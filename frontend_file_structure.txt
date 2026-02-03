@@ -1,0 +1,313 @@
+Directory structure:
+└── frontend/
+    ├── README.md
+    ├── index.html
+    ├── package.json
+    ├── postcss.config.js
+    ├── serve-build.cjs
+    ├── tailwind.config.js
+    ├── vite.config.js
+    ├── .eslintrc.cjs
+    ├── public/
+    │   ├── index.html
+    │   ├── manifest.json
+    │   └── robots.txt
+    ├── scripts/
+    │   └── find_unused_frontend.mjs
+    └── src/
+        ├── App.css
+        ├── app.jsx
+        ├── App.test.js
+        ├── index.css
+        ├── main.jsx
+        ├── reportWebVitals.js
+        ├── setupTests.js
+        ├── components/
+        │   ├── LoadingAnimations.jsx
+        │   └── MotionWrappers/
+        │       ├── ExpandCollapse.jsx
+        │       ├── FadeIn.jsx
+        │       ├── MotionWrappers.jsx
+        │       └── PageTransition.jsx
+        ├── context/
+        │   └── AppContext.jsx
+        ├── screens/
+        │   ├── admin/
+        │   │   ├── ActivityLogScreen.jsx
+        │   │   ├── AdminDashboard.jsx
+        │   │   ├── AuditTrailScreen.jsx
+        │   │   ├── EnvironmentManagerScreen.jsx
+        │   │   ├── EnvironmentSelectScreen.jsx
+        │   │   ├── ToolSelectScreen.jsx
+        │   │   └── UserManagementScreen.jsx
+        │   └── auth/
+        │       ├── LoginScreen.jsx
+        │       ├── RegisterScreen.jsx
+        │       └── Setup2FAScreen.jsx
+        ├── services/
+        │   ├── api.js
+        │   └── api_v2.js
+        ├── styles/
+        │   └── animations.css
+        └── tools/
+            ├── btsy/
+            │   ├── BTSYPlatform.jsx
+            │   ├── theme.js
+            │   ├── components/
+            │   │   ├── StepNavigation.jsx
+            │   │   └── guide/
+            │   │       ├── GuideOverlay.jsx
+            │   │       └── useGuidedWalkthrough.js
+            │   ├── context/
+            │   │   ├── CalibrationRunContext.jsx
+            │   │   └── SnapshotContext.jsx
+            │   ├── guides/
+            │   │   ├── guideEvents.js
+            │   │   └── step3CalibrationGuide.js
+            │   ├── layout/
+            │   │   ├── Header.jsx
+            │   │   ├── layout.constants.js
+            │   │   ├── MainLayout.jsx
+            │   │   └── Sidebar.jsx
+            │   ├── screens/
+            │   │   ├── CalibrationRunsPlaceholder.jsx
+            │   │   ├── DataFoundationContainer.jsx
+            │   │   ├── FoundationHomeScreen.jsx
+            │   │   ├── SnapshotSelectionScreen.jsx
+            │   │   ├── alerting/
+            │   │   │   └── EligibilityAlertGenerationWorkbench.jsx
+            │   │   ├── autorun/
+            │   │   │   └── AutoRunCalibrationRunsScreen.jsx
+            │   │   ├── behavior/
+            │   │   │   ├── AccountBehaviorTimelineDialog.jsx
+            │   │   │   ├── BehaviorBuilderScreen.jsx
+            │   │   │   ├── BehaviorComparisonPanel.jsx
+            │   │   │   ├── BehaviorExplainPanel.jsx
+            │   │   │   ├── BehaviorProgressPanel.jsx
+            │   │   │   ├── BehaviorQualityPanel.jsx
+            │   │   │   ├── BehaviorTopKPanel.jsx
+            │   │   │   ├── MetricOverTimePanel.jsx
+            │   │   │   └── windowIntent.js
+            │   │   ├── calibration/
+            │   │   │   └── transaction_universe/
+            │   │   │       ├── TransactionUniverseScreen.jsx
+            │   │   │       ├── audit/
+            │   │   │       │   └── AuditReportViewer.jsx
+            │   │   │       ├── components/
+            │   │   │       │   ├── SnapshotContextCard.jsx
+            │   │   │       │   ├── UniverseCatalogPanel.jsx
+            │   │   │       │   ├── UniverseDashboardPanel.jsx
+            │   │   │       │   ├── UniverseFilterBuilder.jsx
+            │   │   │       │   ├── UniverseFooterActions.jsx
+            │   │   │       │   ├── UniverseHistoryTable.jsx
+            │   │   │       │   └── UniversePreviewDialog.jsx
+            │   │   │       └── hooks/
+            │   │   │           └── useTransactionUniverses.js
+            │   │   ├── calibration_workbench/
+            │   │   │   ├── OrchestratedCalibrationRun.jsx
+            │   │   │   ├── ScenarioCalibrationWorkbench.jsx
+            │   │   │   ├── components/
+            │   │   │   │   ├── FinalizeDecisionDialog.jsx
+            │   │   │   │   ├── Step3GuideController.jsx
+            │   │   │   │   ├── WorkbenchContextBar.jsx
+            │   │   │   │   ├── WorkbenchEvidencePanel.jsx
+            │   │   │   │   ├── WorkbenchFlowGuide.jsx
+            │   │   │   │   ├── WorkbenchLeftPanel.jsx
+            │   │   │   │   └── WorkbenchValidationPanel.jsx
+            │   │   │   ├── utils/
+            │   │   │   │   └── interpretationEngine.js
+            │   │   │   └── views/
+            │   │   │       ├── EntityDrilldownView.jsx
+            │   │   │       ├── EntityReductionView.jsx
+            │   │   │       ├── RiskSplitView.jsx
+            │   │   │       ├── SignalDistributionView.jsx
+            │   │   │       ├── ThresholdSimulationView.jsx
+            │   │   │       └── TypologyReasoningView.jsx
+            │   │   ├── foundation/
+            │   │   │   ├── DataTypeReviewStep.jsx
+            │   │   │   ├── DataUploadStep.jsx
+            │   │   │   ├── NormalizationStep.jsx
+            │   │   │   ├── SchemaMappingStep.jsx
+            │   │   │   ├── SnapshotSetupScreen.jsx
+            │   │   │   └── SummaryStep.jsx
+            │   │   ├── operations_intelligence/
+            │   │   │   ├── AnalystWorkloadSimulationWorkbench.jsx
+            │   │   │   └── ScenarioInteractionAnalysisWorkbench.jsx
+            │   │   ├── scenarios/
+            │   │   │   └── ScenarioWorkbenchScreen.jsx
+            │   │   └── validation/
+            │   │       ├── MissedSTRAnalysisWorkbench.jsx
+            │   │       └── STRAlignmentValidationWorkbench.jsx
+            │   └── services/
+            │       └── btsyApi.js
+            ├── calibration/
+            │   ├── CalibrationPlatform.jsx
+            │   ├── theme.js
+            │   ├── components/
+            │   │   ├── AIExplanationBox.jsx
+            │   │   ├── AlertPopulationTable.jsx
+            │   │   ├── ATLBTLAnalysisPanel.jsx
+            │   │   ├── CalibrationMetadataBar.jsx
+            │   │   ├── CardinalityPreviewPanel.jsx
+            │   │   ├── CustomerImpactPanel.jsx
+            │   │   ├── DecisionRationalePanel.jsx
+            │   │   ├── DistributionIntelligencePanel.jsx
+            │   │   ├── DistributionShapeInsights.jsx
+            │   │   ├── DistributionTable.jsx
+            │   │   ├── ExcludedPopulationPanel.jsx
+            │   │   ├── FilterDependencyWarnings.jsx
+            │   │   ├── HistogramChart.jsx
+            │   │   ├── ImpactSummaryPanel.jsx
+            │   │   ├── KSCDFComparisonChart.jsx
+            │   │   ├── KSInterpretationBadge.jsx
+            │   │   ├── KSSensitivityCurve.jsx
+            │   │   ├── KSStatisticsPanel.jsx
+            │   │   ├── PercentileLadderTable.jsx
+            │   │   ├── PopulationImpactPanel.jsx
+            │   │   ├── PopulationNarrativeBox.jsx
+            │   │   ├── ScenarioCard.jsx
+            │   │   ├── STRImpactPanel.jsx
+            │   │   ├── ThresholdComparisonBoard.jsx
+            │   │   └── aggregation/
+            │   │       ├── AggregationGrainPanel.jsx
+            │   │       ├── AggregationHealthCheck.jsx
+            │   │       ├── AggregationNarrative.jsx
+            │   │       ├── CalibrationRiskHints.jsx
+            │   │       ├── CompressionFlowCard.jsx
+            │   │       ├── CoverageChart.jsx
+            │   │       ├── GrainValidator.jsx
+            │   │       ├── LookbackFrequencyPanel.jsx
+            │   │       ├── MetricBuilderPanel.jsx
+            │   │       ├── MissedBehaviorWarning.jsx
+            │   │       ├── SnapshotExplainer.jsx
+            │   │       ├── SQLQueryViewer.jsx
+            │   │       ├── TimeSeriesPreview.jsx
+            │   │       └── WindowCoverageHealth.jsx
+            │   ├── context/
+            │   │   └── CalibrationContext.jsx
+            │   ├── hooks/
+            │   │   ├── useAggregation.js
+            │   │   ├── useATLBTLAnalysis.js
+            │   │   ├── useCalibrationInsights.js
+            │   │   ├── useCalibrationState.js
+            │   │   ├── useKSAnalysis.js
+            │   │   ├── usePopulationStats.js
+            │   │   └── useScenario.js
+            │   ├── layout/
+            │   │   ├── Header.jsx
+            │   │   ├── layout.constants.js
+            │   │   ├── Mainlayout.jsx
+            │   │   ├── PageContainer.jsx
+            │   │   └── Sidebar.jsx
+            │   └── screens/
+            │       ├── AggregationScreen.jsx
+            │       ├── ApprovalScreen.jsx
+            │       ├── CalibrationMergeBuilder.jsx
+            │       ├── CalibrationScreen.jsx
+            │       ├── ComparisonScreen.jsx
+            │       ├── DataLoadScreen.jsx
+            │       ├── FinalReportScreen.jsx
+            │       ├── MasterDataJoinVisualizer.jsx
+            │       ├── PopulationDefinitionScreen.jsx
+            │       ├── PopulationExplorerScreen.jsx
+            │       ├── ScenarioCatalogScreen.jsx
+            │       ├── SchemaMapper.jsx
+            │       ├── SummaryScreen.jsx
+            │       ├── ThresholdCalibrationScreen.jsx
+            │       ├── ValidationScreen.jsx
+            │       └── Step0_DataFoundation/
+            │           ├── DatasetMappingSelector.jsx
+            │           ├── DataUploadScreen.jsx
+            │           ├── index.jsx
+            │           ├── LogicalMergeBuilder.jsx
+            │           ├── MergeOptionSelector.jsx
+            │           ├── ReadinessGate.jsx
+            │           ├── SchemaInspector.jsx
+            │           ├── SchemaMapper.jsx
+            │           ├── SQLJoinEditor.jsx
+            │           └── components/
+            │               ├── DatasetSelector.jsx
+            │               ├── DataTypeOverridePanel.jsx
+            │               └── FileUploadCard.jsx
+            ├── investigation/
+            │   ├── InvestigationPlatform.jsx
+            │   ├── theme.js
+            │   ├── components/
+            │   │   ├── CaseContextGuard.jsx
+            │   │   └── guide/
+            │   │       ├── BaselineManual.jsx
+            │   │       ├── CasePackManual.jsx
+            │   │       ├── CopilotManual.jsx
+            │   │       ├── EvidenceLineageManual.jsx
+            │   │       ├── FocusEngineManual.jsx
+            │   │       ├── NetworkGraphManual.jsx
+            │   │       ├── RuleEngineManual.jsx
+            │   │       ├── TypologyManual.jsx
+            │   │       └── UserGuide.jsx
+            │   ├── layout/
+            │   │   ├── Header.jsx
+            │   │   ├── layout.constants.js
+            │   │   ├── Mainlayout.jsx
+            │   │   ├── PageContainer.jsx
+            │   │   └── Sidebar.jsx
+            │   └── screens/
+            │       ├── analysis/
+            │       │   ├── GraphAnalysisScreen.jsx
+            │       │   ├── RuleEditor.jsx
+            │       │   ├── RuleEngineScreen.jsx
+            │       │   ├── TypologyAnalysisScreen.jsx
+            │       │   └── VectorSearchScreen.jsx
+            │       ├── cases/
+            │       │   ├── AiExplainPanel.jsx
+            │       │   ├── AiReviewPanel.jsx
+            │       │   ├── CaseInvestigationScreen.jsx
+            │       │   ├── CaseJsonViewer.jsx
+            │       │   ├── CasePackViewer.jsx
+            │       │   ├── CasePriorityInbox.jsx
+            │       │   ├── ChatAssistantScreen.jsx
+            │       │   ├── CompareCasesScreen.jsx
+            │       │   ├── DataTreeScreen.jsx
+            │       │   ├── components/
+            │       │   │   ├── EvidenceDetailsPanel.jsx
+            │       │   │   ├── EvidenceItem.jsx
+            │       │   │   ├── EvidenceSummaryPanel.jsx
+            │       │   │   ├── EvidenceTreeView.jsx
+            │       │   │   └── TreeNode.jsx
+            │       │   └── utils/
+            │       │       ├── evidenceCalculations.js
+            │       │       ├── treeIcons.jsx
+            │       │       └── treeStyles.js
+            │       └── data/
+            │           ├── AutoBuildScreen.jsx
+            │           ├── ConnectorManagementScreen.jsx
+            │           ├── DataCleanScreen.jsx
+            │           ├── DataLoadScreen.jsx
+            │           ├── DataTableScreen.jsx
+            │           ├── DynamicDashboardScreen.jsx
+            │           ├── IngestionHistoryScreen.jsx
+            │           ├── MasterDashboardScreen.jsx
+            │           ├── MasterViewScreen.jsx
+            │           ├── SchemaMapScreen.jsx
+            │           └── SmartMergeScreen.jsx
+            └── mule_detection/
+                ├── MulePlatform.jsx
+                ├── theme.js
+                ├── layout/
+                │   ├── Header.jsx
+                │   ├── layout.constants.js
+                │   ├── MainLayout.jsx
+                │   ├── MuleLayout.jsx
+                │   └── Sidebar.jsx
+                ├── screens/
+                │   ├── DataIntrospectionScreen.jsx
+                │   ├── MLIntelligenceScreen.jsx
+                │   ├── MuleAccountScreen.jsx
+                │   ├── MuleDashboard.jsx
+                │   ├── MuleUploadScreen.jsx
+                │   └── ml/
+                │       ├── DecisionEngineScreen.jsx
+                │       ├── MLOverviewScreen.jsx
+                │       ├── TrainingConfigScreen.jsx
+                │       └── TrainingMonitorScreen.jsx
+                └── services/
+                    └── muleApi.js

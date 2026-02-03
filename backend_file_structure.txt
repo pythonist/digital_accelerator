@@ -1,0 +1,257 @@
+Directory structure:
+└── backend/
+    ├── app.py
+    ├── build_docs_index.py
+    ├── check_cb_schema.py
+    ├── config.py
+    ├── config_btsy.py
+    ├── init_baseline.py
+    ├── requirements.txt
+    ├── tree.txt
+    ├── verify_db.py
+    ├── api/
+    │   ├── __init__.py
+    │   ├── services.py
+    │   ├── utils.py
+    │   ├── middleware/
+    │   │   ├── auth_middleware.py
+    │   │   └── tenant_context.py
+    │   ├── routes/
+    │   │   ├── admin.py
+    │   │   ├── analysis.py
+    │   │   ├── auth.py
+    │   │   ├── calibration.py
+    │   │   ├── case_facts.py
+    │   │   ├── clean.py
+    │   │   ├── compare.py
+    │   │   ├── connectors.py
+    │   │   ├── data.py
+    │   │   ├── discovery.py
+    │   │   ├── env.py
+    │   │   ├── environment.py
+    │   │   ├── llm.py
+    │   │   ├── merge.py
+    │   │   ├── rules.py
+    │   │   ├── threshold.py
+    │   │   ├── typology.py
+    │   │   ├── btsy/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── alerting_routes.py
+    │   │   │   ├── autorun_routes.py
+    │   │   │   ├── behavior_routes.py
+    │   │   │   ├── calibration_runs_routes.py
+    │   │   │   ├── calibration_workbench_routes.py
+    │   │   │   ├── datatype_routes.py
+    │   │   │   ├── extension_routes.py
+    │   │   │   ├── ks_validation_routes.py
+    │   │   │   ├── mapping_routes.py
+    │   │   │   ├── ml_validation_routes.py
+    │   │   │   ├── normalization_routes.py
+    │   │   │   ├── operations_intelligence_routes.py
+    │   │   │   ├── orchestrated_calibration_routes.py
+    │   │   │   ├── profiling_routes.py
+    │   │   │   ├── risk_population_routes.py
+    │   │   │   ├── scenario_routes.py
+    │   │   │   ├── signal_analysis_routes.py
+    │   │   │   ├── snapshot_routes.py
+    │   │   │   ├── step36_routes.py
+    │   │   │   ├── str_alignment_routes.py
+    │   │   │   ├── threshold_simulation_routes.py
+    │   │   │   ├── transaction_universe_routes.py
+    │   │   │   └── upload_routes.py
+    │   │   ├── calibration/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── aggregation_routes.py
+    │   │   │   ├── approval_routes.py
+    │   │   │   ├── atl_btl_routes.py
+    │   │   │   ├── calibration_data_routes.py
+    │   │   │   ├── calibration_routes.py
+    │   │   │   ├── comparison_routes.py
+    │   │   │   ├── data_routes.py
+    │   │   │   ├── ks_routes.py
+    │   │   │   ├── merge_routes.py
+    │   │   │   ├── percentile_routes.py
+    │   │   │   ├── population_routes.py
+    │   │   │   ├── report_routes.py
+    │   │   │   ├── run_routes.py
+    │   │   │   ├── scenario_routes.py
+    │   │   │   ├── threshold_routes.py
+    │   │   │   └── validation_routes.py
+    │   │   └── mule_detection/
+    │   │       ├── __init__.py
+    │   │       ├── ml_routes.py
+    │   │       └── ml_routes_enhanced.py
+    │   └── tools/
+    │       └── btsy/
+    │           ├── __init__.py
+    │           ├── canonical_model.py
+    │           ├── duckdb_pool.py
+    │           ├── mapping_service.py
+    │           ├── normalization_service.py
+    │           ├── schema_detector.py
+    │           ├── service.py
+    │           ├── snapshot_manager.py
+    │           ├── alerting/
+    │           │   └── eligibility_alert_service.py
+    │           ├── autorun/
+    │           │   ├── __init__.py
+    │           │   ├── autorun_executor.py
+    │           │   ├── autorun_models.py
+    │           │   ├── autorun_registry.py
+    │           │   ├── autorun_service.py
+    │           │   └── worker_entry.py
+    │           ├── calibration_runs/
+    │           │   ├── __init__.py
+    │           │   └── calibration_run_service.py
+    │           ├── calibration_workbench/
+    │           │   ├── calibration_workbench_service.py
+    │           │   └── orchestrated_calibration_service.py
+    │           ├── evidence/
+    │           │   ├── __init__.py
+    │           │   ├── evidence_schema.py
+    │           │   ├── evidence_store.py
+    │           │   └── inference_service.py
+    │           ├── operations_intelligence/
+    │           │   └── operations_intelligence_service.py
+    │           ├── reporting/
+    │           │   ├── __init__.py
+    │           │   └── advanced_report/
+    │           │       ├── __init__.py
+    │           │       └── generator.py
+    │           ├── risk_population/
+    │           │   └── risk_population_service.py
+    │           ├── scenario/
+    │           │   ├── __init__.py
+    │           │   └── scenario_service.py
+    │           ├── signal_analysis/
+    │           │   └── signal_analysis_service.py
+    │           ├── threshold_simulation/
+    │           │   └── threshold_simulation_service.py
+    │           ├── transaction_universe/
+    │           │   ├── __init__.py
+    │           │   ├── audit_service.py
+    │           │   ├── data_statistics_service.py
+    │           │   └── transaction_universe_service.py
+    │           └── validation/
+    │               ├── j_statistic_service.py
+    │               ├── ks_validation_service.py
+    │               └── str_alignment_service.py
+    ├── audit/
+    │   └── audit_logger.py
+    ├── baseline/
+    │   └── baseline_engine.py
+    ├── calibration/
+    │   ├── db_migrations.py
+    │   ├── builder/
+    │   │   ├── aggregation_engine.py
+    │   │   ├── percentile_engine.py
+    │   │   ├── scenario_engine.py
+    │   │   └── threshold_simulator.py
+    │   ├── services/
+    │   │   ├── __init__.py
+    │   │   ├── aggregation_config_service.py
+    │   │   ├── aggregation_health_service.py
+    │   │   ├── aggregation_insight_service.py
+    │   │   ├── aggregation_narrative_service.py
+    │   │   ├── aggregation_service.py
+    │   │   ├── aggregation_stats_service.py
+    │   │   ├── aggregation_validator_service.py
+    │   │   ├── aggregation_visual_service.py
+    │   │   ├── ai_explanation_service.py
+    │   │   ├── approval_service.py
+    │   │   ├── calibration_atl_btl_service.py
+    │   │   ├── calibration_comparison_service.py
+    │   │   ├── calibration_data_ingestion.py
+    │   │   ├── calibration_db_schema.py
+    │   │   ├── calibration_distribution_service.py
+    │   │   ├── calibration_impact_service.py
+    │   │   ├── calibration_ks_narrative_service.py
+    │   │   ├── calibration_ks_service.py
+    │   │   ├── calibration_ks_visualization_service.py
+    │   │   ├── calibration_outcome_service.py
+    │   │   ├── calibration_str_evaluation_service.py
+    │   │   ├── comparison_service.py
+    │   │   ├── data_preview_service.py
+    │   │   ├── data_readiness_service.py
+    │   │   ├── golden_dataset_builder.py
+    │   │   ├── join_validation_service.py
+    │   │   ├── pdf_generator_service.py
+    │   │   ├── population_explorer_service.py
+    │   │   ├── population_materialization_service.py
+    │   │   ├── population_narrative_service.py
+    │   │   ├── population_stats_service.py
+    │   │   ├── report_data_service.py
+    │   │   ├── report_service.py
+    │   │   ├── run_manager.py
+    │   │   ├── scenario_catalog_service.py
+    │   │   ├── scenario_service.py
+    │   │   ├── step0_step1_bridge_service.py
+    │   │   ├── threshold_service.py
+    │   │   ├── data_step_zero_services/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── data_readiness_service.py
+    │   │   │   ├── dataset_manager.py
+    │   │   │   ├── logical_merge_service.py
+    │   │   │   ├── schema_service.py
+    │   │   │   └── sql_execution_service.py
+    │   │   └── pdf_reporting/
+    │   │       ├── __init__.py
+    │   │       ├── components.py
+    │   │       ├── generator.py
+    │   │       ├── styles.py
+    │   │       ├── advanced_report/
+    │   │       │   ├── __init__.py
+    │   │       │   └── styles.py
+    │   │       └── sections/
+    │   │           ├── __init__.py
+    │   │           ├── cover.py
+    │   │           ├── executive_summary.py
+    │   │           ├── governance.py
+    │   │           ├── methodology.py
+    │   │           └── thresholds.py
+    │   └── shared/
+    │       └── calibration_helpers.py
+    ├── case_facts/
+    │   ├── __init__.py
+    │   ├── facts_builder.py
+    │   └── facts_schema.py
+    ├── case_pack/
+    │   ├── case_pack_generator.py
+    │   └── case_summary_builder.py
+    ├── connectors/
+    │   ├── __init__.py
+    │   ├── base_connector.py
+    │   ├── connector_manager.py
+    │   └── sql_connector.py
+    ├── graph_engine/
+    │   └── graph_builder.py
+    ├── llm/
+    │   ├── doc_rag.py
+    │   ├── explain_case.py
+    │   ├── ollama_wrapper.py
+    │   ├── review_questions.py
+    │   └── vector_rag.py
+    ├── rules/
+    │   └── rule_engine.py
+    ├── scripts/
+    │   ├── autorun_smoke.py
+    │   └── find_unused_backend.py
+    ├── services/
+    │   ├── ai_master_builder.py
+    │   ├── aml_data_pipeline.py
+    │   ├── comparison_engine.py
+    │   ├── data_cleaning.py
+    │   ├── data_ingestion.py
+    │   ├── db_schema.py
+    │   ├── focus_engine.py
+    │   ├── metadata_manager.py
+    │   ├── schema_inspector.py
+    │   ├── schema_resolver.py
+    │   ├── smart_merge.py
+    │   └── mule_detection/
+    │       ├── feature_engine.py
+    │       ├── flow_engine.py
+    │       ├── ml_engine.py
+    │       └── pattern_engine.py
+    └── typology/
+        └── typology_detector.py
