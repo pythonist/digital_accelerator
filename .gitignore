@@ -1,0 +1,27 @@
+# Python env
+backend/.venv/
+
+# Runtime data
+backend/data/
+backend/dist/
+backend/env/
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+
+# Caches
+__pycache__/
+*.pyc
+
+# DB / index
+*.db
+*.sqlite3
+*.bin
+*.pkl
+
+# Misc
+.vscode/
+.idea/
+*.log
+.env

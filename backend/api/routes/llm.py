@@ -1,0 +1,730 @@
+# llm.py
+
+from flask import Blueprint, request, jsonify
+from api.utils import handle_errors
+from api.services import services
+import time
+import json
+import re
+from datetime import datetime
+
+llm_bp = Blueprint('llm', __name__)
+def clean_sql_output(text):
+    """
+    Extracts purely the SQL query from the LLM response.
+    Handles Markdown code blocks (```sql ... ```) and whitespace.
+    """
+    # Try to find content inside ```sql ... ``` or ``` ... ```
+    match = re.search(r'```(?:sql)?\n(.*?)\n```', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    
+    # If no markdown blocks, assume the whole text is the query
+    clean_text = text.replace('```', '').strip()
+    return clean_text
+
+def is_conversational(msg):
+    """
+    Quick check to skip SQL generation for simple greetings.
+    Returns True if the message is likely just chat (Hi, Hello, Thanks).
+    """
+    greetings = ['hi', 'hello', 'hey', 'greetings', 'thanks', 'thank you', 'bye', 'help', 'what can you do']
+    # Clean string: lowercase, remove punctuation
+    clean_msg = re.sub(r'[^\w\s]', '', msg.lower()).strip()
+    
+    if clean_msg in greetings:
+        return True
+    if len(clean_msg) < 5: # "Hi", "Yo"
+        return True
+    return False
+
+# --- 1. General LLM Routes ---
+@llm_bp.route('/llm/models', methods=['GET'])
+def list_models():
+    try:
+        if not services.ollama_wrapper or not services.ollama_wrapper.check_connection():
+            return jsonify({'success': False, 'models': [], 'error': 'Ollama service offline'}), 200
+        return jsonify({'success': True, 'models': services.ollama_wrapper.list_models()}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# --- 2. CONTEXT-AWARE CHAT ASSISTANT (Text-to-SQL Pipeline) ---
+@llm_bp.route('/chat/assistant', methods=['POST'])
+@handle_errors
+def chat():
+    """
+    The Core Intelligence Route.
+    It connects the User's question -> Database Schema -> SQL Generation -> Data Retrieval -> Final Answer.
+    """
+    start_time = time.time()
+    msg = request.json.get('message', '')
+    model = request.json.get('model', 'llama3.2:1b')
+    
+    # --- STEP 1: IDENTIFY ACTIVE CONTEXT ---
+    active_env_name = services.metadata_manager.active_env
+    active_db_path = None
+    
+    if active_env_name:
+        paths = services.metadata_manager.activate_environment(active_env_name)
+        active_db_path = paths['paths']['investigation_db']
+    
+    # --- STEP 2: FETCH RICH SCHEMA ---
+    schema_context = "No active investigation database found. Please select an environment."
+    if active_db_path:
+        schema_context = services.investigation_db.get_rich_schema(db_path=active_db_path)
+
+    # --- STEP 3: OPTIONAL CODE DOCS ---
+    tool_context = ""
+    # Only verify docs if keywords exist (optimization)
+    if services.doc_rag_system:
+        keywords = ['code', 'function', 'api', 'error', 'class', 'implementation', 'python']
+        if any(k in msg.lower() for k in keywords):
+            try: 
+                full_docs = services.doc_rag_system.search_docs(msg)
+                tool_context = full_docs[:1000]
+            except: pass
+
+    # --- STEP 4: DECISION & SQL GENERATION AGENT ---
+    data_context = ""
+    query_executed = False
+    generated_sql = "NO_QUERY"
+
+    # CHEAP HACK: Don't use LLM for "Hi"
+    if is_conversational(msg):
+        print("⚡ Skipping SQL Gen for conversational message")
+        data_context = "User is greeting or asking for general help. No DB query needed."
+    else:
+        # We ask the LLM: "Given this schema, write the SQL."
+        sql_system_prompt = f"""
+        You are a Data Expert for an AML system.
+        
+        DATABASE SCHEMA:
+        {schema_context}
+        
+        INSTRUCTIONS:
+        1. If the user asks for data (e.g., "Find CASE900001"), write a valid SQLite SELECT query.
+        2. If the user asks a general question (e.g., "Hi", "Explain AML"), output "NO_QUERY".
+        3. Use 'LIKE' for flexible text matching.
+        4. Output ONLY the SQL query inside ```sql``` blocks. No explanations.
+        """
+        
+        print("🤖 Generating SQL Plan...")
+        sql_response = services.ollama_wrapper.generate(
+            prompt=msg, 
+            model=model, 
+            system_prompt=sql_system_prompt,
+            temperature=0.1
+        )
+        
+        generated_sql = clean_sql_output(sql_response['response'])
+        
+        # --- STEP 5: EXECUTE SQL (If needed) ---
+        if "NO_QUERY" not in generated_sql and "SELECT" in generated_sql.upper():
+            print(f"🔍 Executing SQL: {generated_sql}")
+            query_executed = True
+            
+            query_result = services.investigation_db.execute_safe_query(generated_sql, db_path=active_db_path)
+            
+            if "error" in query_result:
+                data_context = f"SQL Error: {query_result['error']}"
+            else:
+                data_context = json.dumps(query_result['data'], indent=2)
+                if query_result.get('truncated'):
+                    data_context += "\n...(Result truncated to 50 rows)"
+                if query_result['row_count'] == 0:
+                    data_context = "Query executed successfully but returned 0 results. The record does not exist."
+        else:
+            data_context = "No database query was needed."
+
+    # --- STEP 6: FINAL NARRATIVE GENERATION ---
+    # CRITICAL FIX: The System Prompt must force the LLM to trust the data.
+    
+    final_system_prompt = f"""
+    You are a Senior AML Investigator Assistant.
+    
+    CRITICAL INSTRUCTIONS:
+    1. You have access to an INTERNAL, AUTHORIZED investigation database.
+    2. The data provided below is REAL and you MUST analyze it. 
+    3. DO NOT Refuse to answer. DO NOT say "I cannot provide info".
+    4. If the data shows risk, state it clearly.
+    
+    CONTEXT:
+    - Active Case: {active_env_name or "None"}
+    - Tool Code Context: {tool_context}
+    
+    DATA RETRIEVED FROM DATABASE:
+    {data_context}
+    
+    USER QUESTION:
+    "{msg}"
+    
+    Answer the user professionally based ONLY on the data above.
+    """
+    
+    print("📝 Generating Final Narrative...")
+    final_response = services.ollama_wrapper.chat(
+        msg, 
+        model=model, 
+        system_prompt=final_system_prompt
+    )
+    
+    # Append the internal reasoning for the user to see (Transparency)
+    if query_executed:
+        final_response['response'] += f"\n\n*(Analysis based on query: `{generated_sql}`)*"
+    
+    return jsonify(final_response)
+
+
+# ============================================================================
+# DOCUMENTATION RAG ROUTES
+# ============================================================================
+
+@llm_bp.route('/rag/build-doc-index', methods=['POST'])
+@handle_errors
+def build_doc_index():
+    """Build or rebuild documentation index for code search"""
+    if not services.doc_rag_system: 
+        return jsonify({'success': False, 'error': 'DocRAG system not loaded'}), 500
+    
+    services.doc_rag_system.build_documentation_index()
+    return jsonify({'success': True, 'message': 'Knowledge base updated'})
+
+
+# ============================================================================
+# VECTOR RAG ROUTES (Enhanced with new endpoints)
+# ============================================================================
+
+@llm_bp.route('/rag/build-index', methods=['POST'])
+@handle_errors
+def build_case_index():
+    """
+    Build or rebuild the vector index for case embeddings.
+    Enhanced to return detailed metrics.
+    """
+    if not services.rag_system: 
+        return jsonify({'success': False, 'error': 'VectorRAG system not loaded.'}), 500
+    
+    try:
+        force = request.json.get('force_rebuild', False)
+        
+        print("🔨 Starting index build...")
+        result = services.rag_system.build_case_embeddings(force_rebuild=force)
+        
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'case_count': result.get('indexed_cases', len(services.rag_system.case_id_map)),
+                'dimension': result.get('embedding_dim', 768),
+                'build_time': result.get('build_time', 0),
+                'metrics': result.get('metrics', {})
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Unknown error during index build')
+            }), 500
+            
+    except Exception as e:
+        print(f"❌ Index build error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Index build failed: {str(e)}'
+        }), 500
+
+
+@llm_bp.route('/rag/similar-cases', methods=['POST'])
+@handle_errors
+def similar_cases():
+    """
+    Find cases similar to a given case using vector similarity.
+    Enhanced with better response format and error handling.
+    """
+    if not services.rag_system: 
+        return jsonify({'results': [], 'error': 'RAG not ready'}), 400
+    
+    try:
+        case_id = request.json.get('case_id')
+        top_k = int(request.json.get('top_k', 5))
+        
+        if not case_id:
+            return jsonify({'error': 'case_id is required'}), 400
+        
+        # Validate top_k range
+        top_k = max(1, min(top_k, 50))  # Limit between 1 and 50
+        
+        print(f"🔍 Searching for cases similar to: {case_id} (top_k={top_k})")
+        
+        results = services.rag_system.search_similar_cases(case_id, top_k=top_k)
+        
+        return jsonify({
+            'status': 'success',
+            'query_case_id': case_id,
+            'similar_cases': results,
+            'count': len(results)
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Similar cases error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'similar_cases': []
+        }), 500
+
+
+@llm_bp.route('/rag/search-text', methods=['POST'])
+@handle_errors
+def search_text():
+    """
+    Search cases using natural language hypothesis/query.
+    Enhanced with better validation and error handling.
+    """
+    if not services.rag_system: 
+        return jsonify({'results': [], 'error': 'RAG not ready'}), 400
+    
+    try:
+        query = request.json.get('query', '').strip()
+        top_k = int(request.json.get('top_k', 5))
+        
+        if not query:
+            return jsonify({'error': 'query is required and cannot be empty'}), 400
+        
+        # Validate top_k range
+        top_k = max(1, min(top_k, 50))
+        
+        print(f"🧠 Hypothesis search: '{query[:100]}...' (top_k={top_k})")
+        
+        results = services.rag_system.search_by_text(query, top_k=top_k)
+        
+        return jsonify({
+            'status': 'success',
+            'query': query,
+            'results': results,
+            'count': len(results)
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Text search error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'results': []
+        }), 500
+
+
+@llm_bp.route('/rag/batch-compare', methods=['POST'])
+@handle_errors
+def batch_compare():
+    """
+    NEW ENDPOINT: Compare multiple cases in batch mode.
+    Returns a similarity matrix showing relationships between all pairs.
+    """
+    if not services.rag_system:
+        return jsonify({'error': 'RAG system not ready'}), 400
+    
+    try:
+        case_ids = request.json.get('case_ids', [])
+        top_k = int(request.json.get('top_k', 5))
+        
+        # Validation
+        if not case_ids or len(case_ids) < 2:
+            return jsonify({
+                'error': 'At least 2 case_ids required for batch comparison'
+            }), 400
+        
+        if len(case_ids) > 20:
+            return jsonify({
+                'error': 'Maximum 20 cases allowed in batch comparison'
+            }), 400
+        
+        print(f"📊 Batch comparing {len(case_ids)} cases...")
+        
+        result = services.rag_system.batch_compare_cases(case_ids, top_k=top_k)
+        
+        if 'error' in result:
+            return jsonify({
+                'status': 'error',
+                'error': result['error']
+            }), 500
+        
+        return jsonify({
+            'status': 'success',
+            'comparison_matrix': result.get('comparison_matrix', []),
+            'case_count': len(case_ids)
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Batch compare error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
+@llm_bp.route('/rag/explain', methods=['POST'])
+@handle_errors
+def explain_similarity():
+    """
+    FIXED ENDPOINT: Generate LLM explanation of why two cases are similar.
+    
+    This endpoint was previously at /rag/explain-similarity and was causing 404 errors.
+    It now properly uses the case IDs to fetch summaries and generate explanations.
+    
+    Request body:
+    {
+        "case_id_1": "CASE123",
+        "case_id_2": "CASE456", 
+        "similarity_score": 0.87,
+        "model": "llama3.2:1b"  <-- Optional model override
+    }
+    """
+    try:
+        # Get parameters
+        case_id_1 = request.json.get('case_id_1')
+        case_id_2 = request.json.get('case_id_2')
+        score = request.json.get('similarity_score', 0.0)
+        model = request.json.get('model', 'llama3.2:1b') # Use correct default
+        
+        # Validation
+        if not case_id_1 or not case_id_2:
+            return jsonify({
+                'status': 'error',
+                'error': 'Both case_id_1 and case_id_2 are required'
+            }), 400
+        
+        # Check Ollama connection
+        if not services.ollama_wrapper or not services.ollama_wrapper.check_connection():
+            return jsonify({
+                'status': 'error',
+                'explanation': 'AI service unavailable. Ollama connection failed.'
+            }), 503
+        
+        # Check RAG system
+        if not services.rag_system:
+            return jsonify({
+                'status': 'error',
+                'explanation': 'Vector RAG system not initialized.'
+            }), 500
+        
+        print(f"🤖 Generating explanation for {case_id_1} vs {case_id_2} (score: {score:.2%}) using {model}")
+        
+        # Use the new explain_similarity method from VectorRAGSystem
+        explanation = services.rag_system.explain_similarity(case_id_1, case_id_2, score, model=model)
+        
+        return jsonify({
+            'status': 'success',
+            'case_id_1': case_id_1,
+            'case_id_2': case_id_2,
+            'similarity_score': score,
+            'explanation': explanation
+        }), 200
+        
+    except AttributeError as e:
+        # Handle case where explain_similarity method doesn't exist yet
+        print(f"⚠️ Method not found: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'explanation': 'Explanation feature not yet implemented in backend. Please update vector_rag.py with the explain_similarity method.'
+        }), 501
+        
+    except Exception as e:
+        print(f"❌ Explanation error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'explanation': f'Failed to generate explanation: {str(e)}'
+        }), 500
+
+
+@llm_bp.route('/rag/index-status', methods=['GET'])
+@handle_errors
+def index_status():
+    """
+    NEW ENDPOINT: Get current index status and metrics.
+    Returns information about the vector index including size, dimensions, and build time.
+    """
+    try:
+        if not services.rag_system:
+            return jsonify({
+                'index_loaded': False,
+                'error': 'RAG system not initialized'
+            }), 500
+        
+        status = services.rag_system.get_index_status()
+        
+        return jsonify({
+            'status': 'success',
+            **status
+        }), 200
+        
+    except AttributeError:
+        # Fallback if get_index_status doesn't exist
+        return jsonify({
+            'index_loaded': services.rag_system.index is not None if services.rag_system else False,
+            'total_vectors': services.rag_system.index.ntotal if services.rag_system and services.rag_system.index else 0,
+            'embedding_dim': services.rag_system.embedding_dim if services.rag_system else None,
+            'note': 'Limited status information available. Update vector_rag.py for full metrics.'
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Index status error: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+
+@llm_bp.route('/rag/health', methods=['GET'])
+def rag_health_check():
+    """
+    NEW ENDPOINT: Health check for Vector RAG system.
+    Returns system status and configuration information.
+    """
+    try:
+        health = {
+            'status': 'healthy',
+            'service': 'vector-rag',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Check RAG system
+        if services.rag_system:
+            health['rag_system'] = {
+                'initialized': True,
+                'index_loaded': services.rag_system.index is not None,
+                'vector_count': services.rag_system.index.ntotal if services.rag_system.index else 0,
+                'embedding_model': services.rag_system.embedding_model,
+                'ollama_url': services.rag_system.ollama_base_url
+            }
+        else:
+            health['rag_system'] = {'initialized': False}
+            health['status'] = 'degraded'
+        
+        # Check Ollama
+        if services.ollama_wrapper:
+            health['ollama'] = {
+                'available': services.ollama_wrapper.check_connection(),
+                'base_url': services.ollama_wrapper.base_url if hasattr(services.ollama_wrapper, 'base_url') else 'unknown'
+            }
+        else:
+            health['ollama'] = {'available': False}
+            health['status'] = 'degraded'
+        
+        status_code = 200 if health['status'] == 'healthy' else 503
+        
+        return jsonify(health), status_code
+        
+    except Exception as e:
+        print(f"❌ Health check error: {str(e)}")
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 503
+
+
+# ============================================================================
+# LEGACY ENDPOINT (For backwards compatibility)
+# ============================================================================
+
+@llm_bp.route('/rag/explain-similarity', methods=['POST'])
+@handle_errors
+def explain_similarity_legacy():
+    """
+    LEGACY ENDPOINT: Redirects to the new /rag/explain endpoint.
+    
+    This endpoint is maintained for backwards compatibility but will map
+    the old request format to the new one.
+    """
+    try:
+        # Try to extract case IDs from the old format
+        case_a_summary = request.json.get('source_summary', '')
+        case_b_summary = request.json.get('match_summary', '')
+        score = request.json.get('score', 0.0)
+        
+        # Try to extract case IDs from summaries if they're in the format "Case ID XXX..."
+        case_id_1 = request.json.get('case_id_1')
+        case_id_2 = request.json.get('case_id_2')
+        
+        if not case_id_1:
+            # Try to parse from summary
+            import re
+            match = re.search(r'Case\s+(?:ID\s+)?(\w+)', case_a_summary)
+            if match:
+                case_id_1 = match.group(1)
+        
+        if not case_id_2:
+            match = re.search(r'Case\s+(?:ID\s+)?(\w+)', case_b_summary)
+            if match:
+                case_id_2 = match.group(1)
+        
+        if not case_id_1 or not case_id_2:
+            return jsonify({
+                'explanation': 'Unable to extract case IDs from request. Please use the /rag/explain endpoint with case_id_1 and case_id_2 parameters.'
+            }), 400
+        
+        # Forward to new endpoint
+        print(f"⚠️ Using legacy endpoint. Please update to /rag/explain")
+        
+        explanation = services.rag_system.explain_similarity(case_id_1, case_id_2, score)
+        
+        return jsonify({
+            'status': 'success',
+            'explanation': explanation,
+            'note': 'This endpoint is deprecated. Please use /rag/explain instead.'
+        }), 200
+        
+    except Exception as e:
+        print(f"❌ Legacy endpoint error: {str(e)}")
+        return jsonify({
+            'explanation': f'Could not generate explanation. Error: {str(e)}'
+        }), 500
+
+
+# ============================================================================
+# UTILITY ENDPOINTS
+# ============================================================================
+
+@llm_bp.route('/rag/stats', methods=['GET'])
+@handle_errors
+def rag_statistics():
+    """
+    NEW ENDPOINT: Get usage statistics and performance metrics.
+    """
+    try:
+        if not services.rag_system:
+            return jsonify({'error': 'RAG system not initialized'}), 500
+        
+        stats = {
+            'index_info': {
+                'total_vectors': services.rag_system.index.ntotal if services.rag_system.index else 0,
+                'embedding_dim': services.rag_system.embedding_dim,
+                'index_type': 'FAISS-IP (Cosine Similarity)',
+                'last_build': services.rag_system.last_build_time
+            },
+            'system_config': {
+                'embedding_model': services.rag_system.embedding_model,
+                'ollama_url': services.rag_system.ollama_base_url,
+                'vector_store_path': services.rag_system.base_path
+            }
+        }
+        
+        # Add build metrics if available
+        if hasattr(services.rag_system, 'build_metrics') and services.rag_system.build_metrics:
+            stats['build_metrics'] = services.rag_system.build_metrics
+        
+        return jsonify(stats), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+# backend/api/routes/llm.py (ADD THESE ENDPOINTS)
+
+from case_pack.case_summary_builder import CaseSummaryBuilder
+from llm.explain_case import CaseExplainer
+from llm.review_questions import ReviewQuestionsGenerator
+
+# Initialize helpers (add to existing services initialization)
+case_summary_builder = None
+case_explainer = None
+review_questions_gen = None
+
+def init_case_helpers():
+    """Initialize case pack AI helpers"""
+    global case_summary_builder, case_explainer, review_questions_gen
+    
+    if not case_summary_builder:
+        case_summary_builder = CaseSummaryBuilder(services.investigation_db)
+    
+    if not case_explainer and services.ollama_wrapper:
+        case_explainer = CaseExplainer(services.ollama_wrapper)
+    
+    if not review_questions_gen and services.ollama_wrapper:
+        review_questions_gen = ReviewQuestionsGenerator(services.ollama_wrapper)
+
+
+# ============================================================================
+# NEW CASE ANALYSIS ENDPOINTS (Fixed Routes)
+# ============================================================================
+
+@llm_bp.route('/llm/explain-case', methods=['POST', 'OPTIONS'])  # ✅ ADDED /llm/ prefix
+@handle_errors
+def explain_case_endpoint():
+    """
+    Generate AI explanation for a case.
+    Matches Frontend URL: /api/v2/llm/explain-case
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    init_case_helpers()
+    
+    case_id = request.json.get('case_id')
+    model = request.json.get('model', 'llama3.2:1b')
+    
+    if not case_id:
+        return jsonify({'error': 'case_id required'}), 400
+    
+    if not case_summary_builder or not case_explainer:
+        return jsonify({'error': 'AI services not initialized'}), 503
+    
+    try:
+        # Step 1: Build deterministic summary
+        summary = case_summary_builder.build_case_summary(case_id)
+        
+        if "error" in summary:
+            return jsonify({'success': False, 'error': summary['error']}), 500
+        
+        # Step 2: Generate explanation
+        explanation = case_explainer.explain_case(summary, model=model)
+        
+        return jsonify({
+            'success': True,
+            'case_id': case_id,
+            'explanation': explanation
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@llm_bp.route('/llm/review-questions', methods=['POST', 'OPTIONS']) # ✅ ADDED /llm/ prefix
+@handle_errors
+def review_questions_endpoint():
+    """
+    Generate review questions for a case.
+    Matches Frontend URL: /api/v2/llm/review-questions
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    init_case_helpers()
+    
+    case_id = request.json.get('case_id')
+    model = request.json.get('model', 'llama3.2:1b')
+    
+    if not case_id:
+        return jsonify({'error': 'case_id required'}), 400
+    
+    if not review_questions_gen:
+        return jsonify({'error': 'AI services not initialized'}), 503
+    
+    try:
+        # Step 1: Build deterministic summary
+        summary = case_summary_builder.build_case_summary(case_id)
+        
+        if "error" in summary:
+            return jsonify({'success': False, 'error': summary['error']}), 500
+        
+        # Step 2: Generate questions
+        questions = review_questions_gen.generate_review_questions(summary, model=model)
+        
+        return jsonify({
+            'success': True,
+            'case_id': case_id,
+            'questions': questions
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
