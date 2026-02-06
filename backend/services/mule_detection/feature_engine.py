@@ -48,7 +48,17 @@ class MuleFeatureEngine:
             return self._empty_features()
         
         # Parse timestamps
-        account_df['txn_timestamp'] = pd.to_datetime(account_df['txn_timestamp'])
+        time_col = None
+        for c in ["txn_timestamp", "timestamp", "txn_time", "txn_date", "transaction_date", "created_at"]:
+            if c in account_df.columns:
+                time_col = c
+                break
+        if time_col is None:
+            account_df["txn_timestamp"] = pd.Timestamp.utcnow()
+        else:
+            account_df["txn_timestamp"] = pd.to_datetime(account_df[time_col], errors="coerce")
+            if account_df["txn_timestamp"].isna().all():
+                account_df["txn_timestamp"] = pd.Timestamp.utcnow()
         account_df = account_df.sort_values('txn_timestamp')
         
         # Split credits/debits

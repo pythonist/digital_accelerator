@@ -26,11 +26,19 @@ def create_calibration_run():
         snapshot_id = data.get('snapshot_id')
         created_by = data.get('created_by', 'user')
         notes = data.get('notes')
+        logic_config = data.get('logic_config') or {}
         if not snapshot_id:
             return jsonify({'error': 'snapshot_id required'}), 400
         svc = _get(env_id)
-        run = svc.create_run(env_id=env_id, snapshot_id=str(snapshot_id), created_by=str(created_by), notes=notes)
-        return jsonify({'success': True, 'data': run}), 200
+        run = svc.create_run(
+            env_id=env_id,
+            snapshot_id=str(snapshot_id),
+            created_by=str(created_by),
+            notes=notes,
+            logic_config=logic_config
+        )
+        next_url = f"/calibration/run/{run.get('run_id')}"
+        return jsonify({'success': True, 'data': run, 'next_url': next_url}), 200
     except Exception as e:
         logger.error(f"[BTSY][CAL_RUN] Create failed: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
@@ -51,14 +59,20 @@ def list_calibration_runs():
         return jsonify({'error': str(e)}), 500
 
 
-@calibration_runs_bp.route('/calibration/run/<int:calibration_run_id>', methods=['GET'])
-def get_calibration_run(calibration_run_id: int):
+@calibration_runs_bp.route('/calibration/run/<run_id>', methods=['GET'])
+def get_calibration_run(run_id: str):
     try:
         env_id = request.headers.get('X-Environment-ID')
         if not env_id:
             return jsonify({'error': 'X-Environment-ID header required'}), 400
         svc = _get(env_id)
-        run = svc.get_run(env_id=env_id, calibration_run_id=int(calibration_run_id))
+        try:
+            run = svc.get_run_by_id(env_id=env_id, run_id=str(run_id))
+        except ValueError:
+            if str(run_id).isdigit():
+                run = svc.get_run(env_id=env_id, calibration_run_id=int(run_id))
+            else:
+                raise
         return jsonify({'success': True, 'data': run}), 200
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 404
@@ -67,17 +81,42 @@ def get_calibration_run(calibration_run_id: int):
         return jsonify({'error': str(e)}), 500
 
 
-@calibration_runs_bp.route('/calibration/run/<int:calibration_run_id>/activate', methods=['POST'])
-def activate_calibration_run(calibration_run_id: int):
+@calibration_runs_bp.route('/calibration/run/<run_id>/activate', methods=['POST'])
+def activate_calibration_run(run_id: str):
     try:
         env_id = request.headers.get('X-Environment-ID')
         if not env_id:
             return jsonify({'error': 'X-Environment-ID header required'}), 400
         svc = _get(env_id)
-        run = svc.set_active(env_id=env_id, calibration_run_id=int(calibration_run_id), active=True)
+        if str(run_id).isdigit():
+            run = svc.set_active(env_id=env_id, calibration_run_id=int(run_id), active=True)
+        else:
+            run = svc.set_active_by_id(env_id=env_id, run_id=str(run_id), active=True)
         return jsonify({'success': True, 'data': run}), 200
     except Exception as e:
         logger.error(f"[BTSY][CAL_RUN] Activate failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@calibration_runs_bp.route('/calibration/run/<run_id>/clone', methods=['POST'])
+def clone_calibration_run(run_id: str):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        data = request.get_json() or {}
+        created_by = data.get('created_by', 'user')
+        notes = data.get('notes')
+        logic_config = data.get('logic_config') or {}
+        svc = _get(env_id)
+        resolved_run_id = str(run_id)
+        if resolved_run_id.isdigit():
+            base = svc.get_run(env_id=env_id, calibration_run_id=int(resolved_run_id))
+            resolved_run_id = str(base.get("run_id") or resolved_run_id)
+        new_run = svc.clone_run_by_id(env_id=env_id, run_id=resolved_run_id, created_by=str(created_by), notes=notes, logic_config=logic_config)
+        return jsonify({'success': True, 'data': new_run}), 200
+    except Exception as e:
+        logger.error(f"[BTSY][CAL_RUN] Clone failed: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

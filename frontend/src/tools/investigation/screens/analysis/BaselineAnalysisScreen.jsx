@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from "@context/AppContext";
 import apiClient from "@services/api";
+import { formatNumber, toNumber } from "@investigation/utils/format";
 
 import PageContainer from "@investigation-layout/PageContainer";
 import {
@@ -729,7 +730,11 @@ const RiskScorecard = ({ results }) => {
                   </Typography>
                   <Stack direction="row" spacing={0.5} alignItems="baseline">
                     <Typography variant="h5" fontWeight="600">
-                      ${(results.baseline_summary.total_volume / results.baseline_summary.transaction_count || 0).toFixed(2)}
+                      {formatNumber(
+                        (toNumber(results.baseline_summary.total_volume) ?? 0) /
+                          Math.max(1, toNumber(results.baseline_summary.transaction_count) ?? 0),
+                        { decimals: 2 }
+                      )}
                     </Typography>
                     <Typography variant="caption" color="text.disabled">
                       / txn
@@ -743,7 +748,11 @@ const RiskScorecard = ({ results }) => {
                     </Typography>
                     <Stack direction="row" spacing={0.5} alignItems="baseline">
                       <Typography variant="h5" fontWeight="bold">
-                        ${(results.current_summary.total_volume / results.current_summary.transaction_count || 0).toFixed(2)}
+                        {formatNumber(
+                          (toNumber(results.current_summary.total_volume) ?? 0) /
+                            Math.max(1, toNumber(results.current_summary.transaction_count) ?? 0),
+                          { decimals: 2 }
+                        )}
                       </Typography>
                       <Typography variant="caption" color="text.disabled">
                         / txn

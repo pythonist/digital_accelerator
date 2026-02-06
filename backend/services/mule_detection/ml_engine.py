@@ -13,14 +13,24 @@ Key Design Principles:
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-import lightgbm as lgb
+try:
+    import lightgbm as lgb  # type: ignore
+    _LGB_AVAILABLE = True
+except Exception:
+    lgb = None
+    _LGB_AVAILABLE = False
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.metrics import (
     precision_recall_curve, roc_auc_score, classification_report,
     confusion_matrix, f1_score, recall_score, precision_score
 )
-import shap
+try:
+    import shap  # type: ignore
+    _SHAP_AVAILABLE = True
+except Exception:
+    shap = None
+    _SHAP_AVAILABLE = False
 import joblib
 import json
 import warnings
@@ -356,36 +366,46 @@ class MuleMLEngine:
         X_train_scaled = self.preprocess_features(X_train, fit=True)
         X_val_scaled = self.preprocess_features(X_val, fit=False)
         
-        # Train LightGBM with early stopping
         print(f"Training on {len(X_train)} samples, validating on {len(X_val)} samples")
         print(f"Class distribution - Train: {y_train.value_counts().to_dict()}")
-        
-        self.model = lgb.LGBMClassifier(
-            boosting_type=self.config['boosting_type'],
-            objective=self.config['objective'],
-            num_leaves=self.config['num_leaves'],
-            max_depth=self.config['max_depth'],
-            learning_rate=self.config['learning_rate'],
-            n_estimators=self.config['n_estimators'],
-            subsample=self.config['subsample'],
-            colsample_bytree=self.config['colsample_bytree'],
-            min_child_samples=self.config['min_child_samples'],
-            reg_alpha=self.config['reg_alpha'],
-            reg_lambda=self.config['reg_lambda'],
-            scale_pos_weight=self.config['scale_pos_weight'],
-            random_state=self.config['random_state'],
-            verbose=self.config['verbose']
-        )
-        
-        self.model.fit(
-            X_train_scaled, y_train,
-            eval_set=[(X_val_scaled, y_val)],
-            eval_metric='auc',
-            callbacks=[
-                lgb.early_stopping(stopping_rounds=self.config['early_stopping_rounds']),
-                lgb.log_evaluation(period=0)
-            ]
-        )
+
+        if _LGB_AVAILABLE:
+            self.model = lgb.LGBMClassifier(
+                boosting_type=self.config['boosting_type'],
+                objective=self.config['objective'],
+                num_leaves=self.config['num_leaves'],
+                max_depth=self.config['max_depth'],
+                learning_rate=self.config['learning_rate'],
+                n_estimators=self.config['n_estimators'],
+                subsample=self.config['subsample'],
+                colsample_bytree=self.config['colsample_bytree'],
+                min_child_samples=self.config['min_child_samples'],
+                reg_alpha=self.config['reg_alpha'],
+                reg_lambda=self.config['reg_lambda'],
+                scale_pos_weight=self.config['scale_pos_weight'],
+                random_state=self.config['random_state'],
+                verbose=self.config['verbose']
+            )
+            self.model.fit(
+                X_train_scaled, y_train,
+                eval_set=[(X_val_scaled, y_val)],
+                eval_metric='auc',
+                callbacks=[
+                    lgb.early_stopping(stopping_rounds=self.config['early_stopping_rounds']),
+                    lgb.log_evaluation(period=0)
+                ]
+            )
+        else:
+            from sklearn.ensemble import GradientBoostingClassifier
+            self.model = GradientBoostingClassifier(
+                n_estimators=int(self.config['n_estimators']),
+                learning_rate=float(self.config['learning_rate']),
+                max_depth=int(self.config['max_depth']),
+                subsample=float(self.config['subsample']),
+                random_state=int(self.config['random_state'])
+            )
+            sw = np.where(np.asarray(y_train) == 1, float(self.config.get('scale_pos_weight', 10.0)), 1.0)
+            self.model.fit(X_train_scaled, y_train, sample_weight=sw)
         
         # Compute metrics
         y_train_pred_proba = self.model.predict_proba(X_train_scaled)[:, 1]
@@ -423,8 +443,12 @@ class MuleMLEngine:
             'feature_importance': self._compute_feature_importance()
         }
         
-        # Initialize SHAP explainer
-        self.explainer = shap.TreeExplainer(self.model)
+        self.explainer = None
+        if _SHAP_AVAILABLE:
+            try:
+                self.explainer = shap.TreeExplainer(self.model)
+            except Exception:
+                self.explainer = None
         
         # Track metrics
         self.metrics_history.append({
@@ -471,18 +495,28 @@ class MuleMLEngine:
             X_train_scaled = self.preprocess_features(X_train, fit=True)
             X_val_scaled = self.preprocess_features(X_val, fit=False)
             
-            # Train fold model
-            fold_model = lgb.LGBMClassifier(
-                boosting_type=self.config['boosting_type'],
-                num_leaves=self.config['num_leaves'],
-                learning_rate=self.config['learning_rate'],
-                n_estimators=self.config['n_estimators'],
-                scale_pos_weight=self.config['scale_pos_weight'],
-                random_state=self.config['random_state'],
-                verbose=self.config['verbose']
-            )
-            
-            fold_model.fit(X_train_scaled, y_train)
+            if _LGB_AVAILABLE:
+                fold_model = lgb.LGBMClassifier(
+                    boosting_type=self.config['boosting_type'],
+                    num_leaves=self.config['num_leaves'],
+                    learning_rate=self.config['learning_rate'],
+                    n_estimators=self.config['n_estimators'],
+                    scale_pos_weight=self.config['scale_pos_weight'],
+                    random_state=self.config['random_state'],
+                    verbose=self.config['verbose']
+                )
+                fold_model.fit(X_train_scaled, y_train)
+            else:
+                from sklearn.ensemble import GradientBoostingClassifier
+                fold_model = GradientBoostingClassifier(
+                    n_estimators=int(self.config['n_estimators']),
+                    learning_rate=float(self.config['learning_rate']),
+                    max_depth=int(self.config['max_depth']),
+                    subsample=float(self.config['subsample']),
+                    random_state=int(self.config['random_state'])
+                )
+                sw = np.where(np.asarray(y_train) == 1, float(self.config.get('scale_pos_weight', 10.0)), 1.0)
+                fold_model.fit(X_train_scaled, y_train, sample_weight=sw)
             
             # Predict
             y_val_pred_proba = fold_model.predict_proba(X_val_scaled)[:, 1]

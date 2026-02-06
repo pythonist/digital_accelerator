@@ -20,6 +20,8 @@ export const CalibrationRunProvider = ({ children }) => {
     const v = sessionStorage.getItem(`${STORAGE_KEY}:${currentEnv}`);
     return v ? String(v) : '';
   });
+  const [activeRunIdText, setActiveRunIdText] = useState(() => sessionStorage.getItem(`btsy_active_run_id_text:${envId}`) || '');
+  const [activeRunLogic, setActiveRunLogic] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -38,10 +40,23 @@ export const CalibrationRunProvider = ({ children }) => {
         const id = String(res.data.calibration_run_id);
         setActiveCalibrationRunId(id);
         sessionStorage.setItem(`${STORAGE_KEY}:${envId}`, id);
+        const rid = String(res.data.run_id || '');
+        setActiveRunIdText(rid);
+        if (rid) sessionStorage.setItem(`btsy_active_run_id_text:${envId}`, rid);
+        setActiveRunLogic({
+          transaction_type: res.data.transaction_type || null,
+          aggregation_level: res.data.aggregation_level || null,
+          lookback_days: res.data.lookback_days ?? null,
+          run_frequency: res.data.run_frequency || null,
+          locked: Boolean(res.data.locked)
+        });
       }
       if (res.success && !res.data?.calibration_run_id) {
         setActiveCalibrationRunId('');
         sessionStorage.removeItem(`${STORAGE_KEY}:${envId}`);
+        setActiveRunIdText('');
+        sessionStorage.removeItem(`btsy_active_run_id_text:${envId}`);
+        setActiveRunLogic(null);
       }
     } finally {
       setLoading(false);
@@ -63,6 +78,8 @@ export const CalibrationRunProvider = ({ children }) => {
         refreshActive();
       }
     }
+    const rid = sessionStorage.getItem(`btsy_active_run_id_text:${envId}`) || '';
+    setActiveRunIdText(rid);
   }, [envId]);
 
   useEffect(() => {
@@ -91,17 +108,32 @@ export const CalibrationRunProvider = ({ children }) => {
   const setActive = async (calibrationRunId) => {
     const id = String(calibrationRunId || '');
     if (!id) return;
-    await btsyApi.calibrationRuns.activateRun(parseInt(id, 10));
+    await btsyApi.calibrationRuns.activateRun(id);
     setActiveCalibrationRunId(id);
     sessionStorage.setItem(`${STORAGE_KEY}:${envId}`, id);
+    const res = await btsyApi.calibrationRuns.getRun(id);
+    if (res.success && res.data) {
+      const rid = String(res.data.run_id || '');
+      setActiveRunIdText(rid);
+      if (rid) sessionStorage.setItem(`btsy_active_run_id_text:${envId}`, rid);
+      setActiveRunLogic({
+        transaction_type: res.data.transaction_type || null,
+        aggregation_level: res.data.aggregation_level || null,
+        lookback_days: res.data.lookback_days ?? null,
+        run_frequency: res.data.run_frequency || null,
+        locked: Boolean(res.data.locked)
+      });
+    }
   };
 
   const value = useMemo(() => ({
     activeCalibrationRunId,
     setActiveCalibrationRunId: setActive,
+    activeRunIdText,
+    activeRunLogic,
     loading,
     refreshActive,
-  }), [activeCalibrationRunId, loading]);
+  }), [activeCalibrationRunId, activeRunIdText, activeRunLogic, loading]);
 
   return (
     <CalibrationRunContext.Provider value={value}>

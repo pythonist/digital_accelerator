@@ -208,16 +208,16 @@ const NetworkGraphManual = ({ open, onClose }) => {
                       <Alert severity="warning" sx={{ mt: 1 }}>
                         <strong>Detection Logic:</strong>
                         <br/>
-                        1. Calculate Total Inflow ($) and Total Outflow ($).
+                        1. Calculate Total Inflow and Total Outflow.
                         <br/>
                         2. Trigger if <code>min(In, Out) / max(In, Out) &gt; 0.90</code> (90% Match).
                         <br/>
-                        3. Trigger if Total Volume &gt; $1,000.
+                        3. Trigger if Total Volume &gt; 1,000.
                       </Alert>
                     </Grid>
                     <Grid item xs={4} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Typography variant="caption" sx={{ fontStyle: 'italic', textAlign: 'center' }}>
-                        "Account A acts as a mule, moving $50k in and $49.5k out."
+                        "Account A acts as a mule, moving 50k in and 49.5k out."
                       </Typography>
                     </Grid>
                   </Grid>

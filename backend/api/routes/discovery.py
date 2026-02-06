@@ -4,17 +4,81 @@ from services.schema_inspector import SchemaInspector
 import pandas as pd
 
 discovery_bp = Blueprint('discovery', __name__)
-inspector = None
 
 # --- CONSTANTS FOR FILTERING ---
 HIDDEN_TABLES = ['audit', 'sqlite', 'alembic', 'migration', 'revision']
 HIDDEN_COLUMNS = ['password', 'hash', 'salt', 'meta_', 'created_at', 'updated_at', 'token']
 
-@discovery_bp.before_request
-def init_inspector():
-    global inspector
-    if not inspector and services.investigation_db:
-        inspector = SchemaInspector(services.investigation_db)
+def _get_env_db():
+    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
+    tenant_id = getattr(request, 'tenant_id', None)
+    if not env_id:
+        return None, None
+    try:
+        db = services.get_investigation_db(env_id, tenant_id)
+        return env_id, db
+    except Exception:
+        return env_id, None
+
+
+def _get_inspector():
+    _env_id, db = _get_env_db()
+    if not db:
+        return None
+    return SchemaInspector(db)
+
+
+def _visible_tables(db_manager, raw_tables):
+    raw_tables = [t for t in (raw_tables or []) if t and isinstance(t, str)]
+    base_uploaded = {"alerts", "transactions", "accounts", "customers", "cases", "sanctions"}
+    system_prefixes = ("sqlite_",)
+    system_exact = {
+        "audit_log",
+        "upload_history",
+        "system_master_registry",
+        "baseline_profiles",
+        "deviation_history",
+        "focus_runs",
+        "focus_results",
+        "investigation_risk_index",
+        "active_case_scope",
+    }
+
+    keep = set()
+
+    conn = db_manager.connect()
+    try:
+        cur = conn.cursor()
+        if "upload_history" in raw_tables:
+            try:
+                cur.execute("SELECT DISTINCT table_name FROM upload_history WHERE table_name IS NOT NULL")
+                for (t,) in cur.fetchall():
+                    if t:
+                        keep.add(str(t))
+            except Exception:
+                pass
+    finally:
+        db_manager.close_connection(conn)
+
+    if not keep:
+        keep |= (base_uploaded & set(raw_tables))
+
+    for t in raw_tables:
+        tl = t.lower()
+        if t in system_exact:
+            continue
+        if any(tl.startswith(p) for p in system_prefixes):
+            continue
+        if tl == "master_cleaned_data" or tl.startswith("master_"):
+            keep.add(t)
+
+    unified_candidates = [t for t in raw_tables if "unified" in t.lower() and t not in system_exact]
+    if unified_candidates:
+        keep.add(sorted(unified_candidates)[-1])
+
+    keep |= (base_uploaded & set(raw_tables))
+    filtered = [t for t in raw_tables if t in keep and t not in system_exact and not any(t.lower().startswith(p) for p in system_prefixes)]
+    return sorted(set(filtered))
 
 def format_label(name):
     return name.replace('_', ' ').title()
@@ -22,11 +86,12 @@ def format_label(name):
 # --- 1. TABLE LISTING (CLEANED) ---
 @discovery_bp.route('/tables', methods=['GET'])
 def get_tables():
-    if not inspector: return jsonify({'error': 'DB not ready'}), 503
+    env_id, db = _get_env_db()
+    if not db:
+        return jsonify({'error': 'DB not ready', 'env_id': env_id}), 503
+    inspector = SchemaInspector(db)
     raw_tables = inspector.get_tables()
-    
-    # Filter out system tables
-    clean_tables = [t for t in raw_tables if not any(h in t.lower() for h in HIDDEN_TABLES)]
+    clean_tables = _visible_tables(db, raw_tables)
     
     return jsonify({
         'tables': [{'value': t, 'label': format_label(t)} for t in clean_tables]
@@ -41,6 +106,10 @@ def get_schema():
     req = request.json
     tables = req.get('tables', [])
     if not tables: return jsonify([])
+
+    inspector = _get_inspector()
+    if not inspector:
+        return jsonify([]), 503
 
     combined_schema = []
     
@@ -78,6 +147,9 @@ def profile_column():
         if '.' in col_name and req.get('is_multi', False):
             col_name = col_name.split('.')[1]
             
+        inspector = _get_inspector()
+        if not inspector:
+            return jsonify({'success': False, 'error': 'DB not ready'}), 503
         data = inspector.profile_column(req['table'], col_name)
         return jsonify({'success': True, **data})
     except Exception as e:
@@ -101,7 +173,10 @@ def query_multi_table():
     if not tables or not x_axis:
         return jsonify({'success': False, 'error': 'Invalid config'})
 
-    conn = services.investigation_db.connect()
+    env_id, db = _get_env_db()
+    if not db:
+        return jsonify({'success': False, 'error': 'DB not ready', 'env_id': env_id}), 503
+    conn = db.connect()
     try:
         query = ""
         
@@ -178,4 +253,4 @@ def query_multi_table():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
-        services.investigation_db.close_connection(conn)
+        db.close_connection(conn)

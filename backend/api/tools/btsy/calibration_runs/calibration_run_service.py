@@ -20,6 +20,7 @@ class CalibrationRunService:
                 """
                 CREATE TABLE IF NOT EXISTS calibration_runs (
                   calibration_run_id INTEGER PRIMARY KEY DEFAULT nextval('calibration_runs_seq'),
+                  run_id TEXT UNIQUE,
                   env_id TEXT NOT NULL,
                   snapshot_id TEXT NOT NULL,
                   status TEXT NOT NULL,
@@ -27,16 +28,64 @@ class CalibrationRunService:
                   created_by TEXT,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  notes TEXT
+                  notes TEXT,
+                  logic_name TEXT,
+                  logic_description TEXT,
+                  transaction_type TEXT,
+                  aggregation_level TEXT,
+                  lookback_days INTEGER,
+                  run_frequency TEXT,
+                  locked BOOLEAN DEFAULT TRUE
                 )
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_calibration_runs_env ON calibration_runs(env_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_calibration_runs_active ON calibration_runs(env_id, active)")
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN run_id TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN logic_name TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN logic_description TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN transaction_type TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN aggregation_level TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN lookback_days INTEGER")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN run_frequency TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN locked BOOLEAN DEFAULT TRUE")
+            except Exception:
+                pass
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_calibration_runs_runid ON calibration_runs(run_id)")
 
-    def create_run(self, env_id: str, snapshot_id: str, created_by: str = "user", notes: Optional[str] = None) -> Dict[str, Any]:
+    def _generate_run_id(self) -> str:
+        import secrets
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        suffix = secrets.token_hex(3).upper()
+        return f"CAL_{stamp}_{suffix}"
+
+    def create_run(self, env_id: str, snapshot_id: str, created_by: str = "user", notes: Optional[str] = None, logic_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         with duckdb_pool.connection(self.db_path) as conn:
             run_id = int(conn.execute("SELECT nextval('calibration_runs_seq')").fetchone()[0])
+            run_id_text = self._generate_run_id()
             conn.execute(
                 """
                 UPDATE calibration_runs
@@ -48,10 +97,24 @@ class CalibrationRunService:
             conn.execute(
                 """
                 INSERT INTO calibration_runs (
-                  calibration_run_id, env_id, snapshot_id, status, active, created_by, notes
-                ) VALUES (?, ?, ?, 'draft', TRUE, ?, ?)
+                  calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, notes,
+                  logic_name, logic_description, transaction_type, aggregation_level, lookback_days, run_frequency, locked
+                ) VALUES (?, ?, ?, ?, 'draft', TRUE, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
                 """,
-                [int(run_id), env_id, snapshot_id, created_by, notes],
+                [
+                    int(run_id),
+                    run_id_text,
+                    env_id,
+                    snapshot_id,
+                    created_by,
+                    notes,
+                    (logic_config or {}).get('logic_name'),
+                    (logic_config or {}).get('logic_description'),
+                    (logic_config or {}).get('transaction_type'),
+                    (logic_config or {}).get('aggregation_level'),
+                    int((logic_config or {}).get('lookback_days')) if (logic_config or {}).get('lookback_days') is not None else None,
+                    (logic_config or {}).get('run_frequency'),
+                ],
             )
         return self.get_run(env_id, int(run_id))
 
@@ -60,7 +123,8 @@ class CalibrationRunService:
         with duckdb_pool.connection(self.db_path, read_only=True) as conn:
             rows = conn.execute(
                 """
-                SELECT calibration_run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes
+                SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes,
+                       logic_name, logic_description, transaction_type, aggregation_level, lookback_days, run_frequency, locked
                 FROM calibration_runs
                 WHERE env_id = ?
                 ORDER BY created_at DESC
@@ -71,14 +135,22 @@ class CalibrationRunService:
         return [
             {
                 "calibration_run_id": int(r[0]),
-                "env_id": r[1],
-                "snapshot_id": r[2],
-                "status": r[3],
-                "active": bool(r[4]),
-                "created_by": r[5],
-                "created_at": str(r[6]) if r[6] is not None else None,
-                "updated_at": str(r[7]) if r[7] is not None else None,
-                "notes": r[8],
+                "run_id": r[1],
+                "env_id": r[2],
+                "snapshot_id": r[3],
+                "status": r[4],
+                "active": bool(r[5]),
+                "created_by": r[6],
+                "created_at": str(r[7]) if r[7] is not None else None,
+                "updated_at": str(r[8]) if r[8] is not None else None,
+                "notes": r[9],
+                "logic_name": r[10],
+                "logic_description": r[11],
+                "transaction_type": r[12],
+                "aggregation_level": r[13],
+                "lookback_days": int(r[14]) if r[14] is not None else None,
+                "run_frequency": r[15],
+                "locked": bool(r[16]) if r[16] is not None else True,
             }
             for r in rows
         ]
@@ -87,7 +159,8 @@ class CalibrationRunService:
         with duckdb_pool.connection(self.db_path, read_only=True) as conn:
             row = conn.execute(
                 """
-                SELECT calibration_run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes
+                SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes,
+                       logic_name, logic_description, transaction_type, aggregation_level, lookback_days, run_frequency, locked
                 FROM calibration_runs
                 WHERE env_id = ? AND calibration_run_id = ?
                 """,
@@ -97,14 +170,22 @@ class CalibrationRunService:
             raise ValueError("Calibration run not found")
         return {
             "calibration_run_id": int(row[0]),
-            "env_id": row[1],
-            "snapshot_id": row[2],
-            "status": row[3],
-            "active": bool(row[4]),
-            "created_by": row[5],
-            "created_at": str(row[6]) if row[6] is not None else None,
-            "updated_at": str(row[7]) if row[7] is not None else None,
-            "notes": row[8],
+            "run_id": row[1],
+            "env_id": row[2],
+            "snapshot_id": row[3],
+            "status": row[4],
+            "active": bool(row[5]),
+            "created_by": row[6],
+            "created_at": str(row[7]) if row[7] is not None else None,
+            "updated_at": str(row[8]) if row[8] is not None else None,
+            "notes": row[9],
+            "logic_name": row[10],
+            "logic_description": row[11],
+            "transaction_type": row[12],
+            "aggregation_level": row[13],
+            "lookback_days": int(row[14]) if row[14] is not None else None,
+            "run_frequency": row[15],
+            "locked": bool(row[16]) if row[16] is not None else True,
         }
 
     def set_active(self, env_id: str, calibration_run_id: int, active: bool = True) -> Dict[str, Any]:
@@ -128,7 +209,7 @@ class CalibrationRunService:
         with duckdb_pool.connection(self.db_path, read_only=True) as conn:
             row = conn.execute(
                 """
-                SELECT calibration_run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes
+                SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes
                 FROM calibration_runs
                 WHERE env_id = ? AND active = TRUE
                 ORDER BY updated_at DESC
@@ -140,13 +221,74 @@ class CalibrationRunService:
             return None
         return {
             "calibration_run_id": int(row[0]),
-            "env_id": row[1],
-            "snapshot_id": row[2],
-            "status": row[3],
-            "active": bool(row[4]),
-            "created_by": row[5],
-            "created_at": str(row[6]) if row[6] is not None else None,
-            "updated_at": str(row[7]) if row[7] is not None else None,
-            "notes": row[8],
+            "run_id": row[1],
+            "env_id": row[2],
+            "snapshot_id": row[3],
+            "status": row[4],
+            "active": bool(row[5]),
+            "created_by": row[6],
+            "created_at": str(row[7]) if row[7] is not None else None,
+            "updated_at": str(row[8]) if row[8] is not None else None,
+            "notes": row[9],
         }
 
+    def get_run_by_id(self, env_id: str, run_id: str) -> Dict[str, Any]:
+        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+            row = conn.execute(
+                """
+                SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes,
+                       logic_name, logic_description, transaction_type, aggregation_level, lookback_days, run_frequency, locked
+                FROM calibration_runs
+                WHERE env_id = ? AND run_id = ?
+                """,
+                [env_id, str(run_id)],
+            ).fetchone()
+        if not row:
+            raise ValueError("Calibration run not found")
+        return {
+            "calibration_run_id": int(row[0]),
+            "run_id": row[1],
+            "env_id": row[2],
+            "snapshot_id": row[3],
+            "status": row[4],
+            "active": bool(row[5]),
+            "created_by": row[6],
+            "created_at": str(row[7]) if row[7] is not None else None,
+            "updated_at": str(row[8]) if row[8] is not None else None,
+            "notes": row[9],
+            "logic_name": row[10],
+            "logic_description": row[11],
+            "transaction_type": row[12],
+            "aggregation_level": row[13],
+            "lookback_days": int(row[14]) if row[14] is not None else None,
+            "run_frequency": row[15],
+            "locked": bool(row[16]) if row[16] is not None else True,
+        }
+
+    def set_active_by_id(self, env_id: str, run_id: str, active: bool = True) -> Dict[str, Any]:
+        with duckdb_pool.connection(self.db_path) as conn:
+            if active:
+                conn.execute(
+                    "UPDATE calibration_runs SET active = FALSE, updated_at = CURRENT_TIMESTAMP WHERE env_id = ? AND active = TRUE",
+                    [env_id],
+                )
+            conn.execute(
+                """
+                UPDATE calibration_runs
+                SET active = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE env_id = ? AND run_id = ?
+                """,
+                [bool(active), env_id, str(run_id)],
+            )
+        return self.get_run_by_id(env_id, str(run_id))
+
+    def clone_run_by_id(self, env_id: str, run_id: str, created_by: str = "user", notes: Optional[str] = None, logic_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        with duckdb_pool.connection(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT snapshot_id FROM calibration_runs WHERE env_id = ? AND run_id = ?",
+                [env_id, str(run_id)]
+            ).fetchone()
+            if not row:
+                raise ValueError("Source run not found")
+            snapshot_id = row[0]
+        return self.create_run(env_id=env_id, snapshot_id=str(snapshot_id), created_by=str(created_by), notes=notes, logic_config=logic_config)

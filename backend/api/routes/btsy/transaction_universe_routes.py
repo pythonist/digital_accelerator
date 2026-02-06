@@ -7,9 +7,12 @@ from api.tools.btsy.service import get_btsy_service
 from api.tools.btsy.transaction_universe.transaction_universe_service import TransactionUniverseService
 from api.tools.btsy.transaction_universe.data_statistics_service import DataStatisticsService
 from api.tools.btsy.transaction_universe.audit_service import AuditTrailService
+from api.tools.btsy.calibration_runs.calibration_run_service import CalibrationRunService
 from pathlib import Path
 import logging
 import threading
+import pandas as pd
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,19 @@ def _get_services(env_id: str, tenant_id: str = 'default'):
         _svc_cache[key] = (universe_service, audit_service, stats_service)
         return _svc_cache[key]
 
+def _get_run_config(env_id: str, run_id_text: str):
+    service = get_btsy_service()
+    folders = service.init_env_structure('default', env_id)
+    workbench_db = folders['duckdb'] / 'calibration_workbench.duckdb'
+    crs = CalibrationRunService(workbench_db)
+    run = crs.get_run_by_id(env_id=env_id, run_id=str(run_id_text))
+    return {
+        'transaction_type': run.get('transaction_type'),
+        'aggregation_level': run.get('aggregation_level'),
+        'lookback_days': run.get('lookback_days'),
+        'run_frequency': run.get('run_frequency'),
+        'locked': bool(run.get('locked'))
+    }
 
 @universe_bp.route('/universe/data-statistics/<snapshot_id>', methods=['GET'])
 def get_data_statistics(snapshot_id):
@@ -67,6 +83,205 @@ def get_data_statistics(snapshot_id):
         return jsonify({'error': f'Data not found: {str(e)}'}), 404
     except Exception as e:
         logger.error(f"[STATS] Failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@universe_bp.route('/universe/foundation/<snapshot_id>', methods=['GET'])
+def get_data_foundation(snapshot_id):
+    """Summarize base tables and merge coverage (Step 0: Data Foundation)"""
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        
+        universe_service, _, _ = _get_services(env_id)
+        summary = universe_service.data_foundation_summary(snapshot_id)
+        return jsonify({'success': True, 'data': summary}), 200
+    except Exception as e:
+        logger.error(f"[FOUNDATION] Failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@universe_bp.route('/universe/merged-preview/<snapshot_id>', methods=['GET'])
+def merged_preview(snapshot_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        limit = request.args.get('limit', default=10, type=int)
+        universe_service, _, _ = _get_services(env_id)
+        data = universe_service.merged_preview(snapshot_id=snapshot_id, limit=limit)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[UNIVERSE] Merged preview failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@universe_bp.route('/run/<run_id>/thresholds/preview', methods=['POST'])
+def thresholds_by_run(run_id: str):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        payload = request.get_json(silent=True) or {}
+        account_id = payload.get('account_id')
+        limit_threshold_rows = payload.get('limit_threshold_rows', 200)
+        limit_worst_case = payload.get('limit_worst_case', 20)
+        limit_worst_single = payload.get('limit_worst_single', 10)
+        limit_monthly_rows = payload.get('limit_monthly_rows', 200)
+        cfg = _get_run_config(env_id, run_id)
+        universe_service, _, _ = _get_services(env_id)
+        import duckdb
+        conn = duckdb.connect(str(universe_service.db_path))
+        try:
+            row = conn.execute("""
+                SELECT parquet_path
+                FROM transaction_universe_runs
+                WHERE run_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, [run_id]).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return jsonify({'error': 'No universe found for run_id. Create universe first.'}), 404
+        parquet_path = Path(row[0])
+        result = universe_service.compute_thresholds(
+            parquet_path=parquet_path,
+            transaction_type=str(cfg.get('transaction_type') or 'ALL'),
+            schedule='daily' if str(cfg.get('aggregation_level') or 'daily').lower() == 'daily' else 'monthly',
+            aggregation_level=str(cfg.get('aggregation_level') or 'daily'),
+            lookback_days=int(cfg.get('lookback_days') or 7),
+            account_id=str(account_id) if account_id else None,
+            limit_threshold_rows=int(limit_threshold_rows),
+            limit_worst_case=int(limit_worst_case),
+            limit_worst_single=int(limit_worst_single),
+            limit_monthly_rows=int(limit_monthly_rows),
+        )
+        return jsonify({'success': True, 'data': result, 'config': cfg}), 200
+    except Exception as e:
+        logger.error(f"[UNIVERSE] Thresholds by run failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@universe_bp.route('/universe/thresholds-by-run', methods=['POST'])
+def thresholds_by_run_body():
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        payload = request.get_json(silent=True) or {}
+        run_id = str(payload.get('run_id') or '').strip()
+        if not run_id:
+            return jsonify({'error': 'run_id required'}), 400
+        account_id = payload.get('account_id')
+        limit_threshold_rows = payload.get('limit_threshold_rows', 200)
+        limit_worst_case = payload.get('limit_worst_case', 20)
+        limit_worst_single = payload.get('limit_worst_single', 10)
+        limit_monthly_rows = payload.get('limit_monthly_rows', 200)
+        cfg = _get_run_config(env_id, run_id)
+        universe_service, _, _ = _get_services(env_id)
+        import duckdb
+        conn = duckdb.connect(str(universe_service.db_path))
+        try:
+            row = conn.execute("""
+                SELECT parquet_path
+                FROM transaction_universe_runs
+                WHERE run_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, [run_id]).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return jsonify({'error': 'No universe found for run_id. Create universe first.'}), 404
+        parquet_path = Path(row[0])
+        result = universe_service.compute_thresholds(
+            parquet_path=parquet_path,
+            transaction_type=str(cfg.get('transaction_type') or 'ALL'),
+            schedule='daily' if str(cfg.get('aggregation_level') or 'daily').lower() == 'daily' else 'monthly',
+            aggregation_level=str(cfg.get('aggregation_level') or 'daily'),
+            lookback_days=int(cfg.get('lookback_days') or 7),
+            account_id=str(account_id) if account_id else None,
+            limit_threshold_rows=int(limit_threshold_rows),
+            limit_worst_case=int(limit_worst_case),
+            limit_worst_single=int(limit_worst_single),
+            limit_monthly_rows=int(limit_monthly_rows),
+        )
+        return jsonify({'success': True, 'data': result, 'config': cfg}), 200
+    except Exception as e:
+        logger.error(f"[UNIVERSE] Thresholds by run (body) failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@universe_bp.route('/universe/demo/generate', methods=['POST'])
+def generate_demo_snapshot():
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        data = request.get_json() or {}
+        snapshot_id = data.get('snapshot_id') or 'SNAP_DEMO_202510'
+        accounts = ['ACC_000001', 'ACC_000002']
+        dates = pd.date_range('2025-10-01', '2025-10-31', freq='D')
+        rows = []
+        for acc in accounts:
+            cust = 'CUST_' + acc[-6:]
+            for dt in dates:
+                rows.append({
+                    'account_id': acc,
+                    'customer_id': cust,
+                    'transaction_datetime': dt.isoformat(),
+                    'transaction_amount': float(np.random.randint(100, 10000)),
+                    'transaction_category': np.random.choice(['RTGS', 'NEFT', 'CASH']),
+                    'transaction_type': 'DEBIT'
+                })
+        df = pd.DataFrame(rows)
+        service = get_btsy_service()
+        folders = service.init_env_structure('default', env_id)
+        norm_dir = folders['root'] / 'normalized' / snapshot_id
+        norm_dir.mkdir(parents=True, exist_ok=True)
+        tx_path = norm_dir / 'transactions.parquet'
+        df.to_parquet(tx_path, index=False)
+        acc_rows = []
+        for acc in accounts:
+            acc_rows.append({
+                'account_id': acc,
+                'account_type': 'SAVINGS',
+                'account_open_date': '2015-01-01',
+                'account_status': 'ACTIVE',
+                'account_close_date': None,
+                'dormancy_flag': False,
+                'last_dormant_date': None,
+                'internal_watchlist_flag': False
+            })
+        acc_df = pd.DataFrame(acc_rows)
+        acc_df.to_parquet(norm_dir / 'accounts.parquet', index=False)
+        cust_rows = []
+        for acc in accounts:
+            cust = 'CUST_' + acc[-6:]
+            cust_rows.append({
+                'customer_id': cust,
+                'income_bracket': '<5L',
+                'kyc_status': 'KYC_COMPLETE',
+                'pep_flag': False,
+                'sanction_flag': False,
+                'internal_watchlist_flag': False,
+                'customer_risk_rating': 'LOW',
+                'dob_or_incorporation_date': '1980-01-01',
+                'customer_segment': 'RETAIL'
+            })
+        cust_df = pd.DataFrame(cust_rows)
+        cust_df.to_parquet(norm_dir / 'customers.parquet', index=False)
+        str_rows = [{'account_id': accounts[0], 'str_filed_date': '2025-10-15'}]
+        str_df = pd.DataFrame(str_rows)
+        str_df.to_parquet(norm_dir / 'str.parquet', index=False)
+        universe_service, _, _ = _get_services(env_id)
+        summary = universe_service.data_foundation_summary(snapshot_id)
+        return jsonify({'success': True, 'snapshot_id': snapshot_id, 'paths': {
+            'transactions': str(tx_path),
+            'accounts': str(norm_dir / 'accounts.parquet'),
+            'customers': str(norm_dir / 'customers.parquet'),
+            'str': str(norm_dir / 'str.parquet'),
+        }, 'foundation': summary}), 200
+    except Exception as e:
+        logger.error(f"[UNIVERSE] Demo generation failed: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 
@@ -109,7 +324,7 @@ def create_universe():
         if not env_id:
             return jsonify({'error': 'X-Environment-ID header required'}), 400
         
-        data = request.get_json()
+        data = request.get_json() or {}
         
         required = ['snapshot_id', 'universe_name', 'filter_spec']
         missing = [f for f in required if f not in data]
@@ -117,15 +332,34 @@ def create_universe():
             return jsonify({'error': f'Missing fields: {missing}'}), 400
         
         universe_service, _, _ = _get_services(env_id)
+        run_id_text = data.get('run_id')
+        applied_config = None
+        filter_spec = dict(data['filter_spec'])
+        if run_id_text:
+            try:
+                cfg = _get_run_config(env_id, run_id_text)
+                applied_config = cfg
+                if cfg.get('locked'):
+                    t = cfg.get('transaction_type')
+                    if t and str(t).upper() != 'ALL':
+                        filter_spec['types'] = [str(t).upper()]
+                # Persist aggregation and lookback context alongside filter spec for traceability
+                if cfg.get('aggregation_level'):
+                    filter_spec['aggregation_level'] = cfg.get('aggregation_level')
+                if cfg.get('lookback_days') is not None:
+                    filter_spec['lookback_days'] = int(cfg.get('lookback_days'))
+            except Exception as e:
+                applied_config = {'error': str(e)}
         
         result = universe_service.create_universe(
             calibration_run_id=data.get('calibration_run_id'),
+            run_id=run_id_text,
             scenario_id=data.get('scenario_id'),
             snapshot_id=data['snapshot_id'],
             universe_name=data['universe_name'],
-            filter_spec=data['filter_spec'],
-            created_by=data.get('created_by', 'system'),
-            description=data.get('description')
+            filter_spec=filter_spec,
+            description=data.get('description'),
+            created_by=data.get('created_by', 'system')
         )
         
         if result.get('error'):
@@ -133,8 +367,8 @@ def create_universe():
         
         return jsonify({
             'success': True,
-            'message': 'Universe created',
-            'data': result
+            'data': result,
+            'applied_config': applied_config
         }), 200
         
     except Exception as e:
@@ -508,6 +742,47 @@ def universe_statistics(universe_id):
         logger.error(f"[UNIVERSE] Stats failed: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@universe_bp.route('/universe/<int:universe_id>/thresholds', methods=['POST'])
+def universe_thresholds(universe_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+
+        payload = request.get_json(silent=True) or {}
+        transaction_type = payload.get('transaction_type', 'ALL')
+        schedule = payload.get('schedule', 'daily')
+        aggregation_level = payload.get('aggregation_level', 'daily')
+        lookback_days = payload.get('lookback_days', 10)
+        account_id = payload.get('account_id')
+        limit_threshold_rows = payload.get('limit_threshold_rows', 200)
+        limit_monthly_rows = payload.get('limit_monthly_rows', 200)
+
+        universe_service, _, _ = _get_services(env_id)
+        universe = universe_service.get_universe(universe_id)
+        if not universe:
+            return jsonify({'error': 'Universe not found'}), 404
+
+        parquet_path = universe.get('parquet_path')
+        if not parquet_path or not Path(parquet_path).exists():
+            return jsonify({'error': 'Universe data not found'}), 404
+
+        result = universe_service.compute_thresholds(
+            parquet_path=Path(parquet_path),
+            transaction_type=transaction_type,
+            schedule=schedule,
+            aggregation_level=aggregation_level,
+            lookback_days=int(lookback_days),
+            account_id=str(account_id) if account_id is not None and str(account_id).strip() else None,
+            limit_threshold_rows=int(limit_threshold_rows),
+            limit_monthly_rows=int(limit_monthly_rows),
+        )
+
+        return jsonify({'success': True, 'data': result}), 200
+    except Exception as e:
+        logger.error(f"[UNIVERSE] Thresholds failed: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @universe_bp.route('/universe/history', methods=['GET'])
 def universe_history():
     """List past universes with meta for quick reuse"""
@@ -584,24 +859,31 @@ def get_selected_universe():
         if not env_id:
             return jsonify({'error': 'X-Environment-ID header required'}), 400
         
-        run_id = request.args.get('calibration_run_id', type=int)
-        if not run_id:
-            return jsonify({'error': 'calibration_run_id required'}), 400
+        run_id_text = request.args.get('run_id')
+        run_id_num = request.args.get('calibration_run_id', type=int)
+        if not run_id_text and not run_id_num:
+            return jsonify({'error': 'run_id or calibration_run_id required'}), 400
         
         universe_service, _, _ = _get_services(env_id)
         
         import duckdb
         conn = duckdb.connect(str(universe_service.db_path))
         try:
-            row = conn.execute("""
+            query = """
                 SELECT 
                     id, universe_name, status, transaction_count, date_range_start, date_range_end,
                     selected_at, selection_reason, parquet_path, filter_spec
                 FROM transaction_universe_runs
-                WHERE calibration_run_id = ? AND selected = TRUE
+                WHERE {where_clause} AND selected = TRUE
                 ORDER BY selected_at DESC
                 LIMIT 1
-            """, [run_id]).fetchone()
+            """
+            if run_id_text:
+                where_clause = "run_id = ?"
+                row = conn.execute(query.format(where_clause=where_clause), [run_id_text]).fetchone()
+            else:
+                where_clause = "calibration_run_id = ?"
+                row = conn.execute(query.format(where_clause=where_clause), [run_id_num]).fetchone()
         finally:
             conn.close()
         

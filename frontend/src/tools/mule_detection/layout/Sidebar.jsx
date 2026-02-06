@@ -1,4 +1,5 @@
-// frontend/src/tools/mule_detection/layout/Sidebar.jsx (UPDATED WITH ML SUBMENU)
+// frontend/src/tools/mule_detection/layout/Sidebar_Final.jsx
+// Complete sidebar with all ML Intelligence screens
 import React, { useState } from 'react';
 import SentinelLogo from '@assets/PwC_2025_Logo.svg';
 import {
@@ -9,7 +10,8 @@ import { styled } from '@mui/material/styles';
 import {
   CloudUpload, Dashboard, Assessment, Storage, Psychology,
   Circle as StepIcon, ChevronLeft, ChevronRight, ExpandLess, ExpandMore,
-  Visibility, Settings, Speed, TrendingUp
+  Visibility, Settings, Speed, TrendingUp, AutoAwesome, Science,
+  CompareArrows, BubbleChart, AccountTree
 } from '@mui/icons-material';
 import { useAppContext } from '@context/AppContext';
 
@@ -40,11 +42,9 @@ const StyledDrawer = styled(Drawer, {
 }));
 
 const menuItems = [
-  { 
-    id: 'dashboard', 
-    label: 'Dashboard', 
-    icon: <Dashboard fontSize="small" />, 
-    requiresData: true 
+  {
+    type: 'divider',
+    label: 'DATA MODULE'
   },
   { 
     id: 'upload', 
@@ -53,55 +53,101 @@ const menuItems = [
     requiresData: false 
   },
   { 
-    id: 'introspect', 
+    id: 'data-introspection', 
     label: 'Data Introspection', 
     icon: <Assessment fontSize="small" />, 
     requiresData: true 
   },
   {
     type: 'divider',
-    label: 'ML LAYER'
+    label: 'ACCOUNT ANALYSIS'
   },
-  { 
-    id: 'ml-parent',
-    label: 'ML Intelligence', 
-    icon: <Psychology fontSize="small" />, 
-    requiresData: true,
-    badge: true,
-    hasSubmenu: true,
-    submenu: [
-      {
-        id: 'ml-overview',
-        label: 'Overview',
-        icon: <Visibility fontSize="small" />,
-        requiresData: true
-      },
-      {
-        id: 'ml-training',
-        label: 'Training',
-        icon: <Settings fontSize="small" />,
-        requiresData: true
-      },
-      {
-        id: 'ml-monitor',
-        label: 'Monitor',
-        icon: <TrendingUp fontSize="small" />,
-        requiresData: true
-      },
-      {
-        id: 'ml-decision',
-        label: 'Decision Engine',
-        icon: <Speed fontSize="small" />,
-        requiresData: true
-      }
-    ]
+  {
+    id: 'account-analysis',
+    label: 'Account Analysis',
+    icon: <Dashboard fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'risk-dashboard',
+    label: 'Risk Dashboard',
+    icon: <TrendingUp fontSize="small" />,
+    requiresData: true
+  },
+  {
+    type: 'divider',
+    label: 'ML PIPELINE'
+  },
+  {
+    id: 'feature-engineering',
+    label: 'Feature Engineering',
+    icon: <Science fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'feature-store',
+    label: 'Feature Store',
+    icon: <Storage fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'feature-explorer',
+    label: 'Feature Explorer',
+    icon: <Visibility fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'train-model',
+    label: 'Train Model',
+    icon: <Settings fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'inference',
+    label: 'Inference',
+    icon: <Speed fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'explainability',
+    label: 'Explainability (SHAP)',
+    icon: <Psychology fontSize="small" />,
+    requiresData: true
+  },
+  {
+    type: 'divider',
+    label: 'RULES & NETWORK'
+  },
+  {
+    id: 'rule-engine',
+    label: 'Rule Engine',
+    icon: <CompareArrows fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'hybrid-scoring',
+    label: 'Hybrid Scoring',
+    icon: <TrendingUp fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'network-graph',
+    label: 'Network Graph (3D)',
+    icon: <AccountTree fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'pattern-analysis',
+    label: 'Pattern Analysis',
+    icon: <BubbleChart fontSize="small" />,
+    requiresData: true
   }
 ];
 
 const Sidebar = ({ activeScreen, setActiveScreen, hasData, hasMLModel, dataStats }) => {
   const { activeBankName } = useAppContext();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [mlSubmenuOpen, setMlSubmenuOpen] = useState(true); // ML submenu expanded by default
+  const [mlSubmenuOpen, setMlSubmenuOpen] = useState(true);
 
   const isItemAccessible = (item) => {
     return !item.requiresData || hasData;
@@ -111,7 +157,6 @@ const Sidebar = ({ activeScreen, setActiveScreen, hasData, hasMLModel, dataStats
     if (hasSubmenu) {
       setMlSubmenuOpen(!mlSubmenuOpen);
     } else {
-      // Helper to find item recursively
       const findItem = (items) => {
         for (const item of items) {
           if (item.id === itemId) return item;
@@ -131,15 +176,15 @@ const Sidebar = ({ activeScreen, setActiveScreen, hasData, hasMLModel, dataStats
   };
 
   const getBadgeForItem = (item) => {
-    if (item.id === 'ml-parent' && item.badge) {
-      return hasMLModel ? 'ACTIVE' : 'NEW';
+    if (item.id === 'ml-parent' && item.badge && hasMLModel) {
+      return 'ACTIVE';
     }
     return null;
   };
 
   const getBadgeColor = (item) => {
     if (item.id === 'ml-parent') {
-      return hasMLModel ? '#22c55e' : '#ea580c';
+      return '#22c55e';
     }
     return '#ea580c';
   };
@@ -218,133 +263,98 @@ const Sidebar = ({ activeScreen, setActiveScreen, hasData, hasMLModel, dataStats
                 display: 'block'
               }}
             >
-              {activeBankName || 'ENV'}
+              Mule Detection
             </Typography>
           </Box>
         )}
       </Box>
 
-      {/* Data Status Card */}
-      {!isCollapsed && hasData && dataStats && (
-        <Box sx={{ px: 2, py: 1, mb: 1 }}>
-          <Box sx={{ 
-            p: 1.5, 
-            borderRadius: 1, 
-            bgcolor: 'rgba(16, 185, 129, 0.1)',
-            border: '1px solid',
-            borderColor: 'rgba(16, 185, 129, 0.3)'
-          }}>
-            <Typography variant="caption" sx={{ 
-              color: '#10b981', 
-              fontWeight: 600,
-              fontSize: '0.7rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 0.5
-            }}>
-              <Storage sx={{ fontSize: 14 }} />
-              {dataStats.account_count || 0} Accounts
-            </Typography>
-            <Typography variant="caption" sx={{ 
-              color: '#94a3b8', 
-              fontSize: '0.65rem',
-              display: 'block',
-              mt: 0.5
-            }}>
-              {(dataStats.txn_count || 0).toLocaleString()} Transactions
-            </Typography>
-            
-            {/* ML Status Indicator */}
-            {hasMLModel && (
-              <Box sx={{ 
-                mt: 1, 
-                pt: 1, 
-                borderTop: '1px solid rgba(16, 185, 129, 0.2)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.5
-              }}>
-                <Psychology sx={{ fontSize: 14, color: '#ea580c' }} />
-                <Typography variant="caption" sx={{ 
-                  color: '#ea580c', 
-                  fontWeight: 600,
-                  fontSize: '0.7rem'
-                }}>
-                  ML Active
-                </Typography>
-              </Box>
-            )}
-          </Box>
+      {/* Environment Info */}
+      {!isCollapsed && dataStats && (
+        <Box sx={{ px: 2.5, py: 1.5, mb: 1 }}>
+          <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.7rem', fontWeight: 600, mb: 0.5, display: 'block' }}>
+            ENVIRONMENT
+          </Typography>
+          <Typography variant="caption" sx={{ color: '#f1f5f9', fontWeight: 600, fontSize: '0.75rem', display: 'block', mb: 0.5 }}>
+            {activeBankName || 'FCIP'}
+          </Typography>
+          
+          {dataStats.num_accounts && (
+            <Box sx={{ display: 'flex', gap: 1, mt: 1, flexWrap: 'wrap' }}>
+              <Chip 
+                label={`${dataStats.num_accounts} accounts`}
+                size="small"
+                sx={{ 
+                  height: 20, 
+                  fontSize: '0.65rem', 
+                  bgcolor: 'rgba(59, 130, 246, 0.15)', 
+                  color: '#60a5fa',
+                  '& .MuiChip-label': { px: 1 }
+                }} 
+              />
+              {hasMLModel && (
+                <Chip 
+                  label="ML Active"
+                  size="small"
+                  sx={{ 
+                    height: 20, 
+                    fontSize: '0.65rem', 
+                    bgcolor: 'rgba(34, 197, 94, 0.15)', 
+                    color: '#4ade80',
+                    '& .MuiChip-label': { px: 1 }
+                  }} 
+                />
+              )}
+            </Box>
+          )}
         </Box>
       )}
 
-      {/* Menu Items */}
-      <Box sx={{ 
-        overflowY: 'auto', 
-        overflowX: 'hidden', 
-        flex: 1,
-        '&::-webkit-scrollbar': { width: '4px' },
-        '&::-webkit-scrollbar-track': { background: 'transparent' },
-        '&::-webkit-scrollbar-thumb': { background: '#334155', borderRadius: '4px' }
-      }}>
-        <List disablePadding sx={{ px: 1.5 }}>
+      {/* Main Navigation */}
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', overflowX: 'hidden', px: 1.5 }}>
+        <List sx={{ py: 0 }}>
           {menuItems.map((item, index) => {
-            // Handle divider
+            // Handle dividers
             if (item.type === 'divider') {
               return (
-                <Box key={`divider-${index}`} sx={{ my: 2 }}>
+                <React.Fragment key={`divider-${index}`}>
                   {!isCollapsed && (
-                    <Divider 
-                      sx={{ 
-                        borderColor: alpha('#fff', 0.1),
-                        '&::before, &::after': {
-                          borderColor: alpha('#fff', 0.1)
-                        }
-                      }}
-                    >
+                    <Box sx={{ px: 1, pt: 2, pb: 1 }}>
                       <Typography 
                         variant="caption" 
                         sx={{ 
                           color: '#64748b', 
+                          fontWeight: 700, 
                           fontSize: '0.65rem',
-                          fontWeight: 600,
-                          letterSpacing: '0.05em',
-                          px: 1
+                          letterSpacing: '0.1em'
                         }}
                       >
                         {item.label}
                       </Typography>
-                    </Divider>
+                    </Box>
                   )}
-                  {isCollapsed && (
-                    <Box sx={{ 
-                      height: '1px', 
-                      bgcolor: alpha('#fff', 0.1),
-                      mx: 1
-                    }} />
-                  )}
-                </Box>
+                  {isCollapsed && <Divider sx={{ my: 1, borderColor: alpha('#fff', 0.05) }} />}
+                </React.Fragment>
               );
             }
 
-            // Handle menu items with submenu
+            // Handle submenu parent
             if (item.hasSubmenu) {
-              const isAccessible = isItemAccessible(item);
+              const isAnySubmenuActive = item.submenu?.some(sub => activeScreen === sub.id);
               const badge = getBadgeForItem(item);
               const badgeColor = getBadgeColor(item);
-              const isAnySubmenuActive = item.submenu.some(sub => activeScreen === sub.id);
 
               return (
                 <React.Fragment key={item.id}>
                   <ListItem disablePadding sx={{ display: 'block', mb: 0.5 }}>
                     <Tooltip 
-                      title={isCollapsed ? (!isAccessible ? "Upload data first" : item.label) : ""} 
+                      title={isCollapsed ? (!isItemAccessible(item) ? "Upload data first" : item.label) : ""} 
                       placement="right" 
                       arrow
                     >
                       <span>
                         <ListItemButton
-                          disabled={!isAccessible}
+                          disabled={!isItemAccessible(item)}
                           onClick={() => handleItemClick(item.id, true)}
                           sx={{
                             minHeight: 36,
@@ -352,13 +362,21 @@ const Sidebar = ({ activeScreen, setActiveScreen, hasData, hasMLModel, dataStats
                             px: 2.5,
                             borderRadius: 1,
                             transition: 'all 0.15s ease',
-                            color: isAnySubmenuActive ? '#fb923c' : '#94a3b8',
-                            bgcolor: isAnySubmenuActive ? 'rgba(234, 88, 12, 0.08)' : 'transparent',
-                            '&:hover': {
-                              bgcolor: 'rgba(255, 255, 255, 0.03)',
-                              color: '#cbd5e1'
-                            },
-                            ...(!isAccessible && {
+                            
+                            ...(isAnySubmenuActive && {
+                              bgcolor: 'rgba(234, 88, 12, 0.08)',
+                              color: '#fb923c',
+                            }),
+
+                            ...(!isAnySubmenuActive && {
+                              color: '#94a3b8',
+                              '&:hover': {
+                                bgcolor: 'rgba(255, 255, 255, 0.03)',
+                                color: '#cbd5e1'
+                              }
+                            }),
+
+                            ...(!isItemAccessible(item) && {
                               opacity: 0.4
                             })
                           }}

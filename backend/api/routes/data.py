@@ -39,12 +39,60 @@ def list_database_tables():
         conn = db.connect()
         cursor = conn.cursor()
         
-        # Get all non-system tables
+        # Get all non-sqlite tables
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
         tables = [r[0] for r in cursor.fetchall()]
-        
+
+        base_uploaded = {"alerts", "transactions", "accounts", "customers", "cases", "sanctions"}
+        system_tables = {
+            "audit_log",
+            "upload_history",
+            "system_master_registry",
+            "baseline_profiles",
+            "deviation_history",
+            "focus_runs",
+            "focus_results",
+            "investigation_risk_index",
+            "active_case_scope",
+        }
+
+        keep = set()
+
+        # 1) Uploaded datasets: prefer upload_history if present
+        if "upload_history" in tables:
+            try:
+                cursor.execute("SELECT DISTINCT table_name FROM upload_history WHERE table_name IS NOT NULL")
+                for (t,) in cursor.fetchall():
+                    if t:
+                        keep.add(str(t))
+            except Exception:
+                pass
+
+        # Fallback to default uploaded names
+        if not keep:
+            keep |= (base_uploaded & set(tables))
+
+        # 2) Master tables: show cleaned master + any user-saved master_* tables
+        for t in tables:
+            tl = str(t).lower()
+            if tl == "master_cleaned_data":
+                keep.add(t)
+            elif tl.startswith("master_") and t not in system_tables:
+                keep.add(t)
+
+        unified_candidates = [t for t in tables if "unified" in t.lower() and t not in system_tables]
+        if unified_candidates:
+            latest_unified = sorted(unified_candidates)[-1]
+            keep.add(latest_unified)
+
+        # 3) Always ensure core base tables are visible if present
+        keep |= (base_uploaded & set(tables))
+
+        filtered = [t for t in tables if t in keep and t not in system_tables]
+        filtered = sorted(set(filtered))
+
         db.close_connection(conn)
-        return jsonify(tables) # Returns ["alerts", "transactions", "customers", ...]
+        return jsonify(filtered)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

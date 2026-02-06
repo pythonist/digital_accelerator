@@ -331,7 +331,7 @@ class BaselineEngine:
         
         # Find date column
         date_col = self._get_col(df, [
-            'date', 'transaction_date', 'txn_date', 'timestamp',
+            'txn_timestamp', 'timestamp', 'date', 'transaction_date', 'txn_date',
             'created_at', 'datetime', 'time', 'trans_date'
         ])
         
@@ -435,7 +435,7 @@ class BaselineEngine:
             profile['transaction_types'] = {str(k): int(v) for k, v in type_dist.items()}
         
         # Time pattern analysis (if date exists)
-        date_col = self._get_col(df, ['date', 'timestamp', 'datetime', 'transaction_date'])
+        date_col = self._get_col(df, ['txn_timestamp', 'timestamp', 'date', 'datetime', 'transaction_date'])
         
         if date_col:
             df['temp_date'] = pd.to_datetime(df[date_col], errors='coerce')
@@ -459,16 +459,40 @@ class BaselineEngine:
         This is advanced: compare customer against similar customers.
         """
         try:
-            # Simple peer selection: customers with similar transaction volume
-            query = """
-                SELECT customer_id, COUNT(*) as txn_count, SUM(amount) as total_vol
-                FROM transactions
-                WHERE customer_id != ?
-                GROUP BY customer_id
-                HAVING txn_count > 10
-                LIMIT 50
-            """
-            
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(transactions)")
+            cols = [r[1] for r in cursor.fetchall()]
+
+            cust_col = next((c for c in cols if str(c).lower() in {"customer_id", "cust_id", "entity_id", "customer"}), None)
+            if not cust_col:
+                cust_col = next((c for c in cols if "cust" in str(c).lower() or "customer" in str(c).lower()), None)
+            if not cust_col:
+                return None
+
+            amt_candidates = {"amount", "txn_amount", "transaction_amount", "amt", "value", "rule_metric"}
+            amt_col = next((c for c in cols if str(c).lower() in amt_candidates), None)
+            if not amt_col:
+                amt_col = next((c for c in cols if any(k in str(c).lower() for k in ["amount", "amt", "value", "metric"])), None)
+
+            if amt_col:
+                query = f"""
+                    SELECT "{cust_col}" as customer_id, COUNT(*) as txn_count, SUM(CAST("{amt_col}" AS REAL)) as total_vol
+                    FROM transactions
+                    WHERE "{cust_col}" != ?
+                    GROUP BY 1
+                    HAVING txn_count > 10
+                    LIMIT 50
+                """
+            else:
+                query = f"""
+                    SELECT "{cust_col}" as customer_id, COUNT(*) as txn_count, NULL as total_vol
+                    FROM transactions
+                    WHERE "{cust_col}" != ?
+                    GROUP BY 1
+                    HAVING txn_count > 10
+                    LIMIT 50
+                """
+
             peer_data = pd.read_sql(query, conn, params=[customer_id])
             
             if peer_data.empty:
@@ -477,7 +501,7 @@ class BaselineEngine:
             # Aggregate peer metrics
             return {
                 'avg_transaction_count': float(peer_data['txn_count'].mean()),
-                'median_total_volume': float(peer_data['total_vol'].median()),
+                'median_total_volume': float(peer_data['total_vol'].median()) if 'total_vol' in peer_data.columns and peer_data['total_vol'].notna().any() else None,
                 'peer_count': len(peer_data)
             }
             
@@ -503,8 +527,8 @@ class BaselineEngine:
                     'score': 50,
                     'z_score': round(z_score, 2),
                     'message': f"Average transaction amount shows extreme deviation ({abs(z_score):.1f}σ from baseline)",
-                    'baseline_value': f"${baseline['avg_amount']:,.2f}",
-                    'current_value': f"${current['avg_amount']:,.2f}",
+                    'baseline_value': f"{baseline['avg_amount']:,.2f}",
+                    'current_value': f"{current['avg_amount']:,.2f}",
                     'change_pct': round(((current['avg_amount'] / baseline['avg_amount']) - 1) * 100, 1),
                     'risk_indicator': 'High',
                     'investigator_note': 'Sudden change in transaction size patterns - possible structuring or new activity type'
@@ -517,8 +541,8 @@ class BaselineEngine:
                     'score': 30,
                     'z_score': round(z_score, 2),
                     'message': f"Average amount is {abs(z_score):.1f} standard deviations from normal",
-                    'baseline_value': f"${baseline['avg_amount']:,.2f}",
-                    'current_value': f"${current['avg_amount']:,.2f}",
+                    'baseline_value': f"{baseline['avg_amount']:,.2f}",
+                    'current_value': f"{current['avg_amount']:,.2f}",
                     'change_pct': round(((current['avg_amount'] / baseline['avg_amount']) - 1) * 100, 1),
                     'risk_indicator': 'Medium',
                     'investigator_note': 'Notable shift in transaction amounts'
@@ -539,8 +563,8 @@ class BaselineEngine:
                     'severity': 'high',
                     'score': 40,
                     'message': f"Total volume surged {vol_ratio:.1f}x above expected levels",
-                    'baseline_value': f"${baseline_vol:,.2f}",
-                    'current_value': f"${current_vol:,.2f}",
+                    'baseline_value': f"{baseline_vol:,.2f}",
+                    'current_value': f"{current_vol:,.2f}",
                     'change_pct': round((vol_ratio - 1) * 100, 1),
                     'risk_indicator': 'High',
                     'investigator_note': 'Rapid accumulation of funds - review for layering or consolidation schemes'
@@ -595,7 +619,7 @@ class BaselineEngine:
                 'category': 'Amount Behavior',
                 'severity': 'high',
                 'score': 35,
-                'message': f"Sudden appearance of large transactions (≥$10k) - {current_large} detected",
+                'message': f"Sudden appearance of large transactions (≥10k) - {current_large} detected",
                 'baseline_value': "0 large txns",
                 'current_value': f"{current_large} large txns",
                 'change_pct': None,

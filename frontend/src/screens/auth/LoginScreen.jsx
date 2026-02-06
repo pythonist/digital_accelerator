@@ -40,6 +40,7 @@ const LoginScreen = () => {
   // --- Logic State ---
   const [step, setStep] = useState(1);
   const [otp, setOtp] = useState('');
+  const [loginTempToken, setLoginTempToken] = useState('');
   
   // Form State
   const [formData, setFormData] = useState({ username: '', password: '' });
@@ -151,6 +152,7 @@ const LoginScreen = () => {
 
         if (res.ok) {
            if (data.require_mfa) {
+             setLoginTempToken(data.temp_token || '');
              setStep(2); // Move to 2FA
            } else if (data.success && data.token) {
              await handleLogin({ token: data.token, user: data.user });
@@ -169,7 +171,7 @@ const LoginScreen = () => {
         const res = await fetch('/api/login/verify', { 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, code: otp })
+          body: JSON.stringify({ temp_token: loginTempToken, code: otp, username: formData.username, password: formData.password })
         });
         
         const contentType = res.headers.get("content-type");

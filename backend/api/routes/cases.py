@@ -230,7 +230,7 @@ def run_focus_engine():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 result['run_id'],
-                result.get('run_at'),
+                result.get('run_at') or datetime.now().isoformat(),
                 result.get('total_cases', 0),
                 result.get('included_cases', 0),
                 json.dumps(config or {}),
@@ -260,9 +260,30 @@ def get_focus_inbox():
         run_row = cursor.fetchone()
         
         if not run_row:
-            return jsonify({"success": False, "error": "Risk index not built. Run Focus Engine.", "cases": []})
+            try:
+                if not hasattr(services, 'focus_engine') or not services.focus_engine:
+                    from services.focus_engine import FocusEngine
+                    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
+                    db_manager = services.get_investigation_db(env_id, getattr(request, 'tenant_id', None))
+                    services.focus_engine = FocusEngine(db_manager)
+                services.focus_engine.run_focus_job()
+                cursor.execute("SELECT run_id, run_at FROM focus_runs ORDER BY run_at DESC LIMIT 1")
+                run_row = cursor.fetchone()
+            except Exception:
+                run_row = None
+            if not run_row:
+                return jsonify({"success": False, "error": "Risk index not built. Run Focus Engine.", "cases": []})
             
         run_id, run_at = run_row
+
+        run_at_reason = None
+        if run_at:
+            try:
+                from datetime import datetime
+                datetime.fromisoformat(str(run_at).replace("Z", "+00:00"))
+            except Exception:
+                run_at_reason = "run_at not parseable as ISO timestamp"
+                run_at = None
         
         cursor.execute("""
             SELECT entity_key, risk_score, bucket, reasons, 
@@ -279,20 +300,35 @@ def get_focus_inbox():
             except: reasons_list = []
             try: vector = json.loads(r[7])
             except: vector = {}
+            try:
+                rs = int(r[1]) if r[1] is not None else None
+            except Exception:
+                rs = None
+            hybrid = None
+            if rs is not None:
+                try:
+                    hybrid = max(0.0, min(1.0, float(rs) / 100.0))
+                except Exception:
+                    hybrid = None
 
             cases.append({
                 "case_id": r[0],
-                "risk_score": r[1],
+                "risk_score": rs,
+                "hybrid_score": hybrid,
                 "bucket": r[2] if r[2] else "Review",
                 "reasons": reasons_list,
                 "alert_count": r[4],
                 "critical_alerts": r[5],
                 "last_alert": r[6],
                 "alert_types": vector,
-                "context_run_id": run_id
+                "context_run_id": run_id,
+                "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze",
             })
             
-        return jsonify({"success": True, "run_id": run_id, "run_at": run_at, "cases": cases})
+        payload = {"success": True, "run_id": run_id, "run_at": run_at, "cases": cases}
+        if run_at_reason:
+            payload["run_at_reason"] = run_at_reason
+        return jsonify(payload)
     finally:
         if conn: conn.close()
 

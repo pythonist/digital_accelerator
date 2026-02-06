@@ -155,11 +155,15 @@ def _resolve_transaction_table(cursor):
     cols = {c[1].lower(): c[1] for c in cursor.fetchall()}
     
     # 3. Smart Column Mapping
+    date_candidates = [cols[k] for k in cols if ('txn_timestamp' in k or k in ['timestamp'])] + [
+        cols[k] for k in cols if any(x in k for x in ['date', 'time', 'created', 'dt'])
+    ]
+    date_col = next((c for c in date_candidates if c), None)
     return {
         'table': txn_table,
         'case_col': next((cols[k] for k in cols if k in ['case_id', 'caseid', 'case_no', 'case']), None),
         'amt_col': next((cols[k] for k in cols if any(x in k for x in ['amount', 'amt', 'vol', 'value'])), None),
-        'date_col': next((cols[k] for k in cols if any(x in k for x in ['date', 'time', 'created', 'dt'])), None)
+        'date_col': date_col
     }
 
 def _get_case_anchor_date(case_id, cursor, txn_info):

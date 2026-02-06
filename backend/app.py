@@ -1,15 +1,33 @@
 import os
 import sys
-from flask import Flask, jsonify, send_from_directory
+import traceback
+import subprocess
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from security.dotenv_loader import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=False)
+
+_VENV_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv", "Scripts", "python.exe")
+_REQ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "requirements.txt")
+if __name__ == "__main__" and os.path.exists(_VENV_PY):
+    exe = os.path.abspath(sys.executable).lower()
+    vexe = os.path.abspath(_VENV_PY).lower()
+    if exe != vexe:
+        os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
+if __name__ == "__main__" and (not os.path.exists(_VENV_PY)) and os.path.exists(_REQ):
+    subprocess.check_call([sys.executable, "-m", "venv", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".venv")])
+    subprocess.check_call([_VENV_PY, "-m", "pip", "install", "-r", _REQ])
+    os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
 
 from config import CALIBRATION_DB_PATH
 from api.services import services
 from config_btsy import configure_btsy_app
 
 from api.middleware.tenant_context import tenant_context_middleware
+from security.app_secrets import get_app_secret_key
 
 from api.routes.auth import auth_bp
 from api.routes.admin import admin_bp
@@ -26,6 +44,7 @@ from api.routes.analysis import analysis_bp
 from api.routes.typology import typology_bp
 from api.routes.case_facts import case_facts_bp
 from api.routes.calibration import calibration_bp
+from api.routes.audit import audit_bp
 
 try:
     from api.routes.connectors import connectors_bp
@@ -54,7 +73,7 @@ def _iter_routes(app: Flask):
 def _print_debug_routes(app: Flask) -> None:
     prefixes = os.getenv(
         "DEBUG_ROUTE_PREFIXES",
-        "/health,/api/btsy/behavior,/api/btsy/universe",
+        "/health,/api/v2/mule,/api/btsy/behavior,/api/btsy/universe",
     ).split(",")
     prefixes = [p.strip() for p in prefixes if p.strip()]
 
@@ -102,6 +121,7 @@ def _register_blueprints(app: Flask) -> None:
 
     app.register_blueprint(env_bp, url_prefix="/api/v2")
     app.register_blueprint(llm_bp, url_prefix="/api/v2")
+    app.register_blueprint(audit_bp, url_prefix="/api/v2")
     app.register_blueprint(data_bp, url_prefix="/api/v2")
     app.register_blueprint(merge_bp, url_prefix="/api/v2")
     app.register_blueprint(clean_bp, url_prefix="/api/v2")
@@ -117,7 +137,9 @@ def _register_blueprints(app: Flask) -> None:
         from api.routes.mule_detection import mule_bp
         app.register_blueprint(mule_bp, url_prefix="/api/v2/mule")
         mule_ok = True
-    except ImportError:
+    except Exception as e:
+        print("Mule module import failed:", repr(e))
+        traceback.print_exc()
         mule_ok = False
 
     try:
@@ -141,12 +163,23 @@ def _register_blueprints(app: Flask) -> None:
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder=DIST_DIR)
+    app.secret_key = get_app_secret_key()
     app = configure_btsy_app(app)
     tenant_context_middleware(app)
     _setup_cors(app)
 
     core_ok = services.init_services()
     _register_blueprints(app)
+
+    @app.errorhandler(Exception)
+    def _api_error_handler(e):
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
+        if request.path.startswith("/api"):
+            return jsonify({"error": "Internal Server Error"}), 500
+        return jsonify({"error": "Internal Server Error"}), 500
 
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")

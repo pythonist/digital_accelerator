@@ -1,369 +1,366 @@
 """
-Authentication: Tenant-Aware File-Based Sessions with Auto-Tenant Creation
+Authentication: Portable Identity + Ephemeral Sessions
 File: api/routes/auth.py
 """
-from flask import Blueprint, request, jsonify
-import uuid
+
+from __future__ import annotations
+
 import time
-import json
+import uuid
 import os
+import traceback
+from typing import Dict, Optional
+
 import pyotp
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import Blueprint, jsonify, request
 
-auth_bp = Blueprint('auth', __name__)
+from api.services import services
+from services.auth.identity_store import IdentityStore
+from services.auth.session_tokens import SessionTokenService
+from security.app_secrets import _is_production
 
-# --- FILE PATHS ---
-DATA_DIR = 'data'
-USERS_FILE = os.path.join(DATA_DIR, 'users.json')
-SESSIONS_FILE = os.path.join(DATA_DIR, 'sessions.json')
-TENANTS_FILE = os.path.join(DATA_DIR, 'tenants.json')
 
-# --- HELPERS ---
-def ensure_data_dir():
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
+auth_bp = Blueprint("auth", __name__)
 
-def load_json(filepath):
-    ensure_data_dir()
-    if not os.path.exists(filepath): 
-        return {}
-    try:
-        with open(filepath, 'r') as f: 
-            return json.load(f)
-    except: 
-        return {}
+identity_store = IdentityStore()
+token_service = SessionTokenService()
 
-def save_json(filepath, data):
-    ensure_data_dir()
-    with open(filepath, 'w') as f: 
-        json.dump(data, f, indent=2)
+PENDING_REG_CACHE: Dict[str, Dict] = {}
+PENDING_LOGIN_CACHE: Dict[str, Dict] = {}
 
-def extract_tenant_from_email(email):
-    """
-    Extract tenant_id and role from email domain.
-    Auto-creates tenant if it doesn't exist.
-    
-    Returns:
-        tuple: (tenant_id, role)
-    """
-    if not email or '@' not in email:
-        return None, None
-    
-    domain = email.split('@')[1].lower()
-    tenants = load_json(TENANTS_FILE)
-    
-    # Check if tenant exists
-    if domain in tenants:
-        tenant_info = tenants[domain]
-        
-        # Check if this is the first user for this tenant
-        users = load_json(USERS_FILE)
-        existing_tenant_users = [
-            u for u in users.values() 
-            if u.get('tenant_id') == tenant_info['tenant_id']
-        ]
-        
-        # First user becomes TENANT_ADMIN
-        if len(existing_tenant_users) == 0:
-            role = 'TENANT_ADMIN'
-        else:
-            role = 'TENANT_USER'
-        
-        return tenant_info['tenant_id'], role
-    
-    # Auto-create tenant for new domain
-    else:
-        # Generate tenant_id from domain (remove .com, .org, etc.)
-        tenant_id = domain.split('.')[0].lower()
-        
-        # Create readable tenant name
-        tenant_name = domain.split('.')[0].upper()
-        
-        # Register new tenant
-        tenants[domain] = {
-            'tenant_id': tenant_id,
-            'tenant_name': tenant_name,
-            'default_role': 'TENANT_USER',
-            'created_at': time.time()
-        }
-        save_json(TENANTS_FILE, tenants)
-        
-        print(f"✅ Auto-created tenant: {tenant_id} ({domain})")
-        
-        # First user of new tenant is TENANT_ADMIN
-        return tenant_id, 'TENANT_ADMIN'
 
-# --- ROUTES ---
+def _audit_logger():
+    return getattr(services, "audit_logger", None)
 
-@auth_bp.route('/check-auth', methods=['GET'])
-def check_auth():
-    """
-    Validates token against the persistent sessions.json file.
-    Returns user info including tenant_id and role.
-    """
-    auth_header = request.headers.get('Authorization')
-    
+
+def _mfa_bypass_enabled() -> bool:
+    v = (os.getenv("MFA_BYPASS_ENABLED") or "false").strip().lower()
+    return (not _is_production()) and v in {"1", "true", "yes", "y"}
+
+
+def _auth_token() -> Optional[str]:
+    auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
-        return jsonify({'authenticated': False}), 401
+        return None
+    return auth_header.split(" ", 1)[1].strip()
 
-    token = auth_header.split(" ")[1]
-    
-    # Load valid sessions from disk
-    sessions = load_json(SESSIONS_FILE)
-    
-    if token in sessions:
-        session_data = sessions[token]
-        
-        # Check expiry (24 hours)
-        if time.time() - session_data.get('timestamp', 0) > 86400:
-            del sessions[token]
-            save_json(SESSIONS_FILE, sessions)
-            return jsonify({'authenticated': False}), 401
 
-        return jsonify({
-            'authenticated': True, 
-            'user': {
-                'username': session_data['username'],
-                'role': session_data.get('role', 'TENANT_USER'),
-                'tenant_id': session_data.get('tenant_id')
-            }
-        })
-        
-    return jsonify({'authenticated': False}), 401
+def _issue_session(user: Dict, tenant_id: Optional[str] = None, env_id: Optional[str] = None) -> str:
+    payload = {
+        "sid": str(uuid.uuid4()),
+        "iat": float(time.time()),
+        "user_id": user.get("user_id"),
+        "email": user.get("email"),
+        "role": user.get("role") or "TENANT_USER",
+        "tenant_id": tenant_id if tenant_id is not None else user.get("tenant_id"),
+        "env_id": env_id,
+    }
+    return token_service.issue(payload)
 
-@auth_bp.route('/register/init', methods=['POST'])
-def register_init():
-    """
-    Initialize registration - validates email domain and generates 2FA QR code.
-    Auto-creates tenant if domain doesn't exist.
-    """
-    users = load_json(USERS_FILE)
-    data = request.json
-    email = data.get('email')
-    
-    if not email:
-        return jsonify({'error': 'Email is required'}), 400
-    
-    if email in users:
-        return jsonify({'error': 'User already registered'}), 400
 
-    # Extract or create tenant
-    tenant_id, role = extract_tenant_from_email(email)
-    
-    if not tenant_id:
-        return jsonify({
-            'error': 'Invalid email format. Please use a valid email address.'
-        }), 400
+def _require_session():
+    token = _auth_token()
+    if not token:
+        return None, None, (jsonify({"error": "Unauthorized"}), 401)
+    try:
+        payload = token_service.verify(token)
+    except Exception:
+        return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
+    user_id = payload.get("user_id")
+    user = identity_store.get_user_by_id(str(user_id)) if user_id else None
+    if not user or int(user.get("disabled") or 0) == 1:
+        return None, None, (jsonify({"error": "Invalid or expired token"}), 401)
+    return user, payload, None
 
-    # Generate 2FA secret
-    secret = pyotp.random_base32()
-    uri = pyotp.totp.TOTP(secret).provisioning_uri(
-        name=email, 
-        issuer_name="Sentinel AML"
+
+@auth_bp.route("/check-auth", methods=["GET"])
+def check_auth():
+    token = _auth_token()
+    if not token:
+        return jsonify({"authenticated": False}), 401
+    try:
+        payload = token_service.verify(token)
+    except Exception:
+        return jsonify({"authenticated": False}), 401
+
+    user_id = payload.get("user_id")
+    user = identity_store.get_user_by_id(str(user_id)) if user_id else None
+    if not user or int(user.get("disabled") or 0) == 1:
+        return jsonify({"authenticated": False}), 401
+
+    return jsonify(
+        {
+            "authenticated": True,
+            "user": {
+                "user_id": user.get("user_id"),
+                "username": user.get("email"),
+                "role": user.get("role") or "TENANT_USER",
+                "tenant_id": payload.get("tenant_id") or user.get("tenant_id"),
+            },
+            "context": {"tenant_id": payload.get("tenant_id"), "env_id": payload.get("env_id")},
+        }
     )
-    
-    # Store in temporary cache
-    global PENDING_REG_CACHE
-    if 'PENDING_REG_CACHE' not in globals(): 
-        PENDING_REG_CACHE = {}
-    
+
+
+@auth_bp.route("/register/init", methods=["POST"])
+def register_init():
+    data = request.json or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    phone = data.get("phone")
+
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+    if not password:
+        return jsonify({"error": "Password is required"}), 400
+
+    if identity_store.get_user_by_email(email):
+        return jsonify({"error": "User already registered"}), 400
+
+    tenant_id, tenant_name, _domain = identity_store.upsert_tenant_from_email(email)
+    if not tenant_id:
+        return jsonify({"error": "Invalid email format. Please use a valid email address."}), 400
+
+    role = "TENANT_ADMIN" if identity_store.count_users_in_tenant(tenant_id) == 0 else "TENANT_USER"
+
+    secret = pyotp.random_base32()
+    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=email, issuer_name="Sentinel AML")
+
     temp_token = str(uuid.uuid4())
     PENDING_REG_CACHE[temp_token] = {
         "email": email,
-        "password_hash": generate_password_hash(data.get('password')),
-        "phone": data.get('phone'),
+        "password_hash": identity_store.hash_password(password),
+        "phone": phone,
         "secret": secret,
         "tenant_id": tenant_id,
-        "role": role
+        "role": role,
+        "timestamp": float(time.time()),
     }
-    
-    # Get tenant name
-    tenants = load_json(TENANTS_FILE)
-    domain = email.split('@')[1].lower()
-    tenant_name = tenants.get(domain, {}).get('tenant_name', tenant_id.upper())
-    
-    return jsonify({
-        'success': True,
-        'temp_token': temp_token,
-        'qr_uri': uri,
-        'tenant_name': tenant_name,
-        'is_first_user': role == 'TENANT_ADMIN',
-        'message': 'Scan QR code with your authenticator app'
-    })
 
-@auth_bp.route('/register/verify', methods=['POST'])
-def register_verify():
-    """
-    Verify 2FA code and complete registration with tenant assignment.
-    """
-    data = request.json
-    temp_token = data.get('temp_token')
-    code = data.get('code')
-    
-    global PENDING_REG_CACHE
-    if 'PENDING_REG_CACHE' not in globals(): 
-        PENDING_REG_CACHE = {}
-
-    reg_data = PENDING_REG_CACHE.get(temp_token)
-    if not reg_data:
-        return jsonify({'error': 'Registration session expired'}), 400
-        
-    if not pyotp.TOTP(reg_data['secret']).verify(code):
-        return jsonify({'error': 'Invalid 2FA code'}), 400
-        
-    # Save user with tenant information
-    users = load_json(USERS_FILE)
-    users[reg_data['email']] = {
-        "password_hash": reg_data['password_hash'],
-        "phone": reg_data['phone'],
-        "tenant_id": reg_data['tenant_id'],
-        "role": reg_data['role'],
-        "mfa_secret": reg_data['secret'],
-        "mfa_enabled": True,
-        "created_at": time.time()
-    }
-    save_json(USERS_FILE, users)
-    
-    del PENDING_REG_CACHE[temp_token]
-    
-    return jsonify({
-        'success': True,
-        'message': f"Account created successfully as {reg_data['role']}"
-    })
-
-# @auth_bp.route('/login', methods=['POST'])
-# def login():
-#     """
-#     Two-phase login: 
-#     1. Validate credentials
-#     2. Validate 2FA code and create session with tenant context
-#     """
-#     users = load_json(USERS_FILE)
-#     data = request.json
-    
-#     # PHASE 1: Credential Check
-#     if 'code' not in data:
-#         username = data.get('username')
-#         password = data.get('password')
-#         user = users.get(username)
-        
-#         if user and check_password_hash(user['password_hash'], password):
-#             # Check if user is disabled
-#             if user.get('disabled', False):
-#                 return jsonify({'error': 'Account has been disabled'}), 403
-            
-#             return jsonify({
-#                 'success': True,
-#                 'require_mfa': True,
-#                 'temp_token': username
-#             })
-#         return jsonify({'error': 'Invalid email or password'}), 401
-
-#     # PHASE 2: MFA Verification
-#     else:
-#         username = data.get('username')
-#         code = data.get('code')
-#         user = users.get(username)
-        
-#         if not user: 
-#             return jsonify({'error': 'User not found'}), 401
-        
-#         # Check if user is disabled
-#         if user.get('disabled', False):
-#             return jsonify({'error': 'Account has been disabled'}), 403
-        
-#         if pyotp.TOTP(user['mfa_secret']).verify(code):
-#             # Generate session token
-#             new_token = str(uuid.uuid4())
-            
-#             sessions = load_json(SESSIONS_FILE)
-#             sessions[new_token] = {
-#                 "username": username,
-#                 "tenant_id": user.get('tenant_id'),
-#                 "role": user.get('role', 'TENANT_USER'),
-#                 "timestamp": time.time()
-#             }
-#             save_json(SESSIONS_FILE, sessions)
-            
-#             return jsonify({
-#                 'success': True,
-#                 'user': {
-#                     'username': username,
-#                     'role': user['role'],
-#                     'tenant_id': user.get('tenant_id')
-#                 },
-#                 'token': new_token
-#             })
-            
-#         return jsonify({'error': 'Invalid 2FA code'}), 400
-@auth_bp.route('/login', methods=['POST'])
-def login():
-    users = load_json(USERS_FILE)
-    data = request.json or {}
-
-    username = data.get('username')
-    password = data.get('password')
-
-    if not username or not password:
-        return jsonify({'error': 'Username and password required'}), 400
-
-    user = users.get(username)
-
-    if not user or not check_password_hash(user['password_hash'], password):
-        return jsonify({'error': 'Invalid email or password'}), 401
-
-    if user.get('disabled', False):
-        return jsonify({'error': 'Account has been disabled'}), 403
-
-    # ============================================================
-    # ✅ DEMO MODE: BYPASS MFA COMPLETELY
-    # ============================================================
-    DEMO_MODE = True   # 🔴 SET TO FALSE AFTER DEMO
-
-    if DEMO_MODE:
-        new_token = str(uuid.uuid4())
-
-        sessions = load_json(SESSIONS_FILE)
-        sessions[new_token] = {
-            "username": username,
-            "tenant_id": user.get('tenant_id'),
-            "role": user.get('role', 'TENANT_USER'),
-            "timestamp": time.time()
+    return jsonify(
+        {
+            "success": True,
+            "temp_token": temp_token,
+            "qr_uri": uri,
+            "tenant_name": tenant_name,
+            "is_first_user": role == "TENANT_ADMIN",
+            "message": "Scan QR code with your authenticator app",
         }
-        save_json(SESSIONS_FILE, sessions)
+    )
 
-        return jsonify({
-            'success': True,
-            'user': {
-                'username': username,
-                'role': user.get('role'),
-                'tenant_id': user.get('tenant_id')
+
+@auth_bp.route("/register/verify", methods=["POST"])
+def register_verify():
+    data = request.json or {}
+    temp_token = data.get("temp_token")
+    code = data.get("code")
+
+    reg_data = PENDING_REG_CACHE.get(str(temp_token))
+    if not reg_data:
+        return jsonify({"error": "Registration session expired"}), 400
+
+    if not pyotp.TOTP(reg_data["secret"]).verify(str(code or "")):
+        return jsonify({"error": "Invalid 2FA code"}), 400
+
+    user = identity_store.create_user_with_hash(
+        reg_data["email"], reg_data["password_hash"], reg_data.get("tenant_id"), reg_data.get("role") or "TENANT_USER"
+    )
+    identity_store.set_mfa(str(user.get("user_id")), str(reg_data["secret"]), True)
+
+    del PENDING_REG_CACHE[str(temp_token)]
+    return jsonify({"success": True, "message": f"Account created successfully as {user.get('role')}"})
+
+
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    try:
+        data = request.json or {}
+        email = (data.get("username") or data.get("email") or "").strip().lower()
+        password = data.get("password") or ""
+        print(
+            "LOGIN_REQUEST",
+            {
+                "email": email,
+                "has_password": bool(password),
+                "ip": request.remote_addr,
+                "ua": request.headers.get("User-Agent"),
             },
-            'token': new_token
-        })
+        )
 
-    # ============================================================
-    # 🔐 NORMAL MODE (MFA REQUIRED)
-    # ============================================================
-    return jsonify({
-        'success': True,
-        'require_mfa': True,
-        'temp_token': username
-    })
+        if not email or not password:
+            return jsonify({"error": "Username and password required"}), 400
 
-@auth_bp.route('/logout', methods=['POST'])
+        user, ok = identity_store.authenticate(email, password)
+        if not user:
+            try:
+                if _audit_logger():
+                    _audit_logger().log_login(user=email, success=False, ip_address=request.remote_addr)
+            except Exception:
+                pass
+            return jsonify({"error": "Invalid email or password"}), 401
+        if int(user.get("disabled") or 0) == 1:
+            try:
+                if _audit_logger():
+                    _audit_logger().log_login(user=email, success=False, ip_address=request.remote_addr)
+            except Exception:
+                pass
+            return jsonify({"error": "Account has been disabled"}), 403
+        if not ok:
+            try:
+                if _audit_logger():
+                    _audit_logger().log_login(user=email, success=False, ip_address=request.remote_addr)
+            except Exception:
+                pass
+            return jsonify({"error": "Invalid email or password"}), 401
+
+        mfa = identity_store.get_mfa(str(user.get("user_id")))
+        if (not _mfa_bypass_enabled()) and mfa and int(mfa.get("enabled") or 0) == 1:
+            temp_token = str(uuid.uuid4())
+            PENDING_LOGIN_CACHE[temp_token] = {"user_id": str(user.get("user_id")), "timestamp": float(time.time())}
+            return jsonify({"success": True, "require_mfa": True, "temp_token": temp_token})
+
+        token = _issue_session(user)
+        try:
+            if _audit_logger():
+                _audit_logger().log_login(user=str(user.get("email")), success=True, ip_address=request.remote_addr)
+        except Exception:
+            pass
+        return jsonify(
+            {
+                "success": True,
+                "user": {"username": user.get("email"), "role": user.get("role"), "tenant_id": user.get("tenant_id")},
+                "token": token,
+            }
+        )
+    except Exception as e:
+        print("LOGIN_ERROR", repr(e))
+        traceback.print_exc()
+        return jsonify({"error": "Login failed"}), 500
+
+
+@auth_bp.route("/login/verify", methods=["POST"])
+def login_verify():
+    try:
+        data = request.json or {}
+        temp_token = data.get("temp_token")
+        code = data.get("code")
+        print(
+            "LOGIN_VERIFY_REQUEST",
+            {
+                "temp_token": bool(temp_token),
+                "has_code": bool(code),
+                "ip": request.remote_addr,
+                "ua": request.headers.get("User-Agent"),
+            },
+        )
+
+        user = None
+        if temp_token:
+            pending = PENDING_LOGIN_CACHE.get(str(temp_token))
+            if not pending:
+                return jsonify({"error": "Login session expired"}), 400
+            if float(time.time()) - float(pending.get("timestamp") or 0) > 600:
+                del PENDING_LOGIN_CACHE[str(temp_token)]
+                return jsonify({"error": "Login session expired"}), 400
+            user = identity_store.get_user_by_id(str(pending.get("user_id")))
+            if not user:
+                del PENDING_LOGIN_CACHE[str(temp_token)]
+                return jsonify({"error": "User not found"}), 401
+        else:
+            email = (data.get("username") or data.get("email") or "").strip().lower()
+            password = data.get("password") or ""
+            if not email or not password or not code:
+                return jsonify({"error": "temp_token and code required"}), 400
+            user, ok = identity_store.authenticate(email, password)
+            if not user or not ok:
+                return jsonify({"error": "Invalid email or password"}), 401
+
+        if int(user.get("disabled") or 0) == 1:
+            return jsonify({"error": "Account has been disabled"}), 403
+
+        mfa = identity_store.get_mfa(str(user.get("user_id")))
+        if _mfa_bypass_enabled():
+            token = _issue_session(user)
+            return jsonify(
+                {
+                    "success": True,
+                    "user": {"username": user.get("email"), "role": user.get("role"), "tenant_id": user.get("tenant_id")},
+                    "token": token,
+                }
+            )
+
+        if not mfa or int(mfa.get("enabled") or 0) != 1 or not mfa.get("secret"):
+            return jsonify({"error": "MFA not enabled"}), 400
+        if not code:
+            return jsonify({"error": "code required"}), 400
+        if not pyotp.TOTP(str(mfa.get("secret"))).verify(str(code)):
+            return jsonify({"error": "Invalid 2FA code"}), 400
+
+        if temp_token:
+            del PENDING_LOGIN_CACHE[str(temp_token)]
+
+        token = _issue_session(user)
+        try:
+            if _audit_logger():
+                _audit_logger().log_login(user=str(user.get("email")), success=True, ip_address=request.remote_addr)
+        except Exception:
+            pass
+        return jsonify(
+            {
+                "success": True,
+                "user": {"username": user.get("email"), "role": user.get("role"), "tenant_id": user.get("tenant_id")},
+                "token": token,
+            }
+        )
+    except Exception as e:
+        print("LOGIN_VERIFY_ERROR", repr(e))
+        traceback.print_exc()
+        return jsonify({"error": "Login verification failed"}), 500
+
+
+@auth_bp.route("/logout", methods=["POST"])
 def logout():
-    """
-    Logout and invalidate session token.
-    """
-    auth_header = request.headers.get('Authorization')
-    
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-        sessions = load_json(SESSIONS_FILE)
-        
-        if token in sessions:
-            del sessions[token]
-            save_json(SESSIONS_FILE, sessions)
-    
-    return jsonify({'success': True, 'message': 'Logged out successfully'})
+    token = _auth_token()
+    if token:
+        try:
+            payload = token_service.verify(token)
+            email = payload.get("email")
+            if email:
+                services.audit_logger.log_logout(user=str(email), ip_address=request.remote_addr)
+        except Exception:
+            pass
+    return jsonify({"success": True, "message": "Logged out successfully"})
+
+
+@auth_bp.route("/tenants/my", methods=["GET"])
+def my_tenants():
+    user, _payload, err = _require_session()
+    if err:
+        return err
+    tenant_ids = identity_store.list_user_tenants(str(user.get("user_id")))
+    tenants = []
+    for tid in tenant_ids:
+        t = identity_store.get_tenant(str(tid)) or {}
+        tenants.append(
+            {
+                "tenant_id": str(tid),
+                "tenant_name": t.get("tenant_name") or str(tid).upper(),
+                "domain": t.get("domain"),
+            }
+        )
+    return jsonify({"success": True, "tenants": tenants})
+
+
+@auth_bp.route("/select-context", methods=["POST"])
+def select_context():
+    user, payload, err = _require_session()
+    if err:
+        return err
+    data = request.json or {}
+    tenant_id = data.get("tenant_id")
+    env_id = data.get("env_id")
+    allowed = set(identity_store.list_user_tenants(str(user.get("user_id"))))
+    if tenant_id and str(tenant_id) not in allowed:
+        return jsonify({"error": "Invalid tenant selection"}), 403
+    new_token = _issue_session(user, tenant_id=str(tenant_id) if tenant_id else payload.get("tenant_id"), env_id=env_id)
+    return jsonify({"success": True, "token": new_token, "context": {"tenant_id": tenant_id, "env_id": env_id}})

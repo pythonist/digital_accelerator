@@ -3,6 +3,7 @@ import apiClient from "@services/api";
 
 // ✅ Layout Components
 import PageContainer from "@investigation-layout/PageContainer";
+import { formatCompact } from "@investigation/utils/format";
 
 import {
   Box, Paper, Typography, Stack, Chip, IconButton, TextField, Table, TableBody, TableCell,
@@ -263,11 +264,11 @@ const MasterDashboardScreen = () => {
                     <Typography variant="caption" fontWeight="bold" color="text.secondary">TRANSACTIONS</Typography>
                   </Stack>
                   <Typography variant="h5" fontWeight="bold" color="success.main">
-                    ${(summary.transactions?.total_value / 1000000).toFixed(1)}M
+                    {formatCompact(summary.transactions?.total_value, { decimals: 1 })}
                   </Typography>
                   <Stack spacing={0.5} mt={1}>
-                    <Typography variant="caption" color="text.secondary">P95: ${(summary.transactions?.p95_amount / 1000).toFixed(0)}K</Typography>
-                    <Typography variant="caption" color="text.secondary">Max: ${(summary.transactions?.max_amount / 1000000).toFixed(1)}M</Typography>
+                    <Typography variant="caption" color="text.secondary">P95: {formatCompact(summary.transactions?.p95_amount, { decimals: 0 })}</Typography>
+                    <Typography variant="caption" color="text.secondary">Max: {formatCompact(summary.transactions?.max_amount, { decimals: 1 })}</Typography>
                   </Stack>
                 </CardContent>
               </Card>

@@ -7,22 +7,23 @@ from api.utils import handle_errors
 from api.services import services
 from api.middleware.auth_middleware import require_auth
 from services.db_schema import DatabaseManager
+from services.auth.identity_store import IdentityStore
 import json
 import os
 import sys
 import time
 import shutil
 import threading
+import sqlite3
 from werkzeug.utils import secure_filename
 
 admin_bp = Blueprint('admin', __name__)
+identity_store = IdentityStore()
 
 # --- FILE PATHS ---
 ENV_FILE = 'data/environments.json'
 CONFIG_FILE = 'data/app_config.json'
 DATA_DIR = 'data'
-USERS_FILE = os.path.join(DATA_DIR, 'users.json')
-SESSIONS_FILE = os.path.join(DATA_DIR, 'sessions.json')
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -67,21 +68,35 @@ def admin_dashboard():
     tenant_id = request.tenant_id
     
     try:
-        users_data = load_json(USERS_FILE)
-        sessions_data = load_json(SESSIONS_FILE)
-        
-        # Filter by tenant
-        tenant_users = [
-            u for email, u in users_data.items() 
-            if u.get('tenant_id') == tenant_id
-        ]
-        
-        current_time = time.time()
-        active_sessions = sum(
-            1 for s in sessions_data.values() 
-            if s.get('tenant_id') == tenant_id 
-            and (current_time - s.get('timestamp', 0)) < 86400
-        )
+        tenant_users = identity_store.list_users_by_tenant(tenant_id)
+        tenant_emails = [u.get("email") for u in tenant_users if u.get("email")]
+
+        active_sessions = 0
+        try:
+            conn = sqlite3.connect(services.audit_logger.db_path)
+            cur = conn.cursor()
+            if tenant_emails:
+                placeholders = ",".join(["?"] * len(tenant_emails))
+                cur.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT user)
+                    FROM audit_log
+                    WHERE action = 'login_attempt'
+                      AND details LIKE '%"success": true%'
+                      AND timestamp >= datetime('now', '-1 day')
+                      AND user IN ({placeholders})
+                    """,
+                    tuple(tenant_emails),
+                )
+                row = cur.fetchone()
+                active_sessions = int(row[0] or 0) if row else 0
+        except Exception:
+            active_sessions = 0
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
         
         # ✅ FIX: Robust Environment Counting (Legacy + Directory)
         # 1. Get from Directory
@@ -104,7 +119,7 @@ def admin_dashboard():
                 'active_sessions': active_sessions,
                 'total_environments': total_unique_envs,
                 'admin_count': sum(1 for u in tenant_users if u.get('role') == 'TENANT_ADMIN'),
-                'mfa_enabled_count': sum(1 for u in tenant_users if u.get('mfa_enabled', False))
+                'mfa_enabled_count': sum(1 for u in tenant_users if int(u.get('mfa_enabled') or 0) == 1)
             }
         })
     except Exception as e:
@@ -184,38 +199,67 @@ def list_users():
     tenant_id = request.tenant_id
     
     try:
-        users_data = load_json(USERS_FILE)
-        sessions_data = load_json(SESSIONS_FILE)
-        
-        # Build user list with session info
+        tenant_users = identity_store.list_users_by_tenant(tenant_id)
+
+        last_login_by_email = {}
+        active_by_email = set()
+        try:
+            emails = [u.get("email") for u in tenant_users if u.get("email")]
+            if emails:
+                conn = sqlite3.connect(services.audit_logger.db_path)
+                cur = conn.cursor()
+                placeholders = ",".join(["?"] * len(emails))
+                cur.execute(
+                    f"""
+                    SELECT user, MAX(timestamp) AS last_ts
+                    FROM audit_log
+                    WHERE action = 'login_attempt'
+                      AND details LIKE '%"success": true%'
+                      AND user IN ({placeholders})
+                    GROUP BY user
+                    """,
+                    tuple(emails),
+                )
+                for row in cur.fetchall():
+                    last_login_by_email[str(row[0])] = row[1]
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT user
+                    FROM audit_log
+                    WHERE action = 'login_attempt'
+                      AND details LIKE '%"success": true%'
+                      AND timestamp >= datetime('now', '-1 day')
+                      AND user IN ({placeholders})
+                    """,
+                    tuple(emails),
+                )
+                for row in cur.fetchall():
+                    active_by_email.add(str(row[0]))
+        except Exception:
+            last_login_by_email = {}
+            active_by_email = set()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
         users_list = []
-        current_time = time.time()
-        
-        for email, user_info in users_data.items():
-            if user_info.get('tenant_id') != tenant_id:
-                continue
-            
-            # Find active session
-            user_sessions = [
-                s for token, s in sessions_data.items()
-                if s.get('username') == email
-                and (current_time - s.get('timestamp', 0)) < 86400
-            ]
-            
-            last_login = max([s.get('timestamp', 0) for s in user_sessions]) if user_sessions else None
-            
-            users_list.append({
-                'email': email,
-                'phone': user_info.get('phone', ''),
-                'role': user_info.get('role', 'TENANT_USER'),
-                'status': 'active' if user_sessions else 'inactive',
-                'mfa_enabled': user_info.get('mfa_enabled', False),
-                'created_at': user_info.get('created_at', 0),
-                'last_login': last_login
-            })
-        
-        # Sort by creation date (newest first)
-        users_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        for u in tenant_users:
+            email = u.get("email")
+            users_list.append(
+                {
+                    "user_id": u.get("user_id"),
+                    "email": email,
+                    "phone": "",
+                    "role": u.get("role") or "TENANT_USER",
+                    "status": "active" if email in active_by_email else "inactive",
+                    "mfa_enabled": bool(int(u.get("mfa_enabled") or 0)),
+                    "created_at": u.get("created_at") or 0,
+                    "last_login": last_login_by_email.get(email),
+                    "disabled": bool(int(u.get("disabled") or 0)),
+                }
+            )
         
         return jsonify({
             'success': True,
@@ -246,26 +290,14 @@ def update_user_role():
         return jsonify({'error': 'You cannot demote yourself. Transfer ownership first.'}), 400
     
     try:
-        users_data = load_json(USERS_FILE)
-        
-        if target_email not in users_data:
+        user = identity_store.get_user_by_email(target_email)
+        if not user:
             return jsonify({'error': 'User not found'}), 404
-            
-        # Ensure target belongs to your tenant
-        if users_data[target_email].get('tenant_id') != tenant_id:
+
+        if user.get('tenant_id') != tenant_id:
             return jsonify({'error': 'Access denied: User belongs to another tenant'}), 403
-            
-        # Update Role
-        users_data[target_email]['role'] = new_role
-        save_json(USERS_FILE, users_data)
-        
-        # Force session logout for target user so they get new permissions on login
-        sessions_data = load_json(SESSIONS_FILE)
-        sessions_to_keep = {
-            k: v for k, v in sessions_data.items() 
-            if v.get('username') != target_email
-        }
-        save_json(SESSIONS_FILE, sessions_to_keep)
+
+        identity_store.set_user_role(str(user.get("user_id")), new_role)
         
         return jsonify({
             'success': True, 
@@ -288,25 +320,12 @@ def disable_user():
         return jsonify({'error': 'Cannot disable your own account'}), 400
     
     try:
-        users_data = load_json(USERS_FILE)
-        if target_email not in users_data:
+        user = identity_store.get_user_by_email(target_email)
+        if not user:
             return jsonify({'error': 'User not found'}), 404
-        
-        if users_data[target_email].get('tenant_id') != tenant_id:
+        if user.get('tenant_id') != tenant_id:
             return jsonify({'error': 'Access denied'}), 403
-        
-        users_data[target_email]['disabled'] = True
-        users_data[target_email]['disabled_at'] = time.time()
-        users_data[target_email]['disabled_by'] = request.username
-        save_json(USERS_FILE, users_data)
-        
-        sessions_data = load_json(SESSIONS_FILE)
-        sessions_data = {
-            token: session 
-            for token, session in sessions_data.items() 
-            if session.get('username') != target_email
-        }
-        save_json(SESSIONS_FILE, sessions_data)
+        identity_store.set_user_disabled(str(user.get("user_id")), True)
         
         return jsonify({'success': True, 'message': f'User {target_email} has been disabled'})
     except Exception as e:
@@ -322,17 +341,12 @@ def enable_user():
         return jsonify({'error': 'Email required'}), 400
     
     try:
-        users_data = load_json(USERS_FILE)
-        if target_email not in users_data:
+        user = identity_store.get_user_by_email(target_email)
+        if not user:
             return jsonify({'error': 'User not found'}), 404
-        
-        if users_data[target_email].get('tenant_id') != tenant_id:
+        if user.get('tenant_id') != tenant_id:
             return jsonify({'error': 'Access denied'}), 403
-        
-        users_data[target_email]['disabled'] = False
-        users_data[target_email]['enabled_at'] = time.time()
-        users_data[target_email]['enabled_by'] = request.username
-        save_json(USERS_FILE, users_data)
+        identity_store.set_user_disabled(str(user.get("user_id")), False)
         
         return jsonify({'success': True, 'message': f'User {target_email} has been enabled'})
     except Exception as e:
@@ -347,6 +361,74 @@ def get_audit():
         limit=100
     )
     return jsonify(logs)
+
+
+@admin_bp.route('/audit/session/event', methods=['POST'])
+@require_auth()
+@handle_errors
+def log_session_event():
+    payload = request.json or {}
+    session_id = str(payload.get("session_id") or request.headers.get("X-Session-ID") or "")
+    event_type = str(payload.get("event_type") or "event")
+    if not session_id:
+        return jsonify({"success": False, "error": "session_id required"}), 400
+    details = dict(payload)
+    details.pop("session_id", None)
+    details.pop("event_type", None)
+    services.audit_logger.log_action(
+        user=request.username,
+        action=event_type,
+        entity_type="session",
+        entity_id=session_id,
+        details=details,
+        ip_address=request.remote_addr,
+    )
+    return jsonify({"success": True})
+
+
+@admin_bp.route('/audit/session/timeline/<session_id>', methods=['GET'])
+@require_auth()
+@handle_errors
+def get_session_timeline(session_id: str):
+    logs = services.audit_logger.get_audit_trail(entity_type="session", entity_id=str(session_id), limit=2000)
+    logs = list(reversed(logs))
+    return jsonify({"success": True, "session_id": str(session_id), "events": logs})
+
+
+@admin_bp.route('/audit/session/list', methods=['GET'])
+@require_auth()
+@handle_errors
+def list_sessions():
+    limit = request.args.get("limit", default=50, type=int)
+    limit = max(1, min(int(limit or 50), 200))
+    conn = sqlite3.connect(services.audit_logger.db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT entity_id, user, MIN(timestamp) as start_ts, MAX(timestamp) as end_ts, COUNT(*) as event_count
+            FROM audit_log
+            WHERE entity_type = 'session'
+            GROUP BY entity_id, user
+            ORDER BY end_ts DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        sessions = []
+        for row in cur.fetchall():
+            sessions.append(
+                {
+                    "session_id": row[0],
+                    "user": row[1],
+                    "started_at": row[2],
+                    "ended_at": row[3],
+                    "event_count": int(row[4] or 0),
+                }
+            )
+        return jsonify({"success": True, "sessions": sessions})
+    finally:
+        conn.close()
 
 @admin_bp.route('/environments/list-created', methods=['GET'])
 @require_auth()
@@ -485,40 +567,62 @@ def delete_env_legacy():
 def get_users():
     tenant_id = request.tenant_id
     try:
-        users_data = load_json(USERS_FILE)
-        sessions_data = load_json(SESSIONS_FILE)
+        tenant_users = identity_store.list_users_by_tenant(tenant_id)
         users_list = []
-        for email, user_info in users_data.items():
-            if user_info.get('tenant_id') != tenant_id:
-                continue
-            users_list.append({
-                'email': email,
-                'phone': user_info.get('phone', ''),
-                'role': user_info.get('role', 'TENANT_USER'),
-                'mfa_enabled': user_info.get('mfa_enabled', False),
-                'created_at': user_info.get('created_at', time.time())
-            })
+        for u in tenant_users:
+            users_list.append(
+                {
+                    "user_id": u.get("user_id"),
+                    "email": u.get("email"),
+                    "phone": "",
+                    "role": u.get("role") or "TENANT_USER",
+                    "mfa_enabled": bool(int(u.get("mfa_enabled") or 0)),
+                    "created_at": u.get("created_at") or time.time(),
+                    "disabled": bool(int(u.get("disabled") or 0)),
+                }
+            )
+
         sessions_list = []
-        current_time = time.time()
-        for token, session_info in sessions_data.items():
-            if session_info.get('tenant_id') != tenant_id:
-                continue
-            timestamp = session_info.get('timestamp', 0)
-            sessions_list.append({
-                'username': session_info.get('username', ''),
-                'timestamp': timestamp,
-                'is_active': (current_time - timestamp) < 86400,
-                'last_activity': timestamp
-            })
-        sessions_list.sort(key=lambda x: x['timestamp'], reverse=True)
-        users_list.sort(key=lambda x: x.get('created_at', 0), reverse=True)
+        try:
+            emails = [u.get("email") for u in tenant_users if u.get("email")]
+            if emails:
+                conn = sqlite3.connect(services.audit_logger.db_path)
+                cur = conn.cursor()
+                placeholders = ",".join(["?"] * len(emails))
+                cur.execute(
+                    f"""
+                    SELECT user, timestamp
+                    FROM audit_log
+                    WHERE action = 'login_attempt'
+                      AND details LIKE '%"success": true%'
+                      AND user IN ({placeholders})
+                    ORDER BY timestamp DESC
+                    LIMIT 200
+                    """,
+                    tuple(emails),
+                )
+                now = time.time()
+                for row in cur.fetchall():
+                    ts = row[1]
+                    sessions_list.append(
+                        {"username": row[0], "timestamp": ts, "is_active": True, "last_activity": ts, "server_time": now}
+                    )
+        except Exception:
+            sessions_list = []
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        users_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
         return jsonify({
             'success': True,
             'users': users_list,
             'sessions': sessions_list,
             'stats': {
                 'total_users': len(users_list),
-                'active_sessions': len([s for s in sessions_list if s['is_active']]),
+                'active_sessions': len(set([s.get('username') for s in sessions_list if s.get('is_active')])),
                 'mfa_enabled_count': len([u for u in users_list if u['mfa_enabled']])
             }
         })
@@ -530,18 +634,35 @@ def get_users():
 def system_health():
     tenant_id = request.tenant_id
     try:
-        users_data = load_json(USERS_FILE)
-        sessions_data = load_json(SESSIONS_FILE)
-        tenant_users = {
-            k: v for k, v in users_data.items() 
-            if v.get('tenant_id') == tenant_id
-        }
+        tenant_users = identity_store.list_users_by_tenant(tenant_id)
+        tenant_emails = [u.get("email") for u in tenant_users if u.get("email")]
+        active_sessions = 0
+        try:
+            if tenant_emails:
+                conn = sqlite3.connect(services.audit_logger.db_path)
+                cur = conn.cursor()
+                placeholders = ",".join(["?"] * len(tenant_emails))
+                cur.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT user)
+                    FROM audit_log
+                    WHERE action = 'login_attempt'
+                      AND details LIKE '%"success": true%'
+                      AND timestamp >= datetime('now', '-1 day')
+                      AND user IN ({placeholders})
+                    """,
+                    tuple(tenant_emails),
+                )
+                row = cur.fetchone()
+                active_sessions = int(row[0] or 0) if row else 0
+        except Exception:
+            active_sessions = 0
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
         current_time = time.time()
-        active_sessions = sum(
-            1 for s in sessions_data.values() 
-            if s.get('tenant_id') == tenant_id 
-            and (current_time - s.get('timestamp', 0)) < 86400
-        )
         return jsonify({
             'success': True,
             'health': {

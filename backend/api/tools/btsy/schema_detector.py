@@ -58,6 +58,15 @@ class SchemaDetector:
         'str_filed_date': ['TIMESTAMP', 'DATE', 'VARCHAR'],
     }
     
+    EXPECTED_DISTINCT_RANGES = {
+        'transaction_type': (2, 8),
+        'transaction_category': (3, 50),
+        'account_status': (2, 10),
+        'customer_risk_rating': (3, 5),
+        'pep_flag': (2, 2),
+        'sanction_flag': (2, 2),
+    }
+    
     def __init__(self, conn: duckdb.DuckDBPyConnection):
         self.conn = conn
 
@@ -76,45 +85,50 @@ class SchemaDetector:
         """Get detailed column information from file"""
         try:
             rel = self._relation_expr(file_path)
-            # Get schema
             columns_query = f"DESCRIBE SELECT * FROM {rel}"
             columns_result = self.conn.execute(columns_query).fetchall()
-            
-            column_info = []
-            for col_info in columns_result:
-                col_name = col_info[0]
-                col_type = col_info[1]
-                
-                # Get null percentage
-                null_query = f"""
-                    SELECT 
-                        COUNT(*) - COUNT("{col_name}") as null_count,
-                        COUNT(*) as total_count
-                    FROM {rel}
-                """
-                null_result = self.conn.execute(null_query).fetchone()
-                null_pct = (null_result[0] / null_result[1] * 100) if null_result[1] > 0 else 0
-                
-                # Get cardinality
-                card_query = f"""
-                    SELECT COUNT(DISTINCT "{col_name}") as distinct_count
-                    FROM {rel}
-                """
-                card_result = self.conn.execute(card_query).fetchone()
-                distinct_count = card_result[0] if card_result else 0
-                
-                column_info.append({
-                    'name': col_name,
-                    'type': col_type,
-                    'null_pct': null_pct,
-                    'distinct_count': distinct_count
-                })
-            
-            return column_info
+
+            return [
+                {
+                    'name': col_info[0],
+                    'type': col_info[1],
+                    'null_pct': None,
+                    'distinct_count': None,
+                }
+                for col_info in (columns_result or [])
+            ]
             
         except Exception as e:
             logger.error(f"Failed to get column info: {str(e)}")
             return []
+    
+    def _compute_column_stats(self, file_path: Path, columns: List[str]) -> Dict[str, Dict]:
+        stats: Dict[str, Dict] = {}
+        try:
+            rel = self._relation_expr(file_path)
+            rel_sample = f"(SELECT * FROM {rel} USING SAMPLE 10000 ROWS)"
+            for col in columns:
+                try:
+                    q = f'''
+                        SELECT 
+                            COUNT(*) - COUNT("{col}") as null_count,
+                            COUNT(*) as total_count,
+                            COUNT(DISTINCT "{col}") as distinct_count
+                        FROM {rel_sample}
+                    '''
+                    res = self.conn.execute(q).fetchone()
+                    if res and len(res) == 3:
+                        null_count, total_count, distinct_count = res
+                        null_pct = (float(null_count) / float(total_count) * 100.0) if total_count and total_count > 0 else 0.0
+                        stats[col] = {'null_pct': null_pct, 'distinct_count': int(distinct_count or 0)}
+                    else:
+                        stats[col] = {'null_pct': 0.0, 'distinct_count': 0}
+                except Exception:
+                    stats[col] = {'null_pct': 0.0, 'distinct_count': 0}
+        except Exception:
+            for col in columns:
+                stats[col] = {'null_pct': 0.0, 'distinct_count': 0}
+        return stats
     
     def detect_candidates(self, file_path: Path, canonical_fields: List[str]) -> Dict[str, List[Dict]]:
         """
@@ -125,6 +139,7 @@ class SchemaDetector:
         if not column_info:
             return {}
         
+        stats_map = self._compute_column_stats(file_path, [c['name'] for c in column_info])
         candidates = {}
         
         for canonical_field in canonical_fields:
@@ -135,6 +150,7 @@ class SchemaDetector:
             for col in column_info:
                 col_name = col['name']
                 col_type = col['type']
+                s = stats_map.get(col_name, {'null_pct': 0.0, 'distinct_count': 0})
                 
                 # Name similarity score
                 name_score = max(
@@ -145,19 +161,25 @@ class SchemaDetector:
                 # Type compatibility score
                 type_score = 1.0 if col_type in expected_types else 0.3
                 
-                # Null ratio penalty
-                null_penalty = 1.0 - (col['null_pct'] / 100.0 * 0.5)
+                null_penalty = 1.0 - min(max(float(s.get('null_pct', 0.0)) / 100.0, 0.0), 0.8) * 0.5
+                
+                dr = self.EXPECTED_DISTINCT_RANGES.get(canonical_field)
+                if dr:
+                    dval = int(s.get('distinct_count', 0) or 0)
+                    cardinality_score = 1.0 if (dr[0] <= dval <= dr[1]) else (0.6 if dval > 0 else 0.3)
+                else:
+                    cardinality_score = 0.8
                 
                 # Combined confidence score
-                confidence = (name_score * 0.5 + type_score * 0.3) * null_penalty
+                confidence = (name_score * 0.5 + type_score * 0.3 + cardinality_score * 0.2) * null_penalty
                 
                 if confidence > 0.3:  # Only include reasonable candidates
                     field_candidates.append({
                         'column': col_name,
                         'type': col_type,
                         'confidence': round(confidence, 3),
-                        'null_pct': round(col['null_pct'], 2),
-                        'distinct_count': col['distinct_count']
+                        'null_pct': round(float(s.get('null_pct', 0.0)), 3),
+                        'distinct_count': int(s.get('distinct_count', 0))
                     })
             
             # Sort by confidence

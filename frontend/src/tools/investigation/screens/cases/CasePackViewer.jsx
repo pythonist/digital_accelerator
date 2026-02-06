@@ -31,13 +31,69 @@ import {
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
+const fmtNum = (v, digits = 0) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '-';
+  return n.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+};
+
 // --- Visual Graph Component ---
 const VisualGraph = ({ network }) => {
+  const link = network?.link_analysis;
+  if (link && link.success && Array.isArray(link.nodes) && Array.isArray(link.links) && link.links.length > 0) {
+    const cx = 300, cy = 150;
+    const nodes = link.nodes.slice(0, 30);
+    const links = link.links.slice(0, 80);
+    const byId = new Map(nodes.map((n) => [String(n.id), n]));
+    const center = nodes[0]?.id;
+    const pos = new Map();
+    nodes.forEach((n, i) => {
+      if (String(n.id) === String(center)) {
+        pos.set(String(n.id), { x: cx, y: cy });
+        return;
+      }
+      const angle = (i / Math.max(1, nodes.length - 1)) * Math.PI * 2;
+      const radius = 120;
+      pos.set(String(n.id), { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
+    });
+
+    return (
+      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+        <svg width="100%" height="300" viewBox="0 0 600 300">
+          {links.map((l, i) => {
+            const s = pos.get(String(l.source));
+            const t = pos.get(String(l.target));
+            if (!s || !t) return null;
+            return (
+              <g key={`link-${i}`}>
+                <line x1={s.x} y1={s.y} x2={t.x} y2={t.y} stroke="#e0e0e0" strokeWidth={2} />
+              </g>
+            );
+          })}
+          {nodes.map((n, i) => {
+            const p = pos.get(String(n.id));
+            if (!p) return null;
+            const isCenter = String(n.id) === String(center);
+            return (
+              <g key={`node-${i}`}>
+                <circle cx={p.x} cy={p.y} r={isCenter ? 22 : 14} fill={isCenter ? '#2563eb' : '#64748b'} stroke="white" strokeWidth="3" />
+                <text x={p.x} y={p.y + (isCenter ? 38 : 30)} textAnchor="middle" fontSize="11" fontWeight="600" fill="#424242">
+                  {String(n.id).substring(0, 12)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </Paper>
+    );
+  }
   if (!network || !network.top_counterparties || network.top_counterparties.length === 0) {
     return (
       <Box sx={{ height: 300, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px solid #e0e0e0', borderRadius: 2, bgcolor: '#fafafa' }}>
         <NetworkIcon sx={{ fontSize: 48, color: '#bdbdbd', mb: 2, opacity: 0.3 }} />
-        <Typography variant="body2" fontWeight="500" color="text.secondary">No Link Analysis Data</Typography>
+        <Typography variant="body2" fontWeight="500" color="text.secondary">
+          {network?.link_analysis?.reason || 'No Link Analysis Data'}
+        </Typography>
       </Box>
     );
   }
@@ -71,7 +127,7 @@ const VisualGraph = ({ network }) => {
           <g key={`link-${i}`}>
             <line x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#e0e0e0" strokeWidth={2} />
             <text x={(l.x1 + l.x2) / 2} y={(l.y1 + l.y2) / 2 + 4} textAnchor="middle" fontSize="9" fill="#757575" fontWeight="600">
-              ${(l.vol / 1000).toFixed(0)}k
+              {fmtNum(l.vol / 1000, 0)}k
             </text>
           </g>
         ))}
@@ -242,8 +298,8 @@ const CasePackViewer = () => {
           </Paper>
 
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
-            <StatCard label="Total Volume" value={`$${(fps.total_volume || 0).toLocaleString()}`} icon={<ActivityIcon color="primary" />} />
-            <StatCard label="Max Transaction" value={`$${(fps.max_transaction || 0).toLocaleString()}`} icon={<DollarSignIcon color="success" />} />
+            <StatCard label="Total Volume" value={fmtNum(fps.total_volume || 0, 0)} icon={<ActivityIcon color="primary" />} />
+            <StatCard label="Max Transaction" value={fmtNum(fps.max_transaction || 0, 0)} icon={<DollarSignIcon color="success" />} />
             <StatCard label="Alerts" value={casePack.alerts ? casePack.alerts.length : 0} icon={<NetworkIcon color="secondary" />} />
           </Box>
 
@@ -350,15 +406,25 @@ const CasePackViewer = () => {
           ) : (
              <Box sx={{ height: '100%' }}>
                 {activeTab === 0 && renderOverview()}
-                {activeTab === 1 && <Box sx={{ p: 4 }}><Typography variant="h6" fontWeight="bold" mb={2}>Link Analysis</Typography><VisualGraph network={casePack?.network_profile} /></Box>}
+                {activeTab === 1 && (
+                  <Box sx={{ p: 4 }}>
+                    <Typography variant="h6" fontWeight="bold" mb={2}>Link Analysis</Typography>
+                    <VisualGraph network={{ ...(casePack?.network_profile || {}), link_analysis: casePack?.link_analysis }} />
+                  </Box>
+                )}
                 {activeTab === 2 && (
                     <Box sx={{ p: 4 }}>
                         <TableContainer component={Paper} variant="outlined">
                         <Table size="small">
                             <TableHead><TableRow><TableCell>Date</TableCell><TableCell align="right">Amount</TableCell><TableCell>Type</TableCell><TableCell>Reference</TableCell></TableRow></TableHead>
                             <TableBody>
-                            {(casePack?.transactions || []).map((tx, i) => (
-                                <TableRow key={i}><TableCell>{tx.date}</TableCell><TableCell align="right">${tx.amount}</TableCell><TableCell>{tx.type}</TableCell><TableCell>{tx.reference}</TableCell></TableRow>
+                            {(casePack?.ledger || []).map((tx, i) => (
+                                <TableRow key={i}>
+                                  <TableCell>{tx.date || '-'}</TableCell>
+                                  <TableCell align="right">{fmtNum(tx.amount, 2)}</TableCell>
+                                  <TableCell>{tx.type || '-'}</TableCell>
+                                  <TableCell>{tx.reference || '-'}</TableCell>
+                                </TableRow>
                             ))}
                             </TableBody>
                         </Table>

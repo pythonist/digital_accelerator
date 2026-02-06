@@ -30,6 +30,7 @@ from llm.vector_rag import VectorRAGSystem
 from graph_engine.graph_builder import TransactionGraphBuilder
 from baseline.baseline_engine import BaselineEngine
 from services.focus_engine import FocusEngine
+from audit.audit_logger import AuditLogger
 
 # Calibration services
 from calibration.services.calibration_db_schema import CalibrationDatabaseManager
@@ -71,7 +72,10 @@ from calibration.services.aggregation_insight_service import AggregationInsightS
 
 from calibration.services.report_data_service import ReportDataService
 from calibration.services.approval_service import ApprovalService
-from calibration.services.pdf_reporting import PDFGeneratorService
+try:
+    from calibration.services.pdf_reporting import PDFGeneratorService
+except Exception:
+    PDFGeneratorService = None
 from calibration.db_migrations import run_migrations
 
 # ✅ NEW: Step 0 Data Foundation Services
@@ -87,6 +91,7 @@ from calibration.services.data_step_zero_services import (
 class ServiceContainer:
     def __init__(self):
         self.metadata_manager = None
+        self.audit_logger = None
 
         # Global / legacy state
         self.investigation_db = None
@@ -135,6 +140,7 @@ class ServiceContainer:
         try:
             print("🔧 System Startup...")
             self.metadata_manager = MetadataManager()
+            self.audit_logger = AuditLogger()
 
             if OllamaWrapper:
                 self.ollama_wrapper = OllamaWrapper()
@@ -582,6 +588,8 @@ class ServiceContainer:
 
     def get_pdf_generator_service(self):
         """Get PDF generator service with AI support"""
+        if PDFGeneratorService is None:
+            raise RuntimeError("PDF generator dependencies are not installed")
         if not hasattr(self, '_pdf_generator_service'):
             ollama = self.ollama_wrapper if hasattr(self, 'ollama_wrapper') and self.ollama_wrapper else None
             self._pdf_generator_service = PDFGeneratorService(ollama)

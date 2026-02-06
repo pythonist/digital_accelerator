@@ -213,8 +213,45 @@ class LogicalMergeService:
                 error_msg = f"Dataset {dataset_id} not found in env {env_id}"
                 print(f"❌ [MERGE] {error_msg}")
                 raise ValueError(error_msg)
-            
-            return row[0]
+
+            table_name = row[0]
+
+            cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
+            )
+            if cursor.fetchone():
+                return table_name
+
+            prefix = str(dataset_id)[:8]
+            candidates = [
+                f"temp_{env_id}_%_{prefix}",
+                f"temp_{env_id}_%_{prefix}%",
+                f"%_{prefix}",
+                f"%_{prefix}%",
+            ]
+            for pat in candidates:
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ? ORDER BY name DESC LIMIT 1",
+                    (pat,),
+                )
+                hit = cursor.fetchone()
+                if hit and hit[0]:
+                    repaired = hit[0]
+                    try:
+                        cursor.execute(
+                            "UPDATE datasets SET table_name = ? WHERE dataset_id = ? AND env_id = ?",
+                            (repaired, dataset_id, env_id),
+                        )
+                        conn.commit()
+                    except Exception:
+                        pass
+                    print(f"🔧 [MERGE] Repaired missing table_name for {dataset_id}: {table_name} → {repaired}")
+                    return repaired
+
+            error_msg = f"Physical table missing for dataset {dataset_id}: {table_name}"
+            print(f"❌ [MERGE] {error_msg}")
+            raise ValueError(error_msg)
         finally:
             conn.close()
 

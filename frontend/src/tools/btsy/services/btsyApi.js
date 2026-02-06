@@ -271,6 +271,20 @@ const btsyApi = {
 
   // Transaction Universe endpoints
   universe: {
+    getFoundationSummary: async (snapshotId) => {
+      const response = await axios.get(
+        `${API_BASE}/universe/foundation/${encodeURIComponent(String(snapshotId))}`,
+        { headers: getHeaders() }
+      );
+      return response.data;
+    },
+    getMergedPreview: async (snapshotId, limit = 10) => {
+      const response = await axios.get(
+        `${API_BASE}/universe/merged-preview/${encodeURIComponent(String(snapshotId))}?limit=${encodeURIComponent(String(limit))}`,
+        { headers: getHeaders() }
+      );
+      return response.data;
+    },
     getDataStatistics: async (snapshotId) => {
       const response = await axios.get(
         `${API_BASE}/universe/data-statistics/${snapshotId}`,
@@ -338,7 +352,14 @@ const btsyApi = {
       );
       return response.data;
     },
-    getSelected: async (calibrationRunId) => {
+    getSelected: async (calibrationRunId, runIdText = null) => {
+      if (runIdText && String(runIdText).trim()) {
+        const response = await axios.get(
+          `${API_BASE}/universe/selected?run_id=${encodeURIComponent(String(runIdText))}`,
+          { headers: getHeaders() }
+        );
+        return response.data;
+      }
       const response = await axios.get(
         `${API_BASE}/universe/selected?calibration_run_id=${calibrationRunId}`,
         { headers: getHeaders() }
@@ -382,6 +403,14 @@ const btsyApi = {
     previewUniverse: async (universeId, limit = 100) => {
       const response = await axios.get(
         `${API_BASE}/universe/${universeId}/preview?limit=${limit}`,
+        { headers: getHeaders() }
+      );
+      return response.data;
+    },
+    computeThresholds: async (universeId, payload) => {
+      const response = await axios.post(
+        `${API_BASE}/universe/${universeId}/thresholds`,
+        payload || {},
         { headers: getHeaders() }
       );
       return response.data;
@@ -1255,10 +1284,10 @@ btsyApi.autoRun = {
 };
 
 btsyApi.calibrationRuns = {
-  createRun: async (snapshotId, createdBy = 'user', notes = null) => {
+  createRun: async (snapshotId, createdBy = 'user', notes = null, logicConfig = null) => {
     const response = await axios.post(
       `${API_BASE}/calibration/run/create`,
-      { snapshot_id: snapshotId, created_by: createdBy, notes },
+      { snapshot_id: snapshotId, created_by: createdBy, notes, logic_config: logicConfig || {} },
       { headers: getHeaders() }
     );
     return response.data;
@@ -1270,16 +1299,16 @@ btsyApi.calibrationRuns = {
     );
     return response.data;
   },
-  getRun: async (calibrationRunId) => {
+  getRun: async (runIdOrNum) => {
     const response = await axios.get(
-      `${API_BASE}/calibration/run/${calibrationRunId}`,
+      `${API_BASE}/calibration/run/${encodeURIComponent(String(runIdOrNum))}`,
       { headers: getHeaders() }
     );
     return response.data;
   },
-  activateRun: async (calibrationRunId) => {
+  activateRun: async (runIdOrNum) => {
     const response = await axios.post(
-      `${API_BASE}/calibration/run/${calibrationRunId}/activate`,
+      `${API_BASE}/calibration/run/${encodeURIComponent(String(runIdOrNum))}/activate`,
       {},
       { headers: getHeaders() }
     );
@@ -1301,6 +1330,14 @@ btsyApi.scenarios = {
     if (status) params.append('status', status);
     const response = await axios.get(
       `${API_BASE}/scenario/list?${params.toString()}`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  runByRun: async (runIdText, createdBy = 'user', config = null) => {
+    const response = await axios.post(
+      `${API_BASE}/cortex/scenario/run-by-run`,
+      { run_id: runIdText, created_by: createdBy, config: config || {} },
       { headers: getHeaders() }
     );
     return response.data;

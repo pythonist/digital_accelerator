@@ -16,6 +16,205 @@ class CasePackGenerator:
             if any(k in col.lower() for k in keywords): return col
         return None
 
+    def _table_exists(self, conn, table_name: str) -> bool:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+            return cur.fetchone() is not None
+        except Exception:
+            return False
+
+    def _pick_table(self, conn, candidates):
+        for t in candidates:
+            if self._table_exists(conn, t):
+                return t
+        return None
+
+    def _build_ledger_rows(self, txns):
+        if not txns:
+            return []
+        df = pd.DataFrame(txns)
+        if df.empty:
+            return []
+
+        date_col = self._get_col_name(df, ['date', 'txn_timestamp', 'timestamp', 'transaction_date', 'txn_date', 'time', 'created_at'])
+        amt_col = self._get_col_name(df, ['amount', 'txn_amount', 'transaction_amount', 'amt', 'value'])
+        type_col = self._get_col_name(df, ['txn_type', 'transaction_type', 'type', 'direction', 'dr_cr'])
+        ref_col = self._get_col_name(df, ['reference', 'ref', 'transaction_id', 'txn_id', 'id', 'description', 'narrative', 'remarks', 'party', 'beneficiary', 'remitter'])
+
+        if date_col:
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        if amt_col:
+            df[amt_col] = pd.to_numeric(df[amt_col], errors='coerce')
+
+        out = []
+        for _, r in df.iterrows():
+            d = None
+            if date_col:
+                ts = r.get(date_col)
+                if pd.notna(ts):
+                    try:
+                        d = pd.to_datetime(ts).date().isoformat()
+                    except Exception:
+                        d = str(ts)
+            a = None
+            if amt_col:
+                v = r.get(amt_col)
+                if pd.notna(v):
+                    try:
+                        a = float(v)
+                    except Exception:
+                        a = None
+            t = None
+            if type_col:
+                v = r.get(type_col)
+                if pd.notna(v) and str(v) != '':
+                    t = str(v)
+            ref = None
+            if ref_col:
+                v = r.get(ref_col)
+                if pd.notna(v) and str(v) != '':
+                    ref = str(v)
+
+            out.append(
+                {
+                    "date": d,
+                    "amount": a,
+                    "type": t,
+                    "reference": ref,
+                }
+            )
+        return out
+
+    def _build_money_flow_graph(self, txns):
+        if not txns:
+            return {"success": False, "reason": "No transactions available for link analysis", "nodes": [], "links": []}
+        df = pd.DataFrame(txns)
+        if df.empty:
+            return {"success": False, "reason": "No transactions available for link analysis", "nodes": [], "links": []}
+
+        src_col = self._get_col_name(df, [
+            'account_id', 'acct_id', 'accountid', 'account', 'account_no',
+            'source_account', 'from_account', 'from_acct', 'sender_account', 'debit_account', 'payer_account',
+            'customer_id', 'cust_id', 'entity_id'
+        ])
+        dst_col = self._get_col_name(df, [
+            'counterparty_account', 'counterparty_account_id', 'counterparty', 'cp_account',
+            'to_account', 'to_acct', 'receiver_account', 'credit_account', 'beneficiary_account', 'payee_account',
+            'destination_account', 'dst_account'
+        ])
+        ts_col = self._get_col_name(df, ['txn_timestamp', 'timestamp', 'transaction_date', 'txn_date', 'date', 'time', 'created_at'])
+        amt_col = self._get_col_name(df, ['txn_amount', 'amount', 'transaction_amount', 'amt', 'value', 'rule_metric'])
+        dir_col = self._get_col_name(df, ['direction', 'dr_cr', 'debit_credit', 'type', 'txn_type', 'transaction_type'])
+        id_col = self._get_col_name(df, ['transaction_id', 'txn_id', 'id', 'trans_id'])
+
+        dst_kind = "account"
+        if not dst_col:
+            dst_col = self._get_col_name(df, [
+                'party', 'counterparty_name', 'counterparty', 'beneficiary', 'remitter', 'merchant', 'merchant_name',
+                'merchant_type', 'counterparty_country', 'country', 'description', 'desc'
+            ])
+            if dst_col:
+                key = str(dst_col).lower()
+                if "country" in key:
+                    dst_kind = "country"
+                elif "merchant" in key:
+                    dst_kind = "merchant"
+                elif "desc" in key or "description" in key:
+                    dst_kind = "descriptor"
+                else:
+                    dst_kind = "counterparty"
+
+        if not src_col or not dst_col:
+            return {
+                "success": False,
+                "reason": "Missing linkage columns in transactions",
+                "nodes": [],
+                "links": [],
+                "missing": {"source": src_col is None, "target": dst_col is None},
+            }
+
+        if ts_col:
+            df[ts_col] = pd.to_datetime(df[ts_col], errors="coerce")
+        if amt_col:
+            df[amt_col] = pd.to_numeric(df[amt_col], errors="coerce")
+
+        nodes = {}
+        links = []
+
+        def _norm_dir(v):
+            if v is None:
+                return None
+            s = str(v).strip().lower()
+            if s in ["out", "outbound", "debit", "dr"]:
+                return "outbound"
+            if s in ["in", "inbound", "credit", "cr"]:
+                return "inbound"
+            return s
+
+        for _, r in df.iterrows():
+            src = r.get(src_col)
+            dst = r.get(dst_col)
+            if pd.isna(src) or pd.isna(dst) or str(src) == "" or str(dst) == "":
+                continue
+
+            src_id = str(src)
+            dst_id = str(dst)
+
+            d = _norm_dir(r.get(dir_col)) if dir_col else None
+            if d == "inbound":
+                from_id, to_id = dst_id, src_id
+            else:
+                from_id, to_id = src_id, dst_id
+
+            nodes[from_id] = {"id": from_id, "type": "account"}
+            nodes[to_id] = {"id": to_id, "type": dst_kind if to_id != from_id else "account"}
+
+            ts = None
+            if ts_col:
+                v = r.get(ts_col)
+                if pd.notna(v):
+                    try:
+                        ts = pd.to_datetime(v).isoformat()
+                    except Exception:
+                        ts = str(v)
+
+            amt = None
+            if amt_col:
+                v = r.get(amt_col)
+                if pd.notna(v):
+                    try:
+                        amt = float(v)
+                    except Exception:
+                        amt = None
+
+            txn_id = None
+            if id_col:
+                v = r.get(id_col)
+                if pd.notna(v) and str(v) != "":
+                    txn_id = str(v)
+
+            links.append(
+                {
+                    "id": txn_id,
+                    "source": from_id,
+                    "target": to_id,
+                    "ts": ts,
+                    "amount": amt,
+                    "direction": d,
+                }
+            )
+
+        if not links:
+            return {"success": False, "reason": "No linked transactions found for this case", "nodes": [], "links": []}
+
+        try:
+            links.sort(key=lambda x: (x["ts"] is None, x["ts"]))
+        except Exception:
+            pass
+
+        return {"success": True, "nodes": list(nodes.values()), "links": links, "link_target_kind": dst_kind}
+
     def generate_case_pack(self, case_id):
         print(f"📦 Generating Deep Dive Pack for: {case_id}")
         conn = self.db_manager.connect()
@@ -45,51 +244,106 @@ class CasePackGenerator:
             # 2. FETCH RAW ALERTS (Live Query)
             alerts = []
             try:
-                # Look for an 'alerts' table
-                alerts_df = pd.read_sql(f"SELECT * FROM alerts", conn)
+                alerts_table = self._pick_table(conn, ['alerts', 'alert'])
+                if not alerts_table:
+                    raise ValueError("No alerts table found")
+                alerts_df = pd.read_sql(f"SELECT * FROM {alerts_table}", conn)
                 a_case_col = self._get_col_name(alerts_df, ['case_id', 'caseid'])
                 if a_case_col:
-                    alerts = pd.read_sql(f'SELECT * FROM alerts WHERE "{a_case_col}" = ?', conn, params=(case_id,)).to_dict(orient='records')
+                    alerts = pd.read_sql(f'SELECT * FROM {alerts_table} WHERE "{a_case_col}" = ?', conn, params=(case_id,)).to_dict(orient='records')
             except: pass
 
             # 3. FETCH RAW ACCOUNTS (Linked to Case)
             accounts = []
             account_ids = []
+            customer_ids = []
             try:
                 # Try linking via Case ID in accounts table
-                acc_df = pd.read_sql("SELECT * FROM accounts LIMIT 1", conn)
+                accounts_table = self._pick_table(conn, ['accounts', 'account'])
+                if not accounts_table:
+                    raise ValueError("No accounts table found")
+                acc_df = pd.read_sql(f"SELECT * FROM {accounts_table} LIMIT 1", conn)
                 ac_case_col = self._get_col_name(acc_df, ['case_id', 'caseid'])
                 
                 if ac_case_col:
-                    accounts_df = pd.read_sql(f'SELECT * FROM accounts WHERE "{ac_case_col}" = ?', conn, params=(case_id,))
+                    accounts_df = pd.read_sql(f'SELECT * FROM {accounts_table} WHERE "{ac_case_col}" = ?', conn, params=(case_id,))
                     accounts = accounts_df.to_dict(orient='records')
                     
                     # Collect Account IDs to find transactions
                     ac_id_col = self._get_col_name(accounts_df, ['account_id', 'acct_id', 'accountid', 'account_no'])
                     if ac_id_col:
                         account_ids = accounts_df[ac_id_col].astype(str).tolist()
+
+                    cust_id_col = self._get_col_name(accounts_df, ['customer_id', 'cust_id', 'entity_id'])
+                    if cust_id_col:
+                        customer_ids = accounts_df[cust_id_col].dropna().astype(str).tolist()
             except: pass
+
+            # 3B. FETCH RAW CUSTOMERS (Linked via Accounts or Case Metadata)
+            customers = []
+            try:
+                if not customer_ids:
+                    for k, v in (metadata or {}).items():
+                        lk = str(k).lower()
+                        if any(x in lk for x in ["customer", "cust", "entity"]) and v not in [None, ""]:
+                            customer_ids.append(str(v))
+                customer_ids = list(dict.fromkeys([c for c in customer_ids if c not in [None, ""]]))
+
+                customers_table = self._pick_table(conn, ['customers', 'customer'])
+                if customers_table and customer_ids:
+                    cust_limit_df = pd.read_sql(f"SELECT * FROM {customers_table} LIMIT 1", conn)
+                    c_id_col = self._get_col_name(cust_limit_df, ['customer_id', 'cust_id', 'entity_id', 'id'])
+                    if c_id_col:
+                        placeholders = ','.join(['?'] * len(customer_ids))
+                        customers_df = pd.read_sql(
+                            f'SELECT * FROM {customers_table} WHERE "{c_id_col}" IN ({placeholders})',
+                            conn,
+                            params=customer_ids
+                        )
+                        customers = customers_df.fillna("").to_dict(orient='records')
+            except:
+                customers = []
 
             # 4. FETCH RAW TRANSACTIONS (The Missing Grid Fix)
             transactions = []
             try:
-                txn_limit_df = pd.read_sql("SELECT * FROM transactions LIMIT 1", conn)
+                transactions_table = self._pick_table(conn, ['transactions', 'transaction', 'txns', 'txn'])
+                if not transactions_table:
+                    raise ValueError("No transactions table found")
+                txn_limit_df = pd.read_sql(f"SELECT * FROM {transactions_table} LIMIT 1", conn)
                 t_case_col = self._get_col_name(txn_limit_df, ['case_id', 'caseid'])
-                t_acct_col = self._get_col_name(txn_limit_df, ['account_id', 'acct_id', 'accountid'])
+                t_acct_col = self._get_col_name(txn_limit_df, ['account_id', 'acct_id', 'accountid', 'account_no'])
+                t_cust_col = self._get_col_name(txn_limit_df, ['customer_id', 'cust_id', 'entity_id'])
 
                 txn_query = ""
                 params = []
 
                 # Strategy A: Transactions have Case ID (Direct Link)
                 if t_case_col:
-                    txn_query = f'SELECT * FROM transactions WHERE "{t_case_col}" = ?'
+                    txn_query = f'SELECT * FROM {transactions_table} WHERE "{t_case_col}" = ?'
                     params = [case_id]
                 
                 # Strategy B: Transactions link to Accounts (Indirect Link)
                 elif t_acct_col and account_ids:
                     placeholders = ','.join(['?'] * len(account_ids))
-                    txn_query = f'SELECT * FROM transactions WHERE "{t_acct_col}" IN ({placeholders})'
+                    txn_query = f'SELECT * FROM {transactions_table} WHERE "{t_acct_col}" IN ({placeholders})'
                     params = account_ids
+
+                # Strategy C: Transactions link to Customer/Entity via case metadata
+                elif t_cust_col:
+                    candidate_ids = []
+                    try:
+                        for k, v in (metadata or {}).items():
+                            lk = str(k).lower()
+                            if any(x in lk for x in ["customer", "cust", "entity"]) and v not in [None, ""]:
+                                candidate_ids.append(str(v))
+                    except Exception:
+                        candidate_ids = []
+                    candidate_ids = list(dict.fromkeys(candidate_ids))
+                    if candidate_ids:
+                        placeholders = ','.join(['?'] * len(candidate_ids))
+                        txn_query = f'SELECT * FROM {transactions_table} WHERE "{t_cust_col}" IN ({placeholders})'
+                        params = candidate_ids
 
                 if txn_query:
                     # Limit to 500 to prevent crash on massive datasets
@@ -106,6 +360,8 @@ class CasePackGenerator:
             financial_profile = self._analyze_financials(transactions) # Pass raw txns now!
             network_profile = self._analyze_network(transactions)
             typologies = self._detect_typologies(financial_profile, transactions)
+            ledger = self._build_ledger_rows(transactions)
+            link_analysis = self._build_money_flow_graph(transactions)
 
             return {
                 "case_id": case_id,
@@ -113,8 +369,10 @@ class CasePackGenerator:
                 "metadata": metadata,
                 "alerts": alerts,
                 "transactions": transactions, # Now contains REAL data
+                "ledger": ledger,
+                "link_analysis": link_analysis,
                 "accounts": accounts,
-                "customers": [], # Can extend similar to accounts
+                "customers": customers,
                 "financial_profile": financial_profile,
                 "network_profile": network_profile,
                 "typology_flags": typologies,
@@ -202,7 +460,7 @@ class CasePackGenerator:
                 vals = pd.to_numeric(df[amt_col], errors='coerce').fillna(0)
                 structuring = vals[(vals >= 9000) & (vals < 10000)]
                 if len(structuring) > 0:
-                    flags.append({"type": "Structuring", "severity": "High", "desc": f"{len(structuring)} txns just below $10k threshold"})
+                    flags.append({"type": "Structuring", "severity": "High", "desc": f"{len(structuring)} txns just below 10000 threshold"})
 
         # Velocity (Quick Turnaround)
         # logic: if total volume is high but average balance is low (requires balance col, skipping for now)

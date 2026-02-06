@@ -79,7 +79,7 @@ const CasePackManual = ({ open, onClose }) => {
                 <TableRow>
                   <TableCell><strong>High Volume</strong></TableCell>
                   <TableCell>+20 pts</TableCell>
-                  <TableCell>Triggered if Total Volume {'>'} $100,000.</TableCell>
+                  <TableCell>Triggered if Total Volume {'>'} 100,000.</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell><strong>Typology Detected</strong></TableCell>
@@ -169,7 +169,7 @@ const CasePackManual = ({ open, onClose }) => {
                     The system automatically runs rules against the transaction history.
                     <br/><br/>
                     <strong>Example:</strong> "Structuring" is flagged if multiple transactions appear between 
-                    $9,000 and $10,000 (attempting to evade reporting thresholds).
+                    9,000 and 10,000 (attempting to evade reporting thresholds).
                   </Typography>
                 </AccordionDetails>
               </Accordion>

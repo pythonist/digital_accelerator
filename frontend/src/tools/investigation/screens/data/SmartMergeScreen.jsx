@@ -40,6 +40,10 @@ const SmartMergeScreen = () => {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveDatasetName, setSaveDatasetName] = useState('');
   const [lastBuiltTable, setLastBuiltTable] = useState(null);
+  const [customSaveOpen, setCustomSaveOpen] = useState(false);
+  const [customDatasetName, setCustomDatasetName] = useState('My Custom Build');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
   
   const openMenu = Boolean(anchorEl);
   const logsEndRef = useRef(null);
@@ -109,9 +113,9 @@ const SmartMergeScreen = () => {
       const res = await apiClient.post('/api/v2/merge/ai-recommend', payload);
       if (res.success) {
         if (res.suggestions.length > 0) setAiSuggestions(res.suggestions);
-        else alert("No obvious join keys found.");
+        else setSaveStatus("No obvious join keys found.");
       }
-    } catch (err) { alert("AI Service failed."); } 
+    } catch (err) { setSaveStatus("AI service failed."); } 
     finally { setAnalyzing(false); }
   };
 
@@ -128,20 +132,37 @@ const SmartMergeScreen = () => {
     try {
       const res = await apiClient.post('/api/v2/merge/preview', { chain });
       if (res.success) setPreviewData(res.data);
-    } catch (e) { alert(e.message); }
+      else setSaveStatus(`❌ Error: ${res.error || 'Preview failed'}`);
+    } catch (e) { setSaveStatus(`❌ Error: ${e.message}`); }
     setLoading(false);
   };
 
-  const handleSaveCustom = async () => {
-    const name = prompt("Enter a name for this custom dataset:", "My Custom Build");
-    if (!name) return;
+  const handleSaveCustom = () => {
+    setCustomDatasetName('My Custom Build');
+    setCustomSaveOpen(true);
+  };
+
+  const confirmSaveCustom = async () => {
+    const name = (customDatasetName || '').trim();
+    if (!name) {
+      setSaveStatus("Please enter a dataset name.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await apiClient.post('/api/v2/merge/commit', { chain, name });
-      if (res.success) { setSaveStatus(`✅ Saved: ${res.message}`); loadRegistry(); } 
-      else { alert("Error: " + res.error); }
-    } catch (e) { alert("Save failed: " + e.message); }
-    setLoading(false);
+      if (res.success) {
+        setSaveStatus(`✅ Saved: ${res.message || name}`);
+        await loadRegistry();
+        setCustomSaveOpen(false);
+      } else {
+        setSaveStatus(`❌ Error: ${res.error || 'Save failed'}`);
+      }
+    } catch (e) {
+      setSaveStatus(`❌ Error: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const buildUnifiedView = async () => {
@@ -162,13 +183,13 @@ const SmartMergeScreen = () => {
   };
 
   const handleSaveUnifiedView = () => {
-    if (!lastBuiltTable) { alert("No unified view to save. Please build one first."); return; }
+    if (!lastBuiltTable) { setSaveStatus("No unified view to save. Please build one first."); return; }
     setSaveDatasetName(`Unified_${new Date().toISOString().split('T')[0]}`);
     setSaveDialogOpen(true);
   };
 
   const confirmSaveUnifiedView = async () => {
-    if (!saveDatasetName.trim()) { alert("Please enter a dataset name"); return; }
+    if (!saveDatasetName.trim()) { setSaveStatus("Please enter a dataset name."); return; }
     setLoading(true);
     try {
       const res = await apiClient.post('/api/v2/merge/save-unified', { source_table: lastBuiltTable, name: saveDatasetName });
@@ -177,22 +198,43 @@ const SmartMergeScreen = () => {
         await loadRegistry();
         setSaveDialogOpen(false);
         setSaveDatasetName('');
-      } else { alert("Error: " + res.error); }
-    } catch (e) { alert("Save failed: " + e.message); }
+      } else { setSaveStatus(`❌ Error: ${res.error || 'Save failed'}`); }
+    } catch (e) { setSaveStatus(`❌ Error: ${e.message}`); }
     setLoading(false);
   };
 
   const handleDeleteDataset = async (id) => {
-    if (buildInProgress) { alert("Cannot delete dataset while build is in progress"); return; }
-    if (!confirm("Are you sure you want to delete this dataset?")) return;
-    alert("Delete endpoint not yet implemented on backend. Please add /api/v2/merge/delete endpoint.");
+    if (buildInProgress) { setSaveStatus("Cannot delete dataset while build is in progress."); return; }
+    setDeleteTargetId(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteDataset = async () => {
+    if (!deleteTargetId) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.post('/api/v2/merge/delete', { id: deleteTargetId });
+      if (res.success) {
+        setSaveStatus("✅ Deleted dataset");
+        await loadRegistry();
+      } else {
+        setSaveStatus(`❌ Error: ${res.error || 'Delete failed'}`);
+      }
+    } catch (e) {
+      setSaveStatus(`❌ Error: ${e.message}`);
+    } finally {
+      setLoading(false);
+      setDeleteDialogOpen(false);
+      setDeleteTargetId(null);
+    }
   };
 
   const handleViewDataset = async (tableName) => {
     try {
       const res = await apiClient.post('/api/v2/db/query-table', { table: tableName, page: 1, rowsPerPage: 20 });
       if (res.success) setPreviewData(res.data);
-    } catch (e) { alert("Failed to load dataset preview"); }
+      else setSaveStatus("Failed to load dataset preview.");
+    } catch (e) { setSaveStatus("Failed to load dataset preview."); }
   };
 
   return (
@@ -212,6 +254,36 @@ const SmartMergeScreen = () => {
     >
       {/* Content Area - Fixed Layout */}
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <Dialog open={customSaveOpen} onClose={() => setCustomSaveOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Save Custom Dataset</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              margin="dense"
+              fullWidth
+              label="Dataset name"
+              value={customDatasetName}
+              onChange={(e) => setCustomDatasetName(e.target.value)}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setCustomSaveOpen(false)}>Cancel</Button>
+            <Button variant="contained" onClick={confirmSaveCustom} disabled={loading}>Save</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Delete Dataset</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary">
+              This will remove the dataset from the registry and drop its table.
+            </Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+            <Button color="error" variant="contained" onClick={confirmDeleteDataset} disabled={loading}>Delete</Button>
+          </DialogActions>
+        </Dialog>
         
         {/* Scrollable Content Wrapper */}
         <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', pb: 6 }}>

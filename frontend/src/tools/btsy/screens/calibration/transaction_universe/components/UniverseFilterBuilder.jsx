@@ -14,6 +14,7 @@ import {
 } from '@mui/icons-material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import btsyApi from '../../../../services/btsyApi';
+import { useCalibrationRun } from '../../../../context/CalibrationRunContext';
 
 const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
   const [universeName, setUniverseName] = useState('My Transaction Universe');  // DEFAULT NAME
@@ -34,6 +35,7 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
   const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState(null);
   const lastAppliedPresetKeyRef = useRef('');
+  const { activeRunLogic } = useCalibrationRun();
 
   useEffect(() => {
     if (!preset) return;
@@ -219,7 +221,9 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
       amount_min: amountMin ? parseFloat(amountMin) : null,
       amount_max: amountMax ? parseFloat(amountMax) : null,
       date_start: dateStart || null,
-      date_end: dateEnd || null
+      date_end: dateEnd || null,
+      aggregation_level: activeRunLogic?.aggregation_level || undefined,
+      lookback_days: activeRunLogic?.lookback_days ?? undefined
     };
 
     console.log('[FILTER] Creating universe with spec:', filterSpec);
@@ -285,6 +289,20 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
             size="small"
             sx={{ ml: 'auto', bgcolor: 'background.default', color: 'text.primary', fontWeight: 600, border: '1px solid', borderColor: 'divider' }}
           />
+          {activeRunLogic?.aggregation_level && (
+            <Chip
+              label={`Aggregation: ${activeRunLogic.aggregation_level}`}
+              size="small"
+              sx={{ ml: 1, bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 600, border: '1px solid', borderColor: 'divider' }}
+            />
+          )}
+          {activeRunLogic?.transaction_type && (
+            <Chip
+              label={`Type: ${String(activeRunLogic.transaction_type).toUpperCase()}`}
+              size="small"
+              sx={{ ml: 1, bgcolor: '#f1f5f9', color: '#0f172a', fontWeight: 600, border: '1px solid', borderColor: 'divider' }}
+            />
+          )}
         </Box>
       </Box>
 
@@ -425,8 +443,13 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
                   <InputLabel>Select Types (CREDIT, DEBIT)</InputLabel>
                   <Select
                     multiple
-                    value={selectedTypes}
+                    value={
+                      activeRunLogic?.locked && activeRunLogic?.transaction_type
+                        ? [String(activeRunLogic.transaction_type).toUpperCase()]
+                        : selectedTypes
+                    }
                     onChange={(e) => setSelectedTypes(e.target.value)}
+                    disabled={Boolean(activeRunLogic?.locked && activeRunLogic?.transaction_type)}
                     renderValue={(selected) => (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, py: 0.5 }}>
                         {selected.map((value) => (

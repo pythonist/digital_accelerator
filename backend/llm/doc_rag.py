@@ -1,6 +1,7 @@
-# llm/doc_rag.py
-
-import faiss
+try:
+    import faiss
+except Exception:
+    faiss = None
 import pickle
 import numpy as np
 import os
@@ -19,10 +20,14 @@ class DocRAGSystem:
         
         self.index = None
         self.metadata = {} # Maps index_id -> (filename, content_snippet)
+        if faiss is None:
+            return
         self._load_index()
 
     def _load_index(self):
         """Loads the document index from disk."""
+        if faiss is None:
+            return
         try:
             if Path(self.index_path).exists() and Path(self.metadata_path).exists():
                 self.index = faiss.read_index(self.index_path)
@@ -36,6 +41,8 @@ class DocRAGSystem:
 
     def build_documentation_index(self):
         """Scans codebase and DB schema to build the knowledge base."""
+        if faiss is None:
+            return
         print("📚 Starting documentation index build...")
         
         # 1. Define what to scan
@@ -103,6 +110,8 @@ class DocRAGSystem:
 
     def search_docs(self, query_text: str, top_k: int = 3) -> str:
         """Search the doc index and return formatted context."""
+        if faiss is None:
+            return ""
         if self.index is None or self.index.ntotal == 0:
             return "No tool context is available (Index empty)."
 

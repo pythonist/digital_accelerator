@@ -112,7 +112,7 @@ const CopilotManual = ({ open, onClose }) => {
                 <TableRow>
                   <TableCell><strong>Volume Surge</strong></TableCell>
                   <TableCell>+25 points</TableCell>
-                  <TableCell>If 30-day volume {'>'} $100,000</TableCell>
+                  <TableCell>If 30-day volume {'>'} 100,000</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell><strong>Velocity</strong></TableCell>

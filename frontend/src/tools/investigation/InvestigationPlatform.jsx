@@ -41,7 +41,7 @@ const InvestigationPlatform = () => {
   const renderScreen = () => {
     switch (activeTab) {
       // Data Management
-      case 'load': return <DataLoadScreen />;
+      case 'load': return <DataLoadScreen setActiveScreen={setActiveTab} />;
       case 'connectors': return <ConnectorManagementScreen />;
       case 'history': return <IngestionHistoryScreen />;
       case 'table': return <DataTableScreen />;

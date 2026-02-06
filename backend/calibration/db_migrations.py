@@ -197,6 +197,32 @@ def add_step0_data_foundation_tables(conn):
     conn.commit()
     print("✅ [Migration] Step 0 Data Foundation tables created")
 
+    # ==================================================================
+    # TABLE 8: semantic_mappings
+    # Used by Step 0 dataset deletion + mapping workflows
+    # ==================================================================
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS semantic_mappings (
+        mapping_id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL,
+        canonical_field TEXT NOT NULL,
+        source_column TEXT NOT NULL,
+        confidence REAL DEFAULT 0,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(dataset_id, canonical_field),
+        FOREIGN KEY (dataset_id) REFERENCES datasets(dataset_id) ON DELETE CASCADE
+    );
+    """)
+
+    cursor.execute("""
+    CREATE INDEX IF NOT EXISTS idx_semantic_mappings_dataset
+    ON semantic_mappings(dataset_id);
+    """)
+
+    conn.commit()
+
 
 def add_percentile_tables(conn):
     """

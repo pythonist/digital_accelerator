@@ -51,9 +51,10 @@ class MappingService:
         """
         try:
             rel = self._relation_expr(file_path)
+            rel_sample = f"(SELECT * FROM {rel} USING SAMPLE 10000 ROWS)"
             query = f'''
                 SELECT DISTINCT "{column_name}"
-                FROM {rel}
+                FROM {rel_sample}
                 WHERE "{column_name}" IS NOT NULL
                 LIMIT {max_samples}
             '''
@@ -117,11 +118,18 @@ class MappingService:
         bank_columns_result = conn.execute(bank_columns_query).fetchall()
         all_bank_columns = {col[0]: col[1] for col in bank_columns_result}
         
-        # Pre-fetch samples for all columns
         bank_column_samples = {}
-        for col_name, col_type in all_bank_columns.items():
-            limit = 20 if col_type in ['VARCHAR', 'STRING', 'TEXT'] else 5
-            bank_column_samples[col_name] = self._get_categorical_samples(conn, file_path, col_name, limit)
+        for f in all_canonical_fields:
+            if f.category.value != 'category':
+                continue
+            suggested_col = suggested_mapping.get(f.name)
+            if not suggested_col:
+                continue
+            if suggested_col in bank_column_samples:
+                continue
+            col_type = all_bank_columns.get(suggested_col)
+            limit = 20 if col_type in ['VARCHAR', 'STRING', 'TEXT'] else 10
+            bank_column_samples[suggested_col] = self._get_categorical_samples(conn, file_path, suggested_col, limit)
         
         # 4. Build mapping state ensuring NO fields are dropped
         mapping_state = {
@@ -235,6 +243,7 @@ class MappingService:
         """
         warnings = []
         rel = self._relation_expr(file_path)
+        rel_sample = f"(SELECT * FROM {rel} USING SAMPLE 10000 ROWS)"
         
         for field in mapping_state['canonical_fields']:
             if field['status'] != 'mapped' or not field.get('mapped_column'):
@@ -251,7 +260,7 @@ class MappingService:
                 # Query distinct count
                 query = f'''
                     SELECT COUNT(DISTINCT "{mapped_col}") as distinct_count
-                    FROM {rel}
+                    FROM {rel_sample}
                     WHERE "{mapped_col}" IS NOT NULL
                 '''
                 result = conn.execute(query).fetchone()

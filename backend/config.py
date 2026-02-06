@@ -23,3 +23,30 @@ CALIBRATION_DB_PATH = os.path.join(
 # Ensure directory exists
 os.makedirs(os.path.dirname(CALIBRATION_DB_PATH), exist_ok=True)
 
+
+class Config:
+    RULE_WEIGHTS = {
+        "rule_weights": {
+            "velocity": 0.3,
+            "recency": 0.2,
+            "circularity": 0.3,
+            "device": 0.2,
+        }
+    }
+
+    RISK_THRESHOLDS = {
+        "high": 0.7,
+        "medium": 0.4,
+        "low": 0.0,
+    }
+
+    MVP_FEATURES = [
+        "tx_count_24h",
+        "in_out_ratio",
+        "pass_through_ratio",
+        "degree_centrality",
+        "clustering_coefficient",
+        "accounts_per_device",
+        "rule_risk_score",
+    ]
+

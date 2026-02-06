@@ -3,35 +3,47 @@
 from flask import Blueprint, request, jsonify
 from api.utils import handle_errors
 from api.services import services
+from services.smart_merge import SmartMergeService
 
 merge_bp = Blueprint('merge', __name__)
+
+def _get_env_db():
+    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
+    tenant_id = getattr(request, 'tenant_id', None)
+    if not env_id:
+        return None, None
+    try:
+        db = services.get_investigation_db(env_id, tenant_id)
+        return env_id, db
+    except Exception:
+        return env_id, None
+
+
+def _get_smart_merge():
+    _env_id, db = _get_env_db()
+    if not db:
+        return None
+    return SmartMergeService(db)
 
 # --- 1. BASIC TABLE INFO (UNCHANGED) ---
 
 @merge_bp.route('/merge/tables', methods=['GET'])
 def get_tables():
-    """Returns tables. Tries to auto-reconnect if DB is missing."""
-    if not services.investigation_db:
-        print("⚠️ Investigation DB missing. Attempting to restore active environment...")
-        try:
-            if services.metadata_manager and services.metadata_manager.active_env:
-                services.activate_case(services.metadata_manager.active_env)
-            else:
-                return jsonify([]) 
-        except Exception as e:
-            print(f"Auto-connect failed: {e}")
-            return jsonify([])
-
+    """Returns tables for the active environment."""
+    _env_id, db = _get_env_db()
+    if not db:
+        return jsonify([])
     try:
-        if services.smart_merge_service:
-            schema = services.smart_merge_service.get_db_schema()
+        merge = _get_smart_merge()
+        if merge:
+            schema = merge.get_db_schema()
             tables = list(schema.keys())
         else:
-            conn = services.investigation_db.connect()
+            conn = db.connect()
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
             tables = [r[0] for r in cursor.fetchall()]
-            services.investigation_db.close_connection(conn)
+            db.close_connection(conn)
 
         filtered_tables = [t for t in tables if t not in ['sqlite_sequence', 'android_metadata']]
         return jsonify(filtered_tables)
@@ -45,7 +57,10 @@ def get_tables():
 @handle_errors
 def get_keys():
     """Get columns for a specific table."""
-    return jsonify(services.smart_merge_service.get_table_keys(request.json.get('table')))
+    merge = _get_smart_merge()
+    if not merge:
+        return jsonify([])
+    return jsonify(merge.get_table_keys(request.json.get('table')))
 
 
 @merge_bp.route('/merge/cumulative-keys', methods=['POST'])
@@ -53,7 +68,10 @@ def get_keys():
 def get_cumulative_keys():
     """Returns all columns available in the chain so far."""
     tables = request.json.get('tables', [])
-    return jsonify(services.smart_merge_service.get_cumulative_columns(tables))
+    merge = _get_smart_merge()
+    if not merge:
+        return jsonify([])
+    return jsonify(merge.get_cumulative_columns(tables))
 
 
 # --- 2. SMART MERGE (MANUAL - UNCHANGED) ---
@@ -62,9 +80,12 @@ def get_cumulative_keys():
 @handle_errors
 def preview():
     """Previews the join result."""
+    merge = _get_smart_merge()
+    if not merge:
+        return jsonify({'success': False, 'error': 'DB not ready'}), 503
     return jsonify({
         'success': True, 
-        'data': services.smart_merge_service.preview_merge(request.json.get('chain', []))
+        'data': merge.preview_merge(request.json.get('chain', []))
     })
 
 
@@ -73,9 +94,12 @@ def preview():
 def ai_recommend():
     """AI Helper for joins."""
     left = request.json.get('left_table')
+    merge = _get_smart_merge()
+    if not merge:
+        return jsonify({'success': False, 'error': 'DB not ready'}), 503
     return jsonify({
         'success': True,
-        'suggestions': services.smart_merge_service.ai_recommend_joins(left_table=left)
+        'suggestions': merge.ai_recommend_joins(left_table=left)
     })
 
 
@@ -113,7 +137,10 @@ def hydrate_entity():
     
     try:
         # Call SmartMerge for this specific entity only
-        result = services.smart_merge_service.hydrate_single_entity(
+        merge = _get_smart_merge()
+        if not merge:
+            return jsonify({"success": False, "error": "DB not ready"}), 503
+        result = merge.hydrate_single_entity(
             target_id=target_id,
             target_type=target_type,
             date_window=date_window
@@ -135,7 +162,10 @@ def hydrate_entity():
 def build_master():
     """Executes the robust sequential merge (Alerts->Cases->Txn...)."""
     target = request.json.get('target', 'master_case_summary')
-    return jsonify(services.smart_merge_service.build_aml_master_dataset(target))
+    merge = _get_smart_merge()
+    if not merge:
+        return jsonify({"success": False, "error": "DB not ready"}), 503
+    return jsonify(merge.build_aml_master_dataset(target))
 
 
 # --- 5. AUTO-BUILDER (AI ARCHITECT - UNCHANGED) ---
@@ -165,9 +195,10 @@ def execute_strategy():
 @merge_bp.route('/merge/registry', methods=['GET'])
 def get_registry():
     """Returns the list of built master datasets."""
-    if not services.smart_merge_service:
+    merge = _get_smart_merge()
+    if not merge:
         return jsonify([])
-    return jsonify(services.smart_merge_service.get_registry())
+    return jsonify(merge.get_registry())
 
 
 @merge_bp.route('/merge/commit', methods=['POST'])
@@ -177,7 +208,10 @@ def commit_custom_chain():
     chain = request.json.get('chain', [])
     custom_name = request.json.get('name', 'Custom Build')
     
-    result = services.smart_merge_service.commit_merge(chain, custom_name)
+    merge = _get_smart_merge()
+    if not merge:
+        return jsonify({"success": False, "error": "DB not ready"}), 503
+    result = merge.commit_merge(chain, custom_name)
     return jsonify(result)
 
 
@@ -223,7 +257,10 @@ def save_unified_view():
     
     try:
         # Use SmartMergeService to save the unified view
-        result = services.smart_merge_service.save_unified_dataset(
+        merge = _get_smart_merge()
+        if not merge:
+            return jsonify({"success": False, "error": "DB not ready"}), 503
+        result = merge.save_unified_dataset(
             source_table=source_table,
             display_name=custom_name
         )
@@ -251,7 +288,10 @@ def delete_dataset():
     
     try:
         # Use SmartMergeService to delete the dataset
-        result = services.smart_merge_service.delete_dataset(dataset_id)
+        merge = _get_smart_merge()
+        if not merge:
+            return jsonify({"success": False, "error": "DB not ready"}), 503
+        result = merge.delete_dataset(dataset_id)
         return jsonify(result)
     except Exception as e:
         return jsonify({

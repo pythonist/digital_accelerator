@@ -10,9 +10,10 @@ import {
 
 import PageContainer from "@investigation-layout/PageContainer";
 import NetworkGraphManual from "@investigation/components/guide/NetworkGraphManual";
+import { formatNumber } from "@investigation/utils/format";
 
 // Physics Engine Hook
-const useForceGraph = (canvasRef, data, onNodeClick, useFlowLayout, isVisible) => {
+const useForceGraph = (canvasRef, data, onNodeClick, useFlowLayout, isVisible, highlightedTxnIds) => {
   const nodesRef = useRef([]);
   const linksRef = useRef([]);
   const animationRef = useRef();
@@ -32,7 +33,9 @@ const useForceGraph = (canvasRef, data, onNodeClick, useFlowLayout, isVisible) =
     'customer': -200,
     'account': 0,
     'counterparty': 300,
-    'alert': 0 
+    'alert': 0,
+    'score': 520,
+    'rule': 620
   };
 
   useEffect(() => {
@@ -93,7 +96,8 @@ const useForceGraph = (canvasRef, data, onNodeClick, useFlowLayout, isVisible) =
         });
 
         if (useFlowLayout) {
-          const targetBiasX = LAYOUT_X_BIAS[node.type] || 0;
+          const level = Number.isFinite(node._level) ? node._level : null;
+          const targetBiasX = level !== null ? (level * 210) : (LAYOUT_X_BIAS[node.type] || 0);
           const targetX = center.x + targetBiasX;
           fx += (targetX - node.x) * 0.08;
           fy += (center.y - node.y) * 0.03;
@@ -134,7 +138,8 @@ const useForceGraph = (canvasRef, data, onNodeClick, useFlowLayout, isVisible) =
         ctx.beginPath();
         ctx.moveTo(link.source.x, link.source.y);
         ctx.lineTo(link.target.x, link.target.y);
-        ctx.strokeStyle = '#d1d5db';
+        const isHighlighted = highlightedTxnIds && link.id && highlightedTxnIds.has(String(link.id));
+        ctx.strokeStyle = isHighlighted ? '#ea580c' : '#d1d5db';
         ctx.lineWidth = Math.min(link.width || 1, 5);
         ctx.stroke();
         drawArrow(ctx, link.source.x, link.source.y, link.target.x, link.target.y, link.target.val || 5);
@@ -274,6 +279,11 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
   const [investigatorNotes, setInvestigatorNotes] = useState('');
   const [expandedEvidence, setExpandedEvidence] = useState({});
   const [showManual, setShowManual] = useState(false);
+  const [caseAccounts, setCaseAccounts] = useState([]);
+  const [activeAccount, setActiveAccount] = useState(null);
+  const [flowPaths, setFlowPaths] = useState([]);
+  const [patterns, setPatterns] = useState(null);
+  const [selectedPathTxnIds, setSelectedPathTxnIds] = useState(new Set());
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   
@@ -283,7 +293,7 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
   };
   
   const { handleMouseDown, handleMouseMove, handleMouseUp, handleWheel, hoverNodeRef } = 
-    useForceGraph(canvasRef, graphData, handleNodeClick, useFlowLayout, viewMode === 'graph');
+    useForceGraph(canvasRef, graphData, handleNodeClick, useFlowLayout, viewMode === 'graph', selectedPathTxnIds);
 
   useEffect(() => {
     loadPriorityQueue();
@@ -327,7 +337,89 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
     }
   };
 
-  const loadCase = async (id) => {
+  const buildFlowLayout = (graph, focalId) => {
+    const baseNodes = (graph?.nodes || []).map((n) => ({ ...n }));
+    const baseLinks = (graph?.links || []).map((l) => ({ ...l }));
+
+    const nodeById = new Map(baseNodes.map((n) => [String(n.id), n]));
+    const outAdj = new Map();
+    const inAdj = new Map();
+    for (const l of baseLinks) {
+      if (l.relation && l.relation !== 'txn') continue;
+      const s = String(l.source);
+      const t = String(l.target);
+      if (!outAdj.has(s)) outAdj.set(s, []);
+      if (!inAdj.has(t)) inAdj.set(t, []);
+      outAdj.get(s).push(t);
+      inAdj.get(t).push(s);
+    }
+
+    const bfs = (start, adj) => {
+      const dist = new Map();
+      const q = [];
+      dist.set(start, 0);
+      q.push(start);
+      while (q.length) {
+        const cur = q.shift();
+        const d = dist.get(cur);
+        for (const nxt of adj.get(cur) || []) {
+          if (dist.has(nxt)) continue;
+          dist.set(nxt, d + 1);
+          q.push(nxt);
+        }
+      }
+      return dist;
+    };
+
+    const sel = String(focalId || '');
+    const outDist = sel ? bfs(sel, outAdj) : new Map();
+    const inDist = sel ? bfs(sel, inAdj) : new Map();
+
+    let maxIn = 0;
+    for (const [k, v] of inDist.entries()) {
+      if (k !== sel) maxIn = Math.max(maxIn, v);
+    }
+    const mid = maxIn;
+
+    for (const n of baseNodes) {
+      const id = String(n.id);
+      if (id === sel) {
+        n._level = 0;
+      } else if (outDist.has(id)) {
+        n._level = outDist.get(id);
+      } else if (inDist.has(id)) {
+        n._level = -inDist.get(id);
+      } else {
+        n._level = 0;
+      }
+
+      if (n.type === 'account') {
+        n.color = id === sel ? '#ea580c' : '#0ea5e9';
+        n.val = id === sel ? 9 : 6;
+      } else if (n.type === 'score') {
+        if (n.kind === 'ml') n.color = '#0284c7';
+        else if (n.kind === 'rules') n.color = '#7c3aed';
+        else if (n.kind === 'network') n.color = '#16a34a';
+        else n.color = '#334155';
+        n.val = 7;
+        n._level = (mid + 3);
+      } else if (n.type === 'rule') {
+        n.color = '#f59e0b';
+        n.val = 6;
+        n._level = (mid + 4);
+      } else {
+        n.color = n.color || '#94a3b8';
+      }
+    }
+
+    for (const l of baseLinks) {
+      if (!l.width && (l.amount || l.volume)) l.width = Math.min(Math.max(Number(l.amount || l.volume || 0) / 1000, 0.5), 6);
+    }
+
+    return { nodes: baseNodes, links: baseLinks };
+  };
+
+  const loadCase = async (id, accountId = null) => {
     setLoading(true);
     setActiveCase(id);
     setSelectedNode(null);
@@ -335,20 +427,35 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
       const response = await fetch('/api/v2/analysis/graph/build-full-case', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ case_id: id })
+        body: JSON.stringify({ case_id: id, account_id: accountId })
       });
       const data = await response.json();
       
       if (data.success) { 
-        setGraphData(data.graph || { nodes: [], links: [] }); 
-        setEvidence(data.graph?.evidence || []);
+        const g = data.graph || { nodes: [], links: [] };
+        const focal = g.account_id || accountId;
+        setActiveAccount(focal || null);
+        setCaseAccounts(Array.isArray(data.accounts) ? data.accounts : []);
+        setFlowPaths(Array.isArray(g.paths) ? g.paths : []);
+        setPatterns(g.patterns || null);
+        setSelectedPathTxnIds(new Set());
+        setGraphData(buildFlowLayout(g, focal));
+        setEvidence([]);
         setNarrative(data.narrative); 
       } else { 
         setGraphData({ nodes: [], links: [] });
+        setFlowPaths([]);
+        setPatterns(null);
+        setCaseAccounts([]);
+        setActiveAccount(null);
         setNarrative("No data available for this case"); 
       }
     } catch (error) {
       setGraphData({ nodes: [], links: [] });
+      setFlowPaths([]);
+      setPatterns(null);
+      setCaseAccounts([]);
+      setActiveAccount(null);
       setNarrative("Failed to load case data");
     } finally { setLoading(false); }
   };
@@ -497,6 +604,29 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                   </Select>
                 </FormControl>
 
+                <FormControl size="small" fullWidth disabled={!activeCase || caseAccounts.length === 0}>
+                  <InputLabel>Focal Account</InputLabel>
+                  <Select
+                    value={activeAccount || ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setActiveAccount(v);
+                      if (activeCase) loadCase(activeCase, v);
+                    }}
+                    label="Focal Account"
+                    displayEmpty
+                  >
+                    <MenuItem value="">
+                      <em>{activeCase ? 'Select an account...' : 'Select a case...'}</em>
+                    </MenuItem>
+                    {caseAccounts.map((a) => (
+                      <MenuItem key={a} value={a}>
+                        {a}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+
                 <FormControl size="small" fullWidth>
                   <InputLabel>Risk Filter</InputLabel>
                   <Select 
@@ -622,14 +752,14 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                     Max Risk: <strong>{Math.max(...graphData.nodes.map(n=>n.risk_score || 0)).toFixed(0)}</strong>
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    Total Volume: <strong>${graphData.links.reduce((sum, l) => sum + (l.volume || 0), 0).toLocaleString()}</strong>
+                    Total Volume: <strong>{formatNumber(graphData.links.reduce((sum, l) => sum + (l.volume || 0), 0))}</strong>
                   </Typography>
                 </Box>
               )}
             </Box>
 
             {/* Canvas/View Container */}
-            <Box ref={containerRef} sx={{ flexGrow: 1, position: 'relative', bgcolor: '#fafafa', overflow: 'hidden' }}>
+            <Box ref={containerRef} sx={{ flexGrow: 1, position: 'relative', bgcolor: 'white', overflow: 'hidden' }}>
               {loading && (
                 <Box sx={{ position: 'absolute', inset: 0, bgcolor: 'rgba(255,255,255,0.95)', zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                   <CircularProgress size={40} sx={{ mb: 2 }} />
@@ -681,7 +811,7 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                           <Stack direction="row" justifyContent="space-between">
                             <Typography variant="caption" color="grey.400">Volume:</Typography>
                             <Typography variant="caption" fontWeight="600">
-                              ${parseInt(hoveredNode.volume || 0).toLocaleString()}
+                              {formatNumber(hoveredNode.volume)}
                             </Typography>
                           </Stack>
                           <Stack direction="row" justifyContent="space-between">
@@ -710,7 +840,7 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                             <Stack direction="row" spacing={2} alignItems="flex-start">
                               <Box sx={{ minWidth: 80, pt: 0.5 }}>
                                 <Typography variant="caption" color="text.secondary">
-                                  {link.transactions?.[0]?.date || 'N/A'}
+                                {link.ts || 'N/A'}
                                 </Typography>
                               </Box>
                               <Box sx={{ flexGrow: 1 }}>
@@ -725,7 +855,7 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                                   </Typography>
                                 </Stack>
                                 <Typography variant="caption" color="text.secondary">
-                                  Volume: ${parseInt(link.volume || 0).toLocaleString()} • {link.transactions?.length || 0} transactions
+                                  Amount: {formatNumber(link.volume)} • {link.txn_type || 'txn'} • {link.channel || 'N/A'}
                                 </Typography>
                               </Box>
                             </Stack>
@@ -764,8 +894,8 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                               <TableRow key={i} hover>
                                 <TableCell>{sourceNode?.label || link.source}</TableCell>
                                 <TableCell>{targetNode?.label || link.target}</TableCell>
-                                <TableCell align="right">${parseInt(link.volume || 0).toLocaleString()}</TableCell>
-                                <TableCell align="right">{link.transactions?.length || 1}</TableCell>
+                                <TableCell align="right">{formatNumber(link.volume)}</TableCell>
+                                <TableCell align="right">{1}</TableCell>
                                 <TableCell align="center">
                                   <Chip 
                                     label={avgRisk.toFixed(0)} 
@@ -829,115 +959,53 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                 <Stack spacing={3}>
                   <Box>
                     <Typography variant="subtitle2" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', mb: 2 }}>
-                      Detected Typologies
+                      Money Flow Behaviors
                     </Typography>
-                    
-                    {evidence.length > 0 ? (
-                      <Stack spacing={1.5}>
-                        {evidence.map((ev, i) => (
-                          <Card key={i} variant="outlined">
-                            <CardContent 
-                              onClick={() => setExpandedEvidence(prev => ({...prev, [i]: !prev[i]}))}
-                              sx={{ p: 1.5, cursor: 'pointer', '&:last-child': { pb: 1.5 } }}
-                            >
-                              <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                                <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ flexGrow: 1 }}>
-                                  <AlertCircleIcon 
-                                    sx={{ 
-                                      fontSize: 16, 
-                                      mt: 0.25,
-                                      color: ev.severity === 'Critical' ? 'error.main' : ev.severity === 'High' ? 'warning.main' : 'info.main'
-                                    }} 
-                                  />
-                                  <Box sx={{ flexGrow: 1 }}>
-                                    <Typography variant="body2" fontWeight="600" mb={0.5}>
-                                      {ev.typology}
-                                    </Typography>
-                                    <Collapse in={expandedEvidence[i]}>
-                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1, lineHeight: 1.5 }}>
-                                        {ev.description}
-                                      </Typography>
-                                    </Collapse>
-                                    <Chip 
-                                      label={`${ev.severity} Severity`} 
-                                      size="small" 
-                                      color={ev.severity === 'Critical' ? 'error' : ev.severity === 'High' ? 'warning' : 'info'}
-                                      sx={{ height: 20, fontSize: '0.65rem', fontWeight: 'bold' }}
-                                    />
-                                  </Box>
-                                </Stack>
-                                <IconButton size="small">
-                                  {expandedEvidence[i] ? <ChevronUpIcon fontSize="small" /> : <ChevronDownIcon fontSize="small" />}
-                                </IconButton>
-                              </Stack>
-                            </CardContent>
-                          </Card>
-                        ))}
+
+                    {patterns ? (
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        <Chip label={`Network Score: ${Number(patterns.flow_score || 0).toFixed(3)} (${patterns.risk_level})`} />
+                        <Chip label={`Pass-through: ${Number(patterns.pass_through?.rate || 0).toFixed(2)} (${patterns.pass_through?.count || 0})`} />
+                        <Chip label={`Circular: ${Number(patterns.circular_chains?.count || 0)}`} />
+                        <Chip label={`Multi-hop: ${Number(patterns.multi_hop_chains?.count || 0)}`} />
+                        <Chip label={`Bursts: ${Number(patterns.velocity_bursts_in_chains?.count || 0)}`} />
                       </Stack>
                     ) : (
                       <Alert severity="info" variant="outlined" sx={{ fontSize: '0.8rem' }}>
-                        {loading ? 'Analyzing...' : activeCase ? 'No automated typologies detected' : 'Select a case to view evidence'}
+                        {loading ? 'Analyzing...' : activeCase ? 'No flow patterns computed' : 'Select a case to begin'}
                       </Alert>
                     )}
                   </Box>
 
-                  {graphData.nodes.length > 0 && (
+                  {flowPaths.length > 0 ? (
                     <Box>
                       <Typography variant="subtitle2" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', mb: 2 }}>
-                        Network Metrics
+                        Propagation Paths
                       </Typography>
-                      <Grid container spacing={1.5}>
-                        <Grid item xs={6}>
-                          <Card variant="outlined">
-                            <CardContent sx={{ p: 1.5, textAlign: 'center', '&:last-child': { pb: 1.5 } }}>
-                              <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-                                Total Entities
+                      <Stack spacing={1}>
+                        {flowPaths.slice(0, 10).map((p, idx) => (
+                          <Card
+                            key={idx}
+                            variant="outlined"
+                            sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#fafafa' } }}
+                            onClick={() => setSelectedPathTxnIds(new Set((p.txn_ids || []).map((x) => String(x))))}
+                          >
+                            <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                              <Typography variant="body2" fontWeight="600">
+                                {Array.isArray(p.nodes) ? p.nodes.join(' → ') : 'Path'}
                               </Typography>
-                              <Typography variant="h6" fontWeight="bold">
-                                {graphData.nodes.length}
-                              </Typography>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                        <Grid item xs={6}>
-                          <Card variant="outlined">
-                            <CardContent sx={{ p: 1.5, textAlign: 'center', '&:last-child': { pb: 1.5 } }}>
-                              <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-                                Relationships
-                              </Typography>
-                              <Typography variant="h6" fontWeight="bold">
-                                {graphData.links.length}
+                              <Typography variant="caption" color="text.secondary">
+                                Hops: {p.hops} • Amount: {formatNumber(p.amount)} • {p.cycle ? 'Circular' : 'Linear'}
                               </Typography>
                             </CardContent>
                           </Card>
-                        </Grid>
-                        <Grid item xs={6}>
-                          <Card variant="outlined">
-                            <CardContent sx={{ p: 1.5, textAlign: 'center', '&:last-child': { pb: 1.5 } }}>
-                              <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-                                Max Risk
-                              </Typography>
-                              <Typography variant="h6" fontWeight="bold" color="error.main">
-                                {Math.max(...graphData.nodes.map(n=>n.risk_score || 0)).toFixed(0)}
-                              </Typography>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                        <Grid item xs={6}>
-                          <Card variant="outlined">
-                            <CardContent sx={{ p: 1.5, textAlign: 'center', '&:last-child': { pb: 1.5 } }}>
-                              <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-                                High Risk
-                              </Typography>
-                              <Typography variant="h6" fontWeight="bold" color="warning.main">
-                                {graphData.nodes.filter(n => n.risk_score >= 50).length}
-                              </Typography>
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      </Grid>
+                        ))}
+                        <Button variant="text" size="small" onClick={() => setSelectedPathTxnIds(new Set())}>
+                          Clear Highlight
+                        </Button>
+                      </Stack>
                     </Box>
-                  )}
+                  ) : null}
                 </Stack>
               )}
 
@@ -968,7 +1036,7 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                               <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #f0f0f0' }}>
                                 <Typography variant="caption" color="text.secondary">Transaction Volume</Typography>
                                 <Typography variant="body2" fontWeight="bold">
-                                  ${parseInt(selectedNode.volume || 0).toLocaleString()}
+                                  {formatNumber(selectedNode.volume)}
                                 </Typography>
                               </Stack>
                               <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #f0f0f0' }}>
@@ -1000,7 +1068,7 @@ const GraphAnalysisScreen = ({ caseId: propCaseId }) => {
                                       {otherNode?.label || otherId}
                                     </Typography>
                                     <Typography variant="caption" color="text.secondary">
-                                      ${parseInt(link.volume || 0).toLocaleString()} • {link.transactions?.length || 0} txns
+                                      {formatNumber(link.volume)} • {link.txn_type || 'txn'} • {link.channel || 'N/A'}
                                     </Typography>
                                   </CardContent>
                                 </Card>

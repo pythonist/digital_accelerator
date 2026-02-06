@@ -217,7 +217,10 @@ class DatasetManager:
             cursor.execute(f'DROP TABLE IF EXISTS "{table_name}"')
             cursor.execute("DELETE FROM datasets WHERE dataset_id = ?", (dataset_id,))
             cursor.execute("DELETE FROM schema_metadata WHERE dataset_id = ?", (dataset_id,))
-            cursor.execute("DELETE FROM semantic_mappings WHERE dataset_id = ?", (dataset_id,))
+            try:
+                cursor.execute("DELETE FROM semantic_mappings WHERE dataset_id = ?", (dataset_id,))
+            except Exception:
+                pass
             
             conn.commit()
             

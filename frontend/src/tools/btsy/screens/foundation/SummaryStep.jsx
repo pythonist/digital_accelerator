@@ -227,6 +227,75 @@ const SummaryStep = ({ onComplete, onProceed, draftSnapshot }) => {
           </CardContent>
         </Card>
 
+      {foundationSummary && (
+        <Card elevation={0} sx={{ mb: 3, border: '1px solid #E5E7EB', borderRadius: '2px' }}>
+          <CardContent sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600, mb: 2.5, color: '#111827', fontSize: '1.125rem' }}>
+              Data Foundation Merge Summary
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Transactions</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>{(foundationSummary.transactions_count || 0).toLocaleString()}</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Accounts</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>{(foundationSummary.accounts_count || 0).toLocaleString()}</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Customers</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>{(foundationSummary.customers_count || 0).toLocaleString()}</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0' }}>
+                  <Typography variant="caption" sx={{ color: '#64748b' }}>Merge Coverage</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    {foundationSummary.merge_customer_coverage?.coverage_pct != null
+                      ? `${foundationSummary.merge_customer_coverage.coverage_pct}%`
+                      : '—'}
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
+            {mergedPreview?.rows?.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+                  Merged Preview (sample)
+                </Typography>
+                <Paper elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1, overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead style={{ background: '#f8fafc' }}>
+                      <tr>
+                        {Object.keys(mergedPreview.rows[0]).slice(0, 12).map((k) => (
+                          <th key={k} style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #e2e8f0', color: '#334155' }}>{k}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mergedPreview.rows.map((r, idx) => (
+                        <tr key={idx}>
+                          {Object.keys(mergedPreview.rows[0]).slice(0, 12).map((k) => (
+                            <td key={`${idx}-${k}`} style={{ padding: '8px', borderBottom: '1px solid #e2e8f0', fontFamily: 'monospace' }}>
+                              {String(r[k] ?? '')}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Paper>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
         <Stack direction="row" justifyContent="flex-end" spacing={2} sx={{ mb: 3 }}>
           <Button
             variant="contained"

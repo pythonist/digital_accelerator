@@ -136,6 +136,12 @@ const EnvironmentSelectScreen = () => {
       const res = await apiClient.post('/api/v2/env/select', { name: envName });
       
       if (res.success) {
+        try {
+          const ctxRes = await apiClient.post('/api/select-context', { env_id: envName });
+          if (ctxRes?.success && ctxRes?.token) {
+            localStorage.setItem('token', ctxRes.token);
+          }
+        } catch (e) {}
         setActiveEnv(envName);
         await refreshSystemState(); 
         navigate('/tools');

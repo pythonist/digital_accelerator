@@ -80,14 +80,14 @@ const TypologyManual = ({ open, onClose }) => {
                         </code>
                         <Box sx={{ mt: 1 }}>
                           <Chip label="Trigger: Ratio < 0.15 (15%)" size="small" color="error" />
-                          <Chip label="Min Volume: > $20,000" size="small" sx={{ ml: 1 }} />
+                          <Chip label="Min Volume: > 20,000" size="small" sx={{ ml: 1 }} />
                         </Box>
                       </Paper>
                     </Grid>
                     <Grid item xs={12} md={4} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#fafafa', borderRadius: 1 }}>
                       <Stack alignItems="center">
-                        <Typography variant="h6" fontWeight="bold">In: $100k</Typography>
-                        <Typography variant="h6" fontWeight="bold" color="error">Out: $98k</Typography>
+                        <Typography variant="h6" fontWeight="bold">In: 100k</Typography>
+                        <Typography variant="h6" fontWeight="bold" color="error">Out: 98k</Typography>
                         <Typography variant="caption">Retained: 2% (FLAGS ALERT)</Typography>
                       </Stack>
                     </Grid>
@@ -103,14 +103,14 @@ const TypologyManual = ({ open, onClose }) => {
                 </AccordionSummary>
                 <AccordionDetails>
                   <Typography variant="body2" paragraph>
-                    <strong>Concept:</strong> Breaking large deposits into smaller amounts to avoid regulatory reporting thresholds (typically $10,000).
+                    <strong>Concept:</strong> Breaking large deposits into smaller amounts to avoid regulatory reporting thresholds (typically 10,000).
                   </Typography>
                   <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fff', borderLeft: '4px solid #ff9800' }}>
                     <Typography variant="caption" fontWeight="bold" display="block" gutterBottom>THE LOGIC:</Typography>
                     <List dense disablePadding>
                       <ListItem disablePadding>
                         <ListItemIcon sx={{ minWidth: 30 }}><functions fontSize="small"/></ListItemIcon>
-                        <ListItemText primary="Value Range: $9,000 to $10,000" />
+                        <ListItemText primary="Value Range: 9,000 to 10,000" />
                       </ListItem>
                       <ListItem disablePadding>
                         <ListItemIcon sx={{ minWidth: 30 }}><functions fontSize="small"/></ListItemIcon>
@@ -129,12 +129,12 @@ const TypologyManual = ({ open, onClose }) => {
                 </AccordionSummary>
                 <AccordionDetails>
                   <Typography variant="body2" paragraph>
-                    <strong>Concept:</strong> Human-generated fraud often uses round numbers (e.g., $500, $1000) unlike natural commerce (e.g., $19.99).
+                    <strong>Concept:</strong> Human-generated fraud often uses round numbers (e.g., 500, 1000) unlike natural commerce (e.g., 19.99).
                   </Typography>
                   <Paper variant="outlined" sx={{ p: 2, bgcolor: '#fff', borderLeft: '4px solid #03a9f4' }}>
                     <Typography variant="caption" fontWeight="bold" display="block" gutterBottom>THE LOGIC:</Typography>
                     <Typography variant="body2">
-                      If <strong>&gt;40%</strong> of large transactions ({'>'}$500) are exact multiples of 100.
+                      If <strong>&gt;40%</strong> of large transactions ({'>'}500) are exact multiples of 100.
                     </Typography>
                   </Paper>
                 </AccordionDetails>

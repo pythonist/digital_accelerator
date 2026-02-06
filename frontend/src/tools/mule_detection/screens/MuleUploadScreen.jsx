@@ -27,6 +27,10 @@ const MuleUploadScreen = ({ onUploadComplete }) => {
       setError('Transactions file is required');
       return;
     }
+    if (!files.accounts) {
+      setError('Accounts file is required');
+      return;
+    }
 
     setUploading(true);
     setError(null);
@@ -58,10 +62,13 @@ const MuleUploadScreen = ({ onUploadComplete }) => {
 
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2" fontWeight={600} gutterBottom>
-          Required: Transaction Data
+          Required: Transactions CSV + Accounts CSV
         </Typography>
         <Typography variant="caption">
-          Upload a CSV with columns: account_id, txn_timestamp, amount, direction, channel, counterparty_account
+          Transactions columns: txn_id, account_id, txn_timestamp, amount, direction, counterparty_account, counterparty_bank, channel, txn_type, is_suspicious, mule_pattern, hour, day_of_week, is_weekend, is_night, device_id, ip_address, geo_location, balance_after
+        </Typography>
+        <Typography variant="caption" display="block" sx={{ mt: 1 }}>
+          Accounts columns: account_id, customer_id, account_open_date, customer_type, risk_rating, occupation, expected_turnover, is_mule
         </Typography>
       </Alert>
 
@@ -97,17 +104,17 @@ const MuleUploadScreen = ({ onUploadComplete }) => {
           </CardContent>
         </Card>
 
-        {/* Accounts Upload (Optional) */}
+        {/* Accounts Upload */}
         <Card elevation={0}>
           <CardContent>
             <Stack direction="row" alignItems="center" spacing={2}>
               <Description sx={{ color: pwcColors.textMuted, fontSize: 32 }} />
               <Box sx={{ flex: 1 }}>
                 <Typography variant="subtitle1" fontWeight={600}>
-                  Accounts CSV (Optional)
+                  Accounts CSV *
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {files.accounts ? files.accounts.name : 'Additional account metadata'}
+                  {files.accounts ? files.accounts.name : 'No file selected'}
                 </Typography>
               </Box>
               <Button
@@ -134,7 +141,7 @@ const MuleUploadScreen = ({ onUploadComplete }) => {
             size="large"
             fullWidth
             onClick={handleUpload}
-            disabled={!files.transactions || uploading}
+            disabled={!files.transactions || !files.accounts || uploading}
             startIcon={uploading ? null : <CloudUpload />}
             sx={{
               bgcolor: pwcColors.primary,

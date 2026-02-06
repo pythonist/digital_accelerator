@@ -1,0 +1,4 @@
+timestamp,model_version,model_type,accuracy,precision,recall,f1_score,roc_auc,num_features,top_feature,top_feature_importance
+2026-02-05T13:51:29.454572,mule_model_v1,xgboost,1.0,1.0,1.0,1.0,1.0,34,risk_rating,0.7013692855834961
+2026-02-05T13:51:51.534852,mule_model_v2,xgboost,0.93125,1.0,0.56,0.717948717948718,1.0,34,night_tx_ratio,0.1525542438030243
+2026-02-05T13:52:07.557734,mule_model_v3,randomforest,1.0,1.0,1.0,1.0,1.0,34,avg_tx_amount,0.18552125571529893

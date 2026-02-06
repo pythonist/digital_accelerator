@@ -44,8 +44,10 @@ from .aggregation_insight_service import AggregationInsightService
 #report service
 from .approval_service import ApprovalService
 from .report_data_service import ReportDataService
-# backend/calibration/services/pdf_reporting/__init__.py
-from .pdf_reporting import PDFGeneratorService
+try:
+    from .pdf_reporting import PDFGeneratorService
+except Exception:
+    PDFGeneratorService = None
 
 
 __all__ = [
@@ -93,5 +95,7 @@ __all__ = [
     #approval and report
     'ApprovalService',
     'ReportDataService',
-    'PDFGeneratorService'
 ]
+
+if PDFGeneratorService is not None:
+    __all__.append('PDFGeneratorService')

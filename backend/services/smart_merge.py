@@ -43,6 +43,60 @@ class SmartMergeService:
         finally:
             self.db_manager.close_connection(conn)
 
+    def save_unified_dataset(self, source_table: str, display_name: str = "Unified Dataset"):
+        """
+        Persist a built unified table under a stable, user-friendly alias.
+
+        - source_table: existing table name (typically *_unified_YYYYMMDD_HHMM)
+        - display_name: user-visible name (can contain spaces)
+        """
+        if not source_table:
+            return {"success": False, "error": "source_table is required"}
+
+        conn = self.db_manager.connect()
+        try:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (str(source_table),))
+            if not cursor.fetchone():
+                return {"success": False, "error": f"Source table not found: {source_table}"}
+
+            base = re.sub(r"[^A-Za-z0-9_]+", "_", str(display_name).strip()).strip("_")
+            if not base:
+                base = "unified_dataset"
+            base = base.lower()
+            table_name = f"master_{base}"
+
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+            if cursor.fetchone():
+                suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+                table_name = f"{table_name}_{suffix}"
+
+            cursor.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM "{source_table}"')
+            cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
+            row_count = int(cursor.fetchone()[0] or 0)
+
+            try:
+                conn.execute("DELETE FROM system_master_registry WHERE table_name = ?", (table_name,))
+            except Exception:
+                pass
+            self._register_dataset(conn, display_name, table_name, "unified", row_count)
+            conn.commit()
+
+            return {
+                "success": True,
+                "message": "Unified dataset saved",
+                "source_table": source_table,
+                "table": table_name,
+                "display_name": display_name,
+                "rows": row_count,
+            }
+        except Exception as e:
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+        finally:
+            self.db_manager.close_connection(conn)
+
     # ... (Keep get_db_schema, get_table_keys, ai_recommend_joins, preview_merge as they were) ...
 
     def _register_dataset(self, conn, display_name, table_name, type, row_count):

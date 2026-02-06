@@ -227,7 +227,7 @@ class AuditLogger:
     # RETRIEVAL & VERIFICATION
     # =================================================================
 
-    def get_audit_trail(self, entity_type=None, entity_id=None, user=None, 
+    def get_audit_trail(self, entity_type=None, entity_id=None, user=None, action=None,
                        start_date=None, end_date=None, limit=100):
         """Retrieve audit logs with filtering."""
         conn = self._connect()
@@ -246,6 +246,9 @@ class AuditLogger:
         if user:
             query += " AND user = ?"
             params.append(user)
+        if action:
+            query += " AND action = ?"
+            params.append(action)
         if start_date:
             query += " AND timestamp >= ?"
             params.append(start_date)

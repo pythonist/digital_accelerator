@@ -7,7 +7,9 @@ from flask import Blueprint, request, jsonify
 from api.tools.btsy.service import get_btsy_service
 from api.tools.btsy.mapping_service import MappingService
 from api.tools.btsy.snapshot_manager import SnapshotManager
+from api.tools.btsy.foundation_audit_service import FoundationAuditService
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ def detect_mapping(domain):
         # Initialize mapping service
         mapping_service = MappingService(folders['state'])
         
-        # Detect and suggest
+        started = time.time()
         mapping_state = mapping_service.detect_and_suggest(domain, file_path, conn)
         
         # Save state
@@ -83,6 +85,23 @@ def detect_mapping(domain):
             pass
         
         logger.info(f"[BTSY] Detected mapping for {domain}")
+        try:
+            audit = FoundationAuditService(folders["duckdb"] / "snapshots.duckdb")
+            audit.log_event(
+                tenant_id=tenant_id,
+                env_id=env_id,
+                domain=domain,
+                snapshot_id=None,
+                event="mapping.detect",
+                duration_ms=int((time.time() - started) * 1000),
+                metadata={
+                    "file_path": str(file_path),
+                    "columns": len((mapping_state.get("bank_column_info") or {}).keys()),
+                    "mapped_fields": len([f for f in (mapping_state.get("canonical_fields") or []) if f.get("status") == "mapped"]),
+                },
+            )
+        except Exception:
+            pass
         
         return jsonify({
             'success': True,
@@ -173,6 +192,22 @@ def update_field_mapping(domain):
         updated_state = mapping_service.update_field_mapping(
             domain, canonical_field, mapped_column, status
         )
+        try:
+            audit = FoundationAuditService(folders["duckdb"] / "snapshots.duckdb")
+            audit.log_event(
+                tenant_id=tenant_id,
+                env_id=env_id,
+                domain=domain,
+                snapshot_id=None,
+                event="mapping.update",
+                metadata={
+                    "canonical_field": canonical_field,
+                    "mapped_column": mapped_column,
+                    "status": status,
+                },
+            )
+        except Exception:
+            pass
 
         try:
             mgr = SnapshotManager(folders["duckdb"] / "snapshots.duckdb")
@@ -246,6 +281,17 @@ def confirm_verification(domain):
         mapping_service = MappingService(folders['state'])
         # confirm_verification sets verification_confirmed = True in the JSON state
         updated_state = mapping_service.confirm_verification(domain)
+        try:
+            audit = FoundationAuditService(folders["duckdb"] / "snapshots.duckdb")
+            audit.log_event(
+                tenant_id=tenant_id,
+                env_id=env_id,
+                domain=domain,
+                snapshot_id=None,
+                event="mapping.verify_confirmed",
+            )
+        except Exception:
+            pass
         
         return jsonify({
             'success': True,
@@ -419,6 +465,20 @@ def finalize_mapping(domain):
         
         # Finalize
         contract = mapping_service.finalize_mapping(domain)
+        try:
+            audit = FoundationAuditService(folders["duckdb"] / "snapshots.duckdb")
+            audit.log_event(
+                tenant_id=tenant_id,
+                env_id=env_id,
+                domain=domain,
+                snapshot_id=None,
+                event="mapping.finalize",
+                metadata={
+                    "mapped_fields": len([f for f in (contract.get("canonical_fields") or []) if f.get("status") == "mapped"]),
+                },
+            )
+        except Exception:
+            pass
         
         logger.info(f"[BTSY] Finalized mapping for {domain}")
         

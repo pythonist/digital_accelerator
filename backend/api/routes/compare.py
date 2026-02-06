@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from api.utils import handle_errors
 from api.services import services
 import traceback
+from case_pack.case_pack_generator import CasePackGenerator
 
 compare_bp = Blueprint('compare', __name__)
 
@@ -20,12 +21,15 @@ def compare_cases():
         if not case_a_id or not case_b_id:
             return jsonify({"error": "Both Case IDs are required"}), 400
 
-        # 1. Fetch Intelligence Packs (Using the Generator)
-        if not services.case_pack_generator:
-            return jsonify({"error": "Service unavailable"}), 500
+        env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
+        tenant_id = getattr(request, 'tenant_id', None)
+        if not env_id:
+            return jsonify({"error": "No active environment selected"}), 400
+        db_manager = services.get_investigation_db(env_id, tenant_id)
+        generator = CasePackGenerator(db_manager)
 
-        pack_a = services.case_pack_generator.generate_case_pack(case_a_id)
-        pack_b = services.case_pack_generator.generate_case_pack(case_b_id)
+        pack_a = generator.generate_case_pack(case_a_id)
+        pack_b = generator.generate_case_pack(case_b_id)
 
         if pack_a.get('error') or pack_b.get('error'):
             return jsonify({"error": "One or both cases not found."}), 404
@@ -52,9 +56,28 @@ def compare_cases():
         except: pass
 
         # 4. HELPER: Format Lists for Frontend
+        def _amt_value(txn):
+            for k in ['amount', 'txn_amount', 'transaction_amount', 'amt', 'value', 'rule_metric']:
+                v = txn.get(k)
+                if v is None or v == "":
+                    continue
+                try:
+                    return float(v)
+                except Exception:
+                    pass
+            return 0.0
+
+        def _sum_volume(txns):
+            if not txns:
+                return 0.0
+            try:
+                return float(sum(_amt_value(t) for t in txns))
+            except Exception:
+                return 0.0
+
         def format_txns(txns):
             # Sort by amount desc and take top 10
-            sorted_tx = sorted(txns, key=lambda x: float(x.get('amount') or x.get('amt') or 0), reverse=True)
+            sorted_tx = sorted(txns, key=lambda x: _amt_value(x), reverse=True)
             return sorted_tx[:10]
 
         # 5. Structure Response (NOW WITH DETAILED LISTS)
@@ -62,7 +85,7 @@ def compare_cases():
             "case_a": {
                 "id": case_a_id,
                 "risk_score": pack_a.get('risk_score', 0),
-                "volume": pack_a.get('financial_profile', {}).get('total_volume', 0),
+                "volume": pack_a.get('financial_profile', {}).get('total_volume', _sum_volume(pack_a.get('transactions', []))),
                 "alert_count": len(pack_a.get('alerts', [])),
                 "alerts": pack_a.get('alerts', []),           # <--- NEW
                 "transactions": format_txns(pack_a.get('transactions', [])), # <--- NEW
@@ -71,7 +94,7 @@ def compare_cases():
             "case_b": {
                 "id": case_b_id,
                 "risk_score": pack_b.get('risk_score', 0),
-                "volume": pack_b.get('financial_profile', {}).get('total_volume', 0),
+                "volume": pack_b.get('financial_profile', {}).get('total_volume', _sum_volume(pack_b.get('transactions', []))),
                 "alert_count": len(pack_b.get('alerts', [])),
                 "alerts": pack_b.get('alerts', []),           # <--- NEW
                 "transactions": format_txns(pack_b.get('transactions', [])), # <--- NEW

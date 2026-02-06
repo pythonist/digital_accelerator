@@ -9,7 +9,7 @@ import TransactionUniverseScreen from './screens/calibration/transaction_univers
 import { PageTransition } from '@components/LoadingAnimations';
 import { SnapshotProvider, useSnapshot } from './context/SnapshotContext';
 import { CalibrationRunProvider, useCalibrationRun } from './context/CalibrationRunContext';
-import BehaviorBuilderScreen from './screens/behavior/BehaviorBuilderScreen';
+import CortexScenarioBuilderScreen from './screens/behavior/CortexScenarioBuilderScreen';
 import ScenarioCalibrationWorkbench from './screens/calibration_workbench/ScenarioCalibrationWorkbench';
 import MLValidationWorkbench from './screens/advanced_analysis/MLValidationWorkbench';
 import EligibilityAlertGenerationWorkbench from './screens/alerting/EligibilityAlertGenerationWorkbench';
@@ -64,7 +64,7 @@ const BTSYRouterInner = ({ activeScreen, setActiveScreen }) => {
       
     case 'behavior':
       return (
-        <BehaviorBuilderScreen calibrationRunId={activeCalibrationRunId ? parseInt(activeCalibrationRunId, 10) : null} />
+        <CortexScenarioBuilderScreen calibrationRunId={activeCalibrationRunId ? parseInt(activeCalibrationRunId, 10) : null} />
       );
       
     case 'calibration':

@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { Box, Paper, Button, Stack, TextField, InputAdornment, Chip, Alert, Typography } from '@mui/material';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Box, Paper, Button, Stack, TextField, InputAdornment, Chip, Alert, Typography, Autocomplete } from '@mui/material';
 import { Search as SearchIcon, Hub as NetworkIcon, Refresh as RefreshIcon, Info as InfoIcon, HelpOutline } from '@mui/icons-material';
 
 import apiClient from "@services/api";
@@ -16,6 +16,8 @@ import { calculateEvidenceMetrics } from './utils/evidenceCalculations';
 
 const DataTreeScreen = () => {
   const [searchId, setSearchId] = useState('');
+  const [caseOptions, setCaseOptions] = useState([]);
+  const [loadingCases, setLoadingCases] = useState(false);
   const [treeData, setTreeData] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +27,43 @@ const DataTreeScreen = () => {
   
   // ✅ State for Manual
   const [showManual, setShowManual] = useState(false);
+
+  const loadCases = useCallback(async () => {
+    setLoadingCases(true);
+    try {
+      const scope = await apiClient.getCaseScope();
+      const ids = scope?.scope?.case_ids || [];
+      if (Array.isArray(ids) && ids.length) {
+        setCaseOptions(ids.map((id) => ({ case_id: String(id) })));
+        return;
+      }
+    } catch {
+    }
+
+    try {
+      const ranked = await apiClient.getRankedCases();
+      const xs = ranked?.cases || [];
+      if (Array.isArray(xs) && xs.length) {
+        setCaseOptions(xs.map((c) => ({ case_id: String(c.case_id), risk_score: c.risk_score, risk_level: c.risk_level })));
+        return;
+      }
+    } catch {
+    }
+
+    try {
+      const raw = await apiClient.get('/api/v2/case-list');
+      if (Array.isArray(raw) && raw.length) {
+        setCaseOptions(raw.map((c) => ({ case_id: String(c.case_id ?? c.caseId ?? c.id ?? '') })).filter((c) => c.case_id));
+        return;
+      }
+    } catch {
+    }
+    setCaseOptions([]);
+  }, []);
+
+  useEffect(() => {
+    loadCases();
+  }, [loadCases]);
 
   const handleSearch = useCallback(async (e) => {
     e?.preventDefault();
@@ -73,6 +112,12 @@ const DataTreeScreen = () => {
   }, []);
 
   const evidenceMetrics = calculateEvidenceMetrics(treeData, reviewedNodes);
+
+  const selectedCase = useMemo(() => {
+    const id = String(searchId || '');
+    if (!id) return null;
+    return caseOptions.find((c) => String(c.case_id) === id) || null;
+  }, [caseOptions, searchId]);
 
   return (
     <PageContainer
@@ -148,26 +193,38 @@ const DataTreeScreen = () => {
 
         {/* SEARCH BAR */}
         <Paper elevation={0} variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafafa' }}>
-          <TextField
+          <Autocomplete
             fullWidth
             size="small"
-            value={searchId}
-            onChange={(e) => setSearchId(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="Enter Case ID (e.g., CASE-123)..."
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
-                </InputAdornment>
-              )
-            }}
-            sx={{ 
-              '& .MuiOutlinedInput-root': {
-                bgcolor: 'white',
-                '& input': { fontSize: '0.875rem' }
-              }
-            }}
+            options={caseOptions}
+            value={selectedCase}
+            inputValue={searchId}
+            onInputChange={(_, v) => setSearchId(v)}
+            onChange={(_, v) => setSearchId(v?.case_id || '')}
+            loading={loadingCases}
+            getOptionLabel={(o) => (typeof o === 'string' ? o : String(o?.case_id || ''))}
+            isOptionEqualToValue={(o, v) => String(o?.case_id || '') === String(v?.case_id || '')}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                placeholder={loadingCases ? 'Loading cases…' : 'Select a case…'}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch(e)}
+                InputProps={{
+                  ...params.InputProps,
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon sx={{ fontSize: 18, color: 'text.disabled' }} />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    bgcolor: 'white',
+                    '& input': { fontSize: '0.875rem' },
+                  },
+                }}
+              />
+            )}
           />
         </Paper>
 

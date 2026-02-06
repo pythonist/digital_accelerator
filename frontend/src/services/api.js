@@ -53,6 +53,16 @@ class APIClient {
     return env;
   }
 
+  _getSessionId() {
+    let sid = sessionStorage.getItem('session_id');
+    if (!sid) {
+      const rand = Math.random().toString(16).slice(2);
+      sid = `S_${Date.now()}_${rand}`;
+      sessionStorage.setItem('session_id', sid);
+    }
+    return sid;
+  }
+
   setActiveEnv(envId) {
     if (envId) {
       sessionStorage.setItem('active_env', envId);
@@ -76,6 +86,15 @@ class APIClient {
       return response.data;
     } catch (error) {
       throw this._handleError(error);
+    }
+  }
+
+  async logSessionEvent(event) {
+    const payload = { ...(event || {}), session_id: (event && event.session_id) || this._getSessionId() };
+    try {
+      return await this.post('/api/v2/audit/session/event', payload);
+    } catch {
+      return null;
     }
   }
 

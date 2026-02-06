@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { useAppContext } from '@context/AppContext';
 import { muleTheme } from './theme';
-import muleApi from './services/muleApi';
+import { useMuleStore } from './store/muleStore';
 
 // Layout
 import MainLayout from './layout/MainLayout';
@@ -11,87 +11,53 @@ import MainLayout from './layout/MainLayout';
 // Screens
 import MuleUploadScreen from './screens/MuleUploadScreen';
 import MuleDashboard from './screens/MuleDashboard';
-import MuleAccountScreen from './screens/MuleAccountScreen';
 import DataIntrospectionScreen from './screens/DataIntrospectionScreen';
-
-// NEW ML Screens (modular architecture)
-import MLOverviewScreen from './screens/ml/MLOverviewScreen';
-import TrainingConfigScreen from './screens/ml/TrainingConfigScreen';
-import TrainingMonitorScreen from './screens/ml/TrainingMonitorScreen';
-import DecisionEngineScreen from './screens/ml/DecisionEngineScreen';
+import FeatureStoreScreen from './screens/FeatureStoreScreen';
+import FeatureExplorerScreen from './screens/FeatureExplorerScreen';
+import ModelInferenceScreen from './screens/ml/ModelInferenceScreen';
+import FeatureEngineeringScreen from './screens/FeatureEngineeringScreen';
+import TrainModelScreen from './screens/TrainModelScreen';
+import RuleEngineScreen from './screens/RuleEngineScreen';
+import HybridScoringScreen from './screens/HybridScoringScreen';
+import NetworkGraphScreen from './screens/NetworkGraphScreen';
+import PatternAnalysisScreen from './screens/PatternAnalysisScreen';
+import ExplainabilityScreen from './screens/ExplainabilityScreen';
+import RiskDashboardScreen from './screens/RiskDashboardScreen';
 
 const MulePlatform = () => {
   const { activeEnv } = useAppContext();
   
   const [activeScreen, setActiveScreen] = useState('upload');
-  const [hasData, setHasData] = useState(false);
-  const [hasMLModel, setHasMLModel] = useState(false);
-  const [dataStats, setDataStats] = useState(null);
-  const [selectedAccount, setSelectedAccount] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [mlTrainingJobId, setMlTrainingJobId] = useState(null);
+  const { hasData, hasModel, dataStats, loadingStatus, refreshStatus, setEnvId, loadAccounts, setSelectedAccountId, openInvestigation } = useMuleStore();
 
   // Set environment ID in localStorage for API calls
   useEffect(() => {
     if (activeEnv?.id) {
-      localStorage.setItem('activeEnvId', activeEnv.id);
-      console.log('Environment ID set:', activeEnv.id);
+      setEnvId(activeEnv.id);
     }
-  }, [activeEnv]);
+  }, [activeEnv, setEnvId]);
 
   useEffect(() => {
-    checkDataStatus();
-  }, [activeEnv]);
+    refreshStatus();
+  }, [activeEnv, refreshStatus]);
 
-  const checkDataStatus = async () => {
-    setLoading(true);
-    try {
-      const response = await muleApi.getDataStatus();
-      
-      if (response.has_data) {
-        setHasData(true);
-        setDataStats(response.stats);
-        setHasMLModel(response.has_ml_model || false);
-        
-        // Only auto-navigate if we're on upload screen
-        if (activeScreen === 'upload') {
-          setActiveScreen('dashboard');
-        }
-      } else {
-        setHasData(false);
-        setHasMLModel(false);
-        setActiveScreen('upload');
-      }
-    } catch (error) {
-      console.error('Failed to check data status:', error);
-      setHasData(false);
-      setHasMLModel(false);
-      setActiveScreen('upload');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!hasData) return;
+    loadAccounts();
+  }, [hasData, loadAccounts]);
 
   const handleUploadComplete = async () => {
-    await checkDataStatus();
+    await refreshStatus();
+    setActiveScreen('account-analysis');
   };
 
   const handleAccountSelect = (accountId) => {
-    setSelectedAccount(accountId);
-    setActiveScreen('account');
-  };
-
-  const handleBackToDashboard = () => {
-    setSelectedAccount(null);
-    setActiveScreen('dashboard');
+    setSelectedAccountId(accountId);
+    openInvestigation(accountId);
   };
 
   const handleNavigate = (screen) => {
-    if (screen === 'account') {
-      return; // Don't allow direct navigation to account screen
-    }
     setActiveScreen(screen);
-    setSelectedAccount(null);
   };
 
   const renderScreen = () => {
@@ -100,11 +66,11 @@ const MulePlatform = () => {
         return (
           <MuleUploadScreen 
             onUploadComplete={handleUploadComplete}
-            loading={loading}
+            loading={loadingStatus}
           />
         );
       
-      case 'dashboard':
+      case 'account-analysis':
         return (
           <MuleDashboard 
             onAccountSelect={handleAccountSelect}
@@ -113,42 +79,41 @@ const MulePlatform = () => {
           />
         );
       
-      case 'account':
-        return (
-          <MuleAccountScreen 
-            accountId={selectedAccount}
-            onBack={handleBackToDashboard}
-          />
-        );
-      
-      case 'introspect':
+      case 'data-introspection':
         return <DataIntrospectionScreen />;
       
-      // NEW ML SCREENS
-      case 'ml-overview':
-        return <MLOverviewScreen navigateTo={handleNavigate} />;
+      case 'feature-engineering':
+        return <FeatureEngineeringScreen />;
+
+      case 'feature-store':
+        return <FeatureStoreScreen />;
+
+      case 'feature-explorer':
+        return <FeatureExplorerScreen />;
+
+      case 'train-model':
+        return <TrainModelScreen />;
+
+      case 'inference':
+        return <ModelInferenceScreen />;
       
-      case 'ml-training':
-        return (
-          <TrainingConfigScreen
-            navigateTo={handleNavigate}
-            onTrainingStarted={(jobId) => {
-              setMlTrainingJobId(jobId);
-              setActiveScreen('ml-monitor');
-            }}
-          />
-        );
-      
-      case 'ml-monitor':
-        return (
-          <TrainingMonitorScreen
-            navigateTo={handleNavigate}
-            jobId={mlTrainingJobId || 'local_sync_completed'}
-          />
-        );
-      
-      case 'ml-decision':
-        return <DecisionEngineScreen />;
+      case 'rule-engine':
+        return <RuleEngineScreen />;
+
+      case 'hybrid-scoring':
+        return <HybridScoringScreen onAccountSelect={handleAccountSelect} />;
+
+      case 'network-graph':
+        return <NetworkGraphScreen />;
+
+      case 'pattern-analysis':
+        return <PatternAnalysisScreen onAccountSelect={handleAccountSelect} />;
+
+      case 'explainability':
+        return <ExplainabilityScreen />;
+
+      case 'risk-dashboard':
+        return <RiskDashboardScreen onAccountSelect={handleAccountSelect} />;
       
       default:
         return hasData ? (
@@ -160,7 +125,7 @@ const MulePlatform = () => {
         ) : (
           <MuleUploadScreen 
             onUploadComplete={handleUploadComplete}
-            loading={loading}
+            loading={loadingStatus}
           />
         );
     }
@@ -173,7 +138,7 @@ const MulePlatform = () => {
         activeScreen={activeScreen}
         setActiveScreen={handleNavigate}
         hasData={hasData}
-        hasMLModel={hasMLModel}
+        hasMLModel={hasModel}
         dataStats={dataStats}
       >
         {renderScreen()}

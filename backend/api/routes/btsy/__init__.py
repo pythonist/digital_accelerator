@@ -26,6 +26,7 @@ from .calibration_runs_routes import calibration_runs_bp
 from .scenario_routes import scenario_bp
 from .extension_routes import extension_bp
 from .datatype_routes import datatype_bp
+from .cortex_scenario_routes import cortex_scenario_bp
 # Create main BTSY blueprint
 btsy_bp = Blueprint('btsy', __name__)
 
@@ -54,3 +55,4 @@ btsy_bp.register_blueprint(calibration_runs_bp)
 btsy_bp.register_blueprint(scenario_bp)
 btsy_bp.register_blueprint(extension_bp)
 btsy_bp.register_blueprint(datatype_bp)
+btsy_bp.register_blueprint(cortex_scenario_bp)

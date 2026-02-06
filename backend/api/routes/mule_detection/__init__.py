@@ -16,10 +16,14 @@ from typing import Dict, Optional
 # Import engines
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+import duckdb
 from services.mule_detection.feature_engine import MuleFeatureEngine
 from services.mule_detection.pattern_engine import MulePatternEngine
 from services.mule_detection.flow_engine import MuleFlowEngine
 from services.mule_detection.ml_engine import MuleMLEngine
+from services.mule_detection.money_flow import MoneyFlowAnalyzer, MoneyFlowConfig
+from services.mule_detection.flow_graph_workbench import MoneyFlowGraphWorkbench, FlowWorkbenchConfig
+from services.mule_detection.db_service import get_md_db_service
 
 mule_bp = Blueprint('mule', __name__)
 
@@ -28,6 +32,7 @@ feature_engine = MuleFeatureEngine()
 pattern_engine = MulePatternEngine()
 flow_engine = MuleFlowEngine()
 ml_engine = MuleMLEngine()
+md_db = get_md_db_service()
 
 # In-memory stores (replace with Redis in production)
 training_jobs = {}
@@ -95,11 +100,27 @@ def risk_bucket(score: float) -> str:
 
 def load_transactions(env_id):
     """Load transaction data"""
+    paths = md_db.init_env_structure(env_id)
+    conn = duckdb.connect(str(paths["duckdb"]))
+    try:
+        df = conn.execute("SELECT * FROM mule_transactions WHERE environment_id = ?", [env_id]).df()
+        if len(df) > 0:
+            return df
+    finally:
+        conn.close()
     txn_path = os.path.join(get_mule_dir(env_id), "raw", "transactions.csv")
     return pd.read_csv(txn_path)
 
 def load_accounts(env_id):
     """Load account metadata (optional)"""
+    paths = md_db.init_env_structure(env_id)
+    conn = duckdb.connect(str(paths["duckdb"]))
+    try:
+        df = conn.execute("SELECT * FROM mule_accounts WHERE environment_id = ?", [env_id]).df()
+        if len(df) > 0:
+            return df
+    finally:
+        conn.close()
     acc_path = os.path.join(get_mule_dir(env_id), "raw", "accounts.csv")
     if os.path.exists(acc_path):
         return pd.read_csv(acc_path)
@@ -246,6 +267,30 @@ def run_training_job(job_id: str, env_id: str, config: Dict):
         save_model_registry(env_id, disk_registry)
         model_registry[env_id] = disk_registry
         
+        paths = md_db.init_env_structure(env_id)
+        conn = duckdb.connect(str(paths["duckdb"]))
+        try:
+            conn.execute("UPDATE mule_models SET active = FALSE WHERE environment_id = ?", [env_id])
+            conn.execute(
+                """
+                INSERT INTO mule_models
+                VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+                """,
+                [
+                    model_version,
+                    model_path,
+                    model_info['algorithm'],
+                    int(model_info['training_samples']),
+                    int(model_info['feature_count']),
+                    float(model_info['auc']),
+                    float(model_info['recall']),
+                    float(model_info['precision']),
+                    float(model_info['f1']),
+                    env_id
+                ]
+            )
+        finally:
+            conn.close()
         training_jobs[job_id]['status'] = 'COMPLETED'
         training_jobs[job_id]['progress'] = 100
         training_jobs[job_id]['result'] = model_info
@@ -270,34 +315,142 @@ def upload_mule_data():
         
         txn_file = request.files['transactions']
         acc_file = request.files.get('accounts')
-        
-        mule_dir = get_mule_dir(env_id)
-        raw_dir = os.path.join(mule_dir, "raw")
-        os.makedirs(raw_dir, exist_ok=True)
-        
-        txn_path = os.path.join(raw_dir, "transactions.csv")
-        txn_file.save(txn_path)
-        
-        if acc_file:
-            acc_path = os.path.join(raw_dir, "accounts.csv")
-            acc_file.save(acc_path)
-        
-        txn_df = pd.read_csv(txn_path)
-        
-        registry = {
-            'status': 'ACTIVE',
-            'txn_count': len(txn_df),
-            'account_count': txn_df['account_id'].nunique()
-        }
-        
-        registry_path = os.path.join(mule_dir, "dataset_registry.json")
-        with open(registry_path, 'w') as f:
-            json.dump(registry, f, indent=2)
+        if acc_file is None:
+            return jsonify({'error': 'accounts.csv required'}), 400
+
+        transactions_required = [
+            'txn_id',
+            'account_id',
+            'txn_timestamp',
+            'amount',
+            'direction',
+            'counterparty_account',
+            'counterparty_bank',
+            'channel',
+            'txn_type',
+            'is_suspicious',
+            'mule_pattern',
+            'hour',
+            'day_of_week',
+            'is_weekend',
+            'is_night',
+            'device_id',
+            'ip_address',
+            'geo_location',
+            'balance_after',
+        ]
+        accounts_required = [
+            'account_id',
+            'customer_id',
+            'account_open_date',
+            'customer_type',
+            'risk_rating',
+            'occupation',
+            'expected_turnover',
+            'is_mule',
+        ]
+
+        txn_df = pd.read_csv(txn_file)
+        acc_df = pd.read_csv(acc_file)
+
+        txn_cols = [c.strip() for c in txn_df.columns.tolist()]
+        acc_cols = [c.strip() for c in acc_df.columns.tolist()]
+        txn_df.columns = txn_cols
+        acc_df.columns = acc_cols
+
+        missing_txn = [c for c in transactions_required if c not in txn_df.columns]
+        missing_acc = [c for c in accounts_required if c not in acc_df.columns]
+        extra_txn = [c for c in txn_df.columns if c not in transactions_required]
+        extra_acc = [c for c in acc_df.columns if c not in accounts_required]
+
+        if missing_txn or missing_acc or extra_txn or extra_acc:
+            return jsonify({
+                'error': 'Invalid CSV schema',
+                'missing': {
+                    'transactions': missing_txn,
+                    'accounts': missing_acc
+                },
+                'extra': {
+                    'transactions': extra_txn,
+                    'accounts': extra_acc
+                }
+            }), 400
+
+        txn_df = txn_df[transactions_required].copy()
+        acc_df = acc_df[accounts_required].copy()
+
+        txn_df['txn_timestamp'] = pd.to_datetime(txn_df['txn_timestamp'], errors='coerce')
+        acc_df['account_open_date'] = pd.to_datetime(acc_df['account_open_date'], errors='coerce')
+
+        def _to_bool_series(s: pd.Series) -> pd.Series:
+            if s.dtype == bool:
+                return s
+            return s.map(lambda x: True if str(x).strip().lower() in ['1', 'true', 't', 'yes', 'y'] else False if str(x).strip().lower() in ['0', 'false', 'f', 'no', 'n'] else None)
+
+        txn_df['is_suspicious'] = _to_bool_series(txn_df['is_suspicious'])
+        txn_df['is_weekend'] = _to_bool_series(txn_df['is_weekend'])
+        txn_df['is_night'] = _to_bool_series(txn_df['is_night'])
+        acc_df['is_mule'] = _to_bool_series(acc_df['is_mule'])
+
+        invalid_ts = int(txn_df['txn_timestamp'].isna().sum())
+        if invalid_ts > 0:
+            return jsonify({'error': f'Invalid txn_timestamp values: {invalid_ts} rows could not be parsed'}), 400
+
+        txn_df['environment_id'] = env_id
+        acc_df['environment_id'] = env_id
+
+        paths = md_db.init_env_structure(env_id)
+        conn = duckdb.connect(str(paths["duckdb"]))
+        try:
+            conn.execute("DELETE FROM mule_transactions_raw WHERE environment_id = ?", [env_id])
+            conn.execute("DELETE FROM mule_accounts_raw WHERE environment_id = ?", [env_id])
+
+            conn.register("tx", txn_df)
+            conn.execute("""
+                INSERT INTO mule_transactions_raw
+                SELECT txn_id, account_id, txn_timestamp, amount, direction, counterparty_account, counterparty_bank,
+                       channel, txn_type, is_suspicious, mule_pattern, hour, day_of_week, is_weekend, is_night,
+                       device_id, ip_address, geo_location, balance_after, environment_id, CURRENT_TIMESTAMP
+                FROM tx
+            """)
+
+            conn.register("acc", acc_df)
+            conn.execute("""
+                INSERT INTO mule_accounts_raw
+                SELECT account_id, customer_id, account_open_date, customer_type, risk_rating, occupation,
+                       expected_turnover, is_mule, environment_id, CURRENT_TIMESTAMP
+                FROM acc
+            """)
+
+            upload_id = str(uuid.uuid4())
+            txn_schema_json = json.dumps({c: str(txn_df[c].dtype) for c in transactions_required}, indent=2)
+            acc_schema_json = json.dumps({c: str(acc_df[c].dtype) for c in accounts_required}, indent=2)
+            conn.execute(
+                """
+                INSERT INTO mule_uploads
+                VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    upload_id,
+                    env_id,
+                    getattr(txn_file, "filename", "transactions.csv"),
+                    getattr(acc_file, "filename", "accounts.csv"),
+                    int(len(txn_df)),
+                    int(len(acc_df)),
+                    txn_schema_json,
+                    acc_schema_json,
+                ],
+            )
+        finally:
+            conn.close()
         
         return jsonify({
             'success': True,
             'message': 'Data uploaded successfully',
-            'stats': registry
+            'stats': {
+                'txn_count': int(len(txn_df)),
+                'account_count': int(acc_df['account_id'].nunique())
+            }
         })
         
     except Exception as e:
@@ -313,17 +466,21 @@ def get_data_status():
         if not env_id:
             return jsonify({'error': 'Environment ID required'}), 400
         
-        registry_path = os.path.join(get_mule_dir(env_id), "dataset_registry.json")
-        
-        if not os.path.exists(registry_path):
-            return jsonify({'has_data': False, 'message': 'No data uploaded'})
-        
-        with open(registry_path, 'r') as f:
-            registry = json.load(f)
-        disk_registry = load_model_registry(env_id)
-        if disk_registry:
-            model_registry[env_id] = disk_registry
-        has_ml_model = bool(disk_registry)
+        paths = md_db.init_env_structure(env_id)
+        conn = duckdb.connect(str(paths["duckdb"]))
+        try:
+            txn_count = int(conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+            acc_count = int(conn.execute("SELECT COUNT(*) FROM mule_accounts_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+            if txn_count == 0 or acc_count == 0:
+                return jsonify({'has_data': False, 'message': 'No data available'})
+            registry = {'status': 'ACTIVE', 'txn_count': txn_count, 'account_count': acc_count}
+        finally:
+            conn.close()
+        conn = duckdb.connect(str(paths["duckdb"]))
+        try:
+            has_ml_model = int(conn.execute("SELECT COUNT(*) FROM mule_models WHERE environment_id = ?", [env_id]).fetchone()[0]) > 0
+        finally:
+            conn.close()
         
         return jsonify({
             'has_data': True, 
@@ -343,12 +500,10 @@ def get_accounts():
         env_id = request.headers.get('X-Environment-ID')
         if not env_id:
             return jsonify({'error': 'Environment ID required'}), 400
-        
-        txn_path = os.path.join(get_mule_dir(env_id), "raw", "transactions.csv")
-        if not os.path.exists(txn_path):
-            return jsonify({'error': 'No data uploaded'}), 400
-        
-        transactions_df = pd.read_csv(txn_path)
+
+        transactions_df = load_transactions(env_id)
+        if transactions_df is None or len(transactions_df) == 0:
+            return jsonify({'error': 'No data available'}), 400
         accounts_df = load_accounts(env_id)
         account_ids = [str(a) for a in transactions_df['account_id'].unique().tolist()]
 
@@ -502,246 +657,143 @@ def get_account_graph(account_id):
     try:
         env_id = request.headers.get('X-Environment-ID')
         df = load_transactions(env_id)
-
-        counterparty_col = None
-        for c in ['counterparty_account', 'counterparty', 'to_account', 'to_acct', 'receiver_account', 'beneficiary_account']:
-            if c in df.columns:
-                counterparty_col = c
-                break
-
-        ts_col = None
-        for c in ['txn_timestamp', 'timestamp', 'txn_time', 'transaction_time', 'transaction_datetime']:
-            if c in df.columns:
-                ts_col = c
-                break
-
-        if counterparty_col is None or ts_col is None or 'direction' not in df.columns or 'amount' not in df.columns:
-            return jsonify({
-                'success': False,
-                'error': 'transactions dataset missing required columns for graph',
-                'required': ['direction', 'amount', 'txn_timestamp', 'counterparty_account']
-            }), 200
-
         window_hours = float(request.args.get('window_hours', 48))
         max_hops = int(request.args.get('max_hops', 4))
         amount_tolerance = float(request.args.get('amount_tolerance', 0.12))
-        max_edges = int(request.args.get('max_edges', 250))
+        max_edges = int(request.args.get('max_edges', 350))
+        max_paths = int(request.args.get('max_paths', 25))
+        pass_through_window_hours = float(request.args.get('pass_through_window_hours', 1.0))
+        start_ts = request.args.get('start_ts')
+        end_ts = request.args.get('end_ts')
 
-        df = df.copy()
-        df[ts_col] = pd.to_datetime(df[ts_col], errors='coerce')
-        df = df.dropna(subset=[ts_col])
+        analyzer = MoneyFlowAnalyzer(
+            MoneyFlowConfig(
+                window_hours=window_hours,
+                max_hops=max_hops,
+                amount_tolerance=amount_tolerance,
+                max_edges=max_edges,
+                max_paths=max_paths,
+                pass_through_window_hours=pass_through_window_hours,
+            )
+        )
 
-        txns = []
-        for _, r in df.iterrows():
-            acc = str(r.get('account_id'))
-            cp = r.get(counterparty_col)
-            if cp is None or (isinstance(cp, float) and np.isnan(cp)):
-                continue
-            cp = str(cp)
-            direction = str(r.get('direction') or '').lower()
-            amt = r.get('amount')
-            try:
-                amt = float(amt)
-            except Exception:
-                continue
-            ts = r.get(ts_col)
-            if pd.isna(ts):
-                continue
+        result = analyzer.build_account_flow_graph(df, str(account_id), start_ts=start_ts, end_ts=end_ts)
+        return jsonify(convert_numpy_types(result))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
-            if direction == 'debit':
-                src, dst = acc, cp
-            elif direction == 'credit':
-                src, dst = cp, acc
-            else:
-                src, dst = acc, cp
 
-            if not src or not dst:
-                continue
+@mule_bp.route('/accounts/<account_id>/flow-graph', methods=['GET'])
+def get_flow_graph_workbench(account_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        df = load_transactions(env_id)
+        accounts_df = load_accounts(env_id)
 
-            txns.append({'src': src, 'dst': dst, 'amount': amt, 'ts': ts})
+        start_ts = request.args.get('start_ts')
+        end_ts = request.args.get('end_ts')
+        window_hours = float(request.args.get('window_hours', 48))
+        max_hops = int(request.args.get('max_hops', 4))
+        amount_tolerance = float(request.args.get('amount_tolerance', 0.12))
+        max_paths = int(request.args.get('max_paths', 25))
+        pass_through_window_minutes = float(request.args.get('pass_through_window_minutes', 60))
+        circular_only = str(request.args.get('circular_only', 'false')).strip().lower() in {'1', 'true', 'yes', 'y'}
 
-        txns.sort(key=lambda x: x['ts'])
+        builder = MoneyFlowGraphWorkbench(
+            FlowWorkbenchConfig(
+                window_hours=window_hours,
+                max_hops=max_hops,
+                amount_tolerance=amount_tolerance,
+                max_paths=max_paths,
+                pass_through_window_minutes=pass_through_window_minutes,
+                circular_only=circular_only,
+            )
+        )
 
-        def within_tol(a, b):
-            denom = max(abs(b), 1.0)
-            return abs(a - b) / denom <= amount_tolerance
+        result = builder.build_graph_json(df, accounts_df, str(account_id), start_ts=start_ts, end_ts=end_ts)
+        return jsonify(convert_numpy_types(result))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
-        adj = {}
-        for i, t in enumerate(txns):
-            adj.setdefault(t['src'], []).append(i)
 
-        def detect_cycles(start: str):
-            cycles = []
-            if start not in adj:
-                return cycles
+@mule_bp.route('/accounts/flow-context', methods=['POST'])
+def get_flow_graph_context():
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        df = load_transactions(env_id)
+        accounts_df = load_accounts(env_id)
+        payload = request.get_json() or {}
 
-            for idx0 in adj.get(start, []):
-                t0 = txns[idx0]
-                base_amount = float(t0['amount'])
-                start_ts = t0['ts']
-                stack = [([idx0], [start, t0['dst']])]
+        account_ids = payload.get('account_ids') or []
+        if not isinstance(account_ids, list):
+            return jsonify({'error': 'account_ids must be a list'}), 400
 
-                while stack:
-                    path_idx, nodes = stack.pop()
-                    last_idx = path_idx[-1]
-                    last_t = txns[last_idx]
-                    if len(path_idx) >= 3 and nodes[-1] == start:
-                        cycles.append({
-                            'path': nodes,
-                            'hops': len(path_idx),
-                            'start_time': start_ts.isoformat(),
-                            'end_time': last_t['ts'].isoformat(),
-                            'amount': base_amount
-                        })
-                        continue
+        start_ts = payload.get('start_ts')
+        end_ts = payload.get('end_ts')
+        window_hours = float(payload.get('window_hours', 48))
+        max_hops = int(payload.get('max_hops', 4))
+        amount_tolerance = float(payload.get('amount_tolerance', 0.12))
+        max_paths = int(payload.get('max_paths', 25))
+        pass_through_window_minutes = float(payload.get('pass_through_window_minutes', 60))
+        circular_only = bool(payload.get('circular_only', False))
 
-                    if len(path_idx) >= max_hops:
-                        continue
+        builder = MoneyFlowGraphWorkbench(
+            FlowWorkbenchConfig(
+                window_hours=window_hours,
+                max_hops=max_hops,
+                amount_tolerance=amount_tolerance,
+                max_paths=max_paths,
+                pass_through_window_minutes=pass_through_window_minutes,
+                circular_only=circular_only,
+            )
+        )
 
-                    next_src = nodes[-1]
-                    for nxt_idx in adj.get(next_src, []):
-                        if nxt_idx in path_idx:
-                            continue
-                        nxt = txns[nxt_idx]
-                        if nxt['ts'] < last_t['ts']:
-                            continue
-                        dt_hours = (nxt['ts'] - start_ts).total_seconds() / 3600.0
-                        if dt_hours > window_hours:
-                            continue
-                        if not within_tol(float(nxt['amount']), base_amount):
-                            continue
-                        stack.append((path_idx + [nxt_idx], nodes + [nxt['dst']]))
+        results = []
+        for aid in [str(a) for a in account_ids if a is not None and str(a).strip() != ""]:
+            res = builder.build_context_json(df, accounts_df, str(aid), start_ts=start_ts, end_ts=end_ts)
+            results.append(res)
+        return jsonify(convert_numpy_types({"success": True, "results": results}))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
-            uniq = []
-            seen = set()
-            for c in cycles:
-                key = tuple(c['path'])
-                if key in seen:
-                    continue
-                seen.add(key)
-                uniq.append(c)
-            return uniq[:5]
 
-        def detect_near_cycles(start: str):
-            candidates = []
-            if start not in adj:
-                return candidates
+@mule_bp.route('/accounts/<account_id>/flow-graph/expand', methods=['POST'])
+def expand_flow_graph_workbench(account_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        df = load_transactions(env_id)
+        accounts_df = load_accounts(env_id)
+        payload = request.get_json() or {}
 
-            for idx0 in adj.get(start, []):
-                t0 = txns[idx0]
-                base_amount = float(t0['amount'])
-                start_ts = t0['ts']
-                stack = [([idx0], [start, t0['dst']])]
+        node_id = payload.get('node_id') or account_id
+        direction = str(payload.get('direction') or 'outbound').strip().lower()
+        start_ts = payload.get('start_ts')
+        end_ts = payload.get('end_ts')
 
-                while stack:
-                    path_idx, nodes = stack.pop()
-                    if len(path_idx) >= max_hops:
-                        continue
-                    last_idx = path_idx[-1]
-                    last_t = txns[last_idx]
-                    next_src = nodes[-1]
-                    for nxt_idx in adj.get(next_src, []):
-                        if nxt_idx in path_idx:
-                            continue
-                        nxt = txns[nxt_idx]
-                        if nxt['ts'] < last_t['ts']:
-                            continue
-                        dt_hours = (nxt['ts'] - start_ts).total_seconds() / 3600.0
-                        if dt_hours > window_hours * 2:
-                            continue
-                        ok_amt = within_tol(float(nxt['amount']), base_amount)
-                        new_nodes = nodes + [nxt['dst']]
-                        new_path = path_idx + [nxt_idx]
+        window_hours = float(payload.get('window_hours', 48))
+        max_hops = int(payload.get('max_hops', 4))
+        amount_tolerance = float(payload.get('amount_tolerance', 0.12))
+        max_paths = int(payload.get('max_paths', 25))
+        pass_through_window_minutes = float(payload.get('pass_through_window_minutes', 60))
+        circular_only = bool(payload.get('circular_only', False))
 
-                        if len(new_path) >= 3 and new_nodes[-1] != start:
-                            back_edges = adj.get(new_nodes[-1], [])
-                            has_back = any(txns[b]['dst'] == start for b in back_edges)
-                            if has_back:
-                                candidates.append({
-                                    'path': new_nodes,
-                                    'hops': len(new_path),
-                                    'start_time': start_ts.isoformat(),
-                                    'end_time': nxt['ts'].isoformat(),
-                                    'amount': base_amount,
-                                    'reason': 'Near-cycle: final hop exists but constraints may differ' if ok_amt else 'Near-cycle: similar path but amount tolerance fails'
-                                })
+        builder = MoneyFlowGraphWorkbench(
+            FlowWorkbenchConfig(
+                window_hours=window_hours,
+                max_hops=max_hops,
+                amount_tolerance=amount_tolerance,
+                max_paths=max_paths,
+                pass_through_window_minutes=pass_through_window_minutes,
+                circular_only=circular_only,
+            )
+        )
 
-                        stack.append((new_path, new_nodes))
-
-            uniq = []
-            seen = set()
-            for c in candidates:
-                key = tuple(c['path'])
-                if key in seen:
-                    continue
-                seen.add(key)
-                uniq.append(c)
-            uniq.sort(key=lambda x: (x['hops'], x['start_time']))
-            return uniq[:5]
-
-        cycles = detect_cycles(str(account_id))
-        near_cycles = [] if cycles else detect_near_cycles(str(account_id))
-
-        neighborhood = set([str(account_id)])
-        for t in txns:
-            if t['src'] == str(account_id) or t['dst'] == str(account_id):
-                neighborhood.add(t['src'])
-                neighborhood.add(t['dst'])
-
-        edge_map = {}
-        for t in txns:
-            if t['src'] in neighborhood and t['dst'] in neighborhood:
-                k = (t['src'], t['dst'])
-                cur = edge_map.get(k)
-                if not cur:
-                    edge_map[k] = {
-                        'source': t['src'],
-                        'target': t['dst'],
-                        'txn_count': 1,
-                        'total_amount': float(t['amount']),
-                        'first_ts': t['ts'],
-                        'last_ts': t['ts']
-                    }
-                else:
-                    cur['txn_count'] += 1
-                    cur['total_amount'] += float(t['amount'])
-                    if t['ts'] < cur['first_ts']:
-                        cur['first_ts'] = t['ts']
-                    if t['ts'] > cur['last_ts']:
-                        cur['last_ts'] = t['ts']
-
-        edges = list(edge_map.values())
-        edges.sort(key=lambda e: e['total_amount'], reverse=True)
-        edges = edges[:max_edges]
-
-        nodes = sorted(set([n for e in edges for n in (e['source'], e['target'])]))
-        nodes_out = [{'id': n, 'label': n, 'type': 'account' if n == str(account_id) else 'counterparty'} for n in nodes]
-        edges_out = [{
-            'source': e['source'],
-            'target': e['target'],
-            'txn_count': int(e['txn_count']),
-            'total_amount': float(e['total_amount']),
-            'first_ts': e['first_ts'].isoformat(),
-            'last_ts': e['last_ts'].isoformat()
-        } for e in edges]
-
-        return jsonify(convert_numpy_types({
-            'success': True,
-            'account_id': str(account_id),
-            'graph': {
-                'nodes': nodes_out,
-                'edges': edges_out
-            },
-            'circular': {
-                'cycles': cycles,
-                'near_cycles': near_cycles,
-                'parameters': {
-                    'window_hours': window_hours,
-                    'max_hops': max_hops,
-                    'amount_tolerance': amount_tolerance
-                }
-            }
-        }))
+        result = builder.build_graph_json(df, accounts_df, str(node_id), start_ts=start_ts, end_ts=end_ts)
+        result['expanded_from'] = {'account_id': str(account_id), 'node_id': str(node_id), 'direction': direction}
+        return jsonify(convert_numpy_types(result))
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -753,38 +805,74 @@ def detect_patterns():
     try:
         env_id = request.headers.get('X-Environment-ID')
         df = load_transactions(env_id)
-        accounts_meta = load_accounts(env_id)
-        
-        all_patterns = {}
-        pattern_summary = []
-        
-        for account_id in df['account_id'].unique():
-            meta = None
-            if accounts_meta is not None:
-                meta_row = accounts_meta[accounts_meta['account_id'] == account_id]
-                if len(meta_row) > 0:
-                    meta = meta_row.iloc[0].to_dict()
-            
-            features = feature_engine.compute_account_features(df, str(account_id), meta)
-            patterns = pattern_engine.detect_patterns(features)
-            
-            if patterns:
-                all_patterns[str(account_id)] = patterns
-                
-                for pattern in patterns:
-                    pattern_summary.append({
-                        'account_id': str(account_id),
-                        **pattern
-                    })
-        
-        overlap = pattern_engine.get_pattern_overlap(all_patterns)
-        
-        return jsonify({
-            'success': True,
-            'patterns': pattern_summary,
-            'total_flagged': len(all_patterns),
-            'pattern_overlap': overlap
-        })
+        analyzer = MoneyFlowAnalyzer()
+        edges, colmap = analyzer.build_directed_edges(df)
+        if not edges:
+            return jsonify({"success": False, "error": "transactions dataset missing required columns for money flow patterns", "colmap": colmap}), 200
+
+        account_ids = [str(a) for a in df["account_id"].dropna().astype(str).unique().tolist()]
+        patterns_out = []
+        pass_through_accounts = []
+        circular_accounts = []
+        multi_hop_accounts = []
+        burst_accounts = []
+
+        for aid in account_ids:
+            p = analyzer.compute_account_patterns(edges, aid)
+            row = {
+                "account_id": aid,
+                "flow_score": float(p.get("flow_score", 0.0)),
+                "risk_level": p.get("risk_level"),
+                "pass_through": p.get("pass_through", {}),
+                "circular_chains": p.get("circular_chains", {}),
+                "multi_hop_chains": p.get("multi_hop_chains", {}),
+                "velocity_bursts_in_chains": p.get("velocity_bursts_in_chains", {}),
+            }
+            patterns_out.append(row)
+
+            if float(row["pass_through"].get("rate", 0) or 0) >= 0.15:
+                pass_through_accounts.append(row)
+            if int(row["circular_chains"].get("count", 0) or 0) > 0:
+                circular_accounts.append(row)
+            if int(row["multi_hop_chains"].get("count", 0) or 0) > 0:
+                multi_hop_accounts.append(row)
+            if int(row["velocity_bursts_in_chains"].get("count", 0) or 0) > 0:
+                burst_accounts.append(row)
+
+        patterns_out.sort(key=lambda r: float(r.get("flow_score") or 0), reverse=True)
+
+        def top(rows, n=25):
+            xs = rows[:]
+            xs.sort(key=lambda r: float(r.get("flow_score") or 0), reverse=True)
+            return xs[:n]
+
+        return jsonify(
+            {
+                "success": True,
+                "patterns": patterns_out,
+                "summary": {
+                    "total_accounts": int(len(patterns_out)),
+                    "flagged_accounts": int(sum(1 for r in patterns_out if (r.get("risk_level") or "LOW") != "LOW")),
+                    "pass_through_accounts": int(len(pass_through_accounts)),
+                    "circular_chain_accounts": int(len(circular_accounts)),
+                    "multi_hop_chain_accounts": int(len(multi_hop_accounts)),
+                    "velocity_burst_accounts": int(len(burst_accounts)),
+                },
+                "top": {
+                    "overall": patterns_out[:10],
+                    "pass_through": top(pass_through_accounts, 10),
+                    "circular": top(circular_accounts, 10),
+                    "multi_hop": top(multi_hop_accounts, 10),
+                    "velocity_burst": top(burst_accounts, 10),
+                },
+                "methodology": [
+                    "Build directed edges from transactions: outbound account→counterparty, inbound counterparty→account.",
+                    "Detect pass-through when funds exit within 1 hour after entry (amount-tolerant).",
+                    "Detect multi-hop and circular chains via time-ordered traversal of edges.",
+                    "Detect velocity bursts when multiple hops occur within 10 minutes in a chain.",
+                ],
+            }
+        )
         
     except Exception as e:
         traceback.print_exc()
@@ -1089,6 +1177,28 @@ def predict_ml_score(account_id):
             'pattern_risk': pattern_risk,
             'patterns': patterns
         }
+        paths = md_db.init_env_structure(env_id)
+        conn = duckdb.connect(str(paths["duckdb"]))
+        try:
+            conn.execute(
+                """
+                INSERT INTO mule_risk_scores
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                [
+                    int(uuid.uuid4().int % (10**9)),
+                    account_id,
+                    float(hybrid_risk_score),
+                    str(final_risk_level),
+                    float(ml_prediction.get('mule_risk_score', 0)) if ml_prediction else None,
+                    float(pattern_risk.get('risk_score', 0)),
+                    float(ml_prediction.get('confidence', 0)) if ml_prediction else None,
+                    str(response['decision']['decision_logic']) if response.get('decision') else 'PATTERN ONLY',
+                    env_id
+                ]
+            )
+        finally:
+            conn.close()
         return jsonify(convert_numpy_types(response))
         
     except Exception as e:
@@ -1221,10 +1331,45 @@ def batch_predict():
             'risk_distribution': risk_distribution,
             'predictions': all_predictions
         }
+        paths = md_db.init_env_structure(env_id)
+        conn = duckdb.connect(str(paths["duckdb"]))
+        try:
+            conn.execute("DELETE FROM mule_risk_scores WHERE environment_id = ?", [env_id])
+            rows = []
+            for p in all_predictions:
+                rows.append((
+                    int(uuid.uuid4().int % (10**9)),
+                    str(p['account_id']),
+                    float(p['final_risk_score']),
+                    str(p['final_risk_level']),
+                    float(p['ml_risk_score']) if p['ml_risk_score'] is not None else None,
+                    float(p['pattern_risk_score']),
+                    float(p['confidence']) if p['confidence'] is not None else None,
+                    str(p['decision_logic']),
+                    env_id
+                ))
+            conn.register("rs", pd.DataFrame(rows, columns=[
+                "id","account_id","hybrid_score","risk_level","ml_risk_score",
+                "pattern_risk_score","confidence","decision_logic","environment_id"
+            ]))
+            conn.execute("""
+                INSERT INTO mule_risk_scores
+                SELECT id, account_id, hybrid_score, risk_level, ml_risk_score, pattern_risk_score,
+                       confidence, decision_logic, environment_id, CURRENT_TIMESTAMP
+                FROM rs
+            """)
+        finally:
+            conn.close()
         return jsonify(convert_numpy_types(response))
         
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+from .intelligence_routes import intelligence_bp
+mule_bp.register_blueprint(intelligence_bp)
+
+from .platform_routes import platform_bp
+mule_bp.register_blueprint(platform_bp)
 
 print("✓ Mule detection routes with enhanced ML loaded successfully")

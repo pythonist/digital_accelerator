@@ -31,6 +31,14 @@ class DataStatisticsService:
     def __init__(self, snapshot_storage_path: Path, snapshots_db_path: Path):
         self.snapshot_storage_path = snapshot_storage_path
         self.snapshots_db_path = snapshots_db_path
+    
+    def _normalize_tx_type(self, value: str) -> str:
+        v = str(value).strip().upper()
+        if v in ('DR', 'D', 'DEBIT', 'DBIT'):
+            return 'DEBIT'
+        if v in ('CR', 'C', 'CREDIT', 'CRDT'):
+            return 'CREDIT'
+        return v
 
     def _get_transactions_file(self, snapshot_id: str) -> Path:
         from api.tools.btsy.snapshot_manager import SnapshotManager
@@ -95,9 +103,16 @@ class DataStatisticsService:
             # Get transaction TYPE distribution (CREDIT/DEBIT)
             type_dist = []
             try:
+                type_norm = """
+                    CASE
+                      WHEN UPPER(transaction_type) IN ('DR','D','DEBIT','DBIT') THEN 'DEBIT'
+                      WHEN UPPER(transaction_type) IN ('CR','C','CREDIT','CRDT') THEN 'CREDIT'
+                      ELSE UPPER(transaction_type)
+                    END
+                """
                 type_dist = conn.execute(f"""
                     SELECT 
-                        transaction_type,
+                        {type_norm} AS transaction_type,
                         COUNT(*) as count
                     FROM read_parquet('{tx_file}')
                     WHERE transaction_type IS NOT NULL
@@ -184,8 +199,16 @@ class DataStatisticsService:
             
             # NEW: transaction_type filter
             if types:
-                type_list = "', '".join(types)
-                where_clauses.append(f"transaction_type IN ('{type_list}')")
+                norm_types = [self._normalize_tx_type(t) for t in types]
+                type_list = "', '".join(norm_types)
+                type_norm = """
+                    CASE
+                      WHEN UPPER(transaction_type) IN ('DR','D','DEBIT','DBIT') THEN 'DEBIT'
+                      WHEN UPPER(transaction_type) IN ('CR','C','CREDIT','CRDT') THEN 'CREDIT'
+                      ELSE UPPER(transaction_type)
+                    END
+                """
+                where_clauses.append(f"{type_norm} IN ('{type_list}')")
             
             # transaction_category filter
             if categories:

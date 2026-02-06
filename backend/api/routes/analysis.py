@@ -5,8 +5,88 @@ from flask import Blueprint, request, jsonify
 from api.utils import handle_errors
 from api.services import services
 import traceback
+from datetime import datetime
+import pandas as pd
+
+from case_pack.case_pack_generator import CasePackGenerator
+from services.mule_detection.money_flow import MoneyFlowAnalyzer, MoneyFlowConfig
 
 analysis_bp = Blueprint('analysis', __name__)
+
+def _get_env_db():
+    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
+    tenant_id = getattr(request, 'tenant_id', None)
+    if not env_id:
+        return None, None
+    try:
+        db = services.get_investigation_db(env_id, tenant_id)
+        return env_id, db
+    except Exception:
+        return env_id, None
+
+
+def _pick_col(df: pd.DataFrame, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+
+def _canonicalize_transactions(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    out = df.copy()
+    out.columns = [str(c) for c in out.columns]
+
+    mappings = [
+        ("account_id", ["account_id", "acct_id", "accountid", "account_no", "account"]),
+        (
+            "counterparty_account",
+            [
+                "counterparty_account",
+                "counterparty_account_id",
+                "counterparty",
+                "cp_account",
+                "to_account",
+                "to_acct",
+                "receiver_account",
+                "beneficiary_account",
+                "destination_account",
+                "dst_account",
+            ],
+        ),
+        ("txn_timestamp", ["txn_timestamp", "timestamp", "txn_time", "transaction_time", "transaction_datetime", "created_at", "date", "time"]),
+        ("amount", ["amount", "txn_amount", "transaction_amount", "amt", "value", "rule_metric"]),
+        ("direction", ["direction", "dr_cr", "debit_credit", "txn_direction", "type", "transaction_type"]),
+    ]
+
+    for target, candidates in mappings:
+        if target in out.columns:
+            continue
+        src = _pick_col(out, candidates)
+        if src:
+            out[target] = out[src]
+
+    if "txn_timestamp" in out.columns:
+        out["txn_timestamp"] = pd.to_datetime(out["txn_timestamp"], errors="coerce")
+    if "amount" in out.columns:
+        out["amount"] = pd.to_numeric(out["amount"], errors="coerce")
+
+    def _norm_dir(v):
+        if v is None:
+            return None
+        s = str(v).strip().lower()
+        if s in {"outbound", "out", "debit", "dr"}:
+            return "outbound"
+        if s in {"inbound", "in", "credit", "cr"}:
+            return "inbound"
+        return s
+
+    if "direction" in out.columns:
+        out["direction"] = out["direction"].apply(_norm_dir)
+
+    return out
 
 # ============================================================================
 # BASELINE ANALYSIS ROUTES (Enhanced)
@@ -266,33 +346,189 @@ def get_priority_cases():
 @handle_errors
 def build_full_case():
     """
-    Builds the full investigation pack: 
-    Network Graph + Typology Evidence + Risk Metrics
+    Builds a Quantexa-style money flow graph:
+    - Nodes: account_id (+ score/rule nodes)
+    - Edges: txn_id, time-ordered, direction-aware
+    - Includes propagation paths + circular path flags
+    - Includes pattern detection for mule behavior
     """
     case_id = request.json.get('case_id')
-    if not case_id: return jsonify({'error': 'Case ID is required'}), 400
-    if not services.graph_builder: return jsonify({'error': 'Graph service not initialized'}), 500
-        
-    # 1. Build the Network
-    services.graph_builder.build_full_case_network(case_id)
-    
-    # 2. Export with enriched data (Evidence & Metrics)
-    data = services.graph_builder.export_graph_data()
-    
-    # 3. Generate a human-readable summary
-    alert_count = sum(1 for n in data['nodes'] if n['type'] == 'alert')
-    risk_score = data['metrics']['max_risk']
-    
-    narrative = f"Case {case_id} represents a High Risk network ({risk_score}/100) involving {len(data['nodes'])} entities and {alert_count} active alerts."
-    
-    if data['evidence']:
-        narrative += f" Primary typology detected: {data['evidence'][0]['typology']}."
+    if not case_id:
+        return jsonify({'error': 'Case ID is required'}), 400
 
-    return jsonify({
-        'success': True,
-        'graph': data,
-        'narrative': narrative
-    })
+    env_id, db = _get_env_db()
+    if not db:
+        return jsonify({'error': 'DB not ready', 'env_id': env_id}), 503
+
+    req = request.json or {}
+    focal_account_id = req.get("account_id")
+
+    cfg = MoneyFlowConfig(
+        window_hours=float(req.get("window_hours", 48.0)),
+        max_hops=int(req.get("max_hops", 4)),
+        amount_tolerance=float(req.get("amount_tolerance", 0.12)),
+        max_edges=int(req.get("max_edges", 350)),
+        max_paths=int(req.get("max_paths", 25)),
+        pass_through_window_hours=float(req.get("pass_through_window_hours", 1.0)),
+    )
+    start_ts = req.get("start_ts")
+    end_ts = req.get("end_ts")
+
+    generator = CasePackGenerator(db)
+    pack = generator.generate_case_pack(case_id)
+    if not pack or pack.get("error"):
+        return jsonify({'success': False, 'error': pack.get("error") if pack else 'Failed to build case pack'}), 404
+
+    txns = pack.get("transactions") or []
+    if not txns:
+        return jsonify({'success': False, 'error': 'No transactions available for this case'}), 200
+
+    df = _canonicalize_transactions(pd.DataFrame(txns))
+    if df.empty:
+        return jsonify({'success': False, 'error': 'No usable transactions rows for flow graph'}), 200
+
+    if not focal_account_id:
+        acct_col = "account_id" if "account_id" in df.columns else None
+        if acct_col:
+            counts = df[acct_col].dropna().astype(str).value_counts()
+            focal_account_id = str(counts.index[0]) if len(counts.index) > 0 else None
+
+    if not focal_account_id:
+        return jsonify({'success': False, 'error': 'Unable to resolve a focal account for this case'}), 200
+
+    analyzer = MoneyFlowAnalyzer(cfg)
+    flow = analyzer.build_account_flow_graph(df, str(focal_account_id), start_ts=start_ts, end_ts=end_ts)
+    if not flow.get("success"):
+        return jsonify(flow), 200
+
+    nodes = [dict(n) for n in (flow.get("graph") or {}).get("nodes", [])]
+    links = []
+    for e in (flow.get("graph") or {}).get("edges", []):
+        links.append(
+            {
+                "id": e.get("id"),
+                "source": e.get("source"),
+                "target": e.get("target"),
+                "amount": e.get("amount"),
+                "volume": e.get("amount"),
+                "ts": e.get("ts"),
+                "channel": e.get("channel"),
+                "txn_type": e.get("txn_type"),
+                "device_id": e.get("device_id"),
+                "ip_address": e.get("ip_address"),
+                "geo_location": e.get("geo_location"),
+                "counterparty_bank": e.get("counterparty_bank"),
+                "relation": "txn",
+                "width": min(max(float(e.get("amount") or 0) / 1000.0, 0.5), 6.0),
+            }
+        )
+
+    score_nodes = []
+    score_links = []
+
+    patterns = flow.get("patterns") or {}
+    flow_score = float(flow.get("flow_score") or patterns.get("flow_score") or 0.0)
+    flow_node_id = f"{focal_account_id}::FLOW"
+    score_nodes.append({"id": flow_node_id, "label": f"Network Score\n{flow_score:.3f}", "type": "score", "kind": "network"})
+    score_links.append({"source": str(focal_account_id), "target": flow_node_id, "relation": "score"})
+
+    ml_score = None
+    try:
+        conn = db.connect()
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        tables = [r[0] for r in cur.fetchall()]
+        acc_table = next((t for t in tables if str(t).lower() == "accounts" or "account" in str(t).lower()), None)
+        if acc_table:
+            cur.execute(f'SELECT * FROM "{acc_table}" LIMIT 1')
+            cols = [d[0] for d in cur.description]
+            acc_id_col = next((c for c in cols if str(c).lower() in {"account_id", "acct_id", "accountid", "account_no"}), None)
+            ml_col = next((c for c in cols if str(c).lower() in {"ml_score", "mule_score", "model_score"}), None)
+            is_mule_col = next((c for c in cols if str(c).lower() in {"is_mule", "mule"}), None)
+            risk_col = next((c for c in cols if "risk" in str(c).lower() and "rating" in str(c).lower()), None)
+            if acc_id_col:
+                cur.execute(f'SELECT * FROM "{acc_table}" WHERE "{acc_id_col}" = ? LIMIT 1', (str(focal_account_id),))
+                row = cur.fetchone()
+                if row:
+                    rec = dict(zip(cols, row))
+                    if ml_col and rec.get(ml_col) not in [None, ""]:
+                        try:
+                            ml_score = float(rec.get(ml_col))
+                        except Exception:
+                            ml_score = None
+                    elif is_mule_col and rec.get(is_mule_col) not in [None, ""]:
+                        v = str(rec.get(is_mule_col)).strip().lower()
+                        ml_score = 1.0 if v in {"1", "true", "yes", "y"} else 0.0
+                    elif risk_col and rec.get(risk_col) not in [None, ""]:
+                        try:
+                            rv = float(rec.get(risk_col))
+                            ml_score = max(0.0, min(rv / 100.0, 1.0))
+                        except Exception:
+                            ml_score = None
+    except Exception:
+        ml_score = None
+    finally:
+        try:
+            db.close_connection(conn)
+        except Exception:
+            pass
+
+    if ml_score is not None:
+        ml_node_id = f"{focal_account_id}::ML"
+        score_nodes.append({"id": ml_node_id, "label": f"ML Score\n{float(ml_score):.3f}", "type": "score", "kind": "ml"})
+        score_links.append({"source": str(focal_account_id), "target": ml_node_id, "relation": "score"})
+
+    trigger_nodes = []
+    trigger_links = []
+    alerts = pack.get("alerts") or []
+    trigger_keys = ["rule", "rule_id", "rule_name", "alert_type", "typology", "scenario"]
+    triggers = []
+    for a in alerts:
+        for k in trigger_keys:
+            if k in a and a.get(k) not in [None, ""]:
+                triggers.append(str(a.get(k)))
+                break
+    uniq = []
+    seen = set()
+    for t in triggers:
+        if t in seen:
+            continue
+        seen.add(t)
+        uniq.append(t)
+    uniq = uniq[:12]
+    if uniq:
+        rules_node_id = f"{focal_account_id}::RULES"
+        score_nodes.append({"id": rules_node_id, "label": f"Rule Triggers\n{len(uniq)}", "type": "score", "kind": "rules"})
+        score_links.append({"source": str(focal_account_id), "target": rules_node_id, "relation": "score"})
+        for r in uniq:
+            rid = f"{focal_account_id}::RULE::{r}"
+            trigger_nodes.append({"id": rid, "label": r, "type": "rule"})
+            trigger_links.append({"source": rules_node_id, "target": rid, "relation": "trigger"})
+
+    graph = {
+        "nodes": nodes + score_nodes + trigger_nodes,
+        "links": links + score_links + trigger_links,
+        "paths": flow.get("paths") or [],
+        "patterns": patterns,
+        "case_id": case_id,
+        "account_id": str(focal_account_id),
+        "parameters": flow.get("parameters") or {},
+    }
+
+    narrative = f"Case {case_id} money flow graph centered on account {focal_account_id} with {len(nodes)} accounts and {len(links)} transactions."
+    if int(patterns.get("circular_chains", {}).get("count", 0) or 0) > 0:
+        narrative += " Circular paths detected."
+    if float(patterns.get("pass_through", {}).get("rate", 0) or 0) > 0:
+        narrative += " Pass-through behavior detected."
+
+    accounts = []
+    try:
+        if "account_id" in df.columns:
+            accounts = [str(a) for a in df["account_id"].dropna().astype(str).unique().tolist()]
+    except Exception:
+        accounts = []
+
+    return jsonify({"success": True, "graph": graph, "narrative": narrative, "accounts": accounts})
 
 
 @analysis_bp.route('/graph/build-case', methods=['POST'])

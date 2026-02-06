@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Box, Typography, Breadcrumbs } from '@mui/material';
 import { ChevronRight } from '@mui/icons-material';
+import apiClient from '@services/api';
 
 const PageContainer = ({ 
   title, 
@@ -9,6 +10,31 @@ const PageContainer = ({
   actions, 
   children 
 }) => {
+  const startedAtRef = useRef(Date.now());
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    startedAtRef.current = startedAt;
+    apiClient.logSessionEvent({
+      event_type: 'screen_visited',
+      screen: title,
+      breadcrumbs,
+      path: window.location.pathname,
+      started_at: new Date(startedAt).toISOString(),
+    });
+    return () => {
+      const endedAt = Date.now();
+      apiClient.logSessionEvent({
+        event_type: 'screen_left',
+        screen: title,
+        path: window.location.pathname,
+        started_at: new Date(startedAtRef.current).toISOString(),
+        ended_at: new Date(endedAt).toISOString(),
+        duration_ms: Math.max(0, endedAt - startedAtRef.current),
+      });
+    };
+  }, [title]);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       

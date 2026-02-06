@@ -1,5 +1,5 @@
 // src/tools/investigation/screens/system/AuditTrailScreen.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import apiClient from "@services/api";
 
 // ✅ Import Layout Components
@@ -9,7 +9,7 @@ import PageContainer from "@investigation-layout/PageContainer";
 import {
   Box, Paper, Typography, TextField, Button, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Chip, Stack,
-  CircularProgress, Alert, Grid, InputAdornment, Tooltip
+  CircularProgress, Alert, Grid, InputAdornment, Tooltip, Tabs, Tab, Select, MenuItem, Divider
 } from '@mui/material';
 
 // MUI Icons
@@ -26,18 +26,21 @@ import {
 const AuditTrailScreen = () => {
   const [filters, setFilters] = useState({ user: '', action: '', entity_type: '', entity_id: '' });
   const [logs, setLogs] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [activeTab, setActiveTab] = useState(0);
+  const [selectedSessionId, setSelectedSessionId] = useState('');
+  const [sessionEvents, setSessionEvents] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => { fetchLogs(); }, []);
+  useEffect(() => { fetchLogs(); fetchSessions(); }, []);
 
   const fetchLogs = async () => {
     setIsLoading(true); 
     setError(null);
     try {
       const res = await apiClient.post('/api/v2/audit/get-trail', filters);
-      // Ensure res is an array, handle if wrapped
-      setLogs(Array.isArray(res) ? res : res.logs || []);
+      setLogs(res?.logs || []);
     } catch (err) { 
       setError(err.message); 
     } finally { 
@@ -45,7 +48,43 @@ const AuditTrailScreen = () => {
     }
   };
 
+  const fetchSessions = async () => {
+    try {
+      const res = await apiClient.get('/api/v2/audit/session/list', { limit: 100 });
+      if (res?.success) {
+        setSessions(res.sessions || []);
+        if (!selectedSessionId && Array.isArray(res.sessions) && res.sessions.length) {
+          setSelectedSessionId(String(res.sessions[0].session_id));
+        }
+      }
+    } catch {
+      setSessions([]);
+    }
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      if (!selectedSessionId) {
+        setSessionEvents([]);
+        return;
+      }
+      try {
+        const res = await apiClient.get(`/api/v2/audit/session/timeline/${encodeURIComponent(selectedSessionId)}`);
+        if (res?.success) setSessionEvents(res.events || []);
+        else setSessionEvents([]);
+      } catch {
+        setSessionEvents([]);
+      }
+    };
+    load();
+  }, [selectedSessionId]);
+
   const handleFilterChange = (e) => setFilters(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+  const sessionSummary = useMemo(() => {
+    const s = sessions.find((x) => String(x.session_id) === String(selectedSessionId));
+    return s || null;
+  }, [sessions, selectedSessionId]);
 
   return (
     <PageContainer 
@@ -57,7 +96,7 @@ const AuditTrailScreen = () => {
           variant="outlined" 
           size="small" 
           startIcon={<RefreshIcon />} 
-          onClick={fetchLogs}
+          onClick={() => { fetchLogs(); fetchSessions(); }}
           disabled={isLoading}
           sx={{ fontWeight: 600 }}
         >
@@ -67,9 +106,16 @@ const AuditTrailScreen = () => {
     >
       {/* Main Content Area - Fixed height for scrolling */}
       <Box sx={{ height: 'calc(100vh - 140px)', p: 3, display: 'flex', flexDirection: 'column', gap: 3, overflow: 'hidden' }}>
+
+        <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
+          <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} variant="scrollable" scrollButtons="auto">
+            <Tab label="Logs" />
+            <Tab label="Sessions" />
+          </Tabs>
+        </Paper>
         
-        {/* Filters Section (Fixed at Top) */}
-        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, flexShrink: 0 }}>
+        {activeTab === 0 && (
+          <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, flexShrink: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <FilterIcon fontSize="small" color="action" />
             <Typography variant="subtitle2" fontWeight="bold" color="text.secondary">
@@ -137,6 +183,7 @@ const AuditTrailScreen = () => {
             </Grid>
           </form>
         </Paper>
+        )}
 
         {/* Results Table (Scrollable) */}
         <Paper 
@@ -153,7 +200,8 @@ const AuditTrailScreen = () => {
             <Alert severity="error" sx={{ borderRadius: 0 }}>{error}</Alert>
           )}
 
-          <TableContainer sx={{ flex: 1, overflowY: 'auto' }}>
+          {activeTab === 0 ? (
+            <TableContainer sx={{ flex: 1, overflowY: 'auto' }}>
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow>
@@ -216,6 +264,68 @@ const AuditTrailScreen = () => {
               </TableBody>
             </Table>
           </TableContainer>
+          ) : (
+            <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2, overflow: 'hidden', flex: 1 }}>
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <Typography variant="caption" fontWeight="bold" color="text.secondary">Session</Typography>
+                <Select
+                  size="small"
+                  value={selectedSessionId}
+                  onChange={(e) => setSelectedSessionId(e.target.value)}
+                  sx={{ minWidth: 320 }}
+                >
+                  {sessions.map((s) => (
+                    <MenuItem key={s.session_id} value={String(s.session_id)}>
+                      {String(s.session_id)} · {s.user} · {s.event_count} events
+                    </MenuItem>
+                  ))}
+                </Select>
+                {sessionSummary && (
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Chip size="small" label={`User: ${sessionSummary.user}`} />
+                    <Chip size="small" label={`Started: ${new Date(sessionSummary.started_at).toLocaleString()}`} />
+                    <Chip size="small" label={`Ended: ${new Date(sessionSummary.ended_at).toLocaleString()}`} />
+                  </Stack>
+                )}
+              </Stack>
+              <Divider />
+              <TableContainer sx={{ flex: 1, overflowY: 'auto' }}>
+                <Table stickyHeader size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 180 }}>Timestamp</TableCell>
+                      <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 180 }}>Event</TableCell>
+                      <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold' }}>Details</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {sessionEvents.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} align="center" sx={{ height: 200 }}>
+                          <HistoryIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                          <Typography variant="body2" color="text.secondary">No session events</Typography>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      sessionEvents.map((log) => (
+                        <TableRow key={log.id} hover>
+                          <TableCell sx={{ whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                            {new Date(log.timestamp).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <Chip label={log.action} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold', fontSize: '0.75rem', height: 24 }} />
+                          </TableCell>
+                          <TableCell>
+                            <AuditDetailView action={log.action} details={log.details} />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
         </Paper>
 
       </Box>

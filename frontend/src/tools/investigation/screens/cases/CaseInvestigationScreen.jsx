@@ -423,11 +423,11 @@ const CaseInvestigationScreen = () => {
                               <Stack spacing={1.5}>
                               <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #e0e0e0' }}>
                                   <Typography variant="caption" color="text.secondary">Total Volume</Typography>
-                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace">${facts.transactions.total_volume.toLocaleString()}</Typography>
+                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace">{Number(facts.transactions.total_volume || 0).toLocaleString()}</Typography>
                               </Stack>
                               <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #e0e0e0' }}>
                                   <Typography variant="caption" color="text.secondary">Avg Transaction</Typography>
-                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace">${facts.transactions.avg_amount.toFixed(2)}</Typography>
+                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace">{Number(facts.transactions.avg_amount || 0).toFixed(2)}</Typography>
                               </Stack>
                               <Stack direction="row" justifyContent="space-between">
                                   <Typography variant="caption" color="text.secondary">Cash Ratio</Typography>

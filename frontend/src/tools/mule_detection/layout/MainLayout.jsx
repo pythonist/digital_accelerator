@@ -4,6 +4,7 @@ import { Box } from '@mui/material';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { TOOL_HEADER_HEIGHT } from './layout.constants';
+import InvestigationDrawer from '../components/InvestigationDrawer';
 
 const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLModel, dataStats }) => {
   return (
@@ -41,6 +42,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLMod
           {children}
         </Box>
       </Box>
+      <InvestigationDrawer />
     </Box>
   );
 };

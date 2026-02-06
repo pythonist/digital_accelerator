@@ -58,7 +58,7 @@ const BaselineManual = ({ open, onClose }) => {
               1. The Statistical Engine
             </Typography>
             <Typography variant="body1" paragraph>
-              Unlike rule-based systems that look for fixed thresholds (e.g., "Amount {'>'} $10k"), the Baseline Engine uses <strong>Dynamic Statistical Profiling</strong>. It learns what is "normal" for each customer and flags significant deviations.
+              Unlike rule-based systems that look for fixed thresholds (e.g., "Amount {'>'} 10k"), the Baseline Engine uses <strong>Dynamic Statistical Profiling</strong>. It learns what is "normal" for each customer and flags significant deviations.
             </Typography>
 
             <Grid container spacing={3} sx={{ mt: 1 }}>

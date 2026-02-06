@@ -38,13 +38,15 @@ import {
   Link as LinkIcon, VpnKey, History as HistoryIcon
 } from '@mui/icons-material';
 
-const DataLoadScreen = () => {
+const DataLoadScreen = ({ setActiveScreen }) => {
   const navigate = useNavigate();
   const { setDatasetLoaded, checkDatasetStatus, loadCaseList } = useAppContext();
   
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeIngestTab, setActiveIngestTab] = useState(0);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [existingStats, setExistingStats] = useState(null);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
 
   // 1. Initial Data Load
   useEffect(() => {
@@ -80,13 +82,18 @@ const DataLoadScreen = () => {
   };
 
   const handlePurge = async () => {
-    if (window.confirm("Are you sure? This will delete all current data.")) {
-      try {
-        await apiClient.post('/api/v2/db/purge'); 
-        setExistingStats(null); 
-      } catch (err) {
-        alert("Failed to purge data: " + err.message);
-      }
+    setPurgeOpen(true);
+  };
+
+  const confirmPurge = async () => {
+    try {
+      await apiClient.post('/api/v2/db/purge');
+      setExistingStats(null);
+      setSnackbar({ open: true, message: 'Data purged', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: `Failed to purge data: ${err.message}`, severity: 'error' });
+    } finally {
+      setPurgeOpen(false);
     }
   };
 
@@ -97,10 +104,28 @@ const DataLoadScreen = () => {
       breadcrumbs={['System', 'Ingestion']}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)', overflow: 'hidden' }}>
+        <Dialog open={purgeOpen} onClose={() => setPurgeOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle>Purge & Re-upload</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              This will delete all current data in the active environment.
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setPurgeOpen(false)}>Cancel</Button>
+            <Button color="error" variant="contained" onClick={confirmPurge}>Purge</Button>
+          </DialogActions>
+        </Dialog>
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+          message={snackbar.message}
+        />
         
         {/* ✅ TABS: Always Visible */}
         <Box sx={{ px: 3, borderBottom: '1px solid #e0e0e0', bgcolor: 'white', flexShrink: 0 }}>
-          <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)} sx={{ minHeight: 48 }}>
+          <Tabs value={activeIngestTab} onChange={(e, v) => setActiveIngestTab(v)} sx={{ minHeight: 48 }}>
             <Tab 
                 icon={<CloudUploadIcon fontSize="small" />} 
                 iconPosition="start" 
@@ -120,7 +145,7 @@ const DataLoadScreen = () => {
         <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           
           {/* --- TAB 0: FILE UPLOAD (LOGIC HANDLED HERE) --- */}
-          {activeTab === 0 && (
+          {activeIngestTab === 0 && (
             <Box sx={{ flex: 1, overflowY: 'auto', p: 3 }}>
               {isLoadingStats ? (
                  <Box sx={{ p: 4, display: 'flex', justifyContent: 'center' }}><CircularProgress /></Box>
@@ -130,6 +155,7 @@ const DataLoadScreen = () => {
                     stats={existingStats} 
                     onPurge={handlePurge} 
                     navigate={navigate} 
+                    setActiveScreen={setActiveScreen}
                  />
               ) : (
                  // If no data, show Upload Panel
@@ -139,7 +165,7 @@ const DataLoadScreen = () => {
           )}
 
           {/* --- TAB 1: SQL CONNECTORS --- */}
-          {activeTab === 1 && (
+          {activeIngestTab === 1 && (
             <ConnectorManagerPanel onSyncComplete={handleCompletion} />
           )}
         </Box>
@@ -151,7 +177,7 @@ const DataLoadScreen = () => {
 // ============================================================================
 // SUB-COMPONENT 1: SNAPSHOT PANEL (Data Already Exists)
 // ============================================================================
-const SnapshotPanel = ({ stats, onPurge, navigate }) => {
+const SnapshotPanel = ({ stats, onPurge, navigate, setActiveScreen }) => {
     return (
         <Box sx={{ display: 'flex', justifyContent: 'center', height: '100%' }}>
           <Stack spacing={3} sx={{ maxWidth: 800, width: '100%' }}>
@@ -218,7 +244,15 @@ const SnapshotPanel = ({ stats, onPurge, navigate }) => {
 
             <Box display="flex" justifyContent="flex-end" gap={2}>
                  {/* ✅ Navigation to Ingestion History */}
-                 <Button variant="contained" size="large" startIcon={<HistoryIcon />} onClick={() => navigate('/investigation/history')}>
+                 <Button
+                   variant="contained"
+                   size="large"
+                   startIcon={<HistoryIcon />}
+                   onClick={() => {
+                     if (setActiveScreen) setActiveScreen('history');
+                     else navigate('/investigation/history');
+                   }}
+                 >
                     View Ingestion History
                  </Button>
             </Box>

@@ -1,7 +1,6 @@
 import os
 from flask import Flask, send_from_directory
 from flask_cors import CORS
-from api.services import services
 
 def create_app():
     app = Flask(__name__)
@@ -16,6 +15,7 @@ def create_app():
     CORS(app, supports_credentials=True)
 
     # Initialize Services
+    from api.services import services
     services.init_services()
 
     # --- REGISTER BLUEPRINTS ---

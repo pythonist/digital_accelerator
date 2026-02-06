@@ -9,6 +9,7 @@ import UniverseFilterBuilder from './components/UniverseFilterBuilder';
 import UniverseHistoryTable from './components/UniverseHistoryTable';
 import UniverseDashboardPanel from './components/UniverseDashboardPanel';
 import UniverseCatalogPanel from './components/UniverseCatalogPanel';
+import { useCalibrationRun } from '../../../context/CalibrationRunContext';
 
 /**
  * Transaction Universe Screen - Main Orchestrator
@@ -23,6 +24,7 @@ const TransactionUniverseScreen = ({ calibrationRunId, snapshotId, onComplete, n
   const [scenarioId, setScenarioId] = useState(() => sessionStorage.getItem('btsy_selected_scenario_id') || '');
   const [scenarioPreset, setScenarioPreset] = useState(null);
   const [toast, setToast] = useState('');
+  const { activeRunIdText, activeRunLogic } = useCalibrationRun();
   const selectedScenario = useMemo(() => {
     if (!scenarioId) return null;
     return (scenarios || []).find((s) => String(s.scenario_id) === String(scenarioId)) || null;
@@ -129,7 +131,8 @@ const TransactionUniverseScreen = ({ calibrationRunId, snapshotId, onComplete, n
         ...universeData,
         calibration_run_id: calibrationRunId,
         scenario_id: scenarioId || null,
-        snapshot_id: snapshotId
+        snapshot_id: snapshotId,
+        run_id: activeRunIdText || null
       };
       
       console.log('[UNIVERSE] Creating with data:', completeData);
@@ -141,7 +144,7 @@ const TransactionUniverseScreen = ({ calibrationRunId, snapshotId, onComplete, n
       const createdUniverseId = result.universe_id || result.id;
       if (createdUniverseId) {
         const statsRes = await btsyApi.universe.getUniverseStats(createdUniverseId);
-        if (statsRes.success) setDashboardStats(statsRes.data);
+        if (statsRes.success) setDashboardStats({ ...statsRes.data, universe_id: createdUniverseId });
       }
       
     } catch (err) {
@@ -183,7 +186,7 @@ const TransactionUniverseScreen = ({ calibrationRunId, snapshotId, onComplete, n
       setError(null);
       const res = await btsyApi.universe.getUniverseStats(universeId);
       if (res.success) {
-        setDashboardStats(res.data);
+        setDashboardStats({ ...res.data, universe_id: universeId });
       }
     } catch (err) {
       setError(err.message || 'Failed to load universe statistics');
@@ -374,7 +377,7 @@ const TransactionUniverseScreen = ({ calibrationRunId, snapshotId, onComplete, n
                 : { success: false };
               setSelectedUniverse(selected.success ? selected.data : null);
               const statsRes = await btsyApi.universe.getUniverseStats(universeId);
-              if (statsRes.success) setDashboardStats(statsRes.data);
+              if (statsRes.success) setDashboardStats({ ...statsRes.data, universe_id: universeId });
               if (navigateTo) navigateTo('behavior');
             }}
           />

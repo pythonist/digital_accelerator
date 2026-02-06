@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from "@context/AppContext";
 import apiClient from "@services/api";
+import { formatNumber } from "@investigation/utils/format";
 
 // ✅ Import Layout Components
 import PageContainer from "@investigation-layout/PageContainer";
@@ -248,7 +249,7 @@ const CompareCasesScreen = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="body2" color="text.secondary">Total Volume</Typography>
                         <Typography variant="body2" fontWeight="bold">
-                          ${result.case_a.volume.toLocaleString()}
+                          {formatNumber(result.case_a.volume)}
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -315,7 +316,7 @@ const CompareCasesScreen = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="body2" color="text.secondary">Total Volume</Typography>
                         <Typography variant="body2" fontWeight="bold">
-                          ${result.case_b.volume.toLocaleString()}
+                          {formatNumber(result.case_b.volume)}
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -453,7 +454,7 @@ const CompareCasesScreen = () => {
                             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                                 <Typography variant="body2" fontWeight="bold" color="#16a34a">
-                                  ${parseFloat(amt).toLocaleString()}
+                                  {formatNumber(amt)}
                                 </Typography>
                                 <Chip 
                                   label={txn.type || 'Trf'} 
@@ -493,7 +494,7 @@ const CompareCasesScreen = () => {
                             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.5 }}>
                                 <Typography variant="body2" fontWeight="bold" color="#16a34a">
-                                  ${parseFloat(amt).toLocaleString()}
+                                  {formatNumber(amt)}
                                 </Typography>
                                 <Chip 
                                   label={txn.type || 'Trf'} 

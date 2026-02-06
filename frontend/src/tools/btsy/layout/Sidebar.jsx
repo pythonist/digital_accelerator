@@ -79,7 +79,7 @@ const menuSections = [
       { id: 'runs', label: 'Calibration Runs', icon: <PlayArrowIcon /> },
       { id: 'scenarios', label: 'Scenarios', icon: <AssessmentIcon /> },
       { id: 'universe', label: 'Transaction Universe', icon: <InventoryIcon /> },
-      { id: 'behavior', label: 'Behavior Patterns', icon: <PsychologyIcon /> },
+      { id: 'behavior', label: 'Cortex Scenario Builder', icon: <PsychologyIcon /> },
       { id: 'calibration', label: 'Scenario Workbench', icon: <TuneIcon /> },
     ]
   },
