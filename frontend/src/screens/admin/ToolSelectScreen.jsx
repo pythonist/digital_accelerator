@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 import { useNavigate } from 'react-router-dom';
 
@@ -11,28 +11,18 @@ import SentinelLogo from '../../assets/PwC_2025_Logo.svg';
 // MUI Imports
 
 import {
-
   Box,
-
   Typography,
-
   Grid,
-
   Paper,
-
   Divider,
-
   List,
-
   ListItemButton,
-
   ListItemIcon,
-
   ListItemText,
-
   useTheme
-
 } from '@mui/material';
+import IconButton from '@mui/material/IconButton';
 
 
 
@@ -55,12 +45,10 @@ import {
   Tune,
 
   ChevronRight,
-
-  Circle,AccountBalance
-
+  Circle,
+  AccountBalance,
+  MenuOpen
 } from '@mui/icons-material';
-
-
 
 const ToolSelectScreen = () => {
 
@@ -93,6 +81,7 @@ const ToolSelectScreen = () => {
 
 
   const isAdmin = userRole === 'TENANT_ADMIN';
+  const [isSidebarOpen, setSidebarOpen] = useState(false);
 
 
 
@@ -215,184 +204,136 @@ const ToolSelectScreen = () => {
 
 
       {/* --- SIDEBAR --- */}
-
       <Box sx={{ 
-
-        width: 260, 
-
+        width: isSidebarOpen ? 260 : 72, 
         bgcolor: colors.sidebar, 
-
         color: '#fff', 
-
         display: 'flex', 
-
         flexDirection: 'column',
-
-        flexShrink: 0
-
+        flexShrink: 0,
+        transition: 'width 0.2s ease',
+        position: 'relative'
       }}>
 
-        
-
         {/* Header */}
-
         <Box
-
           sx={{
-
             p: 3,
-
             borderBottom: '1px solid rgba(255,255,255,0.1)',
-
             display: 'flex',
-
-            alignItems: 'center'
-
+            alignItems: 'center',
+            gap: 1
           }}
-
         >
-
-          {/* Logo */}
-
           <Box
-
             component="img"
-
             src={SentinelLogo}
-
             alt="Sentinel"
-
             sx={{
-
               width: 28,
-
               height: 28,
-
-              mr: 1.75,
-
               flexShrink: 0,
               filter: 'brightness(0) invert(1)'
-
             }}
-
           />
 
+          {isSidebarOpen && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1, flex: 1 }}>
+              <Typography
+                variant="subtitle1"
+                sx={{
+                  fontWeight: 800,
+                  lineHeight: 1.1,
+                  color: '#ffffff',
+                  letterSpacing: '0.22em'
+                }}
+              >
+                FCIP
+              </Typography>
 
-
-          {/* Text Stack */}
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
-
-            <Typography
-
-              variant="subtitle1"
-
-              sx={{
-
-                fontWeight: 800,
-
-                lineHeight: 1.1,
-
-                color: '#ffffff',
-                letterSpacing: '0.22em'
-
-              }}
-
-            >
-
-              FCIP
-
-            </Typography>
-
-
-
-            
-
-            <Typography
-              variant="caption"
-              sx={{
-                mt: 0.75,
-                color: '#94a3b8',
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                fontWeight: 600,
-                fontFamily: 'monospace'
-              }}
-            >
-              {activeEnv}
-            </Typography>
-
-          </Box>
+              <Typography
+                variant="caption"
+                sx={{
+                  mt: 0.75,
+                  color: '#94a3b8',
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  fontWeight: 600,
+                  fontFamily: 'monospace'
+                }}
+              >
+                {activeEnv}
+              </Typography>
+            </Box>
+          )}
 
         </Box>
-
-
 
         {/* User Block */}
-
         <Box sx={{ p: 3 }}>
+          {isSidebarOpen && (
+            <Typography variant="caption" sx={{ color: '#718096', mb: 0.5, display: 'block', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+              Logged in as
+            </Typography>
+          )}
 
-          <Typography variant="caption" sx={{ color: '#718096', mb: 0.5, display: 'block', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+          {isSidebarOpen && (
+            <Typography variant="body2" sx={{ fontWeight: 500, color: '#fff' }}>
+              {username}
+            </Typography>
+          )}
 
-            Logged in as
-
-          </Typography>
-
-          <Typography variant="body2" sx={{ fontWeight: 500, color: '#fff' }}>
-
-            {username}
-
-          </Typography>
-
-          <Typography variant="caption" sx={{ color: '#a0aec0' }}>
-
-            {userRole || 'Analyst'}
-
-          </Typography>
-
+          {isSidebarOpen && (
+            <Typography variant="caption" sx={{ color: '#a0aec0' }}>
+              {userRole || 'Analyst'}
+            </Typography>
+          )}
         </Box>
-
-
 
         <Box sx={{ flex: 1 }} />
 
-
-
         {/* Menu */}
-
         <List dense sx={{ px: 2, pb: 2 }}>
-
           {isAdmin && (
 
-            <ListItemButton onClick={() => navigate('/admin')} sx={{ borderRadius: 1, mb: 0.5 }}>
-
+            <ListItemButton onClick={() => navigate('/admin')} sx={{ borderRadius: 1, mb: 0.5, justifyContent: isSidebarOpen ? 'flex-start' : 'center' }}>
               <ListItemIcon sx={{ minWidth: 36, color: '#a0aec0' }}><AdminPanelSettings fontSize="small" /></ListItemIcon>
-
-              <ListItemText primary="Admin Console" primaryTypographyProps={{ fontSize: '0.85rem', color: '#e2e8f0' }} />
-
+              {isSidebarOpen && <ListItemText primary="Admin Console" primaryTypographyProps={{ fontSize: '0.85rem', color: '#e2e8f0' }} />}
             </ListItemButton>
-
           )}
 
-          <ListItemButton onClick={disconnectEnv} sx={{ borderRadius: 1, mb: 0.5 }}>
-
+          <ListItemButton onClick={disconnectEnv} sx={{ borderRadius: 1, mb: 0.5, justifyContent: isSidebarOpen ? 'flex-start' : 'center' }}>
             <ListItemIcon sx={{ minWidth: 36, color: '#a0aec0' }}><ArrowBack fontSize="small" /></ListItemIcon>
-
-            <ListItemText primary="Switch Environment" primaryTypographyProps={{ fontSize: '0.85rem', color: '#e2e8f0' }} />
-
+            {isSidebarOpen && <ListItemText primary="Switch Environment" primaryTypographyProps={{ fontSize: '0.85rem', color: '#e2e8f0' }} />}
           </ListItemButton>
 
-          <ListItemButton onClick={handleLogout} sx={{ borderRadius: 1 }}>
-
+          <ListItemButton onClick={handleLogout} sx={{ borderRadius: 1, justifyContent: isSidebarOpen ? 'flex-start' : 'center' }}>
             <ListItemIcon sx={{ minWidth: 36, color: '#a0aec0' }}><Logout fontSize="small" /></ListItemIcon>
-
-            <ListItemText primary="Sign Out" primaryTypographyProps={{ fontSize: '0.85rem', color: '#e2e8f0' }} />
-
+            {isSidebarOpen && <ListItemText primary="Sign Out" primaryTypographyProps={{ fontSize: '0.85rem', color: '#e2e8f0' }} />}
           </ListItemButton>
-
         </List>
 
+        <IconButton
+          onClick={() => setSidebarOpen((v) => !v)}
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            right: isSidebarOpen ? -12 : -12,
+            transform: 'translateY(-50%)',
+            bgcolor: '#0f172a',
+            color: '#e2e8f0',
+            border: '1px solid rgba(255,255,255,0.12)',
+            width: 28,
+            height: 28,
+            '&:hover': { bgcolor: '#111827' }
+          }}
+        >
+          <MenuOpen fontSize="small" sx={{ transform: isSidebarOpen ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform 0.2s ease' }} />
+        </IconButton>
       </Box>
+
+
+
 
 
 
