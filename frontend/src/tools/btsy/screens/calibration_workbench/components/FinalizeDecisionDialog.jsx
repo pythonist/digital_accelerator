@@ -244,7 +244,7 @@ const FinalizeDecisionDialog = ({
   const decisionCards = useMemo(() => {
     const out = [];
     out.push({
-      step: 'Step 3.1 — Aggregation Lens',
+      step: 'Step 3.1 — Interpretation Lens',
       rows: [
         `Lens: ${lensText}`,
         `Entities reduced: ${formatNum(av?.summary?.entities)}`,
@@ -309,7 +309,7 @@ const FinalizeDecisionDialog = ({
     let boundaryTab = 'threshold';
 
     const stepName = (st, bt) => {
-      if (st === 'reduce') return { step: 'Step 3.1', name: 'Aggregation Lens' };
+      if (st === 'reduce') return { step: 'Step 3.1', name: 'Interpretation Lens' };
       if (st === 'signal') return { step: 'Step 3.2', name: 'Signal Distribution' };
       if (st === 'boundary') {
         if (bt === 'threshold') return { step: 'Step 3.3', name: 'Threshold Simulation' };
@@ -352,7 +352,7 @@ const FinalizeDecisionDialog = ({
           return { action: 'Opened Review & Finalize', meaning: 'User requested a decision audit before freezing.' };
         }
         if (et === 'aggregation_updated') {
-          return { action: 'System saved aggregation lens', meaning: `Lens persisted: ${payload.aggregation_lens || '—'}.` };
+          return { action: 'System saved interpretation lens', meaning: `Lens persisted: ${payload.aggregation_lens || '—'}.` };
         }
         if (et === 'strategy_added') {
           return { action: 'System saved strategy', meaning: `Strategy ${payload.strategy_id || '—'} created for threshold simulation.` };
@@ -581,7 +581,7 @@ const FinalizeDecisionDialog = ({
                 </Typography>
                 {!finalStatement && (
                   <Alert severity="warning">
-                    Missing boundary or computed stats. Create/select a boundary for the current aggregation lens.
+                    Missing boundary or computed stats. Create/select a boundary for the current interpretation lens.
                   </Alert>
                 )}
                 {finalStatement && (
@@ -650,7 +650,7 @@ const FinalizeDecisionDialog = ({
                   Freeze Readiness Checklist
                 </Typography>
                 <Stack spacing={0.5}>
-                  <FormControlLabel control={<Checkbox checked={readiness.aggregation} />} label="Aggregation lens set" />
+                  <FormControlLabel control={<Checkbox checked={readiness.aggregation} />} label="Interpretation lens set" />
                   <FormControlLabel control={<Checkbox checked={readiness.boundary} />} label="Boundary created" />
                   <FormControlLabel control={<Checkbox checked={readiness.ks} />} label="KS validation run" />
                   <FormControlLabel control={<Checkbox checked={readiness.stability} />} label={`Stability acceptable (${readiness.stabilityLabel})`} />

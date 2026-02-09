@@ -40,6 +40,7 @@ const WorkbenchLeftPanel = ({
   aggregateView,
   onSessionUpdated,
   loading,
+  runSelectionLocked,
   onNavigateToBoundary,
   onNavigateToValidate
 }) => {
@@ -110,7 +111,7 @@ const WorkbenchLeftPanel = ({
   ];
 
   const lensCardsTime = [
-    { key: 'full', title: 'WHOLE RANGE', desc: 'Use the full time range for aggregation.' },
+    { key: 'full', title: 'WHOLE RANGE', desc: 'Use the full time range for interpretation.' },
     { key: 'worst_day', title: 'WORST DAY', desc: 'Focus on the most extreme day.' },
     { key: 'rolling_peak', title: 'ROLLING PEAK', desc: 'Peak over rolling window.' },
     { key: 'sustained', title: 'SUSTAINED', desc: 'Require repeated behaviour across N days.' },
@@ -151,19 +152,19 @@ const WorkbenchLeftPanel = ({
               <Chip label={`Window: ${selectedRun.config?.metrics?.[0]?.window || '—'}`} />
               {session?.status && <Chip label={`Session: ${session.status}`} />}
               {aggregation?.entity_collapse && aggregation?.time_lens && (
-                <Chip label={`Lens: ${String(aggregation.entity_collapse).toUpperCase()} • ${String(aggregation.time_lens).toUpperCase()}`} />
+                <Chip label={`Interpretation Lens: ${String(aggregation.entity_collapse).toUpperCase()} • ${String(aggregation.time_lens).toUpperCase()}`} />
               )}
               {selectedBoundaryId && <Chip label={`Boundary: B-${String(selectedBoundaryId).padStart(3, '0')}`} />}
             </Box>
           )}
           {selectedRun && !selectedSessionId && (
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Select or create a calibration session to persist strategies, boundaries, and validation.
+              Create a calibration session to persist lens, boundaries, and validation.
             </Typography>
           )}
           {selectedRun && selectedSessionId && (
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              This session stores your lens, boundaries, and validation evidence.
+              This session is locked to the selected behaviour run.
             </Typography>
           )}
           <Stack direction="row" spacing={1} flexWrap="wrap">
@@ -186,14 +187,19 @@ const WorkbenchLeftPanel = ({
               Session is frozen. Lens and boundary creation are locked for audit safety.
             </Alert>
           )}
+          {runSelectionLocked && (
+            <Alert severity="info">
+              Behaviour source is locked for this session.
+            </Alert>
+          )}
         </Stack>
       </Paper>
 
       <Paper sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 0 }}>
         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Behaviour Selection</Typography>
-        <FormControl fullWidth size="small" sx={{ mb: 1 }} data-guide-id="wb-behavior-run-select">
-          <InputLabel>Quick switch</InputLabel>
-          <Select value={selectedBehaviorRunId} label="Quick switch" onChange={(e) => setSelectedBehaviorRunId(e.target.value)}>
+        <FormControl fullWidth size="small" sx={{ mb: 1 }} data-guide-id="wb-behavior-run-select" disabled={runSelectionLocked}>
+          <InputLabel>Select run</InputLabel>
+          <Select value={selectedBehaviorRunId} label="Select run" onChange={(e) => setSelectedBehaviorRunId(e.target.value)}>
             {runOptionsReady.map((r) => (
               <MenuItem key={r.behavior_run_id} value={String(r.behavior_run_id)}>
                 {`R-${String(r.behavior_run_id).padStart(3, '0')} • ${r.config?.metrics?.[0]?.name || 'metric'} • ${r.entity_level} • ${r.config?.metrics?.[0]?.window || '—'}`}
@@ -208,6 +214,7 @@ const WorkbenchLeftPanel = ({
           placeholder="Search behaviour runs"
           fullWidth
           sx={{ mb: 1 }}
+          disabled={runSelectionLocked}
         />
         <TableContainer sx={{ maxHeight: 220, border: '1px solid', borderColor: 'divider' }}>
           <Table size="small" stickyHeader>
@@ -230,8 +237,8 @@ const WorkbenchLeftPanel = ({
                     key={r.behavior_run_id}
                     hover
                     selected={selected}
-                    sx={{ cursor: 'pointer' }}
-                    onClick={() => setSelectedBehaviorRunId(String(r.behavior_run_id))}
+                    sx={{ cursor: runSelectionLocked ? 'default' : 'pointer' }}
+                    onClick={() => !runSelectionLocked && setSelectedBehaviorRunId(String(r.behavior_run_id))}
                   >
                     <TableCell sx={{ fontWeight: selected ? 700 : 500 }}>
                       {`${r.behavior_run_id === recentRunId ? '★ ' : ''}${metric}`}
@@ -308,9 +315,9 @@ const WorkbenchLeftPanel = ({
       </Paper>
 
       <Paper sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 0 }} data-guide-id="wb-aggregation-panel">
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Aggregation Lens</Typography>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Interpretation Lens</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
-          Converts transaction-level behaviour into one value per entity so entities can be compared and split.
+          Collapses Step-2 signal time-series into one value per entity for comparison.
         </Typography>
 
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>Per Entity</Typography>
@@ -382,7 +389,7 @@ const WorkbenchLeftPanel = ({
 
         {aggregateView?.summary && (
           <Box sx={{ mt: 1 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Output Preview</Typography>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Lens Output Preview</Typography>
             <TableContainer sx={{ border: '1px solid', borderColor: 'divider' }}>
               <Table size="small">
                 <TableHead>

@@ -458,7 +458,7 @@ const WorkbenchValidationPanel = ({
 
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-        <Typography variant="body2" sx={{ color: '#64748b', mb: 1 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
           Context resolver
         </Typography>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
@@ -474,18 +474,18 @@ const WorkbenchValidationPanel = ({
             sx={{ mb: 2 }}
             action={(
               <Button color="inherit" size="small" onClick={() => onNavigateToRiskSplit && onNavigateToRiskSplit()}>
-                Create boundary using current aggregation
+                Create boundary using current lens
               </Button>
             )}
           >
-            No boundary exists for the selected behaviour + aggregation lens in this session.
+            No boundary exists for the selected behaviour + interpretation lens in this session.
           </Alert>
         )}
 
         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
           Boundaries
         </Typography>
-        <Typography variant="body2" sx={{ color: '#64748b', mb: 1 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
           A boundary is a behavioural cutoff used to split entities into ATL vs BTL for validation. It is not a risk decision.
         </Typography>
         <TableContainer sx={{ border: '1px solid #e2e8f0', mb: 1 }}>
@@ -524,7 +524,7 @@ const WorkbenchValidationPanel = ({
               })}
               {boundaries.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4} sx={{ color: '#64748b' }}>No boundaries created.</TableCell>
+                  <TableCell colSpan={4} sx={{ color: 'text.secondary' }}>No boundaries created.</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -554,8 +554,8 @@ const WorkbenchValidationPanel = ({
           <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
             What changed since last boundary
           </Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mb: 1 }}>
-            Compare two boundaries created under the same behaviour + aggregation lens. This shows churn and overlap.
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
+            Compare two boundaries created under the same behaviour + interpretation lens. This shows churn and overlap.
           </Typography>
           <Typography variant="body2" sx={{ color: '#0f172a', fontWeight: 700, mb: 1 }}>
             Boundary Comparison

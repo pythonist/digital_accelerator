@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Grid, Paper, Typography, TextField, Select, MenuItem, FormControl, InputLabel, Button, Chip, Alert, Table, TableHead, TableRow, TableCell, TableBody, TablePagination, Tooltip, Tabs, Tab, TableContainer, ToggleButtonGroup, ToggleButton, IconButton } from '@mui/material';
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import { Box, Grid, Paper, Typography, TextField, Select, MenuItem, FormControl, InputLabel, Button, Alert, Table, TableHead, TableRow, TableCell, TableBody, TablePagination, Tabs, Tab, TableContainer, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import btsyApi from '../../services/btsyApi';
 import BehaviorQualityPanel from './BehaviorQualityPanel';
 import BehaviorExplainPanel from './BehaviorExplainPanel';
@@ -8,6 +7,8 @@ import BehaviorProgressPanel from './BehaviorProgressPanel';
 import BehaviorTopKPanel from './BehaviorTopKPanel';
 import MetricOverTimePanel from './MetricOverTimePanel';
 import BehaviorComparisonPanel from './BehaviorComparisonPanel';
+import BehaviorSignalIntelligencePanel from './BehaviorSignalIntelligencePanel';
+import BehaviorInteractionIntelligencePanel from './BehaviorInteractionIntelligencePanel';
 import AccountBehaviorTimelineDialog from './AccountBehaviorTimelineDialog';
 import { getWindowIntent } from './windowIntent';
 
@@ -41,7 +42,6 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
   });
   const [timeline, setTimeline] = useState({ open: false, entity_id: null });
 
-  const activeRun = useMemo(() => runs.find((r) => r.behavior_run_id === activeRunId) || null, [runs, activeRunId]);
   const activeWindow = activeRun?.config?.metrics?.[0]?.window || config?.metrics?.[0]?.window;
   const activeWindowIntent = getWindowIntent(activeWindow);
 
@@ -109,6 +109,11 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
       setError(res.error || 'Failed to run behavior');
     }
   };
+  const openCalibrationWorkbench = (runId) => {
+    if (!runId) return;
+    sessionStorage.setItem('btsy_step3_behavior_run_id', String(runId));
+    window.dispatchEvent(new CustomEvent('btsy:navigate', { detail: { screen: 'calibration' } }));
+  };
 
   const handleChangePage = async (_event, newPage) => {
     setPage(newPage);
@@ -145,53 +150,79 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
     reloadPreview();
   }, [previewMode, previewFilters, rowsPerPage, activeRunId]);
 
-  const behaviourValueTooltip = useMemo(() => {
-    const w = activeWindow || '—';
-    const wText = String(w).toUpperCase();
-    if (String(config.metrics?.[0]?.type || '').toUpperCase() === 'SUM' && String(config.metrics?.[0]?.column || '') === 'transaction_amount') {
-      return `This value represents the total transaction amount for this account, calculated using a rolling lookback window of ${wText}, ending at this transaction timestamp.`;
-    }
-    return `This value represents the behaviour value for this account, calculated using a rolling lookback window of ${wText}, ending at this transaction timestamp.`;
-  }, [activeWindow, config.metrics]);
+  const activeRun = useMemo(() => runs.find((r) => r.behavior_run_id === activeRunId) || null, [runs, activeRunId]);
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 700 }}>Behaviour Builder</Typography>
+    <Box sx={{ p: 2 }}>
+      <Box sx={{ mb: 1.5 }}>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>Behaviour Builder</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
           Explore, understand, and compare behavioural signals before they are used in scenarios. No alerts are generated here.
         </Typography>
       </Box>
-      <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
-        This step focuses on behaviour exploration. Alerts and scenario execution frequency are configured in later steps.
+      <Alert severity="info" variant="outlined" sx={{ mb: 1.5 }}>
+        This step focuses on behaviour analysis. Alerts and scenario execution frequency are configured in later steps.
       </Alert>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
       {!selectedUniverse && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Select a universe in Transaction Universe screen to proceed.
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          Select a transaction universe to proceed.
         </Alert>
+      )}
+      {activeRun && (
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Run Context</Typography>
+          <Grid container spacing={1}>
+            <Grid item xs={12} md={2}><Typography variant="caption">Run</Typography><Typography variant="body2">{`R-${String(activeRun.behavior_run_id).padStart(3, '0')}`}</Typography></Grid>
+            <Grid item xs={12} md={3}><Typography variant="caption">Entity Level</Typography><Typography variant="body2">{activeRun.entity_level}</Typography></Grid>
+            <Grid item xs={12} md={3}><Typography variant="caption">Metric</Typography><Typography variant="body2">{activeRun.config?.metrics?.[0]?.name || 'metric'}</Typography></Grid>
+            <Grid item xs={12} md={2}><Typography variant="caption">Window</Typography><Typography variant="body2">{activeRun.config?.metrics?.[0]?.window || '—'}</Typography></Grid>
+            <Grid item xs={12} md={2}><Typography variant="caption">Rows</Typography><Typography variant="body2">{(activeRun.total_rows || 0).toLocaleString()}</Typography></Grid>
+          </Grid>
+          <Box sx={{ mt: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button variant="outlined" size="small" onClick={() => openCalibrationWorkbench(activeRun.behavior_run_id)}>
+              Open Calibration Workbench
+            </Button>
+          </Box>
+        </Paper>
       )}
       {selectedUniverse && (
         <BehaviorExplainPanel universe={selectedUniverse} config={config} />
       )}
       {selectedUniverse && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Universe</Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
-            <Chip label={selectedUniverse.universe_name} />
-            <Chip label={`Rows: ${selectedUniverse.transaction_count?.toLocaleString()}`} />
-            {selectedUniverse.unique_accounts && <Chip label={`Entities: ${selectedUniverse.unique_accounts} accounts`} />}
-            {selectedUniverse.date_range_start && selectedUniverse.date_range_end && (
-              <Chip label={`${new Date(selectedUniverse.date_range_start).toLocaleDateString()} → ${new Date(selectedUniverse.date_range_end).toLocaleDateString()}`} />
-            )}
-          </Box>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Universe</Typography>
+          <Table size="small">
+            <TableBody>
+              <TableRow>
+                <TableCell>Universe</TableCell>
+                <TableCell>{selectedUniverse.universe_name}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Rows</TableCell>
+                <TableCell>{selectedUniverse.transaction_count?.toLocaleString()}</TableCell>
+              </TableRow>
+              {selectedUniverse.unique_accounts && (
+                <TableRow>
+                  <TableCell>Entities</TableCell>
+                  <TableCell>{selectedUniverse.unique_accounts} accounts</TableCell>
+                </TableRow>
+              )}
+              {selectedUniverse.date_range_start && selectedUniverse.date_range_end && (
+                <TableRow>
+                  <TableCell>Date Range</TableCell>
+                  <TableCell>{`${new Date(selectedUniverse.date_range_start).toLocaleDateString()} → ${new Date(selectedUniverse.date_range_end).toLocaleDateString()}`}</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </Paper>
       )}
       <BehaviorProgressPanel stage={stage} />
 
       {selectedUniverse && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>Config</Typography>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>Configuration</Typography>
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth size="small" sx={{ mb: 1 }}>
@@ -261,18 +292,18 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
               )}
             </Grid>
           </Grid>
-          <Typography variant="body2" sx={{ mt: 1, color: '#475569' }}>
+          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
             Computing {config.metrics[0].name} = {config.metrics[0].type}({config.metrics[0].column}) per {config.entity_level.toUpperCase()} over {config.metrics[0].window}.
           </Typography>
-          <Button variant="contained" sx={{ bgcolor: '#D04A02', mt: 2 }} onClick={runBehavior} disabled={!selectedUniverse}>
-            Run Behavior
+          <Button variant="contained" sx={{ mt: 1.5 }} onClick={runBehavior} disabled={!selectedUniverse}>
+            Run Behaviour
           </Button>
         </Paper>
       )}
 
       {selectedUniverse && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>Runs</Typography>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>Runs</Typography>
           <TableContainer>
             <Table size="small">
               <TableHead>
@@ -282,7 +313,7 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
                   <TableCell>Entity</TableCell>
                   <TableCell>Window</TableCell>
                   <TableCell align="right">Rows</TableCell>
-                  <TableCell>Run Time</TableCell>
+                  <TableCell>Run Timestamp</TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
               </TableHead>
@@ -310,8 +341,8 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
                 ))}
                 {runs.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} sx={{ color: '#64748b' }}>
-                      No runs yet.
+                    <TableCell colSpan={7} sx={{ color: 'text.secondary' }}>
+                      No runs available.
                     </TableCell>
                   </TableRow>
                 )}
@@ -322,23 +353,20 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
       )}
 
       {selectedUniverse && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2, mb: 1 }}>
             <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Preview Output</Typography>
-              <Typography variant="body2" sx={{ color: '#64748b' }}>
-                Showing behaviour values aligned to transaction timestamps. Each row represents the behaviour state at that point in time. Behaviour values are computed at each transaction timestamp using rolling windows. Therefore, behaviour rows equal transaction rows by design.
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Preview Output</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Behaviour values aligned to transaction timestamps. Rows represent behaviour state at each transaction timestamp using rolling windows.
               </Typography>
             </Box>
-            <Tooltip title="Canonical shape: entity_id, as_of_date, metric_name, metric_value. No thresholds.">
-              <Chip label="Explain" size="small" />
-            </Tooltip>
           </Box>
           <Box sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               <TextField
                 size="small"
-                label="Search Account"
+                label="Search Entity"
                 value={previewFilters.entity_search}
                 onChange={(e) => setPreviewFilters((p) => ({ ...p, entity_search: e.target.value }))}
                 sx={{ width: 220 }}
@@ -388,27 +416,20 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
               onChange={(_e, v) => v && setPreviewMode(v)}
             >
               <ToggleButton value="transactions">Transactions</ToggleButton>
-              <ToggleButton value="entity_last">Per Entity (last)</ToggleButton>
-              <ToggleButton value="entity_max">Per Entity (max)</ToggleButton>
-              <ToggleButton value="entity_avg">Per Entity (avg)</ToggleButton>
+              <ToggleButton value="entity_last">Entity (last)</ToggleButton>
+              <ToggleButton value="entity_max">Entity (max)</ToggleButton>
+              <ToggleButton value="entity_avg">Entity (avg)</ToggleButton>
             </ToggleButtonGroup>
           </Box>
           <TableContainer sx={{ maxHeight: 240 }}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell>Account</TableCell>
-                  <TableCell>Transaction Timestamp</TableCell>
-                  <TableCell>Behaviour</TableCell>
+                  <TableCell>Entity</TableCell>
+                  <TableCell>Timestamp</TableCell>
+                  <TableCell>Metric</TableCell>
                   <TableCell align="right">
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5 }}>
-                      <Box component="span">Behaviour Value</Box>
-                      <Tooltip title={behaviourValueTooltip}>
-                        <IconButton size="small" sx={{ color: 'text.secondary' }}>
-                          <InfoOutlinedIcon fontSize="inherit" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
+                    <Box component="span">Metric Value</Box>
                   </TableCell>
                   <TableCell align="right">Actions</TableCell>
                 </TableRow>
@@ -426,14 +447,14 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
                         onClick={() => setTimeline({ open: true, entity_id: row.entity_id })}
                         sx={{ textTransform: 'none' }}
                       >
-                        View Behaviour Timeline
+                        View Timeline
                       </Button>
                     </TableCell>
                   </TableRow>
                 ))}
                 {previewRows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} sx={{ color: '#64748b' }}>
+                    <TableCell colSpan={5} sx={{ color: 'text.secondary' }}>
                       Select a run to view preview rows.
                     </TableCell>
                   </TableRow>
@@ -455,6 +476,8 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
       <Box sx={{ mt: 2 }}>
         <Tabs value={activeTab} onChange={(_e, v) => setActiveTab(v)}>
           <Tab label="Behaviour Quality" value="quality" />
+          <Tab label="Signal Intelligence" value="intelligence" />
+          <Tab label="Behaviour Interaction Intelligence" value="interaction" />
           <Tab label="Behaviour Comparison" value="compare" />
         </Tabs>
       </Box>
@@ -463,6 +486,16 @@ const BehaviorBuilderScreen = ({ calibrationRunId }) => {
           {activeRunId && <BehaviorQualityPanel runId={activeRunId} />}
           {activeRunId && <MetricOverTimePanel runId={activeRunId} />}
           {activeRunId && <BehaviorTopKPanel runId={activeRunId} onViewTimeline={(entity_id) => setTimeline({ open: true, entity_id })} />}
+        </>
+      )}
+      {activeTab === 'intelligence' && (
+        <>
+          {activeRunId && <BehaviorSignalIntelligencePanel runId={activeRunId} />}
+        </>
+      )}
+      {activeTab === 'interaction' && (
+        <>
+          {activeRunId && <BehaviorInteractionIntelligencePanel runId={activeRunId} />}
         </>
       )}
       {activeTab === 'compare' && (

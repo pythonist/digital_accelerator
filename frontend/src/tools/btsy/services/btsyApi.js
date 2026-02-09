@@ -269,6 +269,23 @@ const btsyApi = {
     }
   },
 
+  behaviour: {
+    reconstruct: async ({ behavior_run_id, entity_id, as_of_date, entity_level = 'account', created_by = 'user' }) => {
+      const response = await axios.post(
+        `/api/behaviour/reconstruct`,
+        {
+          behavior_run_id,
+          entity_id,
+          as_of_date,
+          entity_level,
+          created_by
+        },
+        { headers: getHeaders() }
+      );
+      return response.data;
+    }
+  },
+
   // Transaction Universe endpoints
   universe: {
     getFoundationSummary: async (snapshotId) => {
@@ -571,6 +588,61 @@ btsyApi.behavior = {
   getEvidence: async (runId) => {
     const response = await axios.get(
       `${API_BASE}/behavior/run/${runId}/evidence`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  getSignalIntelligence: async (runId, compareRunId = null) => {
+    const q = new URLSearchParams();
+    if (compareRunId) q.set('compare_run_id', String(compareRunId));
+    const response = await axios.get(
+      `${API_BASE}/behavior/run/${runId}/signal_intelligence${q.toString() ? `?${q.toString()}` : ''}`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  getOverlapOverview: async (runId, createdBy = 'user') => {
+    const q = new URLSearchParams();
+    if (createdBy) q.set('created_by', String(createdBy));
+    const response = await axios.get(
+      `${API_BASE}/behavior/run/${runId}/overlap/overview?${q.toString()}`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  getOverlapMatrix: async (runId, createdBy = 'user') => {
+    const q = new URLSearchParams();
+    if (createdBy) q.set('created_by', String(createdBy));
+    const response = await axios.get(
+      `${API_BASE}/behavior/run/${runId}/overlap/matrix?${q.toString()}`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  getOverlapPopulation: async (runId, createdBy = 'user') => {
+    const q = new URLSearchParams();
+    if (createdBy) q.set('created_by', String(createdBy));
+    const response = await axios.get(
+      `${API_BASE}/behavior/run/${runId}/overlap/population?${q.toString()}`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  getOverlapRecurring: async (runId, limit = 10, createdBy = 'user') => {
+    const q = new URLSearchParams();
+    q.set('limit', String(limit));
+    if (createdBy) q.set('created_by', String(createdBy));
+    const response = await axios.get(
+      `${API_BASE}/behavior/run/${runId}/overlap/recurring?${q.toString()}`,
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  getEntityFootprint: async (runId, entityId, createdBy = 'user') => {
+    const q = new URLSearchParams();
+    if (createdBy) q.set('created_by', String(createdBy));
+    const response = await axios.get(
+      `${API_BASE}/behavior/run/${runId}/overlap/entity/${encodeURIComponent(String(entityId))}?${q.toString()}`,
       { headers: getHeaders() }
     );
     return response.data;

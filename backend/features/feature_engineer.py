@@ -227,7 +227,7 @@ class FeatureEngineer:
         
         # Calculate hourly transactions
         account_df['hour'] = account_df['timestamp'].dt.hour
-        hourly_counts = account_df.groupby(account_df['timestamp'].dt.floor('H')).size()
+        hourly_counts = account_df.groupby(account_df['timestamp'].dt.floor('h')).size()
         
         # Calculate daily transactions
         daily_counts = account_df.groupby(account_df['timestamp'].dt.date).size()

@@ -8,8 +8,12 @@ import {
   Tab,
   Divider,
   Alert,
-  Stack,
-  Chip
+  Chip,
+  Table,
+  TableBody,
+  TableRow,
+  TableCell,
+  Button
 } from '@mui/material';
 import btsyApi from '../../services/btsyApi';
 import { emitGuideEvent } from '../../guides/guideEvents';
@@ -51,6 +55,7 @@ const ScenarioCalibrationWorkbench = () => {
 
   const sessionMeta = sessionData?.session || null;
   const aggregationConfig = sessionData?.aggregation || null;
+  const runSelectionLocked = !!selectedSessionId;
 
   const selectedRun = useMemo(() => {
     const rid = parseInt(selectedBehaviorRunId, 10);
@@ -205,6 +210,23 @@ const ScenarioCalibrationWorkbench = () => {
   };
 
   useEffect(() => { loadBehaviorRuns(); }, []);
+  useEffect(() => {
+    if (!behaviorRuns.length) return;
+    const hintedRunId = sessionStorage.getItem('btsy_step3_behavior_run_id');
+    if (!hintedRunId) return;
+    if (String(hintedRunId) === String(selectedBehaviorRunId || '')) {
+      sessionStorage.removeItem('btsy_step3_behavior_run_id');
+      return;
+    }
+    setSelectedSessionId('');
+    setSessionData(null);
+    setAggregateView(null);
+    setSelectedBoundaryId(null);
+    setSelectedStrategyId(null);
+    setSelectedBehaviorRunId(String(hintedRunId));
+    setStageTab('reduce');
+    sessionStorage.removeItem('btsy_step3_behavior_run_id');
+  }, [behaviorRuns, selectedBehaviorRunId]);
 
   useEffect(() => {
     const handler = (ev) => {
@@ -321,16 +343,19 @@ const ScenarioCalibrationWorkbench = () => {
     setStageTab('boundary');
     setBoundaryTab('split');
   };
+  const navigateToBehavior = () => {
+    window.dispatchEvent(new CustomEvent('btsy:navigate', { detail: { screen: 'behavior' } }));
+  };
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, mb: 2 }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 700 }}>
-            Scenario Calibration & Typology Assessment Workbench
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            Scenario Calibration Workbench
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            A decision workbench for defining and validating behavioural boundaries.
+            Step-3 consumes Step-2 signals in a read-only, reproducible flow.
           </Typography>
         </Box>
         <Step3GuideController
@@ -344,7 +369,44 @@ const ScenarioCalibrationWorkbench = () => {
         />
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
+
+      <Paper sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 0, mb: 1.5, p: 1.5 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Source Behaviour</Typography>
+            <Table size="small">
+              <TableBody>
+                <TableRow>
+                  <TableCell>Run ID</TableCell>
+                  <TableCell>{selectedRun?.behavior_run_id || sessionMeta?.behavior_run_id ? `R-${String(selectedRun?.behavior_run_id || sessionMeta?.behavior_run_id).padStart(3, '0')}` : '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Universe</TableCell>
+                  <TableCell>{sessionMeta?.universe_id ? `U-${String(sessionMeta.universe_id).padStart(3, '0')}` : '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Entity Level</TableCell>
+                  <TableCell>{sessionMeta?.entity_level || selectedRun?.entity_level || '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Metric</TableCell>
+                  <TableCell>{sessionMeta?.metric_name || selectedRun?.config?.metrics?.[0]?.name || '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Window</TableCell>
+                  <TableCell>{sessionMeta?.window || selectedRun?.config?.metrics?.[0]?.window || '—'}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Button variant="outlined" size="small" onClick={navigateToBehavior}>
+              Back to Step-2
+            </Button>
+          </Box>
+        </Box>
+      </Paper>
 
       <Paper sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 0, mb: 2 }}>
         <Box sx={{ px: 2, pt: 1 }}>
@@ -370,6 +432,7 @@ const ScenarioCalibrationWorkbench = () => {
               behaviorRuns={behaviorRuns}
               selectedBehaviorRunId={selectedBehaviorRunId}
               setSelectedBehaviorRunId={(v) => {
+                if (runSelectionLocked) return;
                 setSelectedBehaviorRunId(v);
                 setSelectedSessionId('');
                 setSessionData(null);
@@ -393,6 +456,7 @@ const ScenarioCalibrationWorkbench = () => {
                 await refreshAggregateView();
               }}
               loading={loading}
+              runSelectionLocked={runSelectionLocked}
               onNavigateToBoundary={() => openRiskSplit()}
               onNavigateToValidate={() => setStageTab('validate')}
             />
@@ -415,7 +479,7 @@ const ScenarioCalibrationWorkbench = () => {
             <Paper sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 0 }}>
               <Box sx={{ px: 2, pt: 2 }}>
                 <Tabs value={stageTab} onChange={(_e, v) => setStageTab(v)}>
-                  <Tab value="reduce" label="Stage 1 — Reduce Entities" />
+                  <Tab value="reduce" label="Stage 1 — Interpretation Lens" />
                   <Tab value="signal" label="Stage 2 — Understand Signal" />
                   <Tab value="boundary" label="Stage 3 — Define Boundary" />
                   <Tab value="validate" label="Stage 4 — Validate Separation" />
@@ -425,19 +489,19 @@ const ScenarioCalibrationWorkbench = () => {
               <Box sx={{ p: 2 }}>
                 {!selectedRun && (
                   <Alert severity="info">
-                    Select a Behaviour Run to begin.
+                    Select a Behaviour Run to enter the workbench.
                   </Alert>
                 )}
                 {selectedRun && !selectedSessionId && (
                   <Alert severity="info">
-                    Select or create a Calibration Session for this behaviour.
+                    Create or select a Calibration Session for this run.
                   </Alert>
                 )}
 
                 {selectedRun && selectedSessionId && stageTab === 'reduce' && (
                   <>
                     <Alert severity="info" sx={{ mb: 2 }}>
-                      Aggregation reduces transaction-level behaviour into one value per entity so entities can be compared, ranked, and split.
+                      Interpretation lens collapses Step-2 time-series into one value per entity for comparison and splitting.
                     </Alert>
                     <EntityReductionView session={sessionMeta} aggregateView={aggregateView} />
                   </>
@@ -537,17 +601,6 @@ const ScenarioCalibrationWorkbench = () => {
         error={finalizeError}
         onFreeze={freezeFromFinalize}
       />
-
-      {sessionMeta && (
-        <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap' }}>
-          <Chip label={`Session: S-${String(sessionMeta.session_id).padStart(3, '0')}`} />
-          <Chip label={`Behaviour Run: R-${String(sessionMeta.behavior_run_id).padStart(3, '0')}`} />
-          <Chip label={`Metric: ${sessionMeta.metric_name}`} />
-          <Chip label={`Entity: ${sessionMeta.entity_level}`} />
-          {sessionMeta.window && <Chip label={`Window: ${sessionMeta.window}`} />}
-          <Chip label={`Status: ${sessionMeta.status}`} />
-        </Stack>
-      )}
     </Box>
   );
 };

@@ -20,6 +20,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DnsIcon from '@mui/icons-material/Dns';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import ViewListIcon from '@mui/icons-material/ViewList';
 import PersonIcon from '@mui/icons-material/Person';
 import LogoutIcon from '@mui/icons-material/Logout';
 import Circle from '@mui/icons-material/Circle';
@@ -27,11 +28,13 @@ import Circle from '@mui/icons-material/Circle';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '@context/AppContext';
 import { TOOL_HEADER_HEIGHT } from './layout.constants';
+import { useMuleStore } from '../store/muleStore';
 
 const Header = ({ hasData }) => {
   const navigate = useNavigate();
   const { username, activeBankName, handleLogout } = useAppContext();
   const [anchorElUser, setAnchorElUser] = useState(null);
+  const { openModelRegistry } = useMuleStore();
 
   return (
     <AppBar
@@ -135,6 +138,12 @@ const Header = ({ hasData }) => {
           <Tooltip title="Help">
             <IconButton size="small" sx={{ color: 'white' }}>
               <HelpOutlineIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Model Registry">
+            <IconButton size="small" onClick={openModelRegistry} sx={{ color: 'white' }}>
+              <ViewListIcon fontSize="small" />
             </IconButton>
           </Tooltip>
 

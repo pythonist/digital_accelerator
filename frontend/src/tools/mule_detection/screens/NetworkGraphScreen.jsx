@@ -25,12 +25,14 @@ import {
   Typography
 } from '@mui/material';
 import muleApi from '../services/muleApi';
+import { pwcColors } from '../theme';
 import { useMuleStore } from '../store/muleStore';
 import AccountSelector from '../components/AccountSelector';
+import { formatInteger, formatNumber, formatProbability } from '../utils/formatters';
 
 const COLOR = {
   RED: '#ef4444',
-  ORANGE: '#f97316',
+  ORANGE: pwcColors.primary,
   YELLOW: '#f59e0b',
   GREEN: '#22c55e',
   BLUE: '#0ea5e9',
@@ -38,12 +40,6 @@ const COLOR = {
 };
 
 const toColor = (c) => COLOR[String(c || 'GRAY').toUpperCase()] || COLOR.GRAY;
-
-const safeNumber = (v, d = 0) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '-';
-  return n.toFixed(d);
-};
 
 const downloadJson = (name, obj) => {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
@@ -72,7 +68,7 @@ const buildApplyLabel = (availability, maxHops, circularOnly) => {
     const c = Number(availability?.circular_candidates ?? estimate);
     estimate = Math.min(estimate, c);
   }
-  return `Apply filters (will narrow ${total} → ~${Math.max(0, estimate)})`;
+  return `Apply filters (will narrow ${formatInteger(total)} → ~${formatInteger(Math.max(0, estimate))})`;
 };
 
 const ContextPanel = ({ summary }) => {
@@ -85,19 +81,19 @@ const ContextPanel = ({ summary }) => {
         <Grid container spacing={2} sx={{ mb: 1 }}>
           <Grid item xs={12} sm={6} md={2.4}>
             <Typography variant="caption">Total transactions</Typography>
-            <Typography variant="h6">{summary.total_transactions ?? '-'}</Typography>
+            <Typography variant="h6">{formatInteger(summary.total_transactions ?? '-')}</Typography>
           </Grid>
           <Grid item xs={12} sm={6} md={2.4}>
             <Typography variant="caption">Inbound vs outbound</Typography>
-            <Typography variant="h6">{summary.inbound_count ?? '-'} / {summary.outbound_count ?? '-'}</Typography>
+            <Typography variant="h6">{formatInteger(summary.inbound_count ?? '-')} / {formatInteger(summary.outbound_count ?? '-')}</Typography>
           </Grid>
           <Grid item xs={12} sm={6} md={2.4}>
             <Typography variant="caption">Unique counterparties</Typography>
-            <Typography variant="h6">{summary.unique_counterparties ?? '-'}</Typography>
+            <Typography variant="h6">{formatInteger(summary.unique_counterparties ?? '-')}</Typography>
           </Grid>
           <Grid item xs={12} sm={6} md={2.4}>
             <Typography variant="caption">Max observed hops</Typography>
-            <Typography variant="h6">{summary.max_observed_hops ?? '-'}</Typography>
+            <Typography variant="h6">{formatInteger(summary.max_observed_hops ?? '-')}</Typography>
           </Grid>
           <Grid item xs={12} sm={6} md={2.4}>
             <Typography variant="caption">Data available</Typography>
@@ -109,7 +105,7 @@ const ContextPanel = ({ summary }) => {
             top.map((cp) => (
               <Chip
                 key={cp.counterparty}
-                label={`${cp.counterparty} • ${safeNumber(cp.total_amount, 0)}`}
+                label={`${cp.counterparty} • ${formatNumber(cp.total_amount, { minFractionDigits: 0, maxFractionDigits: 0 })}`}
                 variant="outlined"
               />
             ))
@@ -140,7 +136,7 @@ const AvailabilityPanel = ({ availability }) => {
           {items.map((i) => (
             <Chip
               key={i.label}
-              label={`${i.label}: ${Number(i.count) || 0} candidate`}
+              label={`${i.label}: ${formatInteger(Number(i.count) || 0)} candidate`}
               color={Number(i.count) > 0 ? 'primary' : 'default'}
               variant={Number(i.count) > 0 ? 'filled' : 'outlined'}
             />
@@ -151,7 +147,7 @@ const AvailabilityPanel = ({ availability }) => {
             <Typography variant="subtitle2" sx={{ mb: 1 }}>Max hops impact</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               {hopImpact.length ? hopImpact.map((h) => (
-                <Chip key={`hop-${h.max_hops}`} label={`${h.max_hops} hops → ${h.path_count}`} variant="outlined" />
+                <Chip key={`hop-${h.max_hops}`} label={`${formatInteger(h.max_hops)} hops → ${formatInteger(h.path_count)}`} variant="outlined" />
               )) : <Chip label="No path estimates" variant="outlined" />}
             </Stack>
           </Grid>
@@ -159,7 +155,7 @@ const AvailabilityPanel = ({ availability }) => {
             <Typography variant="subtitle2" sx={{ mb: 1 }}>Time window availability</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               {timeWindows.length ? timeWindows.map((w) => (
-                <Chip key={`win-${w.days}`} label={`${w.days} days → ${w.transactions} tx`} variant="outlined" />
+                <Chip key={`win-${w.days}`} label={`${formatInteger(w.days)} days → ${formatInteger(w.transactions)} tx`} variant="outlined" />
               )) : <Chip label="No time window data" variant="outlined" />}
             </Stack>
           </Grid>
@@ -434,7 +430,7 @@ const NetworkGraphScreen = () => {
         const title = `TXN ${tx.txn_id || d.edge_id}`;
         const lines = [
           `Time: ${String(tx.timestamp || '-')}`,
-          `Amount: ${safeNumber(tx.amount, 2)} ${tx.currency || ''}`.trim(),
+          `Amount: ${formatNumber(tx.amount, { minFractionDigits: 2, maxFractionDigits: 2 })} ${tx.currency || ''}`.trim(),
           `Channel: ${tx.channel || '-'}`,
           ...explain
         ];
@@ -688,9 +684,9 @@ const NetworkGraphScreen = () => {
               </Button>
               {filtersApplied && activePath ? (
                 <Stack direction="row" spacing={1} alignItems="center">
-                  <Chip label={`${activePath.path_type} • risk ${safeNumber(activePath.risk_score, 2)}`} />
-                  <Chip label={`hops ${activePath.metrics?.hop_count ?? '-'}`} />
-                  <Chip label={`duration ${safeNumber(activePath.metrics?.total_duration_minutes, 0)} min`} />
+                  <Chip label={`${activePath.path_type} • risk ${formatProbability(activePath.risk_score, 2)}`} />
+                  <Chip label={`hops ${formatInteger(activePath.metrics?.hop_count ?? '-')}`} />
+                  <Chip label={`duration ${formatInteger(activePath.metrics?.total_duration_minutes ?? '-')} min`} />
                 </Stack>
               ) : null}
             </Stack>
@@ -780,7 +776,7 @@ const NetworkGraphScreen = () => {
                     ))}
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
-                    Total amount: {safeNumber(activePath.metrics?.total_amount, 2)} • Retention: {safeNumber(activePath.metrics?.amount_retention_ratio, 2)}
+                    Total amount: {formatNumber(activePath.metrics?.total_amount, { minFractionDigits: 2, maxFractionDigits: 2 })} • Retention: {formatProbability(activePath.metrics?.amount_retention_ratio, 2)}
                   </Typography>
                 </CardContent>
               </Card>
@@ -880,7 +876,7 @@ const NetworkGraphScreen = () => {
             <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
               <Chip label={`${selectedEdge.from} → ${selectedEdge.to}`} />
               <Chip label={`Time: ${selectedEdge.transaction?.timestamp || '-'}`} />
-              <Chip label={`Amount: ${safeNumber(selectedEdge.transaction?.amount, 2)}`} />
+              <Chip label={`Amount: ${formatNumber(selectedEdge.transaction?.amount, { minFractionDigits: 2, maxFractionDigits: 2 })}`} />
               <Chip label={`Channel: ${selectedEdge.transaction?.channel || '-'}`} />
             </Stack>
             {Array.isArray(selectedEdge.explain) && selectedEdge.explain.length ? (

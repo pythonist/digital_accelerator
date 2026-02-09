@@ -6,9 +6,10 @@
 # ---
 
 import os
-import faiss
 import pickle
-import numpy as np
+from core.optional_imports import safe_import
+faiss, _FAISS_OK = safe_import("faiss")
+np, _NUMPY_OK = safe_import("numpy")
 from pathlib import Path
 from llm.ollama_wrapper import OllamaWrapper # Uses your existing wrapper
 
@@ -84,14 +85,17 @@ def build_index():
     print(f"Indexed {len(embeddings)} document chunks.")
 
 if __name__ == "__main__":
-    if not ollama.check_connection():
-        print("❌ Ollama is not running. Please start it first with 'ollama serve'.")
+    if not _FAISS_OK or not _NUMPY_OK:
+        print("❌ Optional dependencies missing for doc index build (faiss/numpy).")
     else:
-        models = ollama.list_models()
+        if not ollama.check_connection():
+            print("❌ Ollama is not running. Please start it first with 'ollama serve'.")
+        else:
+            models = ollama.list_models()
 
-        # FIXED HERE
-        if EMBED_MODEL not in models:
-            print(f"⚠️ Embedding model '{EMBED_MODEL}' not found. Pulling...")
-            os.system(f"ollama pull {EMBED_MODEL}")
+            # FIXED HERE
+            if EMBED_MODEL not in models:
+                print(f"⚠️ Embedding model '{EMBED_MODEL}' not found. Pulling...")
+                os.system(f"ollama pull {EMBED_MODEL}")
 
-        build_index()
+            build_index()

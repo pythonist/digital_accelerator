@@ -16,9 +16,7 @@ import {
   TableRow,
   TableCell,
   TableBody,
-  LinearProgress,
-  Chip,
-  Stack
+  LinearProgress
 } from '@mui/material';
 import axios from 'axios';
 import { useCalibrationRun } from '../../context/CalibrationRunContext';
@@ -43,6 +41,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
   const [thresholdRows, setThresholdRows] = useState([]);
   const [worstRows, setWorstRows] = useState([]);
   const [monthlyRows, setMonthlyRows] = useState([]);
+  const [runId, setRunId] = useState(null);
   const { activeRunLogic } = useCalibrationRun();
 
   useEffect(() => {
@@ -106,6 +105,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
         throw new Error(res.data?.error || 'Scenario run failed');
       }
       const data = res.data.data || {};
+      setRunId(data.run_id || null);
       setStats(data.stats || null);
       setThresholdRows(data.threshold_preview || []);
       setWorstRows(data.worst_case_preview || []);
@@ -136,6 +136,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
       );
       if (res.data?.success) {
         const data = res.data.data || {};
+        setRunId(data.run_id || null);
         setStats(data.stats || null);
         setThresholdRows(data.threshold_preview || []);
         setWorstRows(data.worst_case_preview || []);
@@ -185,35 +186,48 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
   };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 700 }}>Step 2 - Cortex Scenario Builder</Typography>
+    <Box sx={{ p: 2 }}>
+      <Box sx={{ mb: 1.5 }}>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>Step 2 — Cortex Scenario Builder</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
           Builds lookback-based thresholds from the frozen transaction universe.
         </Typography>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
 
       {!universe && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Select a universe in Step 1 to proceed.
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          Select a transaction universe to proceed.
         </Alert>
       )}
 
       {universe && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Selected Universe</Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
-            <Chip label={universe.universe_name} />
-            <Chip label={`Rows: ${(universe.transaction_count || 0).toLocaleString()}`} />
-            {universe.unique_accounts && <Chip label={`Accounts: ${universe.unique_accounts}`} />}
-          </Stack>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Selected Universe</Typography>
+          <Table size="small">
+            <TableBody>
+              <TableRow>
+                <TableCell>Universe</TableCell>
+                <TableCell>{universe.universe_name}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Rows</TableCell>
+                <TableCell>{(universe.transaction_count || 0).toLocaleString()}</TableCell>
+              </TableRow>
+              {universe.unique_accounts && (
+                <TableRow>
+                  <TableCell>Accounts</TableCell>
+                  <TableCell>{universe.unique_accounts}</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </Paper>
       )}
 
-      <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Scenario Config</Typography>
+      <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Scenario Configuration</Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={4}>
             <FormControl fullWidth size="small">
@@ -258,7 +272,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
         </Grid>
         <Button
           variant="contained"
-          sx={{ bgcolor: '#0f172a', mt: 2 }}
+          sx={{ mt: 1.5 }}
           onClick={runScenario}
           disabled={!universe || loading}
         >
@@ -266,7 +280,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
         </Button>
         <Button
           variant="outlined"
-          sx={{ ml: 2, mt: 2 }}
+          sx={{ ml: 2, mt: 1.5 }}
           onClick={runUsingSelectedUniverseForRun}
           disabled={loading}
         >
@@ -275,37 +289,43 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
       </Paper>
 
       {loading && (
-        <Box sx={{ mb: 2 }}>
+        <Box sx={{ mb: 1.5 }}>
           <LinearProgress />
         </Box>
       )}
 
       {stats && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Run Stats</Typography>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Run Statistics</Typography>
           <Grid container spacing={1}>
-            <Grid item xs={12} md={3}><Chip label={`Input Rows: ${stats.rows_input || 0}`} /></Grid>
-            <Grid item xs={12} md={3}><Chip label={`Daily Rows: ${stats.rows_step_daily || 0}`} /></Grid>
-            <Grid item xs={12} md={3}><Chip label={`Threshold Rows: ${stats.rows_threshold || 0}`} /></Grid>
-            <Grid item xs={12} md={3}><Chip label={`Worst Case Rows: ${stats.rows_worst_case || 0}`} /></Grid>
-            {stats.avg_threshold != null && (
-              <Grid item xs={12} md={3}><Chip label={`Avg Threshold: ${Number(stats.avg_threshold).toFixed(2)}`} /></Grid>
-            )}
-            {stats.median_threshold != null && (
-              <Grid item xs={12} md={3}><Chip label={`Median Threshold: ${Number(stats.median_threshold).toFixed(2)}`} /></Grid>
-            )}
-            {stats.max_threshold != null && (
-              <Grid item xs={12} md={3}><Chip label={`Max Threshold: ${Number(stats.max_threshold).toFixed(2)}`} /></Grid>
-            )}
-            {stats.min_threshold != null && (
-              <Grid item xs={12} md={3}><Chip label={`Min Threshold: ${Number(stats.min_threshold).toFixed(2)}`} /></Grid>
-            )}
+            <Grid item xs={12}>
+              <Table size="small">
+                <TableBody>
+                  <TableRow><TableCell>Input rows</TableCell><TableCell>{stats.rows_input || 0}</TableCell></TableRow>
+                  <TableRow><TableCell>Daily rows</TableCell><TableCell>{stats.rows_step_daily || 0}</TableCell></TableRow>
+                  <TableRow><TableCell>Threshold rows</TableCell><TableCell>{stats.rows_threshold || 0}</TableCell></TableRow>
+                  <TableRow><TableCell>Worst case rows</TableCell><TableCell>{stats.rows_worst_case || 0}</TableCell></TableRow>
+                  {stats.avg_threshold != null && (
+                    <TableRow><TableCell>Average threshold</TableCell><TableCell>{Number(stats.avg_threshold).toFixed(2)}</TableCell></TableRow>
+                  )}
+                  {stats.median_threshold != null && (
+                    <TableRow><TableCell>Median threshold</TableCell><TableCell>{Number(stats.median_threshold).toFixed(2)}</TableCell></TableRow>
+                  )}
+                  {stats.max_threshold != null && (
+                    <TableRow><TableCell>Max threshold</TableCell><TableCell>{Number(stats.max_threshold).toFixed(2)}</TableCell></TableRow>
+                  )}
+                  {stats.min_threshold != null && (
+                    <TableRow><TableCell>Min threshold</TableCell><TableCell>{Number(stats.min_threshold).toFixed(2)}</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </Grid>
           </Grid>
         </Paper>
       )}
 
-      <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Threshold Preview</Typography>
+      <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Threshold Preview</Typography>
         <Table size="small">
           <TableHead>
             <TableRow>
@@ -314,6 +334,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
               <TableCell>As Of</TableCell>
               <TableCell align="right">Threshold Amt</TableCell>
               <TableCell align="right">Count</TableCell>
+              <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -324,11 +345,30 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
                 <TableCell>{row.transaction_datetime}</TableCell>
                 <TableCell align="right">{(row.threshold_amt || 0).toLocaleString()}</TableCell>
                 <TableCell align="right">{row.trxn_count}</TableCell>
+                <TableCell align="right">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={!runId}
+                    onClick={() => {
+                      const payload = {
+                        behavior_run_id: runId,
+                        entity_id: row.account_id,
+                        as_of_date: row.transaction_datetime,
+                        entity_level: 'account'
+                      };
+                      sessionStorage.setItem('btsy_behavior_recon_payload', JSON.stringify(payload));
+                      window.dispatchEvent(new CustomEvent('btsy:navigate', { detail: { screen: 'behavior_reconstruction' } }));
+                    }}
+                  >
+                    Reconstruct
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
             {thresholdRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} sx={{ color: '#64748b' }}>
+                <TableCell colSpan={6} sx={{ color: 'text.secondary' }}>
                   No rows yet.
                 </TableCell>
               </TableRow>
@@ -337,8 +377,8 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
         </Table>
       </Paper>
 
-      <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Worst Case (Top Accounts)</Typography>
+      <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Worst Case (Top Accounts)</Typography>
         <Table size="small">
           <TableHead>
             <TableRow>
@@ -359,7 +399,7 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
             ))}
             {worstRows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} sx={{ color: '#64748b' }}>
+                <TableCell colSpan={4} sx={{ color: 'text.secondary' }}>
                   No rows yet.
                 </TableCell>
               </TableRow>
@@ -369,8 +409,8 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
       </Paper>
 
       {monthlyRows.length > 0 && (
-        <Paper sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Monthly Reference Thresholds</Typography>
+        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Monthly Reference Thresholds</Typography>
           <Table size="small">
             <TableHead>
               <TableRow>

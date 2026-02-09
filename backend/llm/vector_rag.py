@@ -1,6 +1,7 @@
 # llm/vector_rag.py
 
-import numpy as np
+from core.optional_imports import safe_import
+np, _NUMPY_OK = safe_import("numpy")
 import pickle
 import requests
 import json
@@ -11,11 +12,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 import sqlite3
 
-try:
-    import faiss
-except ImportError:
-    print("⚠️ FAISS not installed. Install with: pip install faiss-cpu")
-    faiss = None
+faiss, _FAISS_OK = safe_import("faiss")
 
 class VectorRAGSystem:
     """
@@ -30,8 +27,10 @@ class VectorRAGSystem:
         self.embedding_model = embedding_model
         
         self.index = None
+        self.fallback_matrix = None
         self.case_id_map = {}  # Maps Index ID -> Case ID
         self.case_metadata_map = {}  # Maps Case ID -> Summary Text (for display)
+        self.embedding_dim = None 
         self.embedding_dim = None 
         self.id_col_name = 'case_id'
         self.last_build_time = None
@@ -39,6 +38,7 @@ class VectorRAGSystem:
         
         os.makedirs(self.base_path, exist_ok=True)
         self.index_path = os.path.join(self.base_path, 'cases_faiss.bin')
+        self.fallback_path = os.path.join(self.base_path, 'cases_embeddings.npy')
         self.metadata_path = os.path.join(self.base_path, 'cases_meta.pkl')
         self.metrics_path = os.path.join(self.base_path, 'build_metrics.json')
 
@@ -55,6 +55,8 @@ class VectorRAGSystem:
         Generates embeddings via Ollama Batch API with progress tracking.
         Processes in smaller batches to avoid timeouts.
         """
+        if not _NUMPY_OK:
+            return None
         if not texts: 
             return []
         
@@ -112,6 +114,8 @@ class VectorRAGSystem:
 
     def generate_embedding(self, text: str) -> Optional[np.ndarray]:
         """Single string embedding with retry logic"""
+        if not _NUMPY_OK:
+            return None
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -134,9 +138,8 @@ class VectorRAGSystem:
 
     def build_case_embeddings(self, force_rebuild=False):
         """Builds normalized FAISS index for Cosine Similarity with enhanced metrics."""
-        if not faiss:
-            print("❌ FAISS not available")
-            return {'success': False, 'error': 'FAISS not installed'}
+        if not _NUMPY_OK:
+            return {'success': False, 'error': 'numpy not installed'}
         
         if os.path.exists(self.index_path) and not force_rebuild:
             self.load_index()
@@ -203,17 +206,25 @@ class VectorRAGSystem:
                 return {'success': False, 'error': 'Failed to generate embeddings'}
 
             # 5. Create Normalized Index (Cosine Similarity)
-            print(f"  🔢 Building FAISS index...")
+            if _FAISS_OK:
+                print(f"  🔢 Building FAISS index...")
+            else:
+                print(f"  🔢 Building fallback cosine matrix (FAISS not available)...")
             embeddings_matrix = np.vstack(embeddings_list)
             
             # CRITICAL STEP: Normalize vectors to length 1
-            faiss.normalize_L2(embeddings_matrix)
+            norms = np.linalg.norm(embeddings_matrix, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            embeddings_matrix = embeddings_matrix / norms
             
             self.embedding_dim = embeddings_matrix.shape[1] 
             
-            # Use Inner Product (IP) index. With normalized vectors, IP == Cosine Similarity
-            self.index = faiss.IndexFlatIP(self.embedding_dim)
-            self.index.add(embeddings_matrix)
+            if _FAISS_OK:
+                # Use Inner Product (IP) index. With normalized vectors, IP == Cosine Similarity
+                self.index = faiss.IndexFlatIP(self.embedding_dim)
+                self.index.add(embeddings_matrix)
+            else:
+                self.fallback_matrix = embeddings_matrix
             
             # Update Maps
             self.case_id_map = {i: cid for i, cid in enumerate(valid_case_ids)}
@@ -306,9 +317,9 @@ class VectorRAGSystem:
 
     def search_similar_cases(self, query_case_id: str, top_k: int = 5) -> List[Dict]:
         """Finds similar cases. Returns Case ID, Score, and Summary."""
-        if not self.index: 
+        if not self.index and self.fallback_matrix is None: 
             self.load_index()
-        if not self.index: 
+        if not self.index and self.fallback_matrix is None: 
             return []
         
         # Get the summary text for the query case
@@ -331,9 +342,9 @@ class VectorRAGSystem:
 
     def search_by_text(self, query_text: str, top_k: int = 5) -> List[Dict]:
         """Search by natural language hypothesis"""
-        if not self.index: 
+        if not self.index and self.fallback_matrix is None: 
             self.load_index()
-        if not self.index:
+        if not self.index and self.fallback_matrix is None:
             return []
             
         query_vec = self.generate_embedding(query_text)
@@ -346,9 +357,9 @@ class VectorRAGSystem:
         Compare multiple cases and return similarity matrix.
         Returns comparison scores between all pairs.
         """
-        if not self.index:
+        if not self.index and self.fallback_matrix is None:
             self.load_index()
-        if not self.index:
+        if not self.index and self.fallback_matrix is None:
             return {'error': 'Index not loaded'}
         
         results = []
@@ -371,10 +382,19 @@ class VectorRAGSystem:
 
         # Normalize query vector for Cosine Similarity
         query_vector = vector.reshape(1, -1)
-        faiss.normalize_L2(query_vector)
-        
-        # Search for k + extra to account for excluded items
-        distances, indices = self.index.search(query_vector, k + 5)
+        qn = np.linalg.norm(query_vector, axis=1, keepdims=True)
+        qn[qn == 0] = 1.0
+        query_vector = query_vector / qn
+
+        if self.index is not None and _FAISS_OK:
+            distances, indices = self.index.search(query_vector, k + 5)
+        elif self.fallback_matrix is not None:
+            scores = np.dot(self.fallback_matrix, query_vector.T).reshape(-1)
+            order = np.argsort(scores)[::-1][: (k + 5)]
+            distances = scores[order].reshape(1, -1)
+            indices = order.reshape(1, -1)
+        else:
+            return []
         
         results = []
         for score, idx in zip(distances[0], indices[0]):
@@ -453,12 +473,12 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
 
     def get_index_status(self) -> Dict:
         """Return current index status and metrics"""
-        if not self.index:
+        if not self.index and self.fallback_matrix is None:
             self.load_index()
         
         return {
-            'index_loaded': self.index is not None,
-            'total_vectors': self.index.ntotal if self.index else 0,
+            'index_loaded': self.index is not None or self.fallback_matrix is not None,
+            'total_vectors': self.index.ntotal if self.index else (self.fallback_matrix.shape[0] if self.fallback_matrix is not None else 0),
             'embedding_dim': self.embedding_dim,
             'last_updated': self.last_build_time,
             'model': self.embedding_model,
@@ -467,10 +487,13 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
 
     def save_index(self):
         """Save index and metadata with metrics"""
-        if not self.index: 
+        if not self.index and self.fallback_matrix is None: 
             return
         
-        faiss.write_index(self.index, self.index_path)
+        if self.index is not None and _FAISS_OK:
+            faiss.write_index(self.index, self.index_path)
+        elif self.fallback_matrix is not None:
+            np.save(self.fallback_path, self.fallback_matrix)
         
         with open(self.metadata_path, 'wb') as f:
             pickle.dump({
@@ -489,12 +512,18 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
 
     def load_index(self):
         """Load index and metadata"""
-        if not os.path.exists(self.index_path): 
+        if not _NUMPY_OK:
+            print("❌ numpy not available; cannot load index")
+            return False
+        if not os.path.exists(self.index_path) and not os.path.exists(self.fallback_path): 
             print("ℹ️ No index file found. Build index first.")
             return False
         
         try:
-            self.index = faiss.read_index(self.index_path)
+            if _FAISS_OK and os.path.exists(self.index_path):
+                self.index = faiss.read_index(self.index_path)
+            elif os.path.exists(self.fallback_path):
+                self.fallback_matrix = np.load(self.fallback_path)
             
             with open(self.metadata_path, 'rb') as f:
                 meta = pickle.load(f)
@@ -510,7 +539,10 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
                 with open(self.metrics_path, 'r') as f:
                     self.build_metrics = json.load(f)
             
-            print(f"✅ Index loaded: {self.index.ntotal} vectors in {self.embedding_dim}D space")
+            if self.index is not None:
+                print(f"✅ Index loaded: {self.index.ntotal} vectors in {self.embedding_dim}D space")
+            elif self.fallback_matrix is not None:
+                print(f"✅ Fallback index loaded: {self.fallback_matrix.shape[0]} vectors in {self.embedding_dim}D space")
             return True
             
         except Exception as e:

@@ -98,7 +98,13 @@ const menuItems = [
   },
   {
     id: 'train-model',
-    label: 'Train Model',
+    label: 'Model Lab',
+    icon: <Settings fontSize="small" />,
+    requiresData: true
+  },
+  {
+    id: 'train-model-legacy',
+    label: 'Train Model (Legacy)',
     icon: <Settings fontSize="small" />,
     requiresData: true
   },

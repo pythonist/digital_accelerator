@@ -137,7 +137,7 @@ const SignalDistributionView = ({ session, aggregateView }) => {
   if (!aggregateView?.summary) {
     return (
       <Alert severity="info">
-        Step-3.2 analyses Step-3.1 outputs. Apply an aggregation lens first.
+        Step-3.2 analyses Step-3.1 outputs. Apply an interpretation lens first.
       </Alert>
     );
   }
@@ -158,11 +158,11 @@ const SignalDistributionView = ({ session, aggregateView }) => {
         <Grid item xs={12} md={4}>
           <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Step-3.2 Controls</Typography>
-            <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
               Signal distribution and stability analysis only. No thresholds applied here.
             </Typography>
 
-            <Typography variant="caption" sx={{ color: '#64748b' }}>Scale</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Scale</Typography>
             <ToggleButtonGroup
               size="small"
               value={view.scale}

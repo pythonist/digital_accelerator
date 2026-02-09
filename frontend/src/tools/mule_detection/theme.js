@@ -64,6 +64,35 @@ export const muleTheme = createTheme({
         }
       }
     },
+    MuiCardHeader: {
+      styleOverrides: {
+        root: {
+          padding: 16,
+          borderBottom: `1px solid ${pwcColors.border}`,
+        },
+        title: { fontWeight: 800 },
+      }
+    },
+    MuiCardContent: {
+      styleOverrides: {
+        root: {
+          padding: 16,
+          '&:last-child': { paddingBottom: 16 }
+        }
+      }
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        head: {
+          fontWeight: 800,
+          backgroundColor: pwcColors.surface
+        },
+        root: {
+          paddingTop: 10,
+          paddingBottom: 10
+        }
+      }
+    },
     MuiChip: {
       styleOverrides: {
         root: { fontWeight: 600 }

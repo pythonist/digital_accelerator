@@ -70,7 +70,13 @@ class XGBoostTrainer(BaseTrainer):
             params.update(model_params)
         model = xgb.XGBClassifier(**params)
 
+        y_int = np.asarray(y).astype(int)
+        class_counts = np.bincount(y_int) if y_int.size else np.array([])
+        min_class = int(class_counts.min()) if class_counts.size else 0
         folds = max(2, int(cv_folds))
+        if min_class < 2 or folds > min_class:
+            model.fit(X, y)
+            return TrainResult(model=model, cv_mean_auc=None, cv_std_auc=None)
         cv = StratifiedKFold(n_splits=folds, shuffle=True, random_state=random_state)
         cv_scores = cross_val_score(model, X, y, cv=cv, scoring="roc_auc")
 
@@ -106,7 +112,13 @@ class RandomForestTrainer(BaseTrainer):
             params.update(model_params)
         model = RandomForestClassifier(**params)
 
+        y_int = np.asarray(y).astype(int)
+        class_counts = np.bincount(y_int) if y_int.size else np.array([])
+        min_class = int(class_counts.min()) if class_counts.size else 0
         folds = max(2, int(cv_folds))
+        if min_class < 2 or folds > min_class:
+            model.fit(X, y)
+            return TrainResult(model=model, cv_mean_auc=None, cv_std_auc=None)
         cv = StratifiedKFold(n_splits=folds, shuffle=True, random_state=random_state)
         cv_scores = cross_val_score(model, X, y, cv=cv, scoring="roc_auc")
 
@@ -145,10 +157,10 @@ class IsolationForestTrainer(BaseTrainer):
 def get_trainer(model_type: str) -> BaseTrainer:
     mt = str(model_type or "").strip().lower()
     if mt == "xgboost":
-        return XGBoostTrainer()
+        # Fallback to RandomForest if xgboost unavailable
+        return XGBoostTrainer() if xgb is not None else RandomForestTrainer()
     if mt == "randomforest":
         return RandomForestTrainer()
     if mt == "isolation_forest":
         return IsolationForestTrainer()
     raise ValueError(f"Unknown model type: {model_type}")
-

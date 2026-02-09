@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Paper, Typography, Chip, Grid, ToggleButton, ToggleButtonGroup, LinearProgress, Button, Dialog, DialogTitle, DialogContent, DialogActions, Table, TableHead, TableRow, TableCell, TableBody, TableContainer } from '@mui/material';
+import { Box, Paper, Typography, Grid, ToggleButton, ToggleButtonGroup, LinearProgress, Button, Dialog, DialogTitle, DialogContent, DialogActions, Table, TableHead, TableRow, TableCell, TableBody, TableContainer } from '@mui/material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import btsyApi from '../../services/btsyApi';
 
@@ -75,26 +75,49 @@ const BehaviorQualityPanel = ({ runId }) => {
   if (!quality) return null;
 
   return (
-    <Box sx={{ mt: 3 }}>
-      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Behavior Quality</Typography>
+    <Box sx={{ mt: 2 }}>
+      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Behaviour Quality Diagnostics</Typography>
       {diagnostics && (
-        <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0, mb: 2 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Decision Aids</Typography>
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Chip label={`Behaviour Integrity: ${integrityStatus}`} />
-            <Chip label={`null: ${diagnostics.null_pct.toFixed(2)}%`} />
-            <Chip label={`zero: ${diagnostics.zero_pct.toFixed(2)}%`} />
-            <Chip label={`negative: ${diagnostics.negative_pct.toFixed(2)}%`} />
-            {diagnostics.ks_vs_prev !== null && diagnostics.ks_vs_prev !== undefined && (
-              <Chip label={`KS vs prev: ${diagnostics.ks_vs_prev.toFixed(3)}`} />
-            )}
-            {diagnostics.coverage_delta_pct !== null && diagnostics.coverage_delta_pct !== undefined && (
-              <Chip label={`Coverage Δ: ${diagnostics.coverage_delta_pct.toFixed(2)}%`} />
-            )}
-            <Chip label={`Reusability: ${diagnostics.reusability_label} (${diagnostics.reusability_score.toFixed(0)})`} />
-          </Box>
+        <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Decision Summary</Typography>
+          <Table size="small">
+            <TableBody>
+              <TableRow>
+                <TableCell>Integrity</TableCell>
+                <TableCell>{integrityStatus}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Null %</TableCell>
+                <TableCell>{diagnostics.null_pct.toFixed(2)}%</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Zero %</TableCell>
+                <TableCell>{diagnostics.zero_pct.toFixed(2)}%</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Negative %</TableCell>
+                <TableCell>{diagnostics.negative_pct.toFixed(2)}%</TableCell>
+              </TableRow>
+              {diagnostics.ks_vs_prev !== null && diagnostics.ks_vs_prev !== undefined && (
+                <TableRow>
+                  <TableCell>KS vs Previous</TableCell>
+                  <TableCell>{diagnostics.ks_vs_prev.toFixed(3)}</TableCell>
+                </TableRow>
+              )}
+              {diagnostics.coverage_delta_pct !== null && diagnostics.coverage_delta_pct !== undefined && (
+                <TableRow>
+                  <TableCell>Coverage Δ</TableCell>
+                  <TableCell>{diagnostics.coverage_delta_pct.toFixed(2)}%</TableCell>
+                </TableRow>
+              )}
+              <TableRow>
+                <TableCell>Reusability</TableCell>
+                <TableCell>{`${diagnostics.reusability_label} (${diagnostics.reusability_score.toFixed(0)})`}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
           {insightsByType.lineage && (
-            <Typography variant="body2" sx={{ color: '#475569', mt: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 1 }}>
               {insightsByType.lineage}
             </Typography>
           )}
@@ -102,9 +125,9 @@ const BehaviorQualityPanel = ({ runId }) => {
       )}
       <Grid container spacing={2}>
         <Grid item xs={12}>
-          <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
+          <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Metric Distribution</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Distribution Diagnostics</Typography>
               <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                 <Button size="small" onClick={() => setExpanded('distribution')}>Expand</Button>
                 <ToggleButtonGroup
@@ -118,42 +141,56 @@ const BehaviorQualityPanel = ({ runId }) => {
                 </ToggleButtonGroup>
               </Box>
             </Box>
-            <Typography variant="body2" sx={{ color: '#64748b', mb: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
               Shows the spread and tail‑heaviness of the metric values for this run.
             </Typography>
-            <ResponsiveContainer width="100%" height={340}>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={histData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="bucket" tick={{ fontSize: 11 }} stroke="#64748b" />
                 <YAxis tick={{ fontSize: 11 }} stroke="#64748b" scale={scale === 'log' ? 'log' : 'linear'} />
                 <Tooltip labelStyle={{ color: '#1e293b' }} contentStyle={{ borderRadius: 0, border: '1px solid #e2e8f0', fontSize: 12 }} />
                 <Bar dataKey="count" radius={[0,0,0,0]} onClick={(d) => setSelectedBucket(d)}>
-                  {histData.map((_, idx) => (<Cell key={idx} fill="#D04A02" />))}
+                  {histData.map((_, idx) => (<Cell key={idx} fill="#475569" />))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
             {selectedBucket?.payload && (
-              <Box sx={{ mt: 1, color: '#475569' }}>
+              <Box sx={{ mt: 1, color: 'text.secondary' }}>
                 Selected bucket: {selectedBucket.payload.bucket} | count: {selectedBucket.payload.count}
               </Box>
             )}
           </Paper>
         </Grid>
         <Grid item xs={12}>
-          <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
+          <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Entity Coverage</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Entity Coverage</Typography>
               <Button size="small" onClick={() => setExpanded('coverage')}>Expand</Button>
             </Box>
-            <Typography variant="body2" sx={{ color: '#64748b', mb: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
               Shows how many entities have non‑zero activity and repeat behaviour.
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              <Chip label={`Non-zero entities: ${quality.coverage.nz_entities}`} />
-              <Chip label={`Single obs: ${quality.coverage.single_obs}`} />
-              <Chip label={`Repeated obs: ${quality.coverage.repeated_obs}`} />
-              <Chip label={`Total entities: ${quality.coverage.total_entities}`} />
-            </Box>
+            <Table size="small">
+              <TableBody>
+                <TableRow>
+                  <TableCell>Non‑zero entities</TableCell>
+                  <TableCell>{quality.coverage.nz_entities}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Single observation</TableCell>
+                  <TableCell>{quality.coverage.single_obs}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Repeated observation</TableCell>
+                  <TableCell>{quality.coverage.repeated_obs}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Total entities</TableCell>
+                  <TableCell>{quality.coverage.total_entities}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
             <Box sx={{ mt: 2 }}>
               <Typography variant="caption">Coverage</Typography>
               <LinearProgress variant="determinate" value={quality.coverage.total_entities ? (quality.coverage.nz_entities / quality.coverage.total_entities) * 100 : 0} />
@@ -161,17 +198,17 @@ const BehaviorQualityPanel = ({ runId }) => {
           </Paper>
         </Grid>
         <Grid item xs={12}>
-          <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
+          <Paper elevation={0} sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Time Density Heatmap</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>Time Density Matrix</Typography>
               <Button size="small" onClick={() => setExpanded('heatmap')}>Expand</Button>
             </Box>
-            <Typography variant="body2" sx={{ color: '#64748b', mb: 1 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>
               Each cell is a time bucket × entity bucket with average metric intensity.
             </Typography>
             {!heatmapSufficient ? (
-              <Typography variant="body2" sx={{ color: '#64748b' }}>
-                Insufficient density for heatmap at this granularity
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Insufficient density at this granularity.
               </Typography>
             ) : (
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(32, 1fr)', gap: 1 }}>
@@ -182,13 +219,13 @@ const BehaviorQualityPanel = ({ runId }) => {
                     onClick={() => setSelectedCell(cell)}
                     sx={{
                     height: 12,
-                    bgcolor: maxIntensity === 0 ? '#e2e8f0' : `rgba(208, 74, 2, ${Math.max(0.15, cell.intensity / maxIntensity)})`
+                    bgcolor: maxIntensity === 0 ? '#e2e8f0' : `rgba(71, 85, 105, ${Math.max(0.12, cell.intensity / maxIntensity)})`
                   }} />
                 ))}
               </Box>
             )}
             {selectedCell && (
-              <Box sx={{ mt: 1, color: '#475569' }}>
+              <Box sx={{ mt: 1, color: 'text.secondary' }}>
                 Selected cell: {selectedCell.day} | bucket {selectedCell.bucket} | intensity {selectedCell.intensity.toFixed(2)}
               </Box>
             )}

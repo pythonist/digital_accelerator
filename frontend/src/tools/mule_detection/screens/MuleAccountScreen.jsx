@@ -20,6 +20,8 @@ import {
 import { ArrowBack } from '@mui/icons-material';
 import muleApi from '../services/muleApi';
 import { pwcColors } from '../theme';
+import StructuredValue from '../components/StructuredValue';
+import { formatInteger, formatNumber, formatPercentFromRatio, formatProbability } from '../utils/formatters';
 
 const riskColor = (level) => {
   const v = String(level || '').toUpperCase();
@@ -33,16 +35,22 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
+  const [behavior, setBehavior] = useState(null);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await muleApi.getAccountSummary(accountId);
+      const [res, beh] = await Promise.all([
+        muleApi.getAccountSummary(accountId),
+        muleApi.getAccountBehaviorProfile(accountId)
+      ]);
       setData(res);
+      setBehavior(beh);
     } catch (e) {
       setError(e?.response?.data?.error || e?.message || 'Failed to load account');
       setData(null);
+      setBehavior(null);
     } finally {
       setLoading(false);
     }
@@ -100,7 +108,7 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
         </Typography>
         {data?.risk && (
           <Chip
-            label={`${data.risk.risk_level} · ${Number(data.risk.hybrid_score || 0).toFixed(3)}`}
+            label={`${data.risk.risk_level} · ${formatProbability(data.risk.hybrid_score || 0, 3)}`}
             sx={{ bgcolor: riskColor(data.risk.risk_level), color: 'white' }}
           />
         )}
@@ -116,7 +124,7 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
                 <Typography variant="body2">Type: {data?.account?.customer_type || '-'}</Typography>
                 <Typography variant="body2">Risk Rating: {data?.account?.risk_rating || '-'}</Typography>
                 <Typography variant="body2">Occupation: {data?.account?.occupation || '-'}</Typography>
-                <Typography variant="body2">Expected Turnover: {data?.account?.expected_turnover ?? '-'}</Typography>
+                <Typography variant="body2">Expected Turnover: {formatNumber(data?.account?.expected_turnover ?? '-')}</Typography>
                 <Typography variant="body2">Is Mule (label): {String(data?.account?.is_mule ?? '-')}</Typography>
               </Stack>
             </CardContent>
@@ -134,9 +142,61 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
               ) : (
                 <Stack direction="row" spacing={1} flexWrap="wrap">
                   {keyFeatures.map((f) => (
-                    <Chip key={f.k} label={`${f.k}: ${Number.isFinite(Number(f.v)) ? Number(f.v).toFixed(3) : String(f.v)}`} />
+                    <Chip key={f.k} label={`${f.k}: ${Number.isFinite(Number(f.v)) ? formatNumber(Number(f.v), { maxFractionDigits: 3 }) : String(f.v)}`} />
                   ))}
                 </Stack>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card>
+            <CardHeader title="Entity Behaviour Profiler" subheader="Rhythm, diversity, device spread, and peers" />
+            <CardContent>
+              {!behavior?.success ? (
+                <Typography variant="body2" color="text.secondary">Behaviour profile not available.</Typography>
+              ) : (
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2" fontWeight={700}>Rhythm</Typography>
+                      <Chip label={`Transactions: ${formatInteger(behavior.rhythm?.tx_count ?? 0)}`} />
+                      <Chip label={`Active days: ${formatInteger(behavior.rhythm?.active_days ?? 0)}`} />
+                      <Chip label={`Avg/day: ${formatNumber(behavior.rhythm?.avg_per_day ?? 0, { maxFractionDigits: 2 })}`} />
+                      <Chip label={`Peak/day: ${formatInteger(behavior.rhythm?.peak_day ?? 0)}`} />
+                      <Chip label={`Avg gap (min): ${formatNumber(behavior.rhythm?.avg_gap_minutes ?? 0, { maxFractionDigits: 1 })}`} />
+                    </Stack>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2" fontWeight={700}>Counterparty Diversity</Typography>
+                      <Chip label={`Counterparties: ${formatInteger(behavior.counterparty_diversity?.counterparties ?? 0)}`} />
+                      <Chip label={`Banks: ${formatInteger(behavior.counterparty_diversity?.banks ?? 0)}`} />
+                      <StructuredValue value={behavior.counterparty_diversity?.top_counterparties || {}} inline mode="integer" />
+                    </Stack>
+                  </Grid>
+                  <Grid item xs={12} md={4}>
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2" fontWeight={700}>Device Spread</Typography>
+                      <Chip label={`Devices: ${formatInteger(behavior.device_spread?.devices ?? 0)}`} />
+                      <Chip label={`IPs: ${formatInteger(behavior.device_spread?.ip_addresses ?? 0)}`} />
+                      <Typography variant="subtitle2" fontWeight={700}>Channel Mix</Typography>
+                      <StructuredValue value={behavior.channel_mix || {}} inline mode="integer" />
+                    </Stack>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle2" fontWeight={700}>Peer Comparison (percentile)</Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        <Chip label={`Tx count: ${formatPercentFromRatio(behavior.peer_comparison?.tx_count_pct ?? 0, 0)}`} />
+                        <Chip label={`Avg amount: ${formatPercentFromRatio(behavior.peer_comparison?.avg_amount_pct ?? 0, 0)}`} />
+                        <Chip label={`Counterparties: ${formatPercentFromRatio(behavior.peer_comparison?.cp_count_pct ?? 0, 0)}`} />
+                        <Chip label={`Devices: ${formatPercentFromRatio(behavior.peer_comparison?.device_count_pct ?? 0, 0)}`} />
+                      </Stack>
+                    </Stack>
+                  </Grid>
+                </Grid>
               )}
             </CardContent>
           </Card>
@@ -149,8 +209,8 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
               {transactions.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">No transactions found.</Typography>
               ) : (
-                <Box sx={{ overflow: 'auto' }}>
-                  <Table size="small">
+                <Box sx={{ overflow: 'auto', maxHeight: 420 }}>
+                  <Table size="small" stickyHeader>
                     <TableHead>
                       <TableRow>
                         <TableCell>txn_id</TableCell>
@@ -168,7 +228,7 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
                         <TableRow key={idx}>
                           <TableCell>{t.txn_id}</TableCell>
                           <TableCell>{String(t.txn_timestamp || '')}</TableCell>
-                          <TableCell align="right">{Number(t.amount || 0).toFixed(2)}</TableCell>
+                          <TableCell align="right">{formatNumber(t.amount || 0, { minFractionDigits: 2, maxFractionDigits: 2 })}</TableCell>
                           <TableCell>{t.direction}</TableCell>
                           <TableCell>{t.counterparty_account}</TableCell>
                           <TableCell>{t.counterparty_bank}</TableCell>
@@ -189,4 +249,3 @@ const MuleAccountScreen = ({ accountId, onBack }) => {
 };
 
 export default MuleAccountScreen;
-

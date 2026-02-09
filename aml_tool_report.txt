@@ -1,0 +1,861 @@
+toolName: todo_write
+            
+status: success
+          
+Todos updated: 5 items
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: overall project structure, backend and frontend folder listings, tree files
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: backend app entrypoint, API structure, services, llm RAG, security, env handling
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: frontend main composition, app shell, routing, api client, mule tool entry
+          
+
+        
+            
+toolName: search_codebase
+            
+status: success
+          
+query: environment config, .env, deployment scripts, Docker, pyinstaller, security app_secrets, dotenv loader
+          
+
+        
+            
+toolName: todo_write
+            
+status: success
+          
+Todos updated: 5 items
+          
+AI_AML_TOOL_CODEBASE_SCRUTINY_REPORT.txt
+
+
+Executive Summary
+
+Scope and method
+
+This review covers the AI_AML_tool project located at:
+E:\VS CODE Backup\Trae\AI_AML_tool
+
+Analysis focuses on:
+- backend/ (Flask-based AML investigation, calibration, mule detection, BTSY modules, LLM/RAG services)
+- frontend/ (React/Vite multi-tool workbench: investigation, calibration, mule detection, BTSY)
+- shared services and utilities (e.g. api/services.py, security/, calibration/services, mule_detection/services)
+- configuration and environment handling (config.py, backend/.env, vite.config.js, .gitignore, requirements)
+
+The following directories and external data were explicitly excluded from detailed scrutiny as requested:
+- data_generation_scripts/
+- DB/
+- DB_bank/
+- mule_data/
+
+The review is static (no execution trace) and therefore relies on:
+- directory and file structure summaries
+- code-level inspection of central modules (entrypoints, services, routes, store modules)
+- the project’s own “find unused” scripts
+Assumptions are explicitly called out where runtime behaviour cannot be conclusively inferred.
+
+High-level assessment
+
+The codebase is feature-rich and functionally broad, but has grown organically into a multi-domain monolith. Key observations:
+
+1. Architecture and modularity
+- The backend is a single Flask application (backend/app.py) hosting multiple functional “sub-systems”:
+  – AML investigation (cases, rules, typologies, graph analysis)
+  – Calibration workbench (BTSY calibration engine, DuckDB-heavy)
+  – Mule detection (ML and graph-based flows)
+  – LLM and RAG services (doc_rag, vector_rag, Ollama, OpenAI)
+- The frontend is a single React/Vite app structured into tool-specific “mini-platforms” under src/tools:
+  – investigation, calibration, mule_detection, btsy
+- Each platform has its own layout, theme, and service layer, effectively behaving like a small standalone application inside a monolith.
+- Shared concerns (routing, auth, environment selection, API clients) exist, but are duplicated or partially forked per tool.
+
+2. Redundancy and duplication
+- Multiple parallel implementations exist for:
+  – Layouts (headers, sidebars, main layouts) in investigation, calibration, mule_detection, BTSY.
+  – API clients (src/services/api.js, api_v2.js, tools/btsy/services/btsyApi.js, tools/mule_detection/services/muleApi.js).
+  – Backend route modules (e.g. environment.py vs env.py, multiple mule_detection ML route variants).
+- The BTSY calibration system has a large set of domain-specific services and routes that are structurally similar (routes/*.py paired with tools/*.py services).
+- This duplication reduces maintainability and increases the risk of inconsistent behaviour between tools.
+
+3. Dead / unused and transitional code
+- The backend includes:
+  – api/__init__.py (legacy Flask app factory) alongside backend/app.py (current entrypoint).
+  – Multiple versions of mule ML routes (ml_routes.py, ml_routes_complete.py, ml_routes_enhanced.py).
+  – A dedicated find_unused_backend.py script, suggesting known technical debt around unused code.
+- The frontend includes:
+  – A find_unused_frontend.mjs script, indicating awareness of unused components.
+- There are strong indicators of historical migrations (from earlier mule detection apps and BTSY prototypes) with incomplete cleanup.
+
+4. Backend performance and design
+- The Flask app performs substantial work at import and startup:
+  – Auto-venv management and requirements installation in app.py.
+  – Global initialization of multi-domain services in api/services.py, including LLM wrappers, doc RAG, vector RAG, DuckDB calibration services, audit logger.
+- Many heavy libraries are imported globally (faiss_cpu, xgboost, shap, duckdb, pandas, networkx).
+- The design is synchronous Flask with threaded=True and per-request handling of DB and DuckDB connections. There is evidence of connection pooling for BTSY (duckdb_pool), but not consistently across all DB usage.
+- Perceived “slowness” is likely due to:
+  – High startup cost for services.
+  – Per-request data loading in calibration and mule detection.
+  – Heavy Python-level analytics in hot paths.
+
+5. Frontend performance and UX
+- The frontend is structured as a complex multi-tool workbench but is implemented like a set of “large screens”:
+  – Each major tool screen (e.g. NetworkGraphScreen, DataIntrospectionScreen, TrainModelScreen) embeds significant business logic, data fetching, and rendering in a single component.
+  – State management uses a mix of React context (AppContext) and tool-specific zustand stores (e.g. muleStore), but without a coherent global pattern for data caching and invalidation.
+- Factors that make it feel more like a “website” than an investigation workbench:
+  – Large page-level rerenders on data changes.
+  – Limited use of virtualisation for large tables and graphs.
+  – Filters and investigative workflows relying on manual “Apply” buttons with little predictive context (recently improved for money flows, but still present elsewhere).
+
+6. Data layer and analytics design
+- Data access is distributed across:
+  – DatabaseManager and CalibrationDatabaseManager for investigation and calibration.
+  – per-feature services for calibration, BTSY, mule detection, LLM, etc.
+  – direct DuckDB SQL in BTSY services and Mule detection services.
+- There is no single shared data layer abstraction for:
+  – environment/tenant-specific DB access
+  – cross-domain entities (accounts, transactions, alerts)
+- This increases the cost of adding new analytics and makes consistency (e.g. definitions of “mule risk score” or “alert threshold”) harder to maintain.
+
+7. Deployment and infra readiness
+- There is no Dockerfile or explicit container orchestration configuration.
+- app.py’s self-managing virtualenv behaviour is convenient for local development but problematic for:
+  – Docker-based deployments
+  – controlled on-prem packaging
+- The frontend has a simple Vite config and a Node-based serve-build.cjs script but no CI/CD scripts.
+- Configuration is partially environment-driven (backend/.env, security/dotenv_loader.py), but secrets are currently embedded in the repo’s .env file.
+
+8. Security and compliance
+- The backend .env includes:
+  – APP_SECRET_KEY
+  – MFA_BYPASS_ENABLED
+  – GEMINI_API_KEY and placeholder OpenAI keys
+- .gitignore excludes .env but the presence of a populated backend/.env in the tree is a risk if this directory is shared or backed up unsafely.
+- Audit logging exists (audit_logger, admin audit routes), but traceability between user actions, LLM decisions, and analytics flows is fragmented.
+- Several routes expose potentially sensitive data (LLM RAG over code docs and internal configuration) without an obvious access policy beyond authentication.
+
+Overall conclusion
+
+AI_AML_tool is functionally rich and suitable as a lab and demonstration platform, but it is not yet structured as a bank-grade, long-lived production system. The current architecture will become difficult to evolve safely without introducing a more explicit module boundary model, shared data layer, and stricter environment and deployment controls.
+
+The rest of this report details the observations and recommended non-destructive actions along each requested dimension.
+
+
+Major Architectural Issues
+
+1. Monolithic but multi-domain backend
+
+The backend/app.py creates a single Flask app that registers a large number of blueprints:
+- /api: auth, admin, legacy environment routes
+- /api/v2: environments, cases, rules, data, LLM, audit, calibration, mule detection, BTSY modules
+
+Key issues:
+- Multiple distinct domains (investigation, calibration, mule detection, typology, LLM/RAG) share the same runtime environment and dependency set.
+- api/services.py acts as a “mega service container”, instantiating metadata, DB managers, ingestion services, calibration services, LLM and RAG systems, graph engines, etc. This creates:
+  – High startup cost.
+  – Hidden coupling between routes and shared singletons.
+  – Difficulties in testing individual domains independently.
+
+Conceptually, the backend would benefit from:
+- A clearer split into domain modules with bounded contexts (e.g. investigation_service, calibration_service, mule_service, llm_service).
+- A minimal core that wires these modules into the Flask app without performing heavy initialization at import time.
+
+2. Legacy app factory and mixed routing styles
+
+The presence of backend/api/__init__.py (an older app factory) alongside backend/app.py indicates:
+- A partially completed migration from the earlier Flask app.
+- Some routes and patterns may still assume the old structure.
+- There is risk of configuration drift between the legacy view of the app and the current entrypoint.
+
+Additionally, environment handling appears in:
+- api/routes/environment.py (fixed for /env/create).
+- api/routes/env.py, which suggests earlier versions of the same concept.
+
+This contributes to confusion over:
+- Which environment selection API is canonical.
+- Where to add new environment-related behaviour.
+
+3. Tool-specific “mini-platforms” in the frontend
+
+The frontend structure under src/tools is:
+- tools/investigation
+- tools/calibration
+- tools/mule_detection
+- tools/btsy
+
+Each platform includes:
+- Its own layout (Header, Sidebar, MainLayout or equivalent).
+- Its own theme.js.
+- Its own service layer and screens.
+
+Issues:
+- Layout and navigation logic are duplicated across tools with small variations, rather than configured through a shared shell.
+- Cross-tool concepts (case investigation, calibration, mule detection) are handled in isolation, limiting reusability (e.g. a shared account panel across tools).
+- This increases the surface area of the codebase and makes global UX changes expensive.
+
+4. Fragmented API client layer
+
+Frontend API calls are handled through multiple clients:
+- src/services/api.js and api_v2.js for general endpoints.
+- src/tools/btsy/services/btsyApi.js for BTSY-specific endpoints.
+- src/tools/mule_detection/services/muleApi.js for mule detection endpoints.
+- Some screens use api.js directly (e.g. AiReviewPanel, other investigation screens).
+
+Issues:
+- Overlapping logic for:
+  – injecting Authorization headers
+  – tenant/environment identifiers (X-Environment-ID)
+  – error handling and retries
+- No single source of truth for API base URLs or error semantics.
+- Changes in backend semantics (e.g. status codes, error shapes) require multiple manual updates.
+
+5. Incomplete modularisation of analytics and data access
+
+On the backend:
+- The calibration/BTSY stack has its own internal structure, but still reaches out directly to DuckDB connections and SQL in multiple places.
+- The mule detection stack similarly uses services/mule_detection modules, but DB access is mixed between DuckDB and CSV reads depending on environment.
+
+On the frontend:
+- Each complex screen (e.g. BTSY calibration view, mule detection workbench, investigation graph analysis) performs its own data shaping and domain logic.
+
+This leads to:
+- Duplication of business rules (e.g. what qualifies as a multi-hop flow, a mule candidate, or an STR alignment scenario).
+- Difficulty in auditing or revising risk scoring logic in one place.
+
+6. Environment and tenant context handling
+
+The system has:
+- A tenant_context_middleware that injects tenant_id, env_id, user attributes into Flask request.
+- admin and environment routes that manage environments via JSON files and DB initialization.
+
+Issues:
+- Environment configuration (data/environments.json, environment DB paths) is implemented at route level with direct file manipulation.
+- There is no central environment registry abstraction; code in admin and environment routes manipulates the same JSON file directly.
+- This design is fragile for:
+  – multi-instance or multi-node deployments.
+  – harder isolation of environments across tenants.
+
+7. LLM and RAG integration in core process
+
+api/services.py initializes:
+- OllamaWrapper
+- DocRAGSystem
+- VectorRAGSystem
+- CasePack generators and explainers
+
+These are all loaded within the main Flask process. Issues:
+- Tight coupling between LLM stack and transactional APIs.
+- Any instability or slowness in LLM / FAISS / RAG subsystem can impact the core AML workflows.
+- No isolation between RAG indexing workloads and online session processing.
+
+
+Redundancy & Duplication Map
+
+Note: Only representative examples are given; the patterns repeat across the codebase.
+
+1. Layout and navigation components
+
+Frontend:
+- tools/investigation/layout/Mainlayout.jsx, Sidebar.jsx, layout.constants.js
+- tools/calibration/layout/MainLayout.jsx, Sidebar.jsx, layout.constants.js
+- tools/mule_detection/layout/MainLayout.jsx, MuleLayout.jsx, Sidebar.jsx
+- tools/btsy/layout/MainLayout.jsx, Header.jsx, Sidebar.jsx
+
+Duplicated concerns:
+- Drawer widths, collapsed states, icons, navigation groups, theming.
+- User profile dropdown, environment navigation, back buttons.
+Risk:
+- Inconsistent navigation behaviour and styling across tools.
+- High effort to introduce new global navigation items or UX standards.
+Conceptual single source of truth:
+- A shared WorkbenchLayout module that defines sidebar navigation, tool-switching, and user context; individual tools would declare their menu structure rather than reimplement the layout.
+
+2. API clients and request patterns
+
+Frontend:
+- src/services/api.js: general API client.
+- src/services/api_v2.js: variant for v2 endpoints.
+- tools/btsy/services/btsyApi.js: bespoke axios wrapper for BTSY endpoints.
+- tools/mule_detection/services/muleApi.js: bespoke axios wrapper for mule endpoints.
+
+Duplicated concerns:
+- Base URL handling.
+- Authentication headers.
+- X-Environment-ID injection (muleApi and btsyApi both derive environment IDs from storage).
+- Error handling (mapping Axios errors to user messages).
+
+Risk:
+- Divergent behaviour when backend error shapes or auth mechanisms evolve.
+- Inconsistent timeout and retry behaviours across tools.
+
+Conceptual single source of truth:
+- A shared API client layer that:
+  – centralizes base URL, error mapping, and auth headers.
+  – offers scoped clients (e.g. api.investigation, api.mule, api.btsy) built on top of a common HTTP base.
+
+3. Environment and configuration handling
+
+Backend:
+- api/routes/admin.py handles ENVs JSON and DB initialisation.
+- api/routes/environment.py provides environment selection and activation, partly overlapping admin responsibilities.
+- config.py defines core DB paths (e.g. CALIBRATION_DB_PATH).
+
+Duplicated logic:
+- Reading and writing data/environments.json.
+- Deriving environment-specific DB paths.
+- Activation logic via services.metadata_manager.
+
+Risk:
+- Environment creation and selection semantics split between "admin" and "environment" routes.
+- Inconsistent error handling and validation around environment lifecycle.
+
+Conceptual single source of truth:
+- An EnvironmentRegistry service that:
+  – owns the environment model (id, tenant_id, DB paths, calibration DB paths).
+  – exposes a small API for creation, selection, and listing.
+  – is used consistently by both admin and environment routes.
+
+4. Mule detection ML/route variants
+
+Backend (mule_detection):
+- ml_routes.py
+- ml_routes_complete.py
+- ml_routes_enhanced.py
+- plus consolidated functionality inside api/routes/mule_detection/__init__.py
+
+Duplicated responsibilities:
+- Training models, listing models, running inference, computing features.
+
+Risk:
+- Confusion on which API variant is authoritative.
+- Potential divergence between UI expectations (mule tools) and backend routes actually wired into app.
+
+Conceptual single source of truth:
+- A single mule ML service and route set, with configuration-driven behaviour for “simple”, “complete”, or “enhanced” modes rather than multiple code paths.
+
+5. Unstructured graph and pattern logic
+
+Backend:
+- services/mule_detection/money_flow.py implements graph and pattern analysis.
+- services/mule_detection/flow_graph_workbench.py implements another, more detailed graph workbench.
+- BTSY graph analysis and calibration logic has additional graph concepts (transaction_universe, behavior, etc).
+
+Frontend:
+- investigation graph analysis screens.
+- mule detection NetworkGraphScreen with bespoke D3 rendering.
+
+Duplicated concept:
+- Money flow graph and patterns (pass-through, circularity, bursts, multi-hop).
+
+Risk:
+- Multiple places where the definition of “mule-like money flow” exists, potentially inconsistent.
+- Difficult to explain to auditors which module is the canonical implementation.
+
+Conceptual single source of truth:
+- A documented “Money Flow Model” in the backend that exposes:
+  – canonical pattern definitions and metrics.
+  – explicit APIs for baseline vs suspect flows.
+- Frontend graph views would consume this model’s outputs, not re-interpret raw transaction data.
+
+6. Documentation RAG and vector RAG indices
+
+Backend:
+- llm/doc_rag.py
+- llm/vector_rag.py
+- llm routes providing /rag/build-doc-index, /rag/index-status, /rag/health, /rag/stats.
+
+Duplicated or overlapping concerns:
+- Building and managing indexes over documentation/code.
+- Supplying context to the LLM for explanation and SQL generation.
+
+Risk:
+- Complex LLM subsystem living in the same process as transactional AML workflows.
+- Multiple indexing strategies without a clear delineation of which is production-grade vs experimental.
+
+Conceptual single source of truth:
+- A RAGService abstraction with:
+  – defined responsibilities (code-docs, case-docs, config-docs).
+  – explicit life-cycle separate from core AML transaction processing.
+
+Dead / Unused Code Findings
+
+This section is indicative, not exhaustive. Static analysis plus the project’s own “find unused” tools highlight likely dead or legacy code. All classifications assume no hidden external import paths.
+
+1. Backend
+
+Likely legacy / transitional
+- backend/api/__init__.py:
+  – Legacy app factory not invoked by backend/app.py.
+  – Contains older blueprint registration logic.
+  – Classification: Risky-to-remove; verify no external tooling still imports api.create_app.
+
+- api/routes/env.py vs api/routes/environment.py:
+  – Overlapping responsibilities for environment handling.
+  – environment.py appears to be the “fixed” version used in app.py imports.
+  – Classification: Needs dependency verification; env.py may be legacy.
+
+- mule_detection ml_routes variants:
+  – ml_routes.py, ml_routes_complete.py, ml_routes_enhanced.py co-exist with a consolidated mule_detection/__init__.py route module.
+  – If app.py only registers mule_bp from __init__.py, these may be unused.
+  – Classification: Needs dependency verification; likely safe once confirmed not imported.
+
+- backend/scripts/find_unused_backend.py:
+  – Developer tool used for analysis, not runtime.
+  – Safe by design but indicates known unused code elsewhere.
+
+Potential dead code / unused imports
+- requirements.txt includes multiple heavy libraries (e.g. xgboost, shap, networkx). Some appear used (mule_detection ML, feature_engineer), but a full cross-check would be needed:
+  – Some DB drivers (cx_Oracle, pymssql, pyodbc, psycopg2_binary, pyarrow) may be present for connector flexibility rather than current use.
+  – Classification: Needs dependency verification; do not remove without checking connectors/sql_connector usage and deployment plans.
+
+- Some BTSY tools (e.g. certain routes under api/routes/btsy) may not have corresponding frontend screens wired into the current BTSYPlatform. Without full route call graphs, classification must remain:
+  – Needs dependency verification.
+
+2. Frontend
+
+Indications of unused components
+- scripts/find_unused_frontend.mjs:
+  – Designed to find components not reachable from src/main.jsx via imports.
+  – Indicates prior or ongoing effort to identify dead code.
+
+Given the breadth of src/tools and screens, probable categories:
+
+Safe-to-remove (post-tooling confirmation)
+- Legacy screens or components not imported anywhere in src/app.jsx or tool platforms.
+- Experimental components under tools/btsy or tools/investigation that are not referenced by any route and not picked up by find_unused_frontend.mjs.
+
+Risky-to-remove
+- Screens that are only conditionally imported via dynamic routing or lazy-loading patterns (not obviously used from static analysis).
+- Manual documentation components (e.g. guide/* under tools/investigation) that may be accessed via internal links or help menus.
+
+Environment variables and config
+- vite.config.js uses proxy targeting localhost:5001; the backend app reads PORT and APP_PORT from backend/.env.
+- Additional env variables in backend/.env (e.g. DEBUG_MODE, CORS_ORIGINS, RATE_LIMIT) may be defined but not respected by code.
+
+Classification:
+- Unused env keys should be treated as Needs dependency verification; only after confirming they are not read anywhere (search via SearchCodebase) should they be removed from managed configuration.
+
+
+Backend Design & Performance Observations
+
+1. Startup behaviour and service container
+
+- backend/app.py:
+  – Manages its own virtualenv and pip install on first run.
+  – Loads backend/.env via security/dotenv_loader.py at import time.
+  – Immediately imports api/services and config_btsy, then creates app = create_app() at module import.
+
+- api/services.py:
+  – Instantiates MetadataManager, DatabaseManager, DataIngestionService, SmartMergeService, TypologyService, AIMasterBuilder, OllamaWrapper, DocRAGSystem, VectorRAGSystem, TransactionGraphBuilder, BaselineEngine, FocusEngine, AuditLogger, CalibrationDatabaseManager, CalibrationDataIngestionService, and more.
+
+Impact:
+- Very high import-time and startup cost.
+- Even routes that only need simple auth or environment info pay this cost.
+- The process is difficult to scale horizontally because all services initialise in every worker process.
+
+2. Database access and DuckDB usage
+
+- Investigation DB:
+  – Managed via services.db_schema.DatabaseManager.
+  – Accessed both from api/services and from higher-level routes (admin, env, cases).
+
+- Calibration/BTSY:
+  – Uses CalibrationDatabaseManager and multiple DuckDB databases (workbench, behaviour, universe).
+  – Many services and routes instantiate DuckDB connections directly.
+
+- Mule detection:
+  – Uses DuckDB and CSV-based data loading depending on env.
+
+Observations:
+- There is some pooling for DuckDB (e.g. api.tools.btsy.duckdb_pool), but not uniformly applied.
+- Some services open and close DuckDB connections ad-hoc inside methods.
+- Long-running calibration and ML flows are implemented with synchronous calls and thread pools (e.g. autorun_executor using ThreadPoolExecutor).
+
+Performance risks:
+- High I/O overhead due to repeated DuckDB connection establishment.
+- Potential contention on DuckDB file locks if multiple long operations run concurrently.
+- No explicit backpressure or queueing around heavy calibration or ML jobs.
+
+3. API structure and synchronous design
+
+- All routes are standard Flask sync functions.
+- Heavy operations include:
+  – RAG index building (build_docs_index)
+  – BTSY calibration autorun flows
+  – Mule detection training jobs and feature engineering
+- Some of these use background threads but remain controlled from the same process.
+
+Risks:
+- Long requests can block worker threads, leading to poor tail-latency.
+- Shared process for interactive APIs and batch-like jobs increases likelihood of resource interference.
+
+Future-ready observations:
+- For a bank-grade deployment, these heavy tasks should be:
+  – Offloaded to background workers (Celery, RQ, or equivalent).
+  – Triggered via job submission APIs, with monitoring endpoints returning status rather than performing work inline.
+
+4. Logging, error handling, and observability
+
+- api/utils.handle_errors decorator is applied to many routes to standardise JSON error responses and rehydrate DB context if needed.
+- app.py defines a global @app.errorhandler(Exception) returning generic JSON for /api paths.
+- Audit logging is implemented via AuditLogger and used in admin and auth routes.
+
+Gaps:
+- No structured logging or correlation IDs across requests.
+- No clear separation between:
+  – audit logs (compliance-grade, immutable)
+  – operational logs (for debugging/performance)
+- Error responses often surface raw exception messages (especially in calibration and mule detection routes), which can leak internal state in production.
+
+5. Security of DB and large data operations
+
+- config.py constrains calibration DB path to backend/data/calibration/calibration.db and ensures directory creation.
+- Many file paths in admin and environment routes are relative to backend/data.
+
+Concerns:
+- Hard-coded data paths under backend/data reduce flexibility for:
+  – multi-environment deployments
+  – external storage (e.g. network filesystem, object storage)
+- Large data operations (calibration, BTSY universes, mule flows) load substantial amounts of data into memory (pandas, DuckDB).
+
+For large data security and performance:
+- DB and file paths should be abstracted through a configuration layer, supporting:
+  – distinct volumes for large datasets.
+  – encryption at rest where required.
+- Access to raw data exports and debug endpoints should be gated behind strict roles and, ideally, disabled in production.
+
+
+Frontend Design & UX Observations
+
+1. Component hierarchy and routing
+
+- src/app.jsx:
+  – Defines a route structure with:
+    – /login, /register for auth.
+    – /environments, /tools for environment and tool selection.
+    – /investigation/*, /calibration/*, /mule/*, /btsy/* wrapped in ToolLayout.
+- Each tool then provides its own internal navigation and screens.
+
+Observations:
+- This design cleanly separates tools at the routing level but leads to:
+  – duplicated layout and navigation logic.
+  – different mental models per tool for similar activities (e.g. selecting an environment, loading data, running ML or calibration).
+- There is no global “investigation context” visible across tools (e.g. a case selected in investigation cannot obviously be passed into mule detection or BTSY views without manual wiring).
+
+2. State management and re-renders
+
+- AppContext (src/context/AppContext.jsx) manages:
+  – authentication state
+  – user role
+  – global loading indicators.
+
+- Tool-specific stores:
+  – tools/mule_detection/store/muleStore.js uses zustand to track environment, data status, accounts, selected account, and investigationOpen flag.
+
+Observations:
+- Within screens, local React state is used heavily for:
+  – filters (e.g. NetworkGraphScreen path filters).
+  – local data caches (e.g. DataIntrospectionScreen).
+- Large screens do not aggressively memoise derived data or components.
+- Graph and chart components are re-rendered as entire screens update.
+
+Perceived slowness sources:
+- Repeated fetches of the same data when navigating between sub-screens rather than centrally cached results.
+- D3 graph reinitialisation on every filter change in NetworkGraphScreen.
+- Large Recharts components re-rendering with substantial datasets without virtualisation.
+
+3. UX fit for investigators
+
+Current behaviours:
+- Many screens use “Apply” buttons that run non-trivial back-end analytics.
+- Before recent adjustments, filters for complex graphs could be applied without any indication of data availability.
+- Some screens provide rich visualisations (graphs, tables) but:
+  – error messages are generic (“Failed to load”, “No data available”).
+  – there is limited guidance on how to adjust parameters when no results appear.
+
+As a result:
+- The tooling feels closer to a sophisticated data dashboard than a guided investigative workbench.
+- Analysts must mentally “guess” filters and interpret low-level error messages rather than being led through structured flows.
+
+4. Bundle size and code splitting
+
+- The tools tree under src/tools is large and contains many heavy screens.
+- There is no evidence (in the snippets inspected) of route-level code splitting (React.lazy, dynamic imports).
+- All tool screens appear to be part of the main bundle.
+
+Implications:
+- Initial load times can be high, especially over constrained networks.
+- Memory footprint in the browser is larger than necessary, which can be problematic for older endpoints.
+
+Data Layer & Analytics Design Gaps
+
+1. Lack of a unified data access layer
+
+Backend:
+- Multiple DB abstractions (DatabaseManager, CalibrationDatabaseManager, mule DB service, BTSY DuckDB pool) exist, but there is no single interface for:
+  – obtaining a DB session for a given environment and tenant.
+  – executing analytics queries with tracing and errors mapped in a consistent way.
+
+Frontend:
+- Each tool handles its own data loading logic, with:
+  – a variety of endpoints returning JSON of different shapes.
+  – domain-specific knowledge embedded in screens and local utilities (e.g. evidenceCalculations.js in investigation).
+
+Effect:
+- Adding a new analytic (for example, a cross-domain “customer 360” view) would require touching:
+  – new backend code that composes DBs and analytics.
+  – multiple frontend screens, each consuming their own endpoint shapes.
+- There is no central “data layer” module describing the canonical entities (Account, Transaction, Case, Alert, Environment) and their relationships.
+
+2. Analytics logic spread across tiers
+
+- Mule detection:
+  – Features and ML logic in backend/services/mule_detection.
+  – Risk visualisation and rule tuning logic in frontend mule screens.
+
+- BTSY calibration:
+  – Calibration steps, thresholds, and validation logic in backend/api/tools/btsy/services.
+  – Interpretation and presentation in frontend BTSY screens.
+
+Risk:
+- Slight changes in backend scoring logic can silently break UI expectations, and vice versa.
+- There is no single language or schema for “risk factors” and “workbench metrics”.
+
+3. Difficulty scaling analytics
+
+Given the current patterns:
+- Scaling to millions of transactions per environment will stress:
+  – DuckDB instances accessed via local file paths.
+  – synchronous Flask endpoints returning large payloads over HTTP to heavy React clients.
+
+Without:
+- pagination and server-side summarisation at every layer.
+- clear boundaries between “interactive” and “batch” analytics.
+
+the system risks:
+- slow response times.
+- high memory use in both backend and frontend.
+- difficulty meeting SLAs typical in a bank for run-time analytics.
+
+
+Deployment & Scalability Readiness
+
+1. Containerisation and on-prem VM readiness
+
+- No Dockerfile or container-specific configuration is present in the AI_AML_tool project.
+- app.py’s behaviour of creating and managing its own .venv and running pip install is not container-friendly:
+  – in a container, images should be built with dependencies pre-installed.
+  – runtime package installation is undesirable and sometimes blocked.
+
+- The backend stores data inside backend/data/ and uses relative paths. In a container or VM environment, this demands:
+  – correct volume mounting.
+  – careful management of permissions and persistence.
+
+- The frontend contains a serve-build.cjs script for serving dist/ via Express, but lacks:
+  – CI/CD scripts.
+  – environment-specific configs for CDN hosting or static asset pipelines.
+
+2. Microservices vs monolith
+
+Current state:
+- Single Flask process hosting all domains.
+- Heavy internal services (LLM, RAG, calibration) loaded into this process.
+
+Implications:
+- Microservice decomposition would require:
+  – extracting some domains (e.g. LLM/RAG, BTSY calibration batch jobs) into separate services or workers.
+  – introducing a lightweight gateway or API aggregator.
+
+As-is, the system is a monolith and more suitable for a single-node on-prem deployment than for:
+- horizontally scaled microservice architectures.
+- multi-region deployments.
+
+3. FastAPI vs WSGI, async readiness
+
+- The backend is Flask-based and uses sync functions everywhere.
+- Requirements include libraries that are CPU-heavy (pandas, duckdb, xgboost), meaning async IO would not automatically solve performance issues.
+- Migrating to FastAPI or an async stack would require:
+  – re-thinking how analytics tasks are scheduled and offloaded.
+  – redesigning the boundary between fast HTTP handlers and slow analytics jobs.
+
+Currently, the main blockers are:
+- heavy work inside request handlers.
+- lack of a job queue / background worker architecture.
+
+4. Executable / packaged deployment
+
+- There is no explicit PyInstaller or similar packaging configuration for producing a .exe.
+- app.py’s auto-venv logic complicates packaging (embedded relative paths, subprocess calls).
+
+To move towards packaged deployment:
+- The bootstrap logic would need to be separated from:
+  – the core WSGI application.
+  – any CLI or admin scripts.
+
+Risk Register (short-term vs long-term)
+
+Short-term risks (0–3 months)
+
+1. Secret and config exposure
+- Risk: backend/.env with real API keys checked into or backed up alongside code.
+- Impact: leakage of LLM/API keys and APP_SECRET_KEY.
+- Mitigation: move secrets to deployment-level environment management; keep backend/.env strictly local and excluded from repository copies.
+
+2. Breaking changes due to duplicated routes and clients
+- Risk: changes to environment or mule detection routes made in one module but not others (e.g. environment.py vs env.py, ml_routes variants).
+- Impact: inconsistent behaviour, hard-to-debug issues in specific tools.
+- Mitigation: define canonical route modules; treat others as legacy, but do not delete yet.
+
+3. Operational instability from heavy tasks in main process
+- Risk: RAG index building, calibration autoruns, or mule ML jobs saturating CPU and memory.
+- Impact: degraded performance for interactive users.
+- Mitigation: operational limits (run heavy tasks off hours), monitoring CPU/mem, manual process restarts.
+
+Long-term risks (3–18 months)
+
+1. Maintainability of a multi-domain monolith
+- Risk: adding new features requires changes across many duplicated layouts, API clients, and domain-specific services.
+- Impact: high cost of change; elevated defect risk.
+- Mitigation: progressive modularisation and shared layers (see Action Plan).
+
+2. Difficulty meeting bank-grade non-functional requirements
+- Risk: existing design may not meet strict SLAs for:
+  – response time.
+  – throughput.
+  – resiliency.
+- Impact: inability to deploy as-is into production environments with strict requirements.
+- Mitigation: introduce background job architecture, split heavy domains into separate services, strengthen observability.
+
+3. Compliance and audit limitations
+- Risk: incomplete end-to-end audit of:
+  – data used for each analytic computation.
+  – LLM interactions and their influence on decisions.
+- Impact: difficulty in responding to regulatory queries or internal audits.
+- Mitigation: strengthen audit logging across domains and define a consistent data lineage model.
+
+Action Plan (Phase 0 / Phase 1 / Phase 2)
+
+Note: All phases are non-destructive. They focus on understanding, documentation, and setting up structure, not immediate refactoring.
+
+Phase 0 – Stabilisation and inventory
+
+Goals:
+- Build confidence in current behaviour.
+- Create an accurate inventory of active vs legacy components.
+
+Actions:
+1. Confirm canonical entrypoints and routes
+- Document that backend/app.py is the only supported backend entrypoint.
+- List all registered blueprints and their URL prefixes as “supported API surface”.
+- Tag environment.py as the canonical environment routes module; mark env.py (and any other overlapping modules) as legacy.
+
+2. Secrets and environment inventory
+- Create a definitive list of required environment variables:
+  – For core app (APP_SECRET_KEY, PORT/APP_PORT, MFA_BYPASS_ENABLED).
+  – For LLM/RAG (GEMINI_API_KEY, OPENAI_API_KEY, OLLAMA_BASE_URL).
+- Move actual values out of any committed .env into a secure secret store or deployment tooling.
+- Keep an example .env template (without real values) in the repo for developer guidance.
+
+3. Run and capture unused-code analysis
+- Execute backend/scripts/find_unused_backend.py in a safe environment and store results in a non-code artifact (e.g. an internal doc or report).
+- Similarly, run frontend/scripts/find_unused_frontend.mjs to identify unused components/screens.
+- Classify findings into:
+  – obviously safe to deprecate.
+  – requires further analysis.
+  – false positives.
+
+Phase 1 – Structural clarity and shared abstractions
+
+Goals:
+- Introduce conceptual modules and boundaries without moving large amounts of code yet.
+- Align teams on “how the system is meant to be structured”.
+
+Actions:
+1. Define domain modules and their responsibilities
+- Write an internal architecture document that declares:
+  – Investigation domain (cases, rules, typologies, graphs).
+  – Calibration/BTSY domain.
+  – Mule detection domain.
+  – LLM/RAG domain.
+  – Shared platform (auth, tenants, environments, audit).
+- For each domain, list:
+  – Backend service modules.
+  – Route modules.
+  – Frontend tools and screens.
+
+2. Define a shared API contract layer
+- Without changing the existing API clients, document:
+  – canonical base URLs (e.g. /api vs /api/v2).
+  – common headers (Authorization, X-Environment-ID).
+  – error shapes.
+- Identify where clients diverge (muleApi vs api.js vs btsyApi) and specify the desired behaviour for a future unified API client, without implementing it yet.
+
+3. Clarify environment and data path model
+- Document the lifecycle of an “environment”:
+  – how it is created (admin routes).
+  – where its DBs are stored (investigation DB, calibration DB, mule data).
+  – how it is activated (environment routes and services.metadata_manager).
+- Identify all references to data/environments.json and environment-specific DB paths.
+
+Phase 2 – Future-ready improvements (design-level only)
+
+Goals:
+- Prepare for later refactoring by designing target architectures and policies.
+- Focus on large data security, performance, and modularity.
+
+Actions:
+1. Design a background job architecture
+- Specify which operations should move out of request-response paths:
+  – RAG index builds.
+  – BTSY calibration autoruns.
+  – bulk mule ML training and scoring jobs.
+- Propose a job abstraction (job IDs, status endpoints, results retrieval) and where it would live (e.g. dedicated worker service).
+
+2. Design a shared data layer
+- Conceptually define:
+  – core entities (Environment, Tenant, Account, Transaction, Case, Alert, ModelRun, CalibrationRun).
+  – the minimal “query API” for each domain (e.g. for an account, “load flows”, “load risk scores”, “load calibration history”).
+- Map existing code to this conceptual model (where logic currently lives).
+- Identify integration points where the frontend should consume higher-level “data services” rather than raw endpoints.
+
+3. Plan gradual consolidation of layouts and API clients
+- For the frontend:
+  – Define a target WorkbenchLayout with a plug-in menu model.
+  – Define a target shared API client abstraction.
+- For the backend:
+  – Define minimally invasive boundaries between domains (e.g. explicit per-domain service objects within api/services.py).
+
+4. Data security and large data handling
+- Specify policies for:
+  – data-at-rest (where DBs and DuckDB files can live, encryption expectations).
+  – data-in-motion (size limits, pagination, access control for exports).
+- Identify endpoints that:
+  – send large result sets to the client.
+  – expose data that should only be available to specific roles.
+- Design a uniform pattern for:
+  – pagination.
+  – summary-first APIs (e.g. returning aggregate statistics before detailed datasets).
+
+This action plan intentionally stops short of making any refactors. It provides a structured path for understanding and governing the existing codebase so that future rework can be targeted, risk-aware, and aligned with AML and banking requirements.

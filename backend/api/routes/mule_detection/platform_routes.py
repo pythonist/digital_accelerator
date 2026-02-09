@@ -17,6 +17,11 @@ from modules.inference_engine import InferenceEngine
 from modules.network_analyzer import NetworkAnalyzer
 from modules.rule_engine import RuleEngine
 from services.mule_detection.money_flow import MoneyFlowAnalyzer, MoneyFlowConfig
+from services.mule_detection.risk_dashboard_service import RiskDashboardService
+from services.mule_detection.feature_workbench_service import FeatureWorkbenchService
+from services.mule_detection.model_workbench_service import ModelWorkbenchService
+from services.mule_detection.mule_inference_service import MuleInferenceService
+from services.mule_detection.explanation_provider import ExplanationProvider
 from services.mule_detection.db_service import get_md_db_service
 
 platform_bp = Blueprint("mule_platform", __name__)
@@ -24,6 +29,8 @@ md_db = get_md_db_service()
 
 _feature_jobs_lock = threading.Lock()
 _feature_jobs = {}
+_env_job_workers_lock = threading.Lock()
+_env_job_workers = {}
 
 
 def _env_id() -> str:
@@ -41,6 +48,39 @@ def _hash_jsonable(obj) -> str:
     except Exception:
         s = str(obj)
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+
+def _to_jsonable(obj):
+    if obj is None:
+        return None
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_jsonable(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return _to_jsonable(obj.tolist())
+    if isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    if hasattr(obj, "isoformat"):
+        try:
+            return obj.isoformat()
+        except Exception:
+            pass
+    return str(obj)
+
+
+def _jsonify_safe(payload, status_code: int | None = None):
+    if status_code is None:
+        return jsonify(_to_jsonable(payload))
+    return jsonify(_to_jsonable(payload)), int(status_code)
 
 
 def _get_data_version(conn: duckdb.DuckDBPyConnection, env_id: str) -> str:
@@ -210,6 +250,449 @@ def data_schema():
         }
     )
 
+@platform_bp.route("/data/onboarding/profile", methods=["GET"])
+def data_onboarding_profile():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        rows = int(conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+        accs = int(conn.execute("SELECT COUNT(DISTINCT account_id) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+        custs = int(conn.execute("SELECT COUNT(DISTINCT customer_id) FROM mule_accounts_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+        rng = conn.execute("SELECT MIN(txn_timestamp), MAX(txn_timestamp) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()
+        start_ts, end_ts = rng[0], rng[1]
+        tx_per_acc = conn.execute("SELECT AVG(c) FROM (SELECT account_id, COUNT(*) AS c FROM mule_transactions_raw WHERE environment_id = ? GROUP BY account_id)", [env_id]).fetchone()[0]
+        dens = float(tx_per_acc or 0.0)
+        return jsonify({"success": True, "rows": rows, "accounts": accs, "customers": custs, "date_coverage": {"start": str(start_ts), "end": str(end_ts)}, "activity_density": dens})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/validate", methods=["GET"])
+def data_onboarding_validate():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        req_tx = ["txn_id","account_id","txn_timestamp","amount","direction"]
+        req_acc = ["account_id","customer_id","account_open_date","customer_type","risk_rating","expected_turnover","is_mule"]
+        tx_cols = [r[1] for r in conn.execute("PRAGMA table_info('mule_transactions_raw')").fetchall()]
+        acc_cols = [r[1] for r in conn.execute("PRAGMA table_info('mule_accounts_raw')").fetchall()]
+        missing_tx = [c for c in req_tx if c not in tx_cols]
+        missing_acc = [c for c in req_acc if c not in acc_cols]
+        null_tx = conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ? AND (txn_id IS NULL OR account_id IS NULL OR txn_timestamp IS NULL OR amount IS NULL)", [env_id]).fetchone()[0]
+        dup_tx = conn.execute("SELECT COUNT(*) FROM (SELECT txn_id, COUNT(*) AS c FROM mule_transactions_raw WHERE environment_id = ? GROUP BY txn_id HAVING c>1)", [env_id]).fetchone()[0]
+        status = "pass"
+        if missing_tx or missing_acc or dup_tx > 0:
+            status = "fail"
+        elif null_tx > 0:
+            status = "warning"
+        return jsonify({"success": True, "status": status, "missing": {"transactions": missing_tx, "accounts": missing_acc}, "nulls": {"transactions_rows": int(null_tx)}, "duplicates": {"transactions_txn_id": int(dup_tx)}})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/integrity", methods=["GET"])
+def data_onboarding_integrity():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        orphan_tx = conn.execute("SELECT COUNT(*) FROM mule_transactions_raw t LEFT JOIN mule_accounts_raw a ON a.environment_id=t.environment_id AND a.account_id=t.account_id WHERE t.environment_id = ? AND a.account_id IS NULL", [env_id]).fetchone()[0]
+        dup_txid = conn.execute("SELECT COUNT(*) FROM (SELECT txn_id, COUNT(*) AS c FROM mule_transactions_raw WHERE environment_id = ? GROUP BY txn_id HAVING c>1)", [env_id]).fetchone()[0]
+        broken_rel = orphan_tx
+        return jsonify({"success": True, "orphan_transactions": int(orphan_tx), "duplicate_txn_id": int(dup_txid), "broken_relationships": int(broken_rel)})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/time-sanity", methods=["GET"])
+def data_onboarding_time_sanity():
+    from datetime import datetime, timezone
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        now = datetime.now(timezone.utc)
+        fut = conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ? AND txn_timestamp > ?", [env_id, now]).fetchone()[0]
+        rng = conn.execute("SELECT MIN(txn_timestamp), MAX(txn_timestamp) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()
+        start_ts, end_ts = rng[0], rng[1]
+        if start_ts is None or end_ts is None:
+            return jsonify({"success": True, "future_dates": int(fut), "date_coverage": {"start": None, "end": None}, "missing_days": 0})
+        days = conn.execute(
+            "SELECT DISTINCT DATE_TRUNC('day', txn_timestamp) AS d FROM mule_transactions_raw WHERE environment_id = ?",
+            [env_id],
+        ).df()
+        present = set(pd.to_datetime(days["d"], errors="coerce").dropna().dt.date.tolist()) if len(days) else set()
+        full = pd.date_range(pd.to_datetime(start_ts).date(), pd.to_datetime(end_ts).date(), freq="D")
+        missing = [d.date() for d in full if d.date() not in present]
+        return jsonify(
+            {
+                "success": True,
+                "future_dates": int(fut),
+                "date_coverage": {"start": str(start_ts), "end": str(end_ts)},
+                "missing_days": int(len(missing)),
+            }
+        )
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/missingness", methods=["GET"])
+def data_onboarding_missingness():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        tx_cols = conn.execute("PRAGMA table_info('mule_transactions_raw')").df()["name"].tolist()
+        acc_cols = conn.execute("PRAGMA table_info('mule_accounts_raw')").df()["name"].tolist()
+        tx = []
+        for c in tx_cols:
+            n = conn.execute(f"SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ? AND \"{c}\" IS NULL", [env_id]).fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0]
+            pct = float(n) / float(total) if total else 0.0
+            tx.append({"column": c, "nulls": int(n), "pct": pct})
+        acc = []
+        for c in acc_cols:
+            n = conn.execute(f"SELECT COUNT(*) FROM mule_accounts_raw WHERE environment_id = ? AND \"{c}\" IS NULL", [env_id]).fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM mule_accounts_raw WHERE environment_id = ?", [env_id]).fetchone()[0]
+            pct = float(n) / float(total) if total else 0.0
+            acc.append({"column": c, "nulls": int(n), "pct": pct})
+        return jsonify({"success": True, "transactions": tx, "accounts": acc})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/cardinality", methods=["GET"])
+def data_onboarding_cardinality():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        cols = ["direction","channel","txn_type","device_id","ip_address","counterparty_bank"]
+        out = []
+        for c in cols:
+            d = conn.execute(f"SELECT COUNT(DISTINCT \"{c}\") FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0]
+            top = conn.execute(f"SELECT \"{c}\", COUNT(*) AS c FROM mule_transactions_raw WHERE environment_id = ? GROUP BY \"{c}\" ORDER BY c DESC LIMIT 10", [env_id]).df().to_dict("records")
+            out.append({"column": c, "distinct": int(d), "top": top})
+        return jsonify({"success": True, "transactions": out})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/distribution", methods=["GET"])
+def data_onboarding_distribution():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    bins = int(request.args.get("bins", 20))
+    conn, _paths = _conn(env_id)
+    try:
+        r = conn.execute("SELECT MIN(amount), MAX(amount) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()
+        min_v, max_v = float(r[0] or 0.0), float(r[1] or 0.0)
+        width = float(max_v - min_v) / float(bins) if bins > 0 else 0.0
+        if width == 0.0:
+            return jsonify({"success": True, "amount_bins": [], "frequency_top": []})
+        rows = conn.execute("SELECT FLOOR((TRY_CAST(amount AS DOUBLE) - ?) / ?) AS b, COUNT(*) AS c FROM mule_transactions_raw WHERE environment_id = ? AND TRY_CAST(amount AS DOUBLE) IS NOT NULL GROUP BY b ORDER BY b", [min_v, width, env_id]).fetchall()
+        out_bins = []
+        for b, c in rows:
+            start = min_v + float(int(b)) * width
+            end = start + width
+            out_bins.append({"bin": int(b), "start": start, "end": end, "count": int(c)})
+        freq = conn.execute("SELECT account_id, COUNT(*) AS tx_count FROM mule_transactions_raw WHERE environment_id = ? GROUP BY account_id ORDER BY tx_count DESC LIMIT 50", [env_id]).df().to_dict("records")
+        return jsonify({"success": True, "amount_bins": out_bins, "frequency_top": freq})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/onboarding/lineage", methods=["GET"])
+def data_onboarding_lineage():
+    env_id = _env_id()
+    conn, _paths = _conn(env_id)
+    try:
+        df = conn.execute(
+            "SELECT upload_id, uploaded_at, txn_file_name, accounts_file_name, txn_row_count, accounts_row_count, dataset_version, uploader, source_ip, checksum_txn, checksum_acc FROM mule_uploads WHERE environment_id = ? ORDER BY uploaded_at DESC LIMIT 10",
+            [env_id],
+        ).df()
+        return jsonify({"success": True, "uploads": df.to_dict("records")})
+    finally:
+        conn.close()
+
+@platform_bp.route("/data/forensics/report", methods=["GET"])
+def data_forensics_report():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    sample_limit = int(request.args.get("limit", 20000))
+    conn, _paths = _conn(env_id)
+    try:
+        tx = conn.execute("SELECT * FROM mule_transactions_raw WHERE environment_id = ? LIMIT ?", [env_id, sample_limit]).df()
+        acc = conn.execute("SELECT * FROM mule_accounts_raw WHERE environment_id = ? LIMIT ?", [env_id, sample_limit]).df()
+    finally:
+        conn.close()
+
+    def _infer_kind(col_name: str, dtype: str):
+        name = col_name.lower()
+        dt = str(dtype).upper()
+        if "TIMESTAMP" in dt or "DATE" in dt or "time" in name or "date" in name:
+            return "timestamp"
+        if "BOOL" in dt or name.startswith("is_") or name.endswith("_flag"):
+            return "boolean"
+        if "id" in name and "device" not in name and "ip" not in name:
+            return "id"
+        if any(x in dt for x in ["DOUBLE", "FLOAT", "INT", "DECIMAL", "BIGINT"]):
+            return "numeric"
+        return "categorical"
+
+    def _missingness(df):
+        total = int(len(df))
+        out = []
+        for c in df.columns:
+            n = int(df[c].isna().sum())
+            out.append({"column": c, "nulls": n, "pct": float(n) / total if total else 0.0})
+        return out
+
+    def _cardinality(df, limit_cols=12):
+        out = []
+        for c in df.columns[:limit_cols]:
+            if df[c].dtype == object:
+                vc = df[c].value_counts(dropna=True).head(10)
+                out.append({"column": c, "distinct": int(df[c].nunique(dropna=True)), "top": [{"value": str(k), "count": int(v)} for k, v in vc.items()]})
+        return out
+
+    def _rare_categories(df, max_rows=15):
+        out = []
+        for c in df.columns:
+            if df[c].dtype == object:
+                vc = df[c].value_counts(dropna=True)
+                rare = vc[vc <= max(2, int(0.01 * len(df)))]
+                if len(rare):
+                    out.append({"column": c, "rare": [{"value": str(k), "count": int(v)} for k, v in rare.head(max_rows).items()]})
+        return out
+
+    def _correlation_hints(df, limit=10):
+        num = df.select_dtypes(include=[np.number])
+        if num.shape[1] < 2:
+            return []
+        corr = num.corr().abs()
+        pairs = []
+        cols = corr.columns
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                v = corr.iloc[i, j]
+                if v >= 0.7:
+                    pairs.append({"a": cols[i], "b": cols[j], "corr": float(v)})
+        pairs.sort(key=lambda x: x["corr"], reverse=True)
+        return pairs[:limit]
+
+    def _leakage(df, label_col, limit=10):
+        if label_col not in df.columns:
+            return []
+        y = pd.to_numeric(df[label_col], errors="coerce").fillna(0).astype(int)
+        if y.nunique() < 2:
+            return []
+        out = []
+        for c in df.select_dtypes(include=[np.number]).columns:
+            if c == label_col:
+                continue
+            x = pd.to_numeric(df[c], errors="coerce")
+            mu1 = float(x[y == 1].mean()) if (y == 1).any() else 0.0
+            mu0 = float(x[y == 0].mean()) if (y == 0).any() else 0.0
+            std = float(x.std() or 0.0)
+            if std == 0:
+                continue
+            score = abs(mu1 - mu0) / std
+            out.append({"feature": c, "separation": score})
+        out.sort(key=lambda x: x["separation"], reverse=True)
+        return out[:limit]
+
+    def _type_suggestions(df):
+        out = []
+        for c in df.columns:
+            if df[c].dtype != object:
+                continue
+            s = df[c].astype(str)
+            num_ratio = pd.to_numeric(s, errors="coerce").notna().mean()
+            if num_ratio > 0.8:
+                out.append({"column": c, "suggest": "numeric", "confidence": float(num_ratio)})
+            if ("date" in c.lower() or "time" in c.lower()) and pd.to_datetime(s, errors="coerce").notna().mean() > 0.8:
+                out.append({"column": c, "suggest": "timestamp", "confidence": float(pd.to_datetime(s, errors="coerce").notna().mean())})
+        return out[:20]
+
+    def _extremes(df):
+        if "amount" not in df.columns:
+            return None
+        s = pd.to_numeric(df["amount"], errors="coerce").dropna()
+        if len(s) == 0:
+            return None
+        p1, p99 = s.quantile(0.01), s.quantile(0.99)
+        low = int((s < p1).sum())
+        high = int((s > p99).sum())
+        return {"p1": float(p1), "p99": float(p99), "low_outliers": low, "high_outliers": high}
+
+    report = {
+        "transactions": {
+            "schema": [{"column": c, "type": str(t), "kind": _infer_kind(c, t)} for c, t in zip(tx.columns, tx.dtypes)],
+            "missingness": _missingness(tx),
+            "cardinality": _cardinality(tx),
+            "rare_categories": _rare_categories(tx),
+            "correlation_hints": _correlation_hints(tx),
+            "extreme_values": _extremes(tx),
+        },
+        "accounts": {
+            "schema": [{"column": c, "type": str(t), "kind": _infer_kind(c, t)} for c, t in zip(acc.columns, acc.dtypes)],
+            "missingness": _missingness(acc),
+            "cardinality": _cardinality(acc),
+            "rare_categories": _rare_categories(acc),
+            "correlation_hints": _correlation_hints(acc),
+        },
+        "imbalance": {
+            "is_mule": acc["is_mule"].value_counts(dropna=False).to_dict() if "is_mule" in acc.columns else {},
+            "is_suspicious": tx["is_suspicious"].value_counts(dropna=False).to_dict() if "is_suspicious" in tx.columns else {},
+        },
+        "leakage": {
+            "accounts": _leakage(acc, "is_mule"),
+            "transactions": _leakage(tx, "is_suspicious"),
+        },
+        "type_suggestions": {
+            "transactions": _type_suggestions(tx),
+            "accounts": _type_suggestions(acc),
+        },
+    }
+    return jsonify({"success": True, "report": report})
+
+@platform_bp.route("/accounts/<account_id>/behavior", methods=["GET"])
+def account_behavior_profile(account_id: str):
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        tx = conn.execute(
+            """
+            SELECT * FROM mule_transactions_raw
+            WHERE environment_id = ? AND account_id = ?
+            ORDER BY txn_timestamp
+            """,
+            [env_id, account_id],
+        ).df()
+        peers = conn.execute(
+            """
+            SELECT account_id,
+                   COUNT(*) AS tx_count,
+                   AVG(amount) AS avg_amount,
+                   COUNT(DISTINCT counterparty_account) AS cp_count,
+                   COUNT(DISTINCT device_id) AS device_count
+            FROM mule_transactions_raw
+            WHERE environment_id = ?
+            GROUP BY account_id
+            """,
+            [env_id],
+        ).df()
+    finally:
+        conn.close()
+    if len(tx) == 0:
+        return jsonify({"success": False, "error": "No transactions for account"}), 404
+
+    tx["txn_timestamp"] = pd.to_datetime(tx["txn_timestamp"], errors="coerce")
+    tx = tx.dropna(subset=["txn_timestamp"])
+    tx_count = int(len(tx))
+    active_days = int(tx["txn_timestamp"].dt.date.nunique())
+    day_counts = tx.groupby(tx["txn_timestamp"].dt.date).size()
+    avg_per_day = float(day_counts.mean()) if len(day_counts) else 0.0
+    peak_day = int(day_counts.max()) if len(day_counts) else 0
+    diffs = tx["txn_timestamp"].sort_values().diff().dropna()
+    avg_gap_min = float(diffs.dt.total_seconds().mean() / 60.0) if len(diffs) else 0.0
+
+    counterparties = int(tx["counterparty_account"].nunique()) if "counterparty_account" in tx.columns else 0
+    banks = int(tx["counterparty_bank"].nunique()) if "counterparty_bank" in tx.columns else 0
+    channels = tx["channel"].value_counts(dropna=False).head(10).to_dict() if "channel" in tx.columns else {}
+    devices = int(tx["device_id"].nunique()) if "device_id" in tx.columns else 0
+    ips = int(tx["ip_address"].nunique()) if "ip_address" in tx.columns else 0
+    top_counterparty = (
+        tx["counterparty_account"].value_counts(dropna=True).head(5).to_dict()
+        if "counterparty_account" in tx.columns
+        else {}
+    )
+    direction_counts = tx["direction"].value_counts(dropna=False).to_dict() if "direction" in tx.columns else {}
+
+    peer_row = peers[peers["account_id"] == account_id]
+    peer_metrics = {}
+    if len(peers) and len(peer_row):
+        def _percentile(col):
+            v = float(peer_row[col].iloc[0] or 0.0)
+            return float((peers[col] <= v).mean())
+        peer_metrics = {
+            "tx_count_pct": _percentile("tx_count"),
+            "avg_amount_pct": _percentile("avg_amount"),
+            "cp_count_pct": _percentile("cp_count"),
+            "device_count_pct": _percentile("device_count"),
+        }
+
+    return jsonify(
+        {
+            "success": True,
+            "account_id": account_id,
+            "rhythm": {"tx_count": tx_count, "active_days": active_days, "avg_per_day": avg_per_day, "peak_day": peak_day, "avg_gap_minutes": avg_gap_min},
+            "counterparty_diversity": {"counterparties": counterparties, "banks": banks, "top_counterparties": top_counterparty},
+            "channel_mix": channels,
+            "device_spread": {"devices": devices, "ip_addresses": ips},
+            "direction_mix": direction_counts,
+            "peer_comparison": peer_metrics,
+        }
+    )
+
+@platform_bp.route("/risk/signal-preview", methods=["GET"])
+def risk_signal_preview():
+    env_id = _env_id()
+    ok, msg = _ensure_has_data(env_id)
+    if not ok:
+        return jsonify({"success": False, "error": msg}), 400
+    conn, _paths = _conn(env_id)
+    try:
+        feature_count = int(conn.execute("SELECT COUNT(*) FROM mule_account_features WHERE environment_id = ?", [env_id]).fetchone()[0])
+        if feature_count == 0:
+            return jsonify({"success": False, "error": "No engineered features found. Run Feature Engineering first."}), 400
+        df = conn.execute(
+            """
+            SELECT f.*, a.is_mule
+            FROM mule_account_features f
+            LEFT JOIN mule_accounts_raw a
+              ON a.environment_id = f.environment_id AND a.account_id = f.account_id
+            WHERE f.environment_id = ?
+            """,
+            [env_id],
+        ).df()
+    finally:
+        conn.close()
+    if "is_mule" not in df.columns:
+        return jsonify({"success": False, "error": "No labels available for preview"}), 400
+    y = pd.to_numeric(df["is_mule"], errors="coerce").fillna(0).astype(int)
+    if y.nunique() < 2:
+        return jsonify({"success": False, "error": "Labels are single-class; separability cannot be computed"}), 400
+
+    features = []
+    for c in df.select_dtypes(include=[np.number]).columns:
+        if c in ["is_mule"]:
+            continue
+        s = pd.to_numeric(df[c], errors="coerce")
+        mu1 = float(s[y == 1].mean()) if (y == 1).any() else 0.0
+        mu0 = float(s[y == 0].mean()) if (y == 0).any() else 0.0
+        std = float(s.std() or 0.0)
+        if std == 0:
+            continue
+        sep = abs(mu1 - mu0) / std
+        features.append({"feature": c, "separation": float(sep), "mean_mule": mu1, "mean_non_mule": mu0})
+    features.sort(key=lambda x: x["separation"], reverse=True)
+    return jsonify({"success": True, "signals": features[:20]})
 
 @platform_bp.route("/data/sample", methods=["GET"])
 def data_sample():
@@ -324,77 +807,35 @@ def engineer_features():
     ok, msg = _ensure_has_data(env_id)
     if not ok:
         return jsonify({"success": False, "error": msg}), 400
-    with _feature_jobs_lock:
-        existing = _feature_jobs.get(env_id)
-        if existing and existing.get("state") in ["queued", "running"]:
-            return jsonify({"success": True, "job_id": existing["job_id"], "state": existing["state"]})
-        job_id = str(uuid.uuid4())
-        _feature_jobs[env_id] = {
-            "job_id": job_id,
-            "state": "queued",
-            "step": "queued",
-            "message": "Queued",
-            "started_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-            "result": None,
-            "error": None,
-        }
+    payload = request.get_json(silent=True) or {}
+    config = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    job_id = str(uuid.uuid4())
+    conn, _paths = _conn(env_id)
+    try:
+        conn.execute(
+            """
+            INSERT INTO mule_jobs(job_id, job_type, state, step, message, processed_accounts, total_accounts, progress_pct, payload_json, result_json, error, environment_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                job_id,
+                "feature_engineering",
+                "queued",
+                "queued",
+                "Queued",
+                0,
+                None,
+                0.0,
+                json.dumps({"config": config}, default=str),
+                None,
+                None,
+                env_id,
+            ],
+        )
+    finally:
+        conn.close()
 
-    def _run():
-        def _update(state: str, step: str, message: str, result=None, error=None):
-            with _feature_jobs_lock:
-                j = _feature_jobs.get(env_id)
-                if not j or j.get("job_id") != job_id:
-                    return
-                j["state"] = state
-                j["step"] = step
-                j["message"] = message
-                j["updated_at"] = datetime.now().isoformat()
-                if result is not None:
-                    j["result"] = result
-                if error is not None:
-                    j["error"] = error
-
-        try:
-            _update("running", "load_data", "Loading transactions/accounts")
-            tx, acc = _load_tx_acc(env_id)
-            started = datetime.now()
-            total_accounts = int(tx["account_id"].nunique()) if len(tx) and "account_id" in tx.columns else 0
-            with _feature_jobs_lock:
-                j = _feature_jobs.get(env_id)
-                if j and j.get("job_id") == job_id:
-                    j["total_accounts"] = total_accounts
-                    j["processed_accounts"] = 0
-            _update("running", "engineer_features", "Engineering features 0/" + str(total_accounts))
-            fe = FeatureEngineer()
-            def _progress(done: int, total: int):
-                elapsed = int((datetime.now() - started).total_seconds())
-                with _feature_jobs_lock:
-                    j = _feature_jobs.get(env_id)
-                    if j and j.get("job_id") == job_id:
-                        j["processed_accounts"] = int(done)
-                        j["total_accounts"] = int(total)
-                        j["elapsed_seconds"] = elapsed
-                _update("running", "engineer_features", f"Engineering features {done}/{total}")
-
-            features_df = fe.engineer_all_features(tx, acc, progress_cb=_progress)
-            _update("running", "persist", "Persisting features to DuckDB")
-            conn, _paths = _conn(env_id)
-            try:
-                _persist_features(conn, env_id, features_df)
-            finally:
-                conn.close()
-            _update(
-                "completed",
-                "completed",
-                "Completed",
-                result={"accounts": int(len(features_df)), "features": int(len(features_df.columns))},
-            )
-        except Exception as e:
-            _update("failed", "failed", "Failed", error=str(e))
-
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    _ensure_env_feature_worker(env_id)
     return jsonify({"success": True, "job_id": job_id, "state": "queued"})
 
 
@@ -402,13 +843,289 @@ def engineer_features():
 def engineer_features_status():
     env_id = _env_id()
     job_id = request.args.get("job_id")
-    with _feature_jobs_lock:
-        j = _feature_jobs.get(env_id)
-        if not j:
+    _ensure_env_feature_worker(env_id)
+    conn, _paths = _conn(env_id)
+    try:
+        def _row_to_status(row, queue_position: int | None = None):
+            return {
+                "success": True,
+                "job_id": row[0],
+                "state": row[1],
+                "step": row[2],
+                "message": row[3],
+                "processed_accounts": int(row[4] or 0) if row[4] is not None else 0,
+                "total_accounts": int(row[5] or 0) if row[5] is not None else 0,
+                "progress_pct": float(row[6] or 0.0),
+                "result": json.loads(row[7]) if row[7] else None,
+                "error": row[8],
+                "created_at": row[9].isoformat() if hasattr(row[9], "isoformat") else str(row[9]),
+                "updated_at": row[10].isoformat() if hasattr(row[10], "isoformat") else str(row[10]),
+                "queue_position": queue_position,
+            }
+
+        if job_id:
+            row = conn.execute(
+                """
+                SELECT job_id, state, step, message, processed_accounts, total_accounts, progress_pct, result_json, error, created_at, updated_at
+                FROM mule_jobs
+                WHERE environment_id = ? AND job_id = ?
+                """,
+                [env_id, job_id],
+            ).fetchone()
+            if not row:
+                return jsonify({"success": True, "state": "idle", "job_id": None})
+            pos = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM mule_jobs
+                WHERE environment_id = ? AND job_type = 'feature_engineering' AND state = 'queued' AND created_at < (
+                    SELECT created_at FROM mule_jobs WHERE environment_id = ? AND job_id = ?
+                )
+                """,
+                [env_id, env_id, job_id],
+            ).fetchone()[0]
+            queue_position = int(pos or 0) + 1 if row[1] == "queued" else None
+            return jsonify(_row_to_status(row, queue_position=queue_position))
+
+        active = conn.execute(
+            """
+            SELECT job_id, state, step, message, processed_accounts, total_accounts, progress_pct, result_json, error, created_at, updated_at
+            FROM mule_jobs
+            WHERE environment_id = ?
+              AND job_type = 'feature_engineering'
+              AND state IN ('running', 'queued')
+            ORDER BY
+              CASE WHEN state = 'running' THEN 0 ELSE 1 END,
+              created_at ASC
+            LIMIT 1
+            """,
+            [env_id],
+        ).fetchone()
+        if active:
+            pos = None
+            if active[1] == "queued":
+                pos = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM mule_jobs
+                    WHERE environment_id = ? AND job_type = 'feature_engineering' AND state = 'queued' AND created_at < ?
+                    """,
+                    [env_id, active[9]],
+                ).fetchone()[0]
+                pos = int(pos or 0) + 1
+            return jsonify(_row_to_status(active, queue_position=pos))
+
+        last = conn.execute(
+            """
+            SELECT job_id, state, step, message, processed_accounts, total_accounts, progress_pct, result_json, error, created_at, updated_at
+            FROM mule_jobs
+            WHERE environment_id = ? AND job_type = 'feature_engineering'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            [env_id],
+        ).fetchone()
+        if not last:
             return jsonify({"success": True, "state": "idle", "job_id": None})
-        if job_id and j.get("job_id") != job_id:
-            return jsonify({"success": True, "state": "idle", "job_id": None})
-        return jsonify({"success": True, **j})
+        return jsonify(_row_to_status(last))
+    finally:
+        conn.close()
+
+
+@platform_bp.route("/jobs/list", methods=["GET"])
+def jobs_list():
+    env_id = _env_id()
+    job_type = request.args.get("job_type")
+    limit = int(request.args.get("limit", 50))
+    limit = max(1, min(limit, 200))
+    conn, _paths = _conn(env_id)
+    try:
+        sql = """
+            SELECT job_id, job_type, state, step, message, processed_accounts, total_accounts, progress_pct, error, created_at, updated_at
+            FROM mule_jobs
+            WHERE environment_id = ?
+        """
+        args = [env_id]
+        if job_type:
+            sql += " AND job_type = ?"
+            args.append(job_type)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        df = conn.execute(sql, args).df()
+    finally:
+        conn.close()
+    rows = []
+    for _, r in df.iterrows():
+        rows.append(
+            {
+                "job_id": r.get("job_id"),
+                "job_type": r.get("job_type"),
+                "state": r.get("state"),
+                "step": r.get("step"),
+                "message": r.get("message"),
+                "processed_accounts": int(r.get("processed_accounts") or 0),
+                "total_accounts": int(r.get("total_accounts") or 0) if r.get("total_accounts") is not None else None,
+                "progress_pct": float(r.get("progress_pct") or 0.0),
+                "error": r.get("error"),
+                "created_at": str(r.get("created_at")),
+                "updated_at": str(r.get("updated_at")),
+            }
+        )
+    return jsonify({"success": True, "jobs": rows})
+
+
+def _ensure_env_feature_worker(env_id: str):
+    with _env_job_workers_lock:
+        t = _env_job_workers.get(env_id)
+        if t and t.is_alive():
+            return
+        nt = threading.Thread(target=_feature_worker_loop, args=(env_id,), daemon=True)
+        _env_job_workers[env_id] = nt
+        nt.start()
+
+
+def _update_job(env_id: str, job_id: str, state: str, step: str, message: str, processed: int | None = None, total: int | None = None, result: dict | None = None, error: str | None = None):
+    progress_pct = None
+    if processed is not None and total not in [None, 0]:
+        progress_pct = float(processed) / float(total) * 100.0
+    conn, _paths = _conn(env_id)
+    try:
+        conn.execute(
+            """
+            UPDATE mule_jobs
+            SET state = ?, step = ?, message = ?,
+                processed_accounts = COALESCE(?, processed_accounts),
+                total_accounts = COALESCE(?, total_accounts),
+                progress_pct = COALESCE(?, progress_pct),
+                result_json = COALESCE(?, result_json),
+                error = COALESCE(?, error),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE environment_id = ? AND job_id = ?
+            """,
+            [
+                state,
+                step,
+                message,
+                processed,
+                total,
+                progress_pct,
+                json.dumps(result, default=str) if result is not None else None,
+                error,
+                env_id,
+                job_id,
+            ],
+        )
+    finally:
+        conn.close()
+
+
+def _feature_worker_loop(env_id: str):
+    while True:
+        conn, _paths = _conn(env_id)
+        try:
+            row = conn.execute(
+                """
+                SELECT job_id, payload_json
+                FROM mule_jobs
+                WHERE environment_id = ? AND job_type = 'feature_engineering' AND state = 'queued'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                [env_id],
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return
+        job_id = str(row[0])
+        payload_json = row[1]
+        payload = json.loads(payload_json) if payload_json else {}
+        config = payload.get("config") or {}
+
+        try:
+            _update_job(env_id, job_id, "running", "load_data", "Loading transactions/accounts")
+            tx, acc = _load_tx_acc(env_id)
+            started = datetime.now()
+            total_accounts = int(tx["account_id"].nunique()) if len(tx) and "account_id" in tx.columns else 0
+            _update_job(env_id, job_id, "running", "engineer_features", f"Engineering features 0/{total_accounts}", processed=0, total=total_accounts)
+            fe = FeatureEngineer()
+
+            def _progress(done: int, total: int):
+                elapsed = int((datetime.now() - started).total_seconds())
+                _update_job(env_id, job_id, "running", "engineer_features", f"Engineering features {done}/{total} · {elapsed}s", processed=int(done), total=int(total))
+
+            features_df = fe.engineer_all_features(tx, acc, progress_cb=_progress)
+            _update_job(env_id, job_id, "running", "persist", "Persisting features to DuckDB")
+            conn2, _paths2 = _conn(env_id)
+            try:
+                _persist_features(conn2, env_id, features_df)
+                data_version = _get_data_version(conn2, env_id)
+                duration_seconds = int((datetime.now() - started).total_seconds())
+                summary = {"accounts": int(len(features_df)), "features": int(len(features_df.columns)), "duration_seconds": duration_seconds, "failures": 0}
+                meta = _persist_module_run(
+                    conn2,
+                    env_id,
+                    "feature_engineering",
+                    data_version=data_version,
+                    config_version=_hash_jsonable(config or {}),
+                    summary=summary,
+                    result={"config": config, "job_id": job_id},
+                )
+                run_id = meta.get("run_id")
+                if run_id:
+                    numeric_cols = [
+                        c for c in features_df.columns
+                        if c not in ["account_id", "environment_id", "computed_at"]
+                        and pd.api.types.is_numeric_dtype(features_df[c])
+                    ]
+                    for c in numeric_cols:
+                        s = pd.to_numeric(features_df[c], errors="coerce")
+                        missing_pct = float(s.isna().mean())
+                        sn = s.dropna()
+                        if len(sn) == 0:
+                            continue
+                        conn2.execute(
+                            """
+                            INSERT INTO mule_feature_profiles(run_id, feature_name, environment_id, missing_pct, mean, std, min, p25, p50, p75, max)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            [
+                                run_id,
+                                c,
+                                env_id,
+                                missing_pct,
+                                float(sn.mean()),
+                                float(sn.std() or 0.0),
+                                float(sn.min()),
+                                float(sn.quantile(0.25)),
+                                float(sn.quantile(0.50)),
+                                float(sn.quantile(0.75)),
+                                float(sn.max()),
+                            ],
+                        )
+                        counts, edges = np.histogram(sn, bins=10)
+                        for i in range(len(counts)):
+                            conn2.execute(
+                                """
+                                INSERT INTO mule_feature_bins(run_id, feature_name, environment_id, bin_start, bin_end, count)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                """,
+                                [run_id, c, env_id, float(edges[i]), float(edges[i + 1]), int(counts[i])],
+                            )
+            finally:
+                conn2.close()
+            _update_job(
+                env_id,
+                job_id,
+                "completed",
+                "completed",
+                "Completed",
+                processed=int(len(features_df)),
+                total=int(len(features_df)),
+                result={"accounts": int(len(features_df)), "features": int(len(features_df.columns)), "run_id": meta.get("run_id") if "meta" in locals() else None},
+            )
+        except Exception as e:
+            _update_job(env_id, job_id, "failed", "failed", "Failed", error=str(e))
 
 
 @platform_bp.route("/features/accounts", methods=["GET"])
@@ -612,7 +1329,7 @@ def train_model():
     if not ok:
         return jsonify({"success": False, "error": msg}), 400
 
-    payload = request.get_json() or {}
+    payload = request.get_json(silent=True) or {}
     model_type = payload.get("model_type", "xgboost")
     test_size = float(payload.get("test_size", 0.2))
     use_smote = bool(payload.get("use_smote", True))
@@ -721,6 +1438,45 @@ def list_models():
     return jsonify({"success": True, "models": models})
 
 
+@platform_bp.route("/ml/models/delete", methods=["POST"])
+def delete_model():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    model_version = payload.get("model_version") or request.args.get("model_version")
+    if not model_version:
+        return jsonify({"success": False, "error": "model_version is required"}), 400
+
+    conn, paths = _conn(env_id)
+    try:
+        conn.execute(
+            """
+            UPDATE mule_models
+            SET active = FALSE
+            WHERE environment_id = ? AND model_version = ?
+            """,
+            [env_id, model_version],
+        )
+        conn.execute(
+            "DELETE FROM mule_ml_model_approvals WHERE environment_id = ? AND model_version = ?",
+            [env_id, model_version],
+        )
+        conn.execute(
+            "DELETE FROM mule_models WHERE environment_id = ? AND model_version = ?",
+            [env_id, model_version],
+        )
+    finally:
+        conn.close()
+
+    try:
+        p = Path(str(paths["models_dir"])) / f"{model_version}.pkl"
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
+
+    return jsonify({"success": True, "model_version": model_version})
+
+
 @platform_bp.route("/ml/infer-model", methods=["POST"])
 def infer_model():
     env_id = _env_id()
@@ -728,7 +1484,7 @@ def infer_model():
     if not ok:
         return jsonify({"success": False, "error": msg}), 400
 
-    payload = request.get_json() or {}
+    payload = request.get_json(silent=True) or {}
     model_version = payload.get("model_version")
     force = bool(payload.get("force", False))
 
@@ -849,7 +1605,7 @@ def run_rules():
     if not ok:
         return jsonify({"success": False, "error": msg}), 400
 
-    payload = request.get_json() or {}
+    payload = request.get_json(silent=True) or {}
     force = bool(payload.get("force", False))
 
     tx, _acc = _load_tx_acc(env_id)
@@ -1141,7 +1897,7 @@ def run_hybrid():
 
     started_at = datetime.now()
     if use_trained_model and not model_version:
-        return jsonify({"success": False, "error": "No trained model found. Train a model first."}), 400
+        use_trained_model = False
 
     hybrid_cfg = {"model_version": model_version, "weights": score_weights, "rule_cfg_hash": rule_cfg_hash}
     hybrid_config_version = _hash_jsonable(hybrid_cfg)
@@ -1347,6 +2103,334 @@ def risk_summary():
             },
         }
     )
+
+@platform_bp.route("/portfolio/summary", methods=["GET"])
+def portfolio_summary():
+    env_id = _env_id()
+    service = RiskDashboardService(env_id)
+    return jsonify(service.portfolio_summary())
+
+
+@platform_bp.route("/portfolio/migration", methods=["GET"])
+def portfolio_migration():
+    env_id = _env_id()
+    service = RiskDashboardService(env_id)
+    return jsonify(service.portfolio_migration())
+
+
+@platform_bp.route("/queue/priority", methods=["GET"])
+def queue_priority():
+    env_id = _env_id()
+    filters = {
+        "risk_level": request.args.get("risk_level"),
+        "tag": request.args.get("tag"),
+        "signal": request.args.get("signal"),
+        "min_score": request.args.get("min_score"),
+        "max_score": request.args.get("max_score"),
+    }
+    limit = request.args.get("limit", 200, type=int)
+    service = RiskDashboardService(env_id)
+    return jsonify(service.priority_queue(filters=filters, limit=limit))
+
+
+@platform_bp.route("/patterns/emerging", methods=["GET"])
+def patterns_emerging():
+    env_id = _env_id()
+    service = RiskDashboardService(env_id)
+    return jsonify(service.emerging_patterns())
+
+
+@platform_bp.route("/signals/top", methods=["GET"])
+def signals_top():
+    env_id = _env_id()
+    limit = request.args.get("limit", 12, type=int)
+    service = RiskDashboardService(env_id)
+    return jsonify(service.top_signals(limit=limit))
+
+
+@platform_bp.route("/model/health", methods=["GET"])
+def model_health():
+    env_id = _env_id()
+    service = RiskDashboardService(env_id)
+    return jsonify(service.model_health())
+
+# ==================== FEATURE WORKBENCH ====================
+@platform_bp.route("/runs/history", methods=["GET"])
+def feature_runs_history():
+    env_id = _env_id()
+    svc = FeatureWorkbenchService(env_id)
+    limit = request.args.get("limit", 25, type=int)
+    return jsonify(svc.runs_history(limit=limit))
+
+@platform_bp.route("/runs/details", methods=["GET"])
+def feature_runs_details():
+    env_id = _env_id()
+    run_id = request.args.get("run_id")
+    if not run_id:
+        return jsonify({"success": False, "error": "run_id is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.runs_details(run_id))
+
+@platform_bp.route("/features/catalog", methods=["GET"])
+def features_catalog():
+    env_id = _env_id()
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.features_catalog())
+
+@platform_bp.route("/features/profile", methods=["GET"])
+def features_profile():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    run_id = request.args.get("run_id")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_profile(feature_name=feature, run_id=run_id))
+
+@platform_bp.route("/features/drift", methods=["GET"])
+def features_drift():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_drift(feature_name=feature))
+
+@platform_bp.route("/features/leakage", methods=["GET"])
+def features_leakage():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_leakage(feature_name=feature))
+
+@platform_bp.route("/features/compare", methods=["GET"])
+def features_compare():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    left_run = request.args.get("left_run")
+    right_run = request.args.get("right_run")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_compare(feature_name=feature, left_run=left_run, right_run=right_run))
+
+@platform_bp.route("/features/approve", methods=["POST"])
+def features_approve():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    feature = payload.get("feature")
+    status = payload.get("status")
+    comment = payload.get("comment")
+    owner = payload.get("owner")
+    version = payload.get("version")
+    if not feature or not status:
+        return jsonify({"success": False, "error": "feature and status are required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_approve(feature_name=feature, status=status, comment=comment, owner=owner, version=version))
+
+@platform_bp.route("/features/lineage", methods=["GET"])
+def features_lineage():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_lineage(feature_name=feature))
+
+# ==================== MODEL WORKBENCH ====================
+@platform_bp.route("/experiments/create", methods=["POST"])
+def experiments_create():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.experiments_create(payload))
+
+
+@platform_bp.route("/experiments/list", methods=["GET"])
+def experiments_list():
+    env_id = _env_id()
+    limit = request.args.get("limit", 50, type=int)
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.experiments_list(limit=limit))
+
+
+@platform_bp.route("/features/eligible", methods=["POST"])
+def features_eligible():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.features_eligible(payload))
+
+
+@platform_bp.route("/validation/run", methods=["POST"])
+def validation_run():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.validation_run(payload))
+
+
+@platform_bp.route("/training/run", methods=["POST"])
+def training_run():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.training_run(payload))
+
+
+@platform_bp.route("/metrics", methods=["GET"])
+def model_metrics():
+    env_id = _env_id()
+    svc = ModelWorkbenchService(env_id)
+    params = {"experiment_id": request.args.get("experiment_id"), "model_version": request.args.get("model_version")}
+    return _jsonify_safe(svc.metrics(params))
+
+
+@platform_bp.route("/explain/global", methods=["GET"])
+def explain_global():
+    env_id = _env_id()
+    model_version = request.args.get("model_version")
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.explain_global({"model_version": model_version}))
+
+
+@platform_bp.route("/explain/local", methods=["GET"])
+def explain_local():
+    env_id = _env_id()
+    model_version = request.args.get("model_version")
+    account_id = request.args.get("account_id")
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.explain_local({"model_version": model_version, "account_id": account_id}))
+
+
+@platform_bp.route("/bias", methods=["POST"])
+def bias_checks():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.bias(payload))
+
+
+@platform_bp.route("/compare", methods=["POST"])
+def compare_models():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.compare(payload))
+
+
+@platform_bp.route("/approve", methods=["POST"])
+def approve_model():
+    env_id = _env_id()
+    payload = request.get_json(silent=True) or {}
+    svc = ModelWorkbenchService(env_id)
+    return _jsonify_safe(svc.approve(payload))
+
+# ==================== INFERENCE WORKBENCH ====================
+@platform_bp.route("/run/context", methods=["GET"])
+def inference_run_context():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    thresholds = {
+        "high": request.args.get("high", 0.7, type=float),
+        "medium": request.args.get("medium", 0.4, type=float),
+    }
+    population = {"population": request.args.get("population")}
+    return _jsonify_safe(svc.run_context(thresholds=thresholds, population=population))
+
+
+@platform_bp.route("/portfolio/outcome", methods=["GET"])
+def inference_portfolio_outcome():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    thresholds = {
+        "high": request.args.get("high", 0.7, type=float),
+        "medium": request.args.get("medium", 0.4, type=float),
+    }
+    return _jsonify_safe(svc.portfolio_outcome(thresholds=thresholds))
+
+
+@platform_bp.route("/accounts/prioritized", methods=["GET"])
+def inference_accounts_prioritized():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    thresholds = {
+        "high": request.args.get("high", 0.7, type=float),
+        "medium": request.args.get("medium", 0.4, type=float),
+    }
+    filters = {
+        "risk_level": request.args.get("risk_level"),
+        "movement": request.args.get("movement"),
+        "pattern": request.args.get("pattern"),
+        "cluster_id": request.args.get("cluster_id"),
+        "investigator": request.args.get("investigator"),
+    }
+    limit = request.args.get("limit", 500, type=int)
+    return _jsonify_safe(svc.accounts_prioritized(thresholds=thresholds, filters=filters, limit=limit))
+
+
+@platform_bp.route("/accounts/movement", methods=["GET"])
+def inference_accounts_movement():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    thresholds = {
+        "high": request.args.get("high", 0.7, type=float),
+        "medium": request.args.get("medium", 0.4, type=float),
+    }
+    return _jsonify_safe(svc.accounts_movement(thresholds=thresholds))
+
+
+@platform_bp.route("/portfolio/patterns", methods=["GET"])
+def inference_portfolio_patterns():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    return _jsonify_safe(svc.portfolio_patterns())
+
+
+@platform_bp.route("/suppression/confidence", methods=["GET"])
+def inference_suppression_confidence():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    thresholds = {
+        "high": request.args.get("high", 0.7, type=float),
+        "medium": request.args.get("medium", 0.4, type=float),
+    }
+    return _jsonify_safe(svc.suppression_confidence(thresholds=thresholds))
+
+
+@platform_bp.route("/role/classification", methods=["GET"])
+def inference_role_classification():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    limit = request.args.get("limit", 2000, type=int)
+    return _jsonify_safe(svc.role_classification(limit=limit))
+
+
+@platform_bp.route("/accounts/assign", methods=["POST"])
+def inference_assign_accounts():
+    env_id = _env_id()
+    svc = MuleInferenceService(env_id)
+    payload = request.get_json(silent=True) or {}
+    return _jsonify_safe(svc.assign_investigator(account_ids=payload.get("account_ids") or [], investigator=payload.get("investigator")))
+
+
+@platform_bp.route("/explain/account", methods=["GET"])
+def explain_account():
+    env_id = _env_id()
+    account_id = request.args.get("account_id")
+    if not account_id:
+        return jsonify({"success": False, "error": "account_id is required"}), 400
+    model_version = request.args.get("model_version")
+    thresholds = {
+        "high": request.args.get("high", 0.7, type=float),
+        "medium": request.args.get("medium", 0.4, type=float),
+    }
+    provider = ExplanationProvider(env_id)
+    out = provider.explain_account(account_id=account_id, model_version=model_version, thresholds=thresholds)
+    code = 200 if out.get("success") else 400
+    return jsonify(out), code
 
 
 @platform_bp.route("/risk/trend", methods=["GET"])

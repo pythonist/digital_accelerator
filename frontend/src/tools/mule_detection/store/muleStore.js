@@ -22,6 +22,16 @@ export const useMuleStore = create((set, get) => ({
     return single ? [single] : [];
   })(),
   investigationOpen: false,
+  investigationTab: 'explain',
+  modelRegistryOpen: false,
+  starredModels: (() => {
+    try {
+      const raw = localStorage.getItem('mule_starred_models');
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) return parsed.filter(Boolean);
+    } catch {}
+    return [];
+  })(),
 
   setEnvId: (envId) => {
     const next = envId || 'fcip_env';
@@ -45,19 +55,37 @@ export const useMuleStore = create((set, get) => ({
     set({ selectedAccountIds: list, selectedAccountId: primary });
   },
 
-  openInvestigation: (accountId = null) => {
+  setInvestigationTab: (tab) => set({ investigationTab: tab || 'explain' }),
+
+  openInvestigation: (accountId = null, tab = null) => {
+    const nextTab = tab || get().investigationTab || 'explain';
     if (accountId != null) {
       const next = accountId || '';
       localStorage.setItem('mule_selected_account', next);
       const nextList = next ? [next] : [];
       localStorage.setItem('mule_selected_accounts', JSON.stringify(nextList));
-      set({ selectedAccountId: next, selectedAccountIds: nextList, investigationOpen: true });
+      set({ selectedAccountId: next, selectedAccountIds: nextList, investigationOpen: true, investigationTab: nextTab });
       return;
     }
-    set({ investigationOpen: true });
+    set({ investigationOpen: true, investigationTab: nextTab });
   },
 
   closeInvestigation: () => set({ investigationOpen: false }),
+
+  openModelRegistry: () => set({ modelRegistryOpen: true }),
+  closeModelRegistry: () => set({ modelRegistryOpen: false }),
+
+  toggleStarModel: (modelVersion) => {
+    const mv = String(modelVersion || '').trim();
+    if (!mv) return;
+    const prev = get().starredModels || [];
+    const setNext = new Set(prev.map((x) => String(x)));
+    if (setNext.has(mv)) setNext.delete(mv);
+    else setNext.add(mv);
+    const next = Array.from(setNext);
+    localStorage.setItem('mule_starred_models', JSON.stringify(next));
+    set({ starredModels: next });
+  },
 
   loadAccounts: async () => {
     set({ loadingAccounts: true, accountsError: null });

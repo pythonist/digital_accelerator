@@ -18,15 +18,15 @@ const WorkbenchContextBar = ({ session, aggregation, onFreeze, loading }) => {
       <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
         <Box>
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Context</Typography>
-          <Typography variant="body2" sx={{ color: '#64748b' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             {summary || 'No session selected'}
           </Typography>
-          <Typography variant="body2" sx={{ color: '#64748b', mt: 0.5 }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
             When you are satisfied with the boundary and validation, freeze the session to lock choices for downstream steps.
           </Typography>
           {aggregation && (
             <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
-              <Chip label={`Entity lens: ${aggregation.entity_collapse}`} size="small" />
+              <Chip label={`Interpretation lens: ${aggregation.entity_collapse}`} size="small" />
               <Chip label={`Time lens: ${aggregation.time_lens}`} size="small" />
               <Chip label={`Sustained N: ${aggregation.sustained_days}`} size="small" />
             </Stack>

@@ -15,6 +15,8 @@ try:
 except ImportError:
     HAS_PYARROW = False
     class pa:
+        DataType = object
+        Schema = object
         @staticmethod
         def string():
             return "STRING"

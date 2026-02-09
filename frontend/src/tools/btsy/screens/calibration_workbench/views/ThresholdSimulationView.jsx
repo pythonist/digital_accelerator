@@ -213,7 +213,7 @@ const ThresholdSimulationView = ({ session, aggregateView, onStrategySelected })
   if (!aggregateView?.summary) {
     return (
       <Alert severity="info">
-        Step-3.3 depends on the Step-3.1 reduced entity distribution. Apply an aggregation lens first.
+        Step-3.3 depends on the Step-3.1 reduced entity distribution. Apply an interpretation lens first.
       </Alert>
     );
   }
@@ -226,7 +226,7 @@ const ThresholdSimulationView = ({ session, aggregateView, onStrategySelected })
         <Grid item xs={12} md={6}>
           <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Percentile Surface</Typography>
-            <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
               Explore risk boundary placement via percentiles. Slider movements are not saved as strategies unless you persist them.
             </Typography>
 
@@ -245,17 +245,17 @@ const ThresholdSimulationView = ({ session, aggregateView, onStrategySelected })
 
             <Grid container spacing={1} sx={{ mb: 2 }}>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ color: '#64748b' }}>Percentile</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Percentile</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>{Number(percentile).toFixed(1)}</Typography>
               </Grid>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ color: '#64748b' }}>Threshold value</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Threshold value</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   {percentilePreview ? Number(percentilePreview.threshold_value || 0).toLocaleString() : '—'}
                 </Typography>
               </Grid>
               <Grid item xs={6}>
-                <Typography variant="caption" sx={{ color: '#64748b' }}>Entities above</Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>Entities above</Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   {percentilePreview ? (percentilePreview.entity_count || 0).toLocaleString() : '—'}
                 </Typography>

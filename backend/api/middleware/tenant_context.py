@@ -47,6 +47,11 @@ token_service = SessionTokenService()
 def tenant_context_middleware(app):
     @app.before_request
     def inject_tenant_context():
+        request.user_id = None
+        request.username = None
+        request.user_role = None
+        request.tenant_id = "default"
+        request.env_id = None
         # Skip preflight
         if request.method == "OPTIONS":
             return None

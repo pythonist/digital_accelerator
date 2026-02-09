@@ -22,7 +22,7 @@ const EntityReductionView = ({ session, aggregateView }) => {
   if (!aggregateView?.summary) {
     return (
       <Alert severity="info">
-        Apply an aggregation lens to reduce transaction-aligned behaviour rows into entity-level values.
+        Apply an interpretation lens to collapse Step-2 time-series into entity-level values.
       </Alert>
     );
   }
@@ -33,20 +33,20 @@ const EntityReductionView = ({ session, aggregateView }) => {
         <Grid item xs={12}>
           <Paper elevation={0} sx={{ p: 2, border: '1px solid #e2e8f0', borderRadius: 0 }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Entity Reduction Summary</Typography>
-            <Typography variant="body2" sx={{ color: '#64748b' }}>
-              Step-2 produces transaction-aligned behaviour rows. Step-3.1 reduces them explicitly using the selected lens.
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Step-2 produces a time-series signal. Step-3.1 collapses it using the selected interpretation lens.
             </Typography>
             <Box sx={{ mt: 1, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-              <Typography variant="caption" sx={{ color: '#475569' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Entities: {(aggregateView.summary.entities || 0).toLocaleString()}
               </Typography>
-              <Typography variant="caption" sx={{ color: '#475569' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Median: {Number(aggregateView.summary.median || 0).toLocaleString()}
               </Typography>
-              <Typography variant="caption" sx={{ color: '#475569' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 P95: {Number(aggregateView.summary.p95 || 0).toLocaleString()}
               </Typography>
-              <Typography variant="caption" sx={{ color: '#475569' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 P99: {Number(aggregateView.summary.p99 || 0).toLocaleString()}
               </Typography>
             </Box>
@@ -88,7 +88,7 @@ const EntityReductionView = ({ session, aggregateView }) => {
                   ))}
                   {(aggregateView.top_entities || []).length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={2} sx={{ color: '#64748b' }}>No data.</TableCell>
+                      <TableCell colSpan={2} sx={{ color: 'text.secondary' }}>No data.</TableCell>
                     </TableRow>
                   )}
                 </TableBody>

@@ -18,7 +18,7 @@ export const STEP3_CALIBRATION_GUIDE = {
     {
       id: '3.1',
       target: '[data-guide-id="wb-aggregation-panel"]',
-      instruction: 'Define the aggregation lens. Step 3 evaluates signals on the reduced entity distribution.',
+      instruction: 'Define the interpretation lens. Step 3 evaluates Step-2 signals on the reduced entity distribution.',
       action: { type: 'EVENT', name: 'AGGREGATION_APPLIED' }
     },
     {
@@ -65,4 +65,3 @@ export const STEP3_CALIBRATION_GUIDE = {
     }
   ]
 };
-

@@ -1,5 +1,4 @@
 import React from 'react';
-import { CheckCircle, AlertTriangle, XCircle, Info, TrendingUp } from 'lucide-react';
 
 // ============================================
 // INTERPRETATION ENGINE - Core Logic
@@ -18,10 +17,10 @@ export const interpretationEngine = {
     if (entities < 1000) {
       return {
         status: 'error',
-        title: '⚠️ Low Sample Size',
+        title: 'Low Sample Size',
         message: `Only ${entities.toLocaleString()} entities. Statistical measures may be unreliable.`,
         impact: 'Percentile-based thresholds will be unstable. Small population changes cause large threshold shifts.',
-        action: 'Review Step 3.1 aggregation settings. Check if filters are too restrictive.',
+        action: 'Review Step 3.1 interpretation settings. Check if filters are too restrictive.',
         confidence: 'low'
       };
     }
@@ -30,7 +29,7 @@ export const interpretationEngine = {
     if (tailConcentration > 20 || (gini && gini > 0.8)) {
       return {
         status: 'warning',
-        title: '📊 Heavy-Tailed Distribution',
+        title: 'Heavy-Tailed Distribution',
         message: `P99 is ${tailConcentration.toFixed(1)}x the median. Behavior concentrated in few entities.`,
         impact: 'Percentile thresholds may be sensitive to outliers. Top 1% entities dominate the signal.',
         action: 'Consider "top-N" strategy instead of percentiles, or use log-scale thresholds.',
@@ -40,7 +39,7 @@ export const interpretationEngine = {
     
     return {
       status: 'success',
-      title: '✓ Well-Distributed Signal',
+      title: 'Well-Distributed Signal',
       message: `${entities.toLocaleString()} entities with moderate concentration (P99/median = ${tailConcentration.toFixed(1)}x).`,
       impact: 'Signal appears calibratable with standard percentile approaches.',
       action: 'Proceed to Step 3.3: Threshold Selection.',
@@ -55,7 +54,7 @@ export const interpretationEngine = {
     if (ksValue >= 0.7) {
       return {
         status: 'success',
-        title: '✓ Strong Separation',
+        title: 'Strong Separation',
         message: `KS = ${ksValue.toFixed(3)} indicates ATL and BTL distributions are well-separated.`,
         impact: 'This boundary creates a meaningful behavioral split. ATL entities are statistically distinct from BTL.',
         action: atlRatio > 0.05 
@@ -73,10 +72,10 @@ export const interpretationEngine = {
     if (ksValue >= 0.5) {
       return {
         status: 'warning',
-        title: '⚠️ Moderate Separation',
+        title: 'Moderate Separation',
         message: `KS = ${ksValue.toFixed(3)} shows detectable separation, but overlap exists between ATL/BTL.`,
         impact: 'Boundary may struggle with edge cases. Some entities near threshold are ambiguous.',
-        action: 'Review CDF plot. If curves are close, consider adjusting threshold or changing aggregation lens (Step 3.1).',
+        action: 'Review CDF plot. If curves are close, consider adjusting threshold or changing interpretation lens (Step 3.1).',
         confidence: 'medium',
         metrics: {
           'Separation Strength': 'Moderate',
@@ -88,10 +87,10 @@ export const interpretationEngine = {
     
     return {
       status: 'error',
-      title: '❌ Weak Separation',
+        title: 'Weak Separation',
       message: `KS = ${ksValue.toFixed(3)} indicates minimal difference between ATL and BTL.`,
       impact: 'Heavy distribution overlap. The boundary may be arbitrary rather than behavioral.',
-      action: 'Return to Step 3.3 and try a different threshold strategy, or reconsider aggregation lens in Step 3.1.',
+      action: 'Return to Step 3.3 and try a different threshold strategy, or reconsider interpretation lens in Step 3.1.',
       confidence: 'low',
       metrics: {
         'Separation Strength': 'Weak',
@@ -106,7 +105,7 @@ export const interpretationEngine = {
     if (!stressResults || stressResults.length === 0) {
       return {
         status: 'info',
-        title: 'ℹ️ Stress Test Required',
+        title: 'Stress Test Required',
         message: 'No stress testing performed yet.',
         impact: 'Unknown how threshold changes affect entity assignments.',
         action: 'Run stress test to measure boundary fragility.',
@@ -204,10 +203,10 @@ export const interpretationEngine = {
     
     return {
       status: 'error',
-      title: '❌ Insufficient Separation',
+      title: 'Insufficient Separation',
       message: `Max J = ${maxJ.toFixed(3)} is too weak for reliable classification.`,
       impact: 'ATL/BTL may not represent distinct behavioral groups. Boundary lacks predictive power.',
-      action: 'Revisit Step 3.1 (aggregation) and Step 3.3 (threshold). Current signal may not be calibratable.',
+      action: 'Revisit Step 3.1 (interpretation lens) and Step 3.3 (threshold). Current signal may not be calibratable.',
       confidence: 'low',
       metrics: {
         'Separation': 'Weak',
@@ -228,9 +227,8 @@ export const interpretationEngine = {
     if (allSuccess) {
       return {
         readiness: 'production_ready',
-        color: '#16a34a',
-        icon: 'CheckCircle',
-        title: '✓ Production Ready',
+        color: '#0f172a',
+        title: 'Production Ready',
         summary: 'All validation metrics are strong. This boundary is ready for deployment.',
         nextSteps: [
           'Freeze this session to lock the configuration',
@@ -243,13 +241,12 @@ export const interpretationEngine = {
     if (hasError) {
       return {
         readiness: 'needs_revision',
-        color: '#dc2626',
-        icon: 'XCircle',
-        title: '⚠️ Requires Revision',
+        color: '#0f172a',
+        title: 'Requires Revision',
         summary: 'One or more critical issues detected. Boundary is not production-ready.',
         nextSteps: [
           'Review red-flagged validation steps above',
-          'Adjust threshold (Step 3.3) or aggregation (Step 3.1)',
+          'Adjust threshold (Step 3.3) or interpretation lens (Step 3.1)',
           'Re-run validation after changes'
         ]
       };
@@ -258,9 +255,8 @@ export const interpretationEngine = {
     if (hasWarning) {
       return {
         readiness: 'acceptable_with_monitoring',
-        color: '#f59e0b',
-        icon: 'AlertTriangle',
-        title: '⚠️ Acceptable with Monitoring',
+        color: '#0f172a',
+        title: 'Acceptable with Monitoring',
         summary: 'Some concerns exist, but boundary may be acceptable for controlled deployment.',
         nextSteps: [
           'Document known limitations in annotations',
@@ -272,9 +268,8 @@ export const interpretationEngine = {
     
     return {
       readiness: 'incomplete',
-      color: '#64748b',
-      icon: 'Info',
-      title: 'ℹ️ Validation Incomplete',
+      color: '#0f172a',
+      title: 'Validation Incomplete',
       summary: 'Run all validation steps to assess calibration readiness.',
       nextSteps: [
         'Complete Steps 3.4, 3.5, and 3.6',
@@ -292,34 +287,26 @@ export const InterpretationCard = ({ interpretation, showMetrics = false }) => {
   if (!interpretation) return null;
   
   const colors = {
-    success: { bg: '#f0fdf4', border: '#16a34a', text: '#166534' },
-    warning: { bg: '#fffbeb', border: '#f59e0b', text: '#92400e' },
-    error: { bg: '#fef2f2', border: '#dc2626', text: '#991b1b' },
-    info: { bg: '#eff6ff', border: '#3b82f6', text: '#1e40af' }
+    success: { bg: '#ffffff', border: '#e2e8f0', text: '#0f172a' },
+    warning: { bg: '#ffffff', border: '#e2e8f0', text: '#0f172a' },
+    error: { bg: '#ffffff', border: '#e2e8f0', text: '#0f172a' },
+    info: { bg: '#ffffff', border: '#e2e8f0', text: '#0f172a' }
   };
   
   const color = colors[interpretation.status] || colors.info;
   
-  const Icon = 
-    interpretation.status === 'success' ? CheckCircle :
-    interpretation.status === 'warning' ? AlertTriangle :
-    interpretation.status === 'error' ? XCircle :
-    Info;
-  
   return (
     <div style={{
       backgroundColor: color.bg,
-      border: `2px solid ${color.border}`,
-      borderRadius: 8,
-      padding: 16,
-      marginBottom: 16
+      border: `1px solid ${color.border}`,
+      borderRadius: 2,
+      padding: 12,
+      marginBottom: 12
     }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 12 }}>
-        <Icon style={{ color: color.border, marginRight: 12, flexShrink: 0 }} size={24} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 16, color: color.text, marginBottom: 8 }}>
-            {interpretation.title}
-          </div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, color: color.text, marginBottom: 6 }}>
+          {interpretation.title}
+        </div>
           
           <div style={{ marginBottom: 8, color: '#374151' }}>
             <strong>What this means:</strong> {interpretation.message}
@@ -330,25 +317,22 @@ export const InterpretationCard = ({ interpretation, showMetrics = false }) => {
           </div>
           
           <div style={{ 
-            padding: 12, 
-            backgroundColor: 'rgba(0,0,0,0.05)', 
-            borderRadius: 6,
-            border: '1px solid rgba(0,0,0,0.1)'
+            padding: 10, 
+            backgroundColor: '#f8fafc', 
+            borderRadius: 2,
+            border: '1px solid #e2e8f0'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-              <TrendingUp style={{ marginRight: 8 }} size={16} />
-              <strong>Next Step:</strong>
-            </div>
+            <div style={{ marginBottom: 6, fontWeight: 600 }}>Next Step</div>
             <div style={{ color: '#1f2937' }}>{interpretation.action}</div>
           </div>
           
           {showMetrics && interpretation.metrics && (
             <div style={{ 
               marginTop: 12, 
-              padding: 12, 
-              backgroundColor: 'rgba(255,255,255,0.7)',
-              borderRadius: 6,
-              border: '1px solid rgba(0,0,0,0.1)'
+              padding: 10, 
+              backgroundColor: '#ffffff',
+              borderRadius: 2,
+              border: '1px solid #e2e8f0'
             }}>
               <strong>Key Metrics:</strong>
               <div style={{ marginTop: 8 }}>
@@ -358,7 +342,7 @@ export const InterpretationCard = ({ interpretation, showMetrics = false }) => {
                     justifyContent: 'space-between', 
                     marginBottom: 6,
                     paddingBottom: 6,
-                    borderBottom: '1px solid rgba(0,0,0,0.05)'
+                    borderBottom: '1px solid #e2e8f0'
                   }}>
                     <span style={{ color: '#6b7280' }}>{key}:</span>
                     <span style={{ fontWeight: 600, color: '#111827' }}>{value}</span>
@@ -374,7 +358,6 @@ export const InterpretationCard = ({ interpretation, showMetrics = false }) => {
             </div>
           )}
         </div>
-      </div>
     </div>
   );
 };
@@ -382,36 +365,29 @@ export const InterpretationCard = ({ interpretation, showMetrics = false }) => {
 export const ReadinessPanel = ({ readiness }) => {
   if (!readiness) return null;
   
-  const IconComponent = 
-    readiness.icon === 'CheckCircle' ? CheckCircle :
-    readiness.icon === 'AlertTriangle' ? AlertTriangle :
-    readiness.icon === 'XCircle' ? XCircle :
-    Info;
-  
   return (
     <div style={{
-      padding: 24,
-      backgroundColor: '#0f172a',
-      color: 'white',
-      borderRadius: 8,
-      marginTop: 24
+      padding: 16,
+      backgroundColor: '#ffffff',
+      color: '#0f172a',
+      borderRadius: 2,
+      border: '1px solid #e2e8f0',
+      marginTop: 16
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-        <IconComponent style={{ marginRight: 12, color: readiness.color }} size={32} />
-        <h2 style={{ margin: 0, fontSize: 24 }}>{readiness.title}</h2>
-      </div>
+      <div style={{ marginBottom: 12, fontWeight: 700, fontSize: 16 }}>{readiness.title}</div>
       
-      <p style={{ marginBottom: 16, opacity: 0.9, fontSize: 16 }}>
+      <p style={{ marginBottom: 12, fontSize: 14 }}>
         {readiness.summary}
       </p>
       
       <div style={{
-        padding: 16,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 6
+        padding: 12,
+        backgroundColor: '#f8fafc',
+        borderRadius: 2,
+        border: '1px solid #e2e8f0'
       }}>
-        <strong style={{ display: 'block', marginBottom: 12, fontSize: 16 }}>Next Steps:</strong>
-        <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
+        <strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>Next Steps</strong>
+        <ol style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
           {readiness.nextSteps.map((step, i) => (
             <li key={i} style={{ marginBottom: 8 }}>{step}</li>
           ))}
@@ -486,91 +462,6 @@ const CalibrationGuidanceDemo = () => {
       </div>
       
       <ReadinessPanel readiness={readiness} />
-      
-      <div style={{
-        marginTop: 32,
-        padding: 24,
-        backgroundColor: 'white',
-        borderRadius: 8,
-        border: '2px dashed #cbd5e1'
-      }}>
-        <h3 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>
-          💡 Integration Instructions
-        </h3>
-        <p style={{ color: '#64748b', marginBottom: 16 }}>
-          To integrate this interpretation system into your existing workbench:
-        </p>
-        
-        <div style={{ backgroundColor: '#f1f5f9', padding: 16, borderRadius: 6, marginBottom: 16 }}>
-          <h4 style={{ marginTop: 0, marginBottom: 8 }}>Step 1: Create interpretation engine file</h4>
-          <p style={{ margin: 0, fontSize: 14, color: '#475569' }}>
-            Copy the <code>interpretationEngine</code> object into:<br/>
-            <code>frontend/src/tools/btsy/screens/calibration_workbench/utils/interpretationEngine.js</code>
-          </p>
-        </div>
-        
-        <div style={{ backgroundColor: '#f1f5f9', padding: 16, borderRadius: 6, marginBottom: 16 }}>
-          <h4 style={{ marginTop: 0, marginBottom: 8 }}>Step 2: Import in your validation panels</h4>
-          <pre style={{ 
-            backgroundColor: '#1e293b', 
-            color: '#e2e8f0',
-            padding: 12, 
-            borderRadius: 4,
-            overflow: 'auto',
-            fontSize: 13,
-            margin: 0
-          }}>{`import { interpretationEngine, InterpretationCard } 
-  from '../utils/interpretationEngine';`}</pre>
-        </div>
-        
-        <div style={{ backgroundColor: '#f1f5f9', padding: 16, borderRadius: 6, marginBottom: 16 }}>
-          <h4 style={{ marginTop: 0, marginBottom: 8 }}>Step 3: Add after metrics display</h4>
-          <pre style={{ 
-            backgroundColor: '#1e293b', 
-            color: '#e2e8f0',
-            padding: 12, 
-            borderRadius: 4,
-            overflow: 'auto',
-            fontSize: 13,
-            margin: 0
-          }}>{`// In your KS validation component:
-const ksInterp = interpretationEngine.interpretKS(
-  ksValue, nAtl, nBtl
-);
-
-return (
-  <>
-    {/* Your existing metrics table */}
-    <InterpretationCard 
-      interpretation={ksInterp} 
-      showMetrics 
-    />
-  </>
-);`}</pre>
-        </div>
-        
-        <div style={{ backgroundColor: '#f1f5f9', padding: 16, borderRadius: 6 }}>
-          <h4 style={{ marginTop: 0, marginBottom: 8 }}>Step 4: Add readiness panel at bottom</h4>
-          <pre style={{ 
-            backgroundColor: '#1e293b', 
-            color: '#e2e8f0',
-            padding: 12, 
-            borderRadius: 4,
-            overflow: 'auto',
-            fontSize: 13,
-            margin: 0
-          }}>{`// Collect all interpretations
-const readiness = interpretationEngine.assessReadiness({
-  distribution: distInterp,
-  ks: ksInterp,
-  stress: stressInterp,
-  j: jInterp
-});
-
-// Render at bottom of workbench
-<ReadinessPanel readiness={readiness} />`}</pre>
-        </div>
-      </div>
     </div>
   );
 };

@@ -187,6 +187,35 @@ def get_cortex_monthly_threshold(run_id: int):
         return jsonify({'error': str(e)}), 500
 
 
+@cortex_scenario_bp.route('/cortex/scenario/run/<int:run_id>/reconstruct', methods=['POST'])
+def reconstruct_cortex_behavior(run_id: int):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        data = request.get_json() or {}
+        entity_id = data.get('entity_id')
+        as_of_date = data.get('as_of_date')
+        entity_level = data.get('entity_level', 'account')
+        created_by = data.get('created_by', 'user')
+        if not entity_id:
+            return jsonify({'error': 'entity_id required'}), 400
+        if not as_of_date:
+            return jsonify({'error': 'as_of_date required'}), 400
+        builder, universe_db = _get_services(env_id)
+        result = builder.reconstruct_behavior(
+            run_id=int(run_id),
+            universe_db_path=universe_db,
+            entity_id=str(entity_id),
+            as_of_date=str(as_of_date),
+            entity_level=str(entity_level),
+            created_by=str(created_by),
+        )
+        return jsonify({'success': True, 'data': result}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @cortex_scenario_bp.route('/cortex/scenario/run/<int:run_id>', methods=['DELETE'])
 def delete_cortex_run(run_id: int):
     try:

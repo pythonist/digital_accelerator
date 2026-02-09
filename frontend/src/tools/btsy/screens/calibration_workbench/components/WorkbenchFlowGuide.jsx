@@ -46,7 +46,7 @@ const WorkbenchFlowGuide = ({
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
         {chip('1) Select Behaviour Run', status.hasRun)}
         {chip('2) Create/Select Calibration Session', status.hasSession)}
-        {chip('3.1) Set Aggregation Lens', status.hasAgg)}
+        {chip('3.1) Set Interpretation Lens', status.hasAgg)}
         {chip('3.3) Save Threshold Strategies', status.hasStrategies)}
         {chip('3.3) Create Risk Boundary (ATL/BTL)', status.hasBoundaries)}
         {chip('3.4) Run KS Validation', status.hasKs)}

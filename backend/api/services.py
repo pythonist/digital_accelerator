@@ -23,26 +23,22 @@ from services.data_cleaning import DataCleaningService
 from rules.rule_engine import UniversalRuleEngine
 from typology.typology_detector import TypologyService
 from services.ai_master_builder import AIMasterBuilder
-from llm.ollama_wrapper import OllamaWrapper
 from case_pack.case_pack_generator import CasePackGenerator
-from llm.doc_rag import DocRAGSystem
-from llm.vector_rag import VectorRAGSystem
-from graph_engine.graph_builder import TransactionGraphBuilder
 from baseline.baseline_engine import BaselineEngine
 from services.focus_engine import FocusEngine
 from audit.audit_logger import AuditLogger
+from core.module_registry import REGISTRY
+from core.service_proxy import ModuleProxy
 
-# Calibration services
-from calibration.services.calibration_db_schema import CalibrationDatabaseManager
-from calibration.services.calibration_data_ingestion import CalibrationDataIngestionService
-from calibration.services.calibration_outcome_service import CalibrationOutcomeService
-from calibration.services.calibration_str_evaluation_service import CalibrationSTREvaluationService
-
-from calibration.services.calibration_ks_service import CalibrationKSService
-from calibration.services.calibration_ks_visualization_service import CalibrationKSVisualizationService
-from calibration.services.calibration_ks_narrative_service import CalibrationKSNarrativeService
-
-from calibration.services.calibration_atl_btl_service import CalibrationATLBTLService
+# Calibration services (lazy-loaded via registry)
+CalibrationDatabaseManager = None
+CalibrationDataIngestionService = None
+CalibrationOutcomeService = None
+CalibrationSTREvaluationService = None
+CalibrationKSService = None
+CalibrationKSVisualizationService = None
+CalibrationKSNarrativeService = None
+CalibrationATLBTLService = None
 
 # Step 1: Population exploration services
 from calibration.services.population_explorer_service import PopulationExplorerService
@@ -53,8 +49,9 @@ from calibration.services.population_materialization_service import PopulationMa
 
 # Step 2: Aggregation services
 from calibration.services.aggregation_service import AggregationService
-from calibration.builder.percentile_engine import PercentileEngine
-from calibration.builder.threshold_simulator import ThresholdSimulator
+# Heavy engines are lazy-loaded via registry
+PercentileEngine = None
+ThresholdSimulator = None
 
 from calibration.services.join_validation_service import JoinValidationService
 from calibration.services.data_readiness_service import DataReadinessService
@@ -76,7 +73,10 @@ try:
     from calibration.services.pdf_reporting import PDFGeneratorService
 except Exception:
     PDFGeneratorService = None
-from calibration.db_migrations import run_migrations
+try:
+    from calibration.db_migrations import run_migrations
+except Exception:
+    run_migrations = None
 
 # ✅ NEW: Step 0 Data Foundation Services
 from calibration.services.data_step_zero_services import (
@@ -137,50 +137,90 @@ class ServiceContainer:
     # SYSTEM INIT
     # ---------------------------------------------------
     def init_services(self):
+        """Fast cold-start: initialize only core, defer heavy modules to registry."""
         try:
-            print("🔧 System Startup...")
+            print("🔧 System Startup (fast path)...")
             self.metadata_manager = MetadataManager()
             self.audit_logger = AuditLogger()
 
-            if OllamaWrapper:
-                self.ollama_wrapper = OllamaWrapper()
+            # Register lazy modules
+            self._register_lazy_modules()
 
-            if DocRAGSystem and self.ollama_wrapper:
-                self.doc_rag_system = DocRAGSystem(self.ollama_wrapper)
-                if not self.doc_rag_system.index:
-                    threading.Thread(
-                        target=self.doc_rag_system.build_documentation_index,
-                        daemon=True
-                    ).start()
-
-            # Initialize Calibration Tool Services
-            if CalibrationDatabaseManager:
-                self.calibration_db_manager = CalibrationDatabaseManager()
-                print("✅ Calibration DB initialized")
-                try:
-                    conn = self.calibration_db_manager.connect()
-                    run_migrations(conn)
-                    conn.close()
-                    print("✅ Calibration DB migrations applied")
-                except Exception:
-                    print("❌ Calibration DB migration failed")
-                    traceback.print_exc()
-                    raise
-                
-                if CalibrationDataIngestionService:
-                    self.calibration_ingestion = CalibrationDataIngestionService(self.calibration_db_manager)
-                
-                if PercentileEngine:
-                    self.percentile_engine = PercentileEngine(self.calibration_db_manager)
-                
-                if ThresholdSimulator:
-                    self.threshold_simulator = ThresholdSimulator(self.calibration_db_manager)
+            # Proxies (do not load yet)
+            self.ollama_wrapper = ModuleProxy(REGISTRY, "ollama")
+            self.doc_rag_system = ModuleProxy(REGISTRY, "docs_rag")
+            self.rag_system = ModuleProxy(REGISTRY, "rag")
+            self.graph_builder = ModuleProxy(REGISTRY, "graph")
+            self.calibration_db_manager = ModuleProxy(REGISTRY, "calibration_db")
+            self.percentile_engine = ModuleProxy(REGISTRY, "percentile_engine")
+            self.threshold_simulator = ModuleProxy(REGISTRY, "threshold_simulator")
 
             print("✅ Core System Ready.")
             return True
         except Exception:
             traceback.print_exc()
             return False
+
+    def _register_lazy_modules(self):
+        """Declare all heavy modules as lazy loaders."""
+        # Ollama (AI)
+        def _load_ollama():
+            from modules.ai import load_ollama
+            return load_ollama()
+        REGISTRY.register("ollama", _load_ollama, feature_flag_env="ENABLE_AI")
+
+        # Documentation RAG (depends on Ollama, optional FAISS)
+        def _load_docs_rag():
+            ollama = REGISTRY.get("ollama")
+            from modules.rag import load_docs_rag
+            return load_docs_rag(ollama)
+        REGISTRY.register("docs_rag", _load_docs_rag, feature_flag_env="ENABLE_RAG")
+
+        # Vector RAG (needs investigation DB when used)
+        def _load_rag():
+            if not self.investigation_db and self.metadata_manager and self.metadata_manager.active_env:
+                # Best effort to rebind investigation DB
+                try:
+                    self.activate_case(self.metadata_manager.active_env, self.metadata_manager.active_tenant or "default")
+                except Exception:
+                    pass
+            db = self.investigation_db
+            vector_store_path = None
+            try:
+                env_info = self.metadata_manager.get_environment_info(self.metadata_manager.active_env)
+                root = env_info.get("db_path", "").replace("aml_database.db", "")
+                vector_store_path = os.path.join(root, "investigation", "vector_store")
+            except Exception:
+                pass
+            from modules.rag import load_vector_rag
+            return load_vector_rag(db, vector_store_path)
+        REGISTRY.register("rag", _load_rag, feature_flag_env="ENABLE_RAG")
+
+        # Graph builder
+        def _load_graph():
+            if not self.investigation_db:
+                raise RuntimeError("Investigation DB not available for graph builder")
+            from modules.graph import load_graph_builder
+            return load_graph_builder(self.investigation_db)
+        REGISTRY.register("graph", _load_graph, feature_flag_env="ENABLE_GRAPH")
+
+        # Calibration DB and engines
+        def _load_calibration_db():
+            from modules.calibration import load_calibration_db
+            return load_calibration_db(run_migrations)
+        REGISTRY.register("calibration_db", _load_calibration_db, feature_flag_env="ENABLE_CALIBRATION")
+
+        def _load_percentile_engine():
+            db = REGISTRY.get("calibration_db")
+            from modules.calibration import load_percentile_engine
+            return load_percentile_engine(db)
+        REGISTRY.register("percentile_engine", _load_percentile_engine, feature_flag_env="ENABLE_CALIBRATION")
+
+        def _load_threshold_simulator():
+            db = REGISTRY.get("calibration_db")
+            from modules.calibration import load_threshold_simulator
+            return load_threshold_simulator(db)
+        REGISTRY.register("threshold_simulator", _load_threshold_simulator, feature_flag_env="ENABLE_CALIBRATION")
 
     # ---------------------------------------------------
     # STATELESS DB FACTORY (CRITICAL)
@@ -307,25 +347,20 @@ class ServiceContainer:
             if AIMasterBuilder:
                 self.ai_builder = AIMasterBuilder(self.investigation_db)
             if SmartMergeService:
+                ollama = self.ollama_wrapper if self.ollama_wrapper else None
                 self.smart_merge_service = SmartMergeService(
-                    self.investigation_db, self.ollama_wrapper
+                    self.investigation_db, ollama
                 )
             if CasePackGenerator:
                 self.case_pack_generator = CasePackGenerator(self.investigation_db)
-            if TransactionGraphBuilder:
-                self.graph_builder = TransactionGraphBuilder(self.investigation_db)
+            # Graph builder is lazy-loaded via registry when accessed
             if BaselineEngine:
                 self.baseline_engine = BaselineEngine(self.investigation_db)
             if FocusEngine:
                 self.focus_engine = FocusEngine(self.investigation_db)
 
             # Vector RAG
-            if VectorRAGSystem:
-                self.rag_system = VectorRAGSystem(
-                    self.investigation_db,
-                    vector_store_path=paths.get("vector_store")
-                )
-                self.rag_system.load_index()
+            # RAG will be initialized lazily via registry when accessed
 
             print("✅ Environment Activated Successfully")
             return env_info
@@ -385,10 +420,10 @@ class ServiceContainer:
     # ---------------------------------------------------
     def get_calibration_db(self):
         """Get calibration database manager"""
-        if not self.calibration_db_manager:
-            if CalibrationDatabaseManager:
-                self.calibration_db_manager = CalibrationDatabaseManager()
-        return self.calibration_db_manager
+        try:
+            return REGISTRY.get("calibration_db")
+        except Exception:
+            return None
     
     # def get_calibration_ingestion(self, env_id: str):
     #     db = self.get_calibration_db()
@@ -497,17 +532,17 @@ class ServiceContainer:
     # Step 3: Calibration builder services
     def get_percentile_engine(self):
         """Get percentile engine instance"""
-        if not hasattr(self, '_percentile_engine_instance'):
-            db = self.get_calibration_db()
-            self._percentile_engine_instance = PercentileEngine(db)
-        return self._percentile_engine_instance
+        try:
+            return REGISTRY.get("percentile_engine")
+        except Exception:
+            return None
     
     def get_threshold_simulator(self):
         """Get threshold simulator instance"""
-        if not hasattr(self, '_threshold_simulator_instance'):
-            db = self.get_calibration_db()
-            self._threshold_simulator_instance = ThresholdSimulator(db)
-        return self._threshold_simulator_instance
+        try:
+            return REGISTRY.get("threshold_simulator")
+        except Exception:
+            return None
     
     def get_approval_service(self):
         """Get approval service instance"""

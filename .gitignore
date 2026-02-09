@@ -1,6 +1,8 @@
 # Python env
 backend/.venv/
-
+backend/.venv310/
+backend/.venv312/
+backend/.venv313/
 # Runtime data
 backend/data/
 backend/dist/
@@ -13,7 +15,7 @@ frontend/.next/
 # Caches
 __pycache__/
 *.pyc
-
+frontend/.eslintrc.cjs
 # DB / index
 *.db
 *.sqlite3

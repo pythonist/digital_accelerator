@@ -85,14 +85,68 @@ class MuleDetectionDBService:
                         txn_row_count BIGINT,
                         accounts_row_count BIGINT,
                         txn_schema_json TEXT,
-                        accounts_schema_json TEXT
+                        accounts_schema_json TEXT,
+                        dataset_version TEXT,
+                        uploader TEXT,
+                        source_ip TEXT,
+                        checksum_txn TEXT,
+                        checksum_acc TEXT
                     )
                 """)
+                for col, dtype in [
+                    ("dataset_version", "TEXT"),
+                    ("uploader", "TEXT"),
+                    ("source_ip", "TEXT"),
+                    ("checksum_txn", "TEXT"),
+                    ("checksum_acc", "TEXT"),
+                ]:
+                    try:
+                        conn.execute(f"ALTER TABLE mule_uploads ADD COLUMN {col} {dtype}")
+                    except Exception:
+                        pass
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS mule_account_features (
                         account_id TEXT,
                         environment_id TEXT,
                         computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_feature_governance (
+                        feature_name TEXT,
+                        version TEXT,
+                        environment_id TEXT,
+                        status TEXT,
+                        owner TEXT,
+                        comment TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_feature_profiles (
+                        run_id TEXT,
+                        feature_name TEXT,
+                        environment_id TEXT,
+                        missing_pct DOUBLE,
+                        mean DOUBLE,
+                        std DOUBLE,
+                        min DOUBLE,
+                        p25 DOUBLE,
+                        p50 DOUBLE,
+                        p75 DOUBLE,
+                        max DOUBLE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_feature_bins (
+                        run_id TEXT,
+                        feature_name TEXT,
+                        environment_id TEXT,
+                        bin_start DOUBLE,
+                        bin_end DOUBLE,
+                        count BIGINT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 conn.execute("""
@@ -110,6 +164,43 @@ class MuleDetectionDBService:
                         status TEXT,
                         active BOOLEAN,
                         environment_id TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_ml_experiments (
+                        experiment_id TEXT,
+                        name TEXT,
+                        objective TEXT,
+                        owner TEXT,
+                        dataset_version TEXT,
+                        feature_set_version TEXT,
+                        environment_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_ml_experiment_runs (
+                        run_id TEXT,
+                        experiment_id TEXT,
+                        stage TEXT,
+                        status TEXT,
+                        config_json TEXT,
+                        result_json TEXT,
+                        environment_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_ml_model_approvals (
+                        approval_id TEXT,
+                        model_version TEXT,
+                        experiment_id TEXT,
+                        reviewer TEXT,
+                        decision TEXT,
+                        comments TEXT,
+                        valid_until TIMESTAMP,
+                        environment_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 conn.execute("""
@@ -134,6 +225,36 @@ class MuleDetectionDBService:
                         environment_id TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_inference_assignments (
+                        account_id TEXT,
+                        investigator TEXT,
+                        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        environment_id TEXT
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_jobs (
+                        job_id TEXT,
+                        job_type TEXT,
+                        state TEXT,
+                        step TEXT,
+                        message TEXT,
+                        processed_accounts BIGINT,
+                        total_accounts BIGINT,
+                        progress_pct DOUBLE,
+                        payload_json TEXT,
+                        result_json TEXT,
+                        error TEXT,
+                        environment_id TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mule_jobs_env_type_state
+                    ON mule_jobs(environment_id, job_type, state, created_at)
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS mule_rule_config (

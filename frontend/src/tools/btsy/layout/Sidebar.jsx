@@ -2,28 +2,15 @@
 import React, { useState } from 'react';
 import SentinelLogo from '@assets/PwC_2025_Logo.svg';
 import {
-  Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
+  Drawer, List, ListItem, ListItemButton, ListItemText,
   Divider, Box, Typography, IconButton, Tooltip, Collapse, alpha
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import {
-  CloudUpload as CloudUploadIcon,
-  PlayArrow as PlayArrowIcon,
-  Tune as TuneIcon,
-  Inventory2Outlined as InventoryIcon,
-  Psychology as PsychologyIcon,
-  Assessment as AssessmentIcon,
-  Notifications as NotificationsIcon,
-  VerifiedUser as VerifiedUserIcon,
-  SearchOff as SearchOffIcon,
-  Timeline as TimelineIcon,
-  WorkOutline as WorkOutlineIcon,
-  Science as ScienceIcon,
   ChevronLeft,
   ChevronRight,
   ExpandLess,
   ExpandMore,
-  FiberManualRecord,
 } from '@mui/icons-material';
 import { useAppContext } from '@context/AppContext';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from './layout.constants';
@@ -69,48 +56,48 @@ const menuSections = [
     key: 'FOUNDATION',
     label: 'Data Foundation',
     items: [
-      { id: 'foundation', label: 'Foundation', icon: <CloudUploadIcon /> },
+      { id: 'foundation', label: 'Foundation' },
     ]
   },
   {
     key: 'CALIBRATION',
     label: 'Calibration',
     items: [
-      { id: 'runs', label: 'Calibration Runs', icon: <PlayArrowIcon /> },
-      { id: 'scenarios', label: 'Scenarios', icon: <AssessmentIcon /> },
-      { id: 'universe', label: 'Transaction Universe', icon: <InventoryIcon /> },
-      { id: 'behavior', label: 'Cortex Scenario Builder', icon: <PsychologyIcon /> },
-      { id: 'calibration', label: 'Scenario Workbench', icon: <TuneIcon /> },
+      { id: 'runs', label: 'Calibration Runs' },
+      { id: 'scenarios', label: 'Scenarios' },
+      { id: 'universe', label: 'Transaction Universe' },
+      { id: 'behavior', label: 'Cortex Scenario Builder' },
+      { id: 'calibration', label: 'Scenario Workbench' },
     ]
   },
   {
     key: 'ALERTING',
     label: 'Alerting',
     items: [
-      { id: 'alerting_eligibility', label: 'Eligibility & Alert Generation', icon: <NotificationsIcon /> },
+      { id: 'alerting_eligibility', label: 'Eligibility & Alert Generation' },
     ]
   },
   {
     key: 'VALIDATION',
     label: 'Validation',
     items: [
-      { id: 'validation_str_alignment', label: 'STR Alignment & Validation', icon: <VerifiedUserIcon /> },
-      { id: 'validation_missed_str', label: 'Missed STR Analysis', icon: <SearchOffIcon /> },
+      { id: 'validation_str_alignment', label: 'STR Alignment & Validation' },
+      { id: 'validation_missed_str', label: 'Missed STR Analysis' },
     ]
   },
   {
     key: 'OPS_INTELLIGENCE',
     label: 'Operations Intelligence',
     items: [
-      { id: 'ops_scenario_interaction', label: 'Scenario Interaction Analysis', icon: <TimelineIcon /> },
-      { id: 'ops_workload', label: 'Analyst Workload Simulation', icon: <WorkOutlineIcon /> },
+      { id: 'ops_scenario_interaction', label: 'Scenario Interaction Analysis' },
+      { id: 'ops_workload', label: 'Analyst Workload Simulation' },
     ]
   },
   {
     key: 'ADVANCED',
     label: 'Advanced Analysis',
     items: [
-      { id: 'ml_validation', label: 'ML Validation Workbench', icon: <ScienceIcon /> },
+      { id: 'ml_validation', label: 'ML Validation Workbench' },
     ]
   }
 ];
@@ -151,14 +138,14 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
           size="small"
           onClick={() => setIsCollapsed(!isCollapsed)}
           sx={{
-            bgcolor: '#1e293b',
+            bgcolor: '#111827',
             color: '#e5e7eb',
-            border: '1px solid #334155',
+            border: '1px solid #1f2937',
             width: 24,
             height: 24,
-            boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+            boxShadow: 'none',
             '&:hover': {
-              bgcolor: '#334155',
+              bgcolor: '#1f2937',
               color: '#ffffff',
             },
           }}
@@ -268,23 +255,12 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
                               py: 1.25,
                               mx: 1.5,
                               my: 0.25,
-                              borderRadius: '6px',
+                              borderRadius: '2px',
                               transition: 'all 0.15s ease',
 
                               ...(isActive && {
-                                bgcolor: 'rgba(208, 74, 2, 0.12)',
-                                color: '#fb923c',
-                                '&:before': {
-                                  content: '""',
-                                  position: 'absolute',
-                                  left: -6,
-                                  top: '20%',
-                                  height: '60%',
-                                  width: '3px',
-                                  borderRadius: '0 2px 2px 0',
-                                  backgroundColor: '#D04A02',
-                                  display: isCollapsed ? 'none' : 'block'
-                                }
+                                bgcolor: 'rgba(148, 163, 184, 0.12)',
+                                color: '#e2e8f0',
                               }),
 
                               ...(!isActive && {
@@ -296,22 +272,6 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
                               }),
                             }}
                           >
-                            <ListItemIcon
-                              sx={{
-                                minWidth: 0,
-                                mr: isCollapsed ? 0 : 2.5,
-                                justifyContent: 'center',
-                                alignSelf: 'flex-start',
-                                mt: 0.25,
-                                color: 'inherit',
-                                '& .MuiSvgIcon-root': { 
-                                  fontSize: 20
-                                }
-                              }}
-                            >
-                              {item.icon}
-                            </ListItemIcon>
-
                             <ListItemText
                               primary={item.label}
                               primaryTypographyProps={{
@@ -326,10 +286,6 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
                                 m: 0
                               }}
                             />
-
-                            {isActive && !isCollapsed && (
-                              <FiberManualRecord sx={{ fontSize: 8, color: '#D04A02', ml: 'auto' }} />
-                            )}
                           </ListItemButton>
                         </Tooltip>
                       </ListItem>
@@ -346,31 +302,18 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
 
       {/* Status Footer */}
       <Box sx={{
-        p: 2,
+        p: 1.5,
         borderTop: '1px solid',
         borderColor: alpha('#fff', 0.1),
         bgcolor: 'rgba(15, 23, 42, 0.5)',
         display: 'flex',
         justifyContent: isCollapsed ? 'center' : 'flex-start',
         alignItems: 'center',
-        gap: 1.5
       }}>
-        <Box sx={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          bgcolor: '#22c55e',
-          boxShadow: '0 0 8px rgba(34, 197, 94, 0.5)'
-        }} />
         {!isCollapsed && (
-          <Box>
-            <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.6875rem', display: 'block', fontWeight: 500, letterSpacing: '0.03em' }}>
-              System Status
-            </Typography>
-            <Typography variant="caption" sx={{ color: '#22c55e', fontWeight: 600, fontSize: '0.75rem' }}>
-              READY
-            </Typography>
-          </Box>
+          <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: '0.6875rem', fontWeight: 500, letterSpacing: '0.03em' }}>
+            System Status: Ready
+          </Typography>
         )}
       </Box>
     </StyledDrawer>

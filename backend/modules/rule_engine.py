@@ -202,7 +202,7 @@ class RuleEngine:
             return 0.0, False
         
         # Group by hour
-        account_df['hour_group'] = account_df['timestamp'].dt.floor('H')
+        account_df['hour_group'] = account_df['timestamp'].dt.floor('h')
         hourly_counts = account_df.groupby('hour_group').size()
         
         # Check for bursts (more than 5 transactions per hour)

@@ -15,6 +15,7 @@ import DataIntrospectionScreen from './screens/DataIntrospectionScreen';
 import FeatureStoreScreen from './screens/FeatureStoreScreen';
 import FeatureExplorerScreen from './screens/FeatureExplorerScreen';
 import ModelInferenceScreen from './screens/ml/ModelInferenceScreen';
+import ModelLabScreen from './screens/ml/ModelLabScreen';
 import FeatureEngineeringScreen from './screens/FeatureEngineeringScreen';
 import TrainModelScreen from './screens/TrainModelScreen';
 import RuleEngineScreen from './screens/RuleEngineScreen';
@@ -92,6 +93,9 @@ const MulePlatform = () => {
         return <FeatureExplorerScreen />;
 
       case 'train-model':
+        return <ModelLabScreen />;
+
+      case 'train-model-legacy':
         return <TrainModelScreen />;
 
       case 'inference':

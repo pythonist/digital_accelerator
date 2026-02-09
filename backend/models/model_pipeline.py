@@ -38,6 +38,9 @@ class ModelPipeline:
         self.feature_columns = None
         self.scaler = StandardScaler()
         self.label_encoder = LabelEncoder()
+        self.last_correlated_dropped = []
+        self.last_corr_threshold = None
+        self.last_corr_heatmap = None
         
         # Experiment tracking
         self.experiment_log = self._load_experiment_log()
@@ -71,9 +74,11 @@ class ModelPipeline:
         elif use_smote and SMOTE is None:
             print("SMOTE is not available; continuing without oversampling.")
         
-        # Split data
+        class_counts = np.bincount(y.astype(int)) if len(y) else np.array([])
+        min_class = int(class_counts.min()) if len(class_counts) else 0
+        use_stratify = len(y_unique) > 1 and min_class >= 2
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=y if len(np.unique(y)) > 1 else None
+            X, y, test_size=test_size, random_state=random_state, stratify=y if use_stratify else None
         )
         
         # Scale features
@@ -192,16 +197,30 @@ class ModelPipeline:
     
     def _remove_correlated_features(self, X: pd.DataFrame, threshold: float = 0.95) -> pd.DataFrame:
         """Remove highly correlated features"""
-        
-        corr_matrix = X.corr().abs()
+        self.last_correlated_dropped = []
+        self.last_corr_threshold = float(threshold)
+        self.last_corr_heatmap = None
+
+        corr_matrix = X.corr(numeric_only=True).abs()
         upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        
+
         to_drop = [column for column in upper.columns if any(upper[column] > threshold)]
-        
+        self.last_correlated_dropped = list(to_drop)
+
+        keep_cols = [c for c in X.columns if c not in set(to_drop)]
+        heat_cols = keep_cols[: min(len(keep_cols), 25)]
+        if len(heat_cols) >= 2:
+            cm = corr_matrix.loc[heat_cols, heat_cols].fillna(0.0)
+            self.last_corr_heatmap = {
+                "features": heat_cols,
+                "matrix": cm.to_numpy(dtype=float).tolist(),
+                "threshold": float(threshold),
+            }
+
         if to_drop:
             print(f"Dropping highly correlated features: {to_drop}")
             X = X.drop(columns=to_drop)
-        
+
         return X
     
     def _train_xgboost(self, X: np.ndarray, y: np.ndarray, model_params: Optional[Dict[str, Any]] = None, cv_folds: int = 5, random_state: int = 42):
@@ -258,8 +277,9 @@ class ModelPipeline:
         # Calculate additional metrics if training data provided
         if X_train is not None and y_train is not None:
             if hasattr(model, 'predict_proba'):
-                y_train_pred_proba = model.predict_proba(X_train)[:, 1]
-                metrics['train_roc_auc'] = roc_auc_score(y_train, y_train_pred_proba)
+                if len(np.unique(y_train)) > 1:
+                    y_train_pred_proba = model.predict_proba(X_train)[:, 1]
+                    metrics['train_roc_auc'] = roc_auc_score(y_train, y_train_pred_proba)
             else:
                 y_train_pred = model.predict(X_train)
                 metrics['train_accuracy'] = accuracy_score(y_train, y_train_pred)

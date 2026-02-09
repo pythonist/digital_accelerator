@@ -13,6 +13,15 @@ import duckdb
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+try:
+    import pyarrow  # type: ignore
+    _PARQUET_ENGINE = "pyarrow"
+except Exception:
+    try:
+        import fastparquet  # type: ignore
+        _PARQUET_ENGINE = "fastparquet"
+    except Exception:
+        _PARQUET_ENGINE = None
 
 
 class TransactionUniverseService:
@@ -545,7 +554,10 @@ class TransactionUniverseService:
         parquet_path = output_dir / filename
         
         # Save to parquet
-        df.to_parquet(parquet_path, index=False, engine='pyarrow')
+        if _PARQUET_ENGINE:
+            df.to_parquet(parquet_path, index=False, engine=_PARQUET_ENGINE)
+        else:
+            df.to_parquet(parquet_path, index=False)
         
         # Compute hash
         file_hash = hashlib.md5(parquet_path.read_bytes()).hexdigest()

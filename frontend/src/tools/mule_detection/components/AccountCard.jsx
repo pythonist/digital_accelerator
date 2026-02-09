@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Card, CardContent, Stack, Typography, Button, Divider } from '@mui/material';
 import RiskChip from './RiskChip';
+import { formatInteger, formatNumber, formatProbability } from '../utils/formatters';
 
 const Metric = ({ label, value }) => (
   <Box sx={{ minWidth: 110 }}>
@@ -12,13 +13,6 @@ const Metric = ({ label, value }) => (
     </Typography>
   </Box>
 );
-
-const fmt = (v, digits = 3) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '-';
-  if (Math.abs(n) >= 1000) return n.toFixed(0);
-  return n.toFixed(digits);
-};
 
 const AccountCard = ({ account, onInvestigate }) => {
   const id = account?.account_id;
@@ -40,12 +34,12 @@ const AccountCard = ({ account, onInvestigate }) => {
         <Divider sx={{ my: 1.5 }} />
 
         <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-          <Metric label="Tx (24h)" value={fmt(account?.tx_count_24h ?? account?.tx_count ?? account?.tx_24h, 0)} />
-          <Metric label="In/Out" value={fmt(account?.in_out_ratio, 3)} />
-          <Metric label="Accounts/Device" value={fmt(account?.accounts_per_device, 2)} />
-          <Metric label="Rule Score" value={fmt(account?.rule_score ?? account?.pattern_risk_score, 3)} />
-          <Metric label="ML Score" value={fmt(account?.ml_score ?? account?.ml_risk_score, 3)} />
-          <Metric label="Hybrid" value={fmt(account?.hybrid_score, 3)} />
+          <Metric label="Tx (24h)" value={formatInteger(account?.tx_count_24h ?? account?.tx_count ?? account?.tx_24h ?? '-')} />
+          <Metric label="In/Out" value={formatNumber(account?.in_out_ratio ?? '-', { maxFractionDigits: 3 })} />
+          <Metric label="Accounts/Device" value={formatNumber(account?.accounts_per_device ?? '-', { maxFractionDigits: 2 })} />
+          <Metric label="Rule Score" value={formatProbability(account?.rule_score ?? account?.pattern_risk_score ?? '-', 3)} />
+          <Metric label="ML Score" value={formatProbability(account?.ml_score ?? account?.ml_risk_score ?? '-', 3)} />
+          <Metric label="Hybrid" value={formatProbability(account?.hybrid_score ?? '-', 3)} />
         </Stack>
 
         <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
@@ -59,4 +53,3 @@ const AccountCard = ({ account, onInvestigate }) => {
 };
 
 export default AccountCard;
-

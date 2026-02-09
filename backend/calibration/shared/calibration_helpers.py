@@ -631,8 +631,10 @@ class ThresholdApplicator:
             "top_customers": top_customers
         }
     
-import numpy as np
-from scipy import stats
+from core.optional_imports import safe_import
+
+np, _NP_OK = safe_import("numpy")
+stats, _SCIPY_OK = safe_import("scipy.stats")
 
 
 class KSStatisticsHelper:

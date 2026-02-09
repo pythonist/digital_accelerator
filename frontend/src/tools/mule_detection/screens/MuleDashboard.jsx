@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import muleApi from '../services/muleApi';
 import AccountCard from '../components/AccountCard';
+import { formatInteger } from '../utils/formatters';
 
 const MuleDashboard = ({ onAccountSelect, dataStats, onReupload }) => {
   const [loading, setLoading] = useState(false);
@@ -94,6 +95,48 @@ const MuleDashboard = ({ onAccountSelect, dataStats, onReupload }) => {
     return () => clearPoll();
   }, []);
 
+  const startPoll = (jobId) => {
+    if (!jobId) return;
+    clearPoll();
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await muleApi.getFeatureEngineeringStatus(jobId);
+        if (s?.success) {
+          setFeJob(s);
+          if (s?.job_id) localStorage.setItem('mule_fe_job_id', s.job_id);
+        }
+        if (s?.state === 'completed') {
+          clearPoll();
+          await load();
+        }
+        if (s?.state === 'failed') {
+          clearPoll();
+          setError(s?.error || 'Feature engineering failed');
+        }
+      } catch (e) {
+        clearPoll();
+        setError(getErr(e, 'Failed to fetch feature engineering status'));
+      }
+    }, 1000);
+  };
+
+  useEffect(() => {
+    const restore = async () => {
+      try {
+        const lastJobId = localStorage.getItem('mule_fe_job_id') || undefined;
+        const s = await muleApi.getFeatureEngineeringStatus(lastJobId);
+        if (s?.success && s?.job_id) {
+          setFeJob(s);
+          localStorage.setItem('mule_fe_job_id', s.job_id);
+          if (s?.state === 'running' || s?.state === 'queued') {
+            startPoll(s.job_id);
+          }
+        }
+      } catch {}
+    };
+    restore();
+  }, []);
+
   const runFeatureEngineering = async () => {
     setLoading(true);
     setError(null);
@@ -103,25 +146,9 @@ const MuleDashboard = ({ onAccountSelect, dataStats, onReupload }) => {
         throw new Error(startRes?.error || 'Failed to start feature engineering');
       }
       const jobId = startRes.job_id;
+      if (jobId) localStorage.setItem('mule_fe_job_id', jobId);
       setFeJob({ job_id: jobId, state: startRes.state || 'queued', step: 'queued', message: 'Queued' });
-      clearPoll();
-      pollRef.current = setInterval(async () => {
-        try {
-          const s = await muleApi.getFeatureEngineeringStatus(jobId);
-          if (s?.success) setFeJob(s);
-          if (s?.state === 'completed') {
-            clearPoll();
-            await load();
-          }
-          if (s?.state === 'failed') {
-            clearPoll();
-            setError(s?.error || 'Feature engineering failed');
-          }
-        } catch (e) {
-          clearPoll();
-          setError(getErr(e, 'Failed to fetch feature engineering status'));
-        }
-      }, 1000);
+      startPoll(jobId);
     } catch (e) {
       setError(getErr(e, 'Feature engineering failed'));
     } finally {
@@ -155,10 +182,10 @@ const MuleDashboard = ({ onAccountSelect, dataStats, onReupload }) => {
             />
             <CardContent>
               <Stack direction="row" spacing={2} flexWrap="wrap">
-                <Chip label={`Total Accounts: ${summary.total}`} />
-                <Chip label={`Transactions: ${dataStats?.txn_count ?? dataStats?.num_transactions ?? '-'}`} />
-                <Chip label={`Labeled Mule: ${summary.muleCount}`} />
-                <Chip label={`Labeled Legit: ${summary.legitCount}`} />
+                <Chip label={`Total Accounts: ${formatInteger(summary.total)}`} />
+                <Chip label={`Transactions: ${formatInteger(dataStats?.txn_count ?? dataStats?.num_transactions ?? '-')}`} />
+                <Chip label={`Labeled Mule: ${formatInteger(summary.muleCount)}`} />
+                <Chip label={`Labeled Legit: ${formatInteger(summary.legitCount)}`} />
               </Stack>
               <Box sx={{ mt: 2 }}>
                 <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
@@ -173,7 +200,18 @@ const MuleDashboard = ({ onAccountSelect, dataStats, onReupload }) => {
                     {feJob?.state ? `Status: ${feJob.state}${feJob.step ? ` · ${feJob.step}` : ''}${feJob.message ? ` · ${feJob.message}` : ''}` : ''}
                   </Typography>
                 </Stack>
-                {feJob?.state === 'running' && <LinearProgress sx={{ mt: 1 }} />}
+                {(feJob?.state === 'running' || feJob?.state === 'queued') && (
+                  <LinearProgress
+                    sx={{ mt: 1 }}
+                    variant={typeof feJob?.progress_pct === 'number' ? 'determinate' : 'indeterminate'}
+                    value={typeof feJob?.progress_pct === 'number' ? feJob.progress_pct : 0}
+                  />
+                )}
+                {feJob?.queue_position && feJob.state === 'queued' && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.75, display: 'block' }}>
+                    Queue position: {feJob.queue_position}
+                  </Typography>
+                )}
               </Box>
             </CardContent>
           </Card>

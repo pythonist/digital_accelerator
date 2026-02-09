@@ -11,7 +11,7 @@ Key behaviors:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import json
 
 import duckdb
@@ -295,6 +295,7 @@ class CortexScenarioBuilderService:
         conn = duckdb.connect(str(self.db_path))
         try:
             conn.execute("CREATE SEQUENCE IF NOT EXISTS cortex_runs_seq START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS cortex_recon_seq START 1")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS cortex_scenario_runs (
@@ -352,6 +353,29 @@ class CortexScenarioBuilderService:
                   month_last_date TIMESTAMP,
                   threshold_amt DOUBLE,
                   transaction_count INTEGER
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cortex_reconstruction_runs (
+                  recon_id INTEGER PRIMARY KEY DEFAULT nextval('cortex_recon_seq'),
+                  run_id INTEGER NOT NULL,
+                  entity_level TEXT,
+                  entity_id TEXT,
+                  as_of_date TIMESTAMP,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  created_by TEXT
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cortex_reconstruction_artifacts (
+                  recon_id INTEGER NOT NULL,
+                  payload_json TEXT
                 )
                 """
             )
@@ -450,6 +474,320 @@ class CortexScenarioBuilderService:
             'run_id': int(run_id),
             'stats': result['stats']
         }
+
+    def reconstruct_behavior(
+        self,
+        run_id: int,
+        universe_db_path: Path,
+        entity_id: str,
+        as_of_date: str,
+        entity_level: str = 'account',
+        created_by: str = 'user',
+    ) -> Dict[str, Any]:
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            row = conn.execute(
+                """
+                SELECT universe_id, config_json, transaction_type, aggregation_level, lookback_days
+                FROM cortex_scenario_runs
+                WHERE run_id = ?
+                """,
+                [int(run_id)],
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            raise ValueError(f"cortex run {run_id} not found")
+        universe_id = int(row[0])
+        base_cfg = {}
+        if row[1]:
+            try:
+                base_cfg = json.loads(row[1])
+            except Exception:
+                base_cfg = {}
+        if row[2]:
+            base_cfg.setdefault('transaction_type', row[2])
+        if row[3]:
+            base_cfg.setdefault('aggregation_level', row[3])
+        if row[4]:
+            base_cfg.setdefault('lookback_days', int(row[4]))
+        cfg = _normalize_config(base_cfg)
+        parquet_path = self._get_universe_parquet(universe_id, universe_db_path)
+        if not parquet_path.exists():
+            raise FileNotFoundError(f"Universe parquet not found: {parquet_path}")
+        df_all = pd.read_parquet(parquet_path)
+        df0 = _ensure_columns(df_all)
+        entity_id_str = str(entity_id)
+        if entity_level.lower() == 'customer':
+            df_entity = df0[df0['customer_id'].astype(str) == entity_id_str].copy()
+        else:
+            df_entity = df0[df0['account_id'].astype(str) == entity_id_str].copy()
+        if len(df_entity) == 0:
+            artifact = {
+                'entity_id': entity_id_str,
+                'entity_level': entity_level,
+                'as_of_date': as_of_date,
+                'raw_view': [],
+                'filter_impact': {
+                    'total_raw': 0,
+                    'after_basic_filters': 0,
+                    'after_type_filter': 0,
+                },
+                'aggregation': {
+                    'rows': [],
+                    'groups': [],
+                },
+                'lookback': {
+                    'window_start': None,
+                    'window_end': as_of_date,
+                    'included_dates': [],
+                    'excluded_dates': [],
+                },
+                'contribution_table': {
+                    'rows': [],
+                    'final_threshold': 0.0,
+                },
+                'duplicates': [],
+                'data_loss': {
+                    'eligible_raw': 0,
+                    'included_raw': 0,
+                    'dropped_raw': 0,
+                    'dropped_rows': [],
+                },
+                'entity_merge': {
+                    'accounts': [],
+                },
+                'config_snapshot': {
+                    'transaction_type': cfg.transaction_type,
+                    'aggregation_level': cfg.aggregation_level,
+                    'lookback_days': cfg.lookback_days,
+                    'grouping_keys': [],
+                },
+                'certificate': 'No transactions found for this entity.',
+            }
+        else:
+            df_work = df_entity.copy()
+            df_work['transaction_datetime'] = pd.to_datetime(df_work['transaction_datetime'], errors='coerce')
+            df_work['transaction_amount'] = pd.to_numeric(df_work['transaction_amount'], errors='coerce')
+            mask_dt = df_work['transaction_datetime'].notna()
+            mask_amt = df_work['transaction_amount'].notna()
+            mask_acc = df_work['account_id'].notna()
+            base_ok = mask_dt & mask_amt & mask_acc
+            tx_type = str(cfg.transaction_type or 'ALL').upper()
+            if tx_type != 'ALL':
+                norm_tx = df_work['transaction_type'].astype(str).map(_normalize_tx_type)
+                mask_type = norm_tx == _normalize_tx_type(tx_type)
+            else:
+                mask_type = pd.Series(True, index=df_work.index)
+            as_of_ts = pd.to_datetime(as_of_date, errors='coerce')
+            if pd.isna(as_of_ts):
+                raise ValueError('invalid as_of_date')
+            window_start = as_of_ts - pd.Timedelta(days=int(cfg.lookback_days))
+            mask_window = (df_work['transaction_datetime'] >= window_start) & (df_work['transaction_datetime'] <= as_of_ts)
+            eligible = base_ok & mask_type & mask_window
+            raw_view = df_entity.copy()
+            raw_view['transaction_datetime'] = df_work['transaction_datetime']
+            raw_view['transaction_amount'] = df_work['transaction_amount']
+            raw_view['included_step2'] = eligible
+            reason = pd.Series('', index=df_work.index, dtype=object)
+            invalid_dt = ~mask_dt
+            invalid_amt = mask_dt & ~mask_amt
+            missing_id = mask_dt & mask_amt & ~mask_acc
+            reason[invalid_dt] = 'invalid_datetime'
+            reason[invalid_amt] = 'invalid_amount'
+            reason[missing_id] = 'missing_id'
+            reason[base_ok & ~mask_type] = 'wrong_type'
+            reason[base_ok & mask_type & ~mask_window] = 'outside_lookback_window'
+            reason[eligible] = 'included'
+            raw_view['exclusion_reason'] = reason
+            total_raw = int(len(raw_view))
+            after_basic = int(base_ok.sum())
+            after_type = int((base_ok & mask_type).sum())
+            df_filtered = df_work[base_ok & mask_type].copy()
+            agg_level = str(cfg.aggregation_level or 'daily').lower()
+            has_customer_id = 'customer_id' in df_filtered.columns and bool(df_filtered['customer_id'].notna().all())
+            if not has_customer_id:
+                df_filtered['customer_id'] = pd.NA
+            id_keys = ['account_id', 'customer_id'] if has_customer_id else ['account_id']
+            if agg_level == 'daily':
+                df_stage = df_filtered.assign(
+                    month_last_date=df_filtered['transaction_datetime'].dt.to_period('M').dt.to_timestamp('M') + pd.Timedelta(days=1)
+                )
+                group_cols = [*id_keys, 'transaction_datetime', 'month_last_date']
+                step_daily_level = (
+                    df_stage
+                    .groupby(group_cols, as_index=False, dropna=False)
+                    .agg(total_daily_amount=('transaction_amount', 'sum'))
+                )
+            elif agg_level == 'monthly':
+                df_stage = df_filtered.assign(
+                    month_last_date=df_filtered['transaction_datetime'].dt.to_period('M').dt.to_timestamp('M') + pd.Timedelta(days=1),
+                    month_start=df_filtered['transaction_datetime'].dt.to_period('M').dt.to_timestamp(),
+                )
+                group_cols = [*id_keys, 'month_start', 'month_last_date']
+                step_daily_level = (
+                    df_stage
+                    .groupby(group_cols, as_index=False, dropna=False)
+                    .agg(total_daily_amount=('transaction_amount', 'sum'))
+                    .rename(columns={'month_start': 'transaction_datetime'})
+                )
+            else:
+                raise ValueError('aggregation_level must be daily or monthly')
+            if 'customer_id' not in step_daily_level.columns:
+                step_daily_level['customer_id'] = pd.NA
+            df_stage_keys = df_stage.copy()
+            if agg_level == 'monthly':
+                df_stage_keys = df_stage_keys.rename(columns={'month_start': 'transaction_datetime'})
+            def _make_key_row(r):
+                vals = [str(r[k]) for k in id_keys]
+                vals.append(pd.to_datetime(r['transaction_datetime']).isoformat() if pd.notna(r['transaction_datetime']) else '')
+                vals.append(pd.to_datetime(r['month_last_date']).isoformat() if pd.notna(r['month_last_date']) else '')
+                return '|'.join(vals)
+            df_stage_keys['group_key'] = df_stage_keys.apply(_make_key_row, axis=1)
+            step_daily_level['group_key'] = step_daily_level.apply(_make_key_row, axis=1)
+            group_to_rows: Dict[str, Any] = {}
+            for idx, r in df_stage_keys.iterrows():
+                k = r['group_key']
+                if k not in group_to_rows:
+                    group_to_rows[k] = []
+                group_to_rows[k].append(int(idx))
+            step_daily_level_window = step_daily_level[
+                (step_daily_level['transaction_datetime'] >= window_start)
+                & (step_daily_level['transaction_datetime'] <= as_of_ts)
+            ].copy()
+            included_dates = sorted(
+                {pd.to_datetime(d).isoformat() for d in step_daily_level_window['transaction_datetime'] if pd.notna(d)}
+            )
+            all_dates = sorted(
+                {pd.to_datetime(d).isoformat() for d in step_daily_level['transaction_datetime'] if pd.notna(d)}
+            )
+            excluded_dates = [d for d in all_dates if d not in included_dates]
+            agg_rows = []
+            for _, r in step_daily_level_window.iterrows():
+                k = r['group_key']
+                src_rows = group_to_rows.get(k, [])
+                agg_rows.append(
+                    {
+                        'account_id': str(r['account_id']) if r['account_id'] is not None else None,
+                        'customer_id': str(r['customer_id']) if r['customer_id'] is not None else None,
+                        'transaction_datetime': pd.to_datetime(r['transaction_datetime']).isoformat() if pd.notna(r['transaction_datetime']) else None,
+                        'month_last_date': pd.to_datetime(r['month_last_date']).isoformat() if pd.notna(r['month_last_date']) else None,
+                        'total_daily_amount': float(r['total_daily_amount']) if r['total_daily_amount'] is not None else 0.0,
+                        'source_row_indices': src_rows,
+                    }
+                )
+            contribution_rows = []
+            final_threshold = 0.0
+            for r in agg_rows:
+                amt = float(r['total_daily_amount'])
+                final_threshold += amt
+                contribution_rows.append(
+                    {
+                        'transaction_datetime': r['transaction_datetime'],
+                        'aggregated_amount': amt,
+                        'reason': f"within lookback window {window_start.isoformat()} to {as_of_ts.isoformat()}",
+                    }
+                )
+            duplicates = []
+            if len(df_filtered) > 0:
+                dup_counts = (
+                    df_filtered.groupby(['transaction_datetime', 'transaction_amount'])
+                    .size()
+                    .reset_index(name='count')
+                )
+                dup_counts = dup_counts[dup_counts['count'] > 1]
+                for _, r in dup_counts.iterrows():
+                    duplicates.append(
+                        {
+                            'transaction_datetime': pd.to_datetime(r['transaction_datetime']).isoformat() if pd.notna(r['transaction_datetime']) else None,
+                            'transaction_amount': float(r['transaction_amount']) if r['transaction_amount'] is not None else None,
+                            'count': int(r['count']),
+                        }
+                    )
+            eligible_raw = int(eligible.sum())
+            included_raw = eligible_raw
+            dropped_raw = 0
+            dropped_rows = []
+            accounts_merge = sorted({str(a) for a in df_filtered['account_id'].dropna().astype(str).unique().tolist()})
+            grouping_keys = id_keys + ['transaction_datetime']
+            config_snapshot = {
+                'transaction_type': cfg.transaction_type,
+                'aggregation_level': cfg.aggregation_level,
+                'lookback_days': int(cfg.lookback_days),
+                'grouping_keys': grouping_keys,
+            }
+            certificate = f"The threshold value {final_threshold:.2f} is reproducible from the transactions listed in the contribution table."
+            raw_view_out = raw_view.copy()
+            if 'transaction_datetime' in raw_view_out.columns:
+                raw_view_out['transaction_datetime'] = raw_view_out['transaction_datetime'].apply(
+                    lambda v: v.isoformat() if isinstance(v, pd.Timestamp) and pd.notna(v) else None
+                )
+            artifact = {
+                'entity_id': entity_id_str,
+                'entity_level': entity_level,
+                'as_of_date': as_of_ts.isoformat(),
+                'raw_view': raw_view_out.to_dict('records'),
+                'filter_impact': {
+                    'total_raw': total_raw,
+                    'after_basic_filters': after_basic,
+                    'after_type_filter': after_type,
+                },
+                'aggregation': {
+                    'rows': agg_rows,
+                    'groups': agg_rows,
+                },
+                'lookback': {
+                    'window_start': window_start.isoformat(),
+                    'window_end': as_of_ts.isoformat(),
+                    'included_dates': included_dates,
+                    'excluded_dates': excluded_dates,
+                },
+                'contribution_table': {
+                    'rows': contribution_rows,
+                    'final_threshold': final_threshold,
+                },
+                'duplicates': duplicates,
+                'data_loss': {
+                    'eligible_raw': eligible_raw,
+                    'included_raw': included_raw,
+                    'dropped_raw': dropped_raw,
+                    'dropped_rows': dropped_rows,
+                },
+                'entity_merge': {
+                    'accounts': accounts_merge,
+                },
+                'config_snapshot': config_snapshot,
+                'certificate': certificate,
+            }
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            recon_id = conn.execute("SELECT nextval('cortex_recon_seq')").fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO cortex_reconstruction_runs (recon_id, run_id, entity_level, entity_id, as_of_date, created_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    int(recon_id),
+                    int(run_id),
+                    str(entity_level),
+                    entity_id_str,
+                    artifact.get('as_of_date'),
+                    created_by,
+                ],
+            )
+            conn.execute(
+                """
+                INSERT INTO cortex_reconstruction_artifacts (recon_id, payload_json)
+                VALUES (?, ?)
+                """,
+                [int(recon_id), json.dumps(artifact)],
+            )
+        finally:
+            conn.close()
+        result = dict(artifact)
+        result['recon_id'] = int(recon_id)
+        return result
 
     def preview_thresholds(self, run_id: int, limit: int = 50, offset: int = 0) -> pd.DataFrame:
         conn = duckdb.connect(str(self.db_path))

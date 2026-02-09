@@ -3,11 +3,13 @@
 Complete Mule Detection Routes with Enhanced ML Integration
 """
 from flask import Blueprint, request, jsonify
-import pandas as pd
-import numpy as np
+from core.optional_imports import safe_import
+pd, _PANDAS_OK = safe_import("pandas")
+np, _NUMPY_OK = safe_import("numpy")
 import os
 import traceback
 import json
+import hashlib
 import uuid
 from datetime import datetime
 from threading import Thread
@@ -16,23 +18,53 @@ from typing import Dict, Optional
 # Import engines
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-import duckdb
-from services.mule_detection.feature_engine import MuleFeatureEngine
-from services.mule_detection.pattern_engine import MulePatternEngine
-from services.mule_detection.flow_engine import MuleFlowEngine
-from services.mule_detection.ml_engine import MuleMLEngine
-from services.mule_detection.money_flow import MoneyFlowAnalyzer, MoneyFlowConfig
-from services.mule_detection.flow_graph_workbench import MoneyFlowGraphWorkbench, FlowWorkbenchConfig
-from services.mule_detection.db_service import get_md_db_service
+duckdb, _DUCKDB_OK = safe_import("duckdb")
+try:
+    from services.mule_detection.feature_engine import MuleFeatureEngine
+    from services.mule_detection.pattern_engine import MulePatternEngine
+    from services.mule_detection.flow_engine import MuleFlowEngine
+    from services.mule_detection.ml_engine import MuleMLEngine
+    from services.mule_detection.money_flow import MoneyFlowAnalyzer, MoneyFlowConfig
+    from services.mule_detection.flow_graph_workbench import MoneyFlowGraphWorkbench, FlowWorkbenchConfig
+    from services.mule_detection.db_service import get_md_db_service
+    _MULE_SERVICES_OK = True
+    _MULE_IMPORT_ERROR = None
+except Exception as e:
+    _MULE_SERVICES_OK = False
+    _MULE_IMPORT_ERROR = repr(e)
 
+_MULE_AVAILABLE = all([_PANDAS_OK, _NUMPY_OK, _DUCKDB_OK, _MULE_SERVICES_OK])
 mule_bp = Blueprint('mule', __name__)
 
+
+@mule_bp.before_request
+def _mule_guard():
+    if not _MULE_AVAILABLE:
+        return jsonify({
+            "error": "Mule detection module not available",
+            "available": False,
+            "missing": {
+                "pandas": _PANDAS_OK,
+                "numpy": _NUMPY_OK,
+                "duckdb": _DUCKDB_OK,
+                "services": _MULE_SERVICES_OK,
+            },
+            "details": _MULE_IMPORT_ERROR,
+        }), 503
+
 # Initialize engines
-feature_engine = MuleFeatureEngine()
-pattern_engine = MulePatternEngine()
-flow_engine = MuleFlowEngine()
-ml_engine = MuleMLEngine()
-md_db = get_md_db_service()
+if _MULE_AVAILABLE:
+    feature_engine = MuleFeatureEngine()
+    pattern_engine = MulePatternEngine()
+    flow_engine = MuleFlowEngine()
+    ml_engine = MuleMLEngine()
+    md_db = get_md_db_service()
+else:
+    feature_engine = None
+    pattern_engine = None
+    flow_engine = None
+    ml_engine = None
+    md_db = None
 
 # In-memory stores (replace with Redis in production)
 training_jobs = {}
@@ -40,9 +72,9 @@ model_registry = {}
 
 # Numpy type converter for JSON serialization
 def convert_numpy_types(obj):
-    if isinstance(obj, np.generic):
+    if _NUMPY_OK and isinstance(obj, np.generic):
         return obj.item()
-    elif isinstance(obj, np.ndarray):
+    elif _NUMPY_OK and isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, dict):
         return {key: convert_numpy_types(value) for key, value in obj.items()}
@@ -306,6 +338,8 @@ def run_training_job(job_id: str, env_id: str, config: Dict):
 def upload_mule_data():
     """Upload transaction/account data"""
     try:
+        if not _MULE_AVAILABLE:
+            return jsonify({'error': 'Mule services unavailable', 'details': _MULE_IMPORT_ERROR}), 503
         env_id = request.headers.get('X-Environment-ID')
         if not env_id:
             return jsonify({'error': 'Environment ID required'}), 400
@@ -315,8 +349,6 @@ def upload_mule_data():
         
         txn_file = request.files['transactions']
         acc_file = request.files.get('accounts')
-        if acc_file is None:
-            return jsonify({'error': 'accounts.csv required'}), 400
 
         transactions_required = [
             'txn_id',
@@ -350,33 +382,61 @@ def upload_mule_data():
             'is_mule',
         ]
 
-        txn_df = pd.read_csv(txn_file)
-        acc_df = pd.read_csv(acc_file)
+        def _read_csv(file_obj):
+            try:
+                return pd.read_csv(file_obj, encoding="utf-8-sig")
+            except Exception:
+                return pd.read_csv(file_obj, encoding="latin-1")
 
-        txn_cols = [c.strip() for c in txn_df.columns.tolist()]
-        acc_cols = [c.strip() for c in acc_df.columns.tolist()]
+        def _checksum(file_obj):
+            if file_obj is None:
+                return None
+            try:
+                file_obj.stream.seek(0)
+                data = file_obj.stream.read()
+                file_obj.stream.seek(0)
+            except Exception:
+                data = file_obj.read()
+                file_obj.seek(0)
+            return hashlib.md5(data or b"").hexdigest()
+
+        checksum_txn = _checksum(txn_file)
+        checksum_acc = _checksum(acc_file) if acc_file is not None else None
+
+        txn_df = _read_csv(txn_file)
+        acc_df = _read_csv(acc_file) if acc_file is not None else None
+
+        txn_cols = [c.strip().lower() for c in txn_df.columns.tolist()]
         txn_df.columns = txn_cols
-        acc_df.columns = acc_cols
+        if acc_df is not None:
+            acc_cols = [c.strip().lower() for c in acc_df.columns.tolist()]
+            acc_df.columns = acc_cols
 
         missing_txn = [c for c in transactions_required if c not in txn_df.columns]
-        missing_acc = [c for c in accounts_required if c not in acc_df.columns]
-        extra_txn = [c for c in txn_df.columns if c not in transactions_required]
-        extra_acc = [c for c in acc_df.columns if c not in accounts_required]
+        missing_acc = [c for c in accounts_required if acc_df is not None and c not in acc_df.columns]
 
-        if missing_txn or missing_acc or extra_txn or extra_acc:
+        if missing_txn or missing_acc:
             return jsonify({
                 'error': 'Invalid CSV schema',
                 'missing': {
                     'transactions': missing_txn,
                     'accounts': missing_acc
                 },
-                'extra': {
-                    'transactions': extra_txn,
-                    'accounts': extra_acc
-                }
             }), 400
 
         txn_df = txn_df[transactions_required].copy()
+        if acc_df is None:
+            account_ids = txn_df['account_id'].dropna().astype(str).unique().tolist()
+            acc_df = pd.DataFrame({
+                'account_id': account_ids,
+                'customer_id': None,
+                'account_open_date': None,
+                'customer_type': None,
+                'risk_rating': None,
+                'occupation': None,
+                'expected_turnover': None,
+                'is_mule': None,
+            })
         acc_df = acc_df[accounts_required].copy()
 
         txn_df['txn_timestamp'] = pd.to_datetime(txn_df['txn_timestamp'], errors='coerce')
@@ -423,22 +483,35 @@ def upload_mule_data():
             """)
 
             upload_id = str(uuid.uuid4())
+            dataset_version = f"{env_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{(checksum_txn or 'na')[:8]}"
+            uploader = request.headers.get("X-User") or request.headers.get("X-Username") or request.headers.get("X-User-Id") or "unknown"
+            source_ip = request.headers.get("X-Forwarded-For") or request.remote_addr
             txn_schema_json = json.dumps({c: str(txn_df[c].dtype) for c in transactions_required}, indent=2)
             acc_schema_json = json.dumps({c: str(acc_df[c].dtype) for c in accounts_required}, indent=2)
             conn.execute(
                 """
-                INSERT INTO mule_uploads
-                VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
+                INSERT INTO mule_uploads (
+                    upload_id, environment_id, uploaded_at,
+                    txn_file_name, accounts_file_name, txn_row_count, accounts_row_count,
+                    txn_schema_json, accounts_schema_json,
+                    dataset_version, uploader, source_ip, checksum_txn, checksum_acc
+                )
+                VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     upload_id,
                     env_id,
                     getattr(txn_file, "filename", "transactions.csv"),
-                    getattr(acc_file, "filename", "accounts.csv"),
+                    getattr(acc_file, "filename", "accounts.csv") if acc_file is not None else None,
                     int(len(txn_df)),
                     int(len(acc_df)),
                     txn_schema_json,
                     acc_schema_json,
+                    dataset_version,
+                    uploader,
+                    source_ip,
+                    checksum_txn,
+                    checksum_acc,
                 ],
             )
         finally:

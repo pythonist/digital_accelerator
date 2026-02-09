@@ -187,7 +187,7 @@ class NetworkAnalyzer:
     def _get_community(self, account_id: str) -> int:
         """Detect community using Louvain algorithm"""
         
-        if community_louvain is None:
+        if community_louvain is None or not hasattr(community_louvain, "best_partition"):
             return None
 
         if not self.account_communities:

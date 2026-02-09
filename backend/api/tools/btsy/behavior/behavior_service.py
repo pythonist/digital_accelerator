@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import json
 import time
 from datetime import datetime
@@ -22,6 +22,7 @@ class BehaviorService:
             conn.execute("CREATE SEQUENCE IF NOT EXISTS behavior_runs_seq START 1")
             conn.execute("CREATE SEQUENCE IF NOT EXISTS behavior_insights_seq START 1")
             conn.execute("CREATE SEQUENCE IF NOT EXISTS behavior_chart_seq START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS behavior_overlap_audit_seq START 1")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS behavior_runs (
                   behavior_run_id INTEGER PRIMARY KEY DEFAULT nextval('behavior_runs_seq'),
@@ -87,6 +88,56 @@ class BehaviorService:
                   behavior_run_id INTEGER NOT NULL,
                   chart_type TEXT NOT NULL,
                   data_json TEXT NOT NULL,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_run_entities (
+                  behavior_run_id INTEGER NOT NULL,
+                  entity_id TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_run_period_entities (
+                  behavior_run_id INTEGER NOT NULL,
+                  period TIMESTAMP NOT NULL,
+                  entity_id TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_run_entity_stats (
+                  behavior_run_id INTEGER PRIMARY KEY,
+                  total_entities INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_overlap_cache (
+                  run_a INTEGER NOT NULL,
+                  run_b INTEGER NOT NULL,
+                  shared_entities INTEGER,
+                  shared_pct_a DOUBLE,
+                  shared_pct_b DOUBLE,
+                  shared_periods INTEGER,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_entity_footprint (
+                  entity_id TEXT NOT NULL,
+                  behavior_run_id INTEGER NOT NULL,
+                  first_seen TIMESTAMP,
+                  last_seen TIMESTAMP,
+                  active_days INTEGER,
+                  activity_dates_json TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS behavior_overlap_audit (
+                  id INTEGER PRIMARY KEY DEFAULT nextval('behavior_overlap_audit_seq'),
+                  behavior_run_id INTEGER,
+                  entity_id TEXT,
+                  action TEXT,
+                  created_by TEXT,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -485,6 +536,147 @@ class BehaviorService:
         index = pd.Series(range(1, n + 1)).to_numpy()
         return float((2.0 * (index * arr).sum()) / (n * arr.sum()) - (n + 1) / n)
 
+    def _resolve_snapshot_domain_path(self, snapshot_id: str, domain: str) -> Path:
+        from api.tools.btsy.snapshot_manager import SnapshotManager
+        mgr = SnapshotManager(self.snapshot_storage_path.parent / "duckdb" / "snapshots.duckdb")
+        snap = mgr.get_snapshot(str(snapshot_id))
+        if snap:
+            for d in (snap.get("domains") or []):
+                if d.get("domain") == domain and d.get("normalized_file_path"):
+                    return Path(d["normalized_file_path"])
+        return self.snapshot_storage_path.parent / "normalized" / str(snapshot_id) / f"{domain}.parquet"
+
+    def _get_distribution_stats(self, conn, run_id: int) -> Dict[str, Any]:
+        snap = conn.execute(
+            """
+            SELECT data_json
+            FROM behavior_chart_snapshots
+            WHERE behavior_run_id = ? AND chart_type = 'distribution_stats'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            [run_id],
+        ).fetchone()
+        if snap and snap[0]:
+            try:
+                return json.loads(snap[0])
+            except Exception:
+                pass
+        dist = conn.execute(
+            """
+            SELECT
+              COUNT(*) AS n,
+              MIN(metric_value) AS minv,
+              MAX(metric_value) AS maxv,
+              AVG(metric_value) AS meanv,
+              median(metric_value) AS medianv,
+              quantile(metric_value, 0.9) AS p90,
+              quantile(metric_value, 0.95) AS p95,
+              quantile(metric_value, 0.99) AS p99,
+              SUM(CASE WHEN metric_value = 0 THEN 1 ELSE 0 END) AS zeros
+            FROM behavior_table
+            WHERE behavior_run_id = ?
+            """,
+            [run_id],
+        ).fetchone()
+        total_mass_row = conn.execute(
+            "SELECT SUM(ABS(metric_value)) AS mass FROM behavior_table WHERE behavior_run_id = ?",
+            [run_id],
+        ).fetchone()
+        total_mass = float(total_mass_row[0] or 0.0)
+        tail = {'top1_mass_pct': None, 'top5_mass_pct': None}
+        if total_mass > 0:
+            q99 = conn.execute(
+                "SELECT quantile(metric_value, 0.99) FROM behavior_table WHERE behavior_run_id = ?",
+                [run_id],
+            ).fetchone()[0]
+            q95 = conn.execute(
+                "SELECT quantile(metric_value, 0.95) FROM behavior_table WHERE behavior_run_id = ?",
+                [run_id],
+            ).fetchone()[0]
+            top1 = conn.execute(
+                """
+                SELECT SUM(ABS(metric_value)) AS mass
+                FROM behavior_table
+                WHERE behavior_run_id = ? AND metric_value >= ?
+                """,
+                [run_id, q99],
+            ).fetchone()[0]
+            top5 = conn.execute(
+                """
+                SELECT SUM(ABS(metric_value)) AS mass
+                FROM behavior_table
+                WHERE behavior_run_id = ? AND metric_value >= ?
+                """,
+                [run_id, q95],
+            ).fetchone()[0]
+            tail = {
+                'top1_mass_pct': float((top1 or 0.0) / total_mass * 100.0),
+                'top5_mass_pct': float((top5 or 0.0) / total_mass * 100.0),
+            }
+        gini_vals = conn.execute(
+            """
+            SELECT MAX(ABS(metric_value)) AS v
+            FROM behavior_table
+            WHERE behavior_run_id = ?
+            GROUP BY entity_id
+            """,
+            [run_id],
+        ).fetchall()
+        gini = self._gini([float(r[0] or 0.0) for r in gini_vals])
+        return {
+            'count': int(dist[0] or 0),
+            'min': float(dist[1] or 0.0),
+            'max': float(dist[2] or 0.0),
+            'mean': float(dist[3] or 0.0),
+            'median': float(dist[4] or 0.0),
+            'p90': float(dist[5] or 0.0),
+            'p95': float(dist[6] or 0.0),
+            'p99': float(dist[7] or 0.0),
+            'zero_pct': (float(dist[8] or 0.0) / float(dist[0] or 1)) * 100.0 if dist[0] else 0.0,
+            'tail': tail,
+            'gini': float(gini or 0.0),
+        }
+
+    def _get_prev_run_id(self, conn, run_id: int) -> Optional[int]:
+        row = conn.execute(
+            """
+            SELECT universe_id, config_json
+            FROM behavior_runs
+            WHERE behavior_run_id = ?
+            """,
+            [int(run_id)],
+        ).fetchone()
+        if not row:
+            return None
+        universe_id = int(row[0])
+        metric_name = None
+        try:
+            cfg = json.loads(row[1]) if row[1] else {}
+            metric = (cfg.get('metrics') or [{}])[0] if cfg.get('metrics') else {}
+            metric_name = metric.get('name')
+        except Exception:
+            metric_name = None
+        prev_rows = conn.execute(
+            """
+            SELECT behavior_run_id, config_json
+            FROM behavior_runs
+            WHERE universe_id = ? AND behavior_run_id < ?
+            ORDER BY behavior_run_id DESC
+            LIMIT 25
+            """,
+            [universe_id, int(run_id)],
+        ).fetchall()
+        for rid, cfg in prev_rows:
+            try:
+                c = json.loads(cfg) if cfg else {}
+                m = (c.get('metrics') or [{}])[0] if c.get('metrics') else {}
+                if metric_name and m.get('name') == metric_name:
+                    return int(rid)
+            except Exception:
+                continue
+        return None
+
     def _ks_from_histograms(self, hist_a: Dict[int, int], hist_b: Dict[int, int]) -> Optional[float]:
         if not hist_a or not hist_b:
             return None
@@ -501,6 +693,815 @@ class BehaviorService:
             cdf_b += hist_b.get(k, 0) / total_b
             ks = max(ks, abs(cdf_a - cdf_b))
         return float(ks)
+
+    def get_signal_intelligence(self, run_id: int, universe_db_path: Optional[Path] = None, compare_run_id: Optional[int] = None) -> Dict:
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            if compare_run_id is None:
+                snap = conn.execute(
+                    """
+                    SELECT data_json
+                    FROM behavior_chart_snapshots
+                    WHERE behavior_run_id = ? AND chart_type = 'signal_intelligence'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    [int(run_id)],
+                ).fetchone()
+                if snap and snap[0]:
+                    try:
+                        return json.loads(snap[0])
+                    except Exception:
+                        pass
+
+            meta = self._get_run_meta(run_id)
+            entity_level = str(meta.get('entity_level') or 'account')
+            metric_name = (meta.get('metric') or {}).get('name')
+            dist = self._get_distribution_stats(conn, run_id)
+            totals = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS n,
+                  SUM(CASE WHEN metric_value IS NULL THEN 1 ELSE 0 END) AS nulls,
+                  SUM(CASE WHEN metric_value = 0 THEN 1 ELSE 0 END) AS zeros,
+                  SUM(CASE WHEN metric_value < 0 THEN 1 ELSE 0 END) AS negatives
+                FROM behavior_table
+                WHERE behavior_run_id = ?
+                """,
+                [int(run_id)],
+            ).fetchone()
+            n = int(totals[0] or 0)
+            null_pct = float((totals[1] or 0) / n * 100.0) if n else 0.0
+            zero_pct = float((totals[2] or 0) / n * 100.0) if n else 0.0
+            negative_pct = float((totals[3] or 0) / n * 100.0) if n else 0.0
+
+            tail = dist.get('tail') or {}
+            top1_mass_pct = tail.get('top1_mass_pct') or 0.0
+            gini = float(dist.get('gini') or 0.0)
+            median = float(dist.get('median') or 0.0)
+            p99 = float(dist.get('p99') or 0.0)
+            distribution_label = 'moderate_skew'
+            if zero_pct >= 70:
+                distribution_label = 'mostly_zero'
+            elif top1_mass_pct >= 40 or gini >= 0.6:
+                distribution_label = 'highly_concentrated'
+            elif median > 0 and p99 >= 5 * median:
+                distribution_label = 'heavy_right_tail'
+            elif median > 0 and dist.get('p95') is not None and float(dist.get('p95') or 0) <= 2 * median:
+                distribution_label = 'uniform'
+
+            distribution_text = "Signal shows moderate skew with mixed concentration."
+            if distribution_label == 'mostly_zero':
+                distribution_text = "Most observations are zero; the signal is sparse."
+            elif distribution_label == 'highly_concentrated':
+                distribution_text = "This behaviour is highly concentrated in a small number of entities."
+            elif distribution_label == 'heavy_right_tail':
+                distribution_text = "Signal has a heavy right tail; extreme values dominate."
+            elif distribution_label == 'uniform':
+                distribution_text = "Signal distribution is relatively uniform across entities."
+
+            dominance_rows = conn.execute(
+                """
+                SELECT entity_id, SUM(ABS(metric_value)) AS mass
+                FROM behavior_table
+                WHERE behavior_run_id = ?
+                GROUP BY entity_id
+                ORDER BY mass DESC
+                """,
+                [int(run_id)],
+            ).fetchall()
+            total_mass = float(sum([float(r[1] or 0.0) for r in dominance_rows]) or 0.0)
+            def _mass_pct(k: int) -> float:
+                if total_mass <= 0:
+                    return 0.0
+                return float(sum([float(r[1] or 0.0) for r in dominance_rows[:k]]) / total_mass * 100.0)
+            dominance = {
+                'top1_pct': _mass_pct(1),
+                'top5_pct': _mass_pct(5),
+                'top10_pct': _mass_pct(10),
+                'total_mass': total_mass,
+            }
+
+            by_day = conn.execute(
+                """
+                SELECT date_trunc('day', as_of_date) AS day, SUM(ABS(metric_value)) AS day_mass
+                FROM behavior_table
+                WHERE behavior_run_id = ?
+                GROUP BY day
+                ORDER BY day
+                """,
+                [int(run_id)],
+            ).fetchall()
+            day_mass = pd.Series([float(r[1] or 0.0) for r in by_day])
+            day_mean = float(day_mass.mean()) if not day_mass.empty else 0.0
+            day_std = float(day_mass.std()) if not day_mass.empty else 0.0
+            day_cv = float(day_std / day_mean) if day_mean else 0.0
+            by_month = conn.execute(
+                """
+                SELECT date_trunc('month', as_of_date) AS month, SUM(ABS(metric_value)) AS month_mass
+                FROM behavior_table
+                WHERE behavior_run_id = ?
+                GROUP BY month
+                ORDER BY month
+                """,
+                [int(run_id)],
+            ).fetchall()
+            month_mass = pd.Series([float(r[1] or 0.0) for r in by_month])
+            month_mean = float(month_mass.mean()) if not month_mass.empty else 0.0
+            month_std = float(month_mass.std()) if not month_mass.empty else 0.0
+            month_cv = float(month_std / month_mean) if month_mean else 0.0
+            stability_label = 'moderate'
+            if day_cv <= 0.5:
+                stability_label = 'stable'
+            elif day_cv >= 1.0:
+                stability_label = 'volatile'
+            stability = {
+                'day_cv': day_cv,
+                'month_cv': month_cv,
+                'label': stability_label,
+            }
+
+            activity_rows = conn.execute(
+                """
+                WITH by_entity_day AS (
+                  SELECT entity_id,
+                         COUNT(DISTINCT CASE WHEN metric_value != 0 THEN date_trunc('day', as_of_date) END) AS active_days
+                  FROM behavior_table
+                  WHERE behavior_run_id = ?
+                  GROUP BY entity_id
+                )
+                SELECT
+                  SUM(CASE WHEN active_days = 1 THEN 1 ELSE 0 END) AS one_time,
+                  SUM(CASE WHEN active_days BETWEEN 2 AND 3 THEN 1 ELSE 0 END) AS repeat,
+                  SUM(CASE WHEN active_days >= 4 THEN 1 ELSE 0 END) AS sustained,
+                  COUNT(*) AS total
+                FROM by_entity_day
+                """,
+                [int(run_id)],
+            ).fetchone()
+            total_entities = float(activity_rows[3] or 0)
+            activity_pattern = {
+                'one_time': int(activity_rows[0] or 0),
+                'repeat': int(activity_rows[1] or 0),
+                'sustained': int(activity_rows[2] or 0),
+                'total': int(activity_rows[3] or 0),
+            }
+            if total_entities > 0:
+                activity_pattern['one_time_pct'] = float(activity_pattern['one_time'] / total_entities * 100.0)
+                activity_pattern['repeat_pct'] = float(activity_pattern['repeat'] / total_entities * 100.0)
+                activity_pattern['sustained_pct'] = float(activity_pattern['sustained'] / total_entities * 100.0)
+            else:
+                activity_pattern['one_time_pct'] = 0.0
+                activity_pattern['repeat_pct'] = 0.0
+                activity_pattern['sustained_pct'] = 0.0
+            activity_pattern['label'] = max(
+                [('one_time', activity_pattern['one_time_pct']),
+                 ('repeat', activity_pattern['repeat_pct']),
+                 ('sustained', activity_pattern['sustained_pct'])],
+                key=lambda x: x[1]
+            )[0] if total_entities > 0 else 'none'
+
+            entity_stats = conn.execute(
+                """
+                SELECT entity_id,
+                       MAX(metric_value) AS maxv,
+                       median(metric_value) AS medv
+                FROM behavior_table
+                WHERE behavior_run_id = ?
+                GROUP BY entity_id
+                """,
+                [int(run_id)],
+            ).fetchall()
+            ratios = []
+            for _, maxv, medv in entity_stats:
+                mv = float(maxv or 0.0)
+                md = float(medv or 0.0)
+                if md > 0:
+                    ratios.append(mv / md)
+            ratios_series = pd.Series(ratios)
+            median_ratio = float(ratios_series.median()) if not ratios_series.empty else 0.0
+            p90_ratio = float(ratios_series.quantile(0.9)) if not ratios_series.empty else 0.0
+            spike_pct = float((ratios_series >= 5).mean() * 100.0) if not ratios_series.empty else 0.0
+            entity_variability = {
+                'median_ratio': median_ratio,
+                'p90_ratio': p90_ratio,
+                'spike_pct': spike_pct,
+            }
+
+            peaks_df = pd.DataFrame(entity_stats, columns=['entity_id', 'maxv', 'medv'])
+            peaks_df['peak'] = peaks_df['maxv'].fillna(0.0).astype(float)
+            peak_values = peaks_df['peak'].to_numpy()
+            percentiles = [0.8, 0.85, 0.9, 0.92, 0.94, 0.95, 0.97, 0.98, 0.99]
+            sensitivity = []
+            if peak_values.size > 0:
+                series = pd.Series(peak_values)
+                for p in percentiles:
+                    cutoff = float(series.quantile(p))
+                    count = int((series >= cutoff).sum())
+                    sensitivity.append({
+                        'percentile': p,
+                        'cutoff': cutoff,
+                        'entity_count': count,
+                        'entity_pct': float(count / len(series) * 100.0),
+                    })
+            sensitivity_preview = {
+                'points': sensitivity,
+                'total_entities': int(len(peak_values)),
+            }
+
+            warnings = []
+            if zero_pct >= 70:
+                warnings.append('too_many_zeros')
+            if null_pct >= 5:
+                warnings.append('high_null_rate')
+            if activity_pattern.get('one_time_pct', 0) >= 70:
+                warnings.append('too_many_single_observations')
+            if total_entities < 50:
+                warnings.append('low_entity_density')
+            cov_delta = None
+            diag_row = conn.execute(
+                "SELECT coverage_delta_pct, ks_vs_prev FROM behavior_run_diagnostics WHERE behavior_run_id = ?",
+                [int(run_id)],
+            ).fetchone()
+            if diag_row:
+                cov_delta = float(diag_row[0]) if diag_row[0] is not None else None
+            if cov_delta is not None and cov_delta <= -10:
+                warnings.append('coverage_drop')
+
+            heatmap = conn.execute(
+                """
+                WITH by_day AS (
+                  SELECT
+                    date_trunc('day', as_of_date) AS day,
+                    SUM(ABS(metric_value)) AS day_mass
+                  FROM behavior_table
+                  WHERE behavior_run_id = ?
+                  GROUP BY day
+                ),
+                ranked AS (
+                  SELECT day, day_mass,
+                         ROW_NUMBER() OVER (ORDER BY day_mass DESC) AS rn
+                  FROM by_day
+                )
+                SELECT
+                  (SELECT COUNT(*) FROM by_day) AS total_days,
+                  (SELECT SUM(day_mass) FROM by_day) AS total_mass,
+                  (SELECT SUM(day_mass) FROM ranked WHERE rn <= 3) AS top3_mass,
+                  (SELECT SUM(day_mass) FROM ranked WHERE rn <= 10) AS top10_mass
+                """,
+                [int(run_id)],
+            ).fetchone()
+            top_days = conn.execute(
+                """
+                SELECT
+                  strftime(date_trunc('day', as_of_date), '%Y-%m-%d') AS day,
+                  SUM(ABS(metric_value)) AS total_value
+                FROM behavior_table
+                WHERE behavior_run_id = ?
+                GROUP BY day
+                ORDER BY total_value DESC
+                LIMIT 10
+                """,
+                [int(run_id)],
+            ).fetchall()
+            total_mass_hm = float(heatmap[1] or 0.0)
+            peak_concentration = {
+                'top3_mass_pct': float((heatmap[2] or 0.0) / total_mass_hm * 100.0) if total_mass_hm else 0.0,
+                'top10_mass_pct': float((heatmap[3] or 0.0) / total_mass_hm * 100.0) if total_mass_hm else 0.0,
+                'top_days': [{'day': d, 'total_value': float(v or 0.0)} for d, v in top_days],
+            }
+
+            composition = {}
+            if universe_db_path:
+                try:
+                    u = self._get_universe(meta['universe_id'], universe_db_path)
+                    snapshot_id = u.get('snapshot_id')
+                    if snapshot_id:
+                        domain = 'customers' if entity_level == 'customer' else 'accounts'
+                        path = self._resolve_snapshot_domain_path(snapshot_id, domain)
+                        if path.exists():
+                            conn2 = duckdb.connect()
+                            try:
+                                entity_col = 'customer_id' if entity_level == 'customer' else 'account_id'
+                                conn2.register('entity_peaks', peaks_df[['entity_id', 'peak']])
+                                cols = conn2.execute(
+                                    f"DESCRIBE SELECT * FROM read_parquet('{str(path)}')"
+                                ).fetchall()
+                                col_names = [c[0] for c in cols]
+                                candidates = [
+                                    'customer_type',
+                                    'segment',
+                                    'risk_category',
+                                    'risk_tier',
+                                    'customer_segment',
+                                    'risk_segment',
+                                    'account_type',
+                                    'industry',
+                                    'customer_industry',
+                                ]
+                                for col in candidates:
+                                    if col in col_names:
+                                        safe_col = self._safe_ident(col)
+                                        safe_id = self._safe_ident(entity_col)
+                                        rows = conn2.execute(
+                                            f"""
+                                            SELECT {safe_col} AS key,
+                                                   COUNT(*) AS entity_count,
+                                                   SUM(entity_peaks.peak) AS total_peak
+                                            FROM entity_peaks
+                                            JOIN read_parquet('{str(path)}') a
+                                              ON CAST(a.{safe_id} AS VARCHAR) = entity_peaks.entity_id
+                                            GROUP BY key
+                                            ORDER BY total_peak DESC NULLS LAST
+                                            LIMIT 10
+                                            """
+                                        ).fetchall()
+                                        total_entities_comp = sum([int(r[1] or 0) for r in rows]) or 1
+                                        total_peak_comp = sum([float(r[2] or 0.0) for r in rows]) or 1.0
+                                        composition[col] = [
+                                            {
+                                                'key': r[0],
+                                                'entity_count': int(r[1] or 0),
+                                                'entity_pct': float((r[1] or 0) / total_entities_comp * 100.0),
+                                                'mass_pct': float((r[2] or 0.0) / total_peak_comp * 100.0),
+                                            }
+                                            for r in rows
+                                        ]
+                            finally:
+                                conn2.close()
+                except Exception:
+                    composition = {}
+
+            prev_id = compare_run_id if compare_run_id is not None else self._get_prev_run_id(conn, run_id)
+            run_drift = {
+                'prev_run_id': int(prev_id) if prev_id else None,
+                'ks_vs_prev': None,
+                'delta_gini': None,
+                'delta_p95': None,
+                'delta_p99': None,
+                'delta_zero_pct': None,
+                'delta_top1_mass_pct': None,
+            }
+            if prev_id:
+                prev_dist = self._get_distribution_stats(conn, int(prev_id))
+                run_drift['delta_gini'] = float(gini - float(prev_dist.get('gini') or 0.0))
+                run_drift['delta_p95'] = float(dist.get('p95') or 0.0) - float(prev_dist.get('p95') or 0.0)
+                run_drift['delta_p99'] = float(dist.get('p99') or 0.0) - float(prev_dist.get('p99') or 0.0)
+                run_drift['delta_zero_pct'] = float(dist.get('zero_pct') or 0.0) - float(prev_dist.get('zero_pct') or 0.0)
+                prev_tail = (prev_dist.get('tail') or {}).get('top1_mass_pct') or 0.0
+                run_drift['delta_top1_mass_pct'] = float(top1_mass_pct - prev_tail)
+                ks_row = conn.execute(
+                    "SELECT ks_vs_prev FROM behavior_run_diagnostics WHERE behavior_run_id = ?",
+                    [int(run_id)],
+                ).fetchone()
+                if ks_row and ks_row[0] is not None:
+                    run_drift['ks_vs_prev'] = float(ks_row[0])
+
+            insights = [
+                {'type': 'distribution', 'text': distribution_text},
+                {'type': 'dominance', 'text': f"Top 10 entities control {dominance['top10_pct']:.1f}% of total signal mass."},
+                {'type': 'stability', 'text': f"Signal stability is {stability_label} (daily CV {stability['day_cv']:.2f})."},
+                {'type': 'activity', 'text': f"Activity pattern is {activity_pattern.get('label')} across entities."},
+            ]
+            if warnings:
+                insights.append({'type': 'warnings', 'text': f"Warnings flagged: {', '.join(warnings)}."})
+
+            payload = {
+                'behavior_run_id': int(run_id),
+                'entity_level': entity_level,
+                'metric_name': metric_name,
+                'distribution_nature': {
+                    'label': distribution_label,
+                    'text': distribution_text,
+                    'stats': dist,
+                },
+                'dominance': dominance,
+                'stability': stability,
+                'activity_pattern': activity_pattern,
+                'entity_variability': entity_variability,
+                'sensitivity': sensitivity_preview,
+                'noise_warnings': warnings,
+                'peak_concentration': peak_concentration,
+                'population_composition': composition,
+                'run_drift': run_drift,
+                'insights': insights,
+            }
+
+            if compare_run_id is None:
+                conn.execute(
+                    "INSERT INTO behavior_chart_snapshots (behavior_run_id, chart_type, data_json) VALUES (?, 'signal_intelligence', ?)",
+                    [int(run_id), json.dumps(payload)],
+                )
+
+            return payload
+        finally:
+            conn.close()
+
+    def _audit_overlap(self, run_id: Optional[int], entity_id: Optional[str], action: str, created_by: str) -> None:
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            conn.execute(
+                """
+                INSERT INTO behavior_overlap_audit (behavior_run_id, entity_id, action, created_by)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    int(run_id) if run_id is not None else None,
+                    str(entity_id) if entity_id is not None else None,
+                    str(action),
+                    str(created_by),
+                ],
+            )
+        finally:
+            conn.close()
+
+    def _ensure_interaction_cache(self, run_id: int) -> Tuple[int, List[int]]:
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            row = conn.execute(
+                """
+                SELECT universe_id
+                FROM behavior_runs
+                WHERE behavior_run_id = ?
+                """,
+                [int(run_id)],
+            ).fetchone()
+            if not row:
+                raise ValueError("Behavior run not found")
+            universe_id = int(row[0])
+            runs = conn.execute(
+                """
+                SELECT behavior_run_id
+                FROM behavior_runs
+                WHERE universe_id = ?
+                ORDER BY behavior_run_id
+                """,
+                [universe_id],
+            ).fetchall()
+            run_ids = [int(r[0]) for r in runs]
+            for rid in run_ids:
+                conn.execute("DELETE FROM behavior_run_entities WHERE behavior_run_id = ?", [rid])
+                conn.execute(
+                    """
+                    INSERT INTO behavior_run_entities
+                    SELECT ?, entity_id
+                    FROM behavior_table
+                    WHERE behavior_run_id = ?
+                    GROUP BY entity_id
+                    """,
+                    [rid, rid],
+                )
+                conn.execute("DELETE FROM behavior_run_period_entities WHERE behavior_run_id = ?", [rid])
+                conn.execute(
+                    """
+                    INSERT INTO behavior_run_period_entities
+                    SELECT ?, date_trunc('month', as_of_date) AS period, entity_id
+                    FROM behavior_table
+                    WHERE behavior_run_id = ?
+                    GROUP BY period, entity_id
+                    """,
+                    [rid, rid],
+                )
+                total_entities = conn.execute(
+                    "SELECT COUNT(*) FROM behavior_run_entities WHERE behavior_run_id = ?",
+                    [rid],
+                ).fetchone()[0]
+                conn.execute("DELETE FROM behavior_run_entity_stats WHERE behavior_run_id = ?", [rid])
+                conn.execute(
+                    """
+                    INSERT INTO behavior_run_entity_stats (behavior_run_id, total_entities)
+                    VALUES (?, ?)
+                    """,
+                    [rid, int(total_entities or 0)],
+                )
+                rows = conn.execute(
+                    """
+                    SELECT
+                      entity_id,
+                      MIN(as_of_date) AS first_seen,
+                      MAX(as_of_date) AS last_seen,
+                      COUNT(DISTINCT date_trunc('day', as_of_date)) AS active_days,
+                      list(DISTINCT strftime(date_trunc('day', as_of_date), '%Y-%m-%d')) AS days
+                    FROM behavior_table
+                    WHERE behavior_run_id = ?
+                    GROUP BY entity_id
+                    """,
+                    [rid],
+                ).fetchall()
+                conn.execute("DELETE FROM behavior_entity_footprint WHERE behavior_run_id = ?", [rid])
+                for r in rows:
+                    days = r[4] if isinstance(r[4], list) else []
+                    conn.execute(
+                        """
+                        INSERT INTO behavior_entity_footprint (
+                          entity_id, behavior_run_id, first_seen, last_seen, active_days, activity_dates_json
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            str(r[0]),
+                            rid,
+                            r[1],
+                            r[2],
+                            int(r[3] or 0),
+                            json.dumps(days),
+                        ],
+                    )
+            conn.execute(
+                """
+                DELETE FROM behavior_overlap_cache
+                WHERE run_a IN ({runs}) OR run_b IN ({runs})
+                """.format(runs=",".join([str(r) for r in run_ids]))
+            )
+            for i, a in enumerate(run_ids):
+                total_a = conn.execute(
+                    "SELECT total_entities FROM behavior_run_entity_stats WHERE behavior_run_id = ?",
+                    [a],
+                ).fetchone()
+                total_a_val = int(total_a[0] or 0) if total_a else 0
+                for b in run_ids[i + 1:]:
+                    total_b = conn.execute(
+                        "SELECT total_entities FROM behavior_run_entity_stats WHERE behavior_run_id = ?",
+                        [b],
+                    ).fetchone()
+                    total_b_val = int(total_b[0] or 0) if total_b else 0
+                    shared = conn.execute(
+                        """
+                        SELECT COUNT(*) FROM (
+                          SELECT a.entity_id
+                          FROM behavior_run_entities a
+                          JOIN behavior_run_entities b
+                            ON a.entity_id = b.entity_id
+                          WHERE a.behavior_run_id = ? AND b.behavior_run_id = ?
+                          GROUP BY a.entity_id
+                        )
+                        """,
+                        [a, b],
+                    ).fetchone()[0]
+                    shared_periods = conn.execute(
+                        """
+                        SELECT COUNT(*) FROM (
+                          SELECT a.entity_id, a.period
+                          FROM behavior_run_period_entities a
+                          JOIN behavior_run_period_entities b
+                            ON a.entity_id = b.entity_id AND a.period = b.period
+                          WHERE a.behavior_run_id = ? AND b.behavior_run_id = ?
+                          GROUP BY a.entity_id, a.period
+                        )
+                        """,
+                        [a, b],
+                    ).fetchone()[0]
+                    pct_a = float(shared / total_a_val * 100.0) if total_a_val else 0.0
+                    pct_b = float(shared / total_b_val * 100.0) if total_b_val else 0.0
+                    conn.execute(
+                        """
+                        INSERT INTO behavior_overlap_cache (
+                          run_a, run_b, shared_entities, shared_pct_a, shared_pct_b, shared_periods
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        [a, b, int(shared or 0), pct_a, pct_b, int(shared_periods or 0)],
+                    )
+            return universe_id, run_ids
+        finally:
+            conn.close()
+
+    def get_overlap_overview(self, run_id: int, created_by: str = "user") -> Dict:
+        universe_id, run_ids = self._ensure_interaction_cache(run_id)
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            meta_rows = conn.execute(
+                """
+                SELECT behavior_run_id, config_json
+                FROM behavior_runs
+                WHERE behavior_run_id IN ({runs})
+                """.format(runs=",".join([str(r) for r in run_ids]))
+            ).fetchall()
+            metric_map = {}
+            for rid, cfg in meta_rows:
+                try:
+                    c = json.loads(cfg) if cfg else {}
+                    metric = (c.get('metrics') or [{}])[0] if c.get('metrics') else {}
+                    metric_map[int(rid)] = metric.get('name')
+                except Exception:
+                    metric_map[int(rid)] = None
+            rows = conn.execute(
+                """
+                SELECT run_a, run_b, shared_entities, shared_pct_a, shared_pct_b, shared_periods
+                FROM behavior_overlap_cache
+                WHERE run_a = ? OR run_b = ?
+                ORDER BY shared_entities DESC
+                """,
+                [int(run_id), int(run_id)],
+            ).fetchall()
+            overview = []
+            for r in rows:
+                a, b, shared, pct_a, pct_b, shared_periods = r
+                other = b if a == run_id else a
+                overview.append({
+                    'other_run_id': int(other),
+                    'other_metric_name': metric_map.get(int(other)),
+                    'shared_entities': int(shared or 0),
+                    'shared_pct_this': float(pct_a if a == run_id else pct_b),
+                    'shared_pct_other': float(pct_b if a == run_id else pct_a),
+                    'shared_periods': int(shared_periods or 0),
+                })
+            self._audit_overlap(run_id, None, "overview", created_by)
+            return {
+                'behavior_run_id': int(run_id),
+                'universe_id': int(universe_id),
+                'overview': overview,
+            }
+        finally:
+            conn.close()
+
+    def get_overlap_matrix(self, run_id: int, created_by: str = "user") -> Dict:
+        universe_id, run_ids = self._ensure_interaction_cache(run_id)
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            meta_rows = conn.execute(
+                """
+                SELECT behavior_run_id, config_json
+                FROM behavior_runs
+                WHERE behavior_run_id IN ({runs})
+                ORDER BY behavior_run_id
+                """.format(runs=",".join([str(r) for r in run_ids]))
+            ).fetchall()
+            runs = []
+            for rid, cfg in meta_rows:
+                try:
+                    c = json.loads(cfg) if cfg else {}
+                    metric = (c.get('metrics') or [{}])[0] if c.get('metrics') else {}
+                    name = metric.get('name')
+                except Exception:
+                    name = None
+                runs.append({'run_id': int(rid), 'metric_name': name})
+            pairs = conn.execute(
+                """
+                SELECT run_a, run_b, shared_entities, shared_pct_a, shared_pct_b
+                FROM behavior_overlap_cache
+                WHERE run_a IN ({runs}) OR run_b IN ({runs})
+                """.format(runs=",".join([str(r) for r in run_ids]))
+            ).fetchall()
+            matrix = []
+            for a, b, shared, pct_a, pct_b in pairs:
+                matrix.append({
+                    'run_a': int(a),
+                    'run_b': int(b),
+                    'shared_entities': int(shared or 0),
+                    'shared_pct_a': float(pct_a or 0.0),
+                    'shared_pct_b': float(pct_b or 0.0),
+                })
+            self._audit_overlap(run_id, None, "matrix", created_by)
+            return {
+                'behavior_run_id': int(run_id),
+                'universe_id': int(universe_id),
+                'runs': runs,
+                'matrix': matrix,
+            }
+        finally:
+            conn.close()
+
+    def get_population_interaction_stats(self, run_id: int, created_by: str = "user") -> Dict:
+        universe_id, run_ids = self._ensure_interaction_cache(run_id)
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            rows = conn.execute(
+                """
+                WITH base AS (
+                  SELECT entity_id
+                  FROM behavior_run_entities
+                  WHERE behavior_run_id = ?
+                ),
+                counts AS (
+                  SELECT r.entity_id, COUNT(DISTINCT r.behavior_run_id) AS run_count
+                  FROM behavior_run_entities r
+                  JOIN base b ON b.entity_id = r.entity_id
+                  GROUP BY r.entity_id
+                )
+                SELECT
+                  SUM(CASE WHEN run_count = 1 THEN 1 ELSE 0 END) AS only_here,
+                  SUM(CASE WHEN run_count = 2 THEN 1 ELSE 0 END) AS in_two,
+                  SUM(CASE WHEN run_count >= 3 THEN 1 ELSE 0 END) AS in_three_plus,
+                  COUNT(*) AS total
+                FROM counts
+                """,
+                [int(run_id)],
+            ).fetchone()
+            self._audit_overlap(run_id, None, "population_stats", created_by)
+            return {
+                'behavior_run_id': int(run_id),
+                'universe_id': int(universe_id),
+                'only_here': int(rows[0] or 0),
+                'in_two': int(rows[1] or 0),
+                'in_three_plus': int(rows[2] or 0),
+                'total': int(rows[3] or 0),
+            }
+        finally:
+            conn.close()
+
+    def get_recurring_pairs(self, run_id: int, limit: int = 10, created_by: str = "user") -> Dict:
+        universe_id, run_ids = self._ensure_interaction_cache(run_id)
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            meta_rows = conn.execute(
+                """
+                SELECT behavior_run_id, config_json
+                FROM behavior_runs
+                WHERE behavior_run_id IN ({runs})
+                """.format(runs=",".join([str(r) for r in run_ids]))
+            ).fetchall()
+            metric_map = {}
+            for rid, cfg in meta_rows:
+                try:
+                    c = json.loads(cfg) if cfg else {}
+                    metric = (c.get('metrics') or [{}])[0] if c.get('metrics') else {}
+                    metric_map[int(rid)] = metric.get('name')
+                except Exception:
+                    metric_map[int(rid)] = None
+            rows = conn.execute(
+                """
+                SELECT run_a, run_b, shared_entities, shared_pct_a, shared_pct_b
+                FROM behavior_overlap_cache
+                ORDER BY shared_entities DESC
+                LIMIT ?
+                """,
+                [int(limit)],
+            ).fetchall()
+            pairs = []
+            for a, b, shared, pct_a, pct_b in rows:
+                pairs.append({
+                    'run_a': int(a),
+                    'run_b': int(b),
+                    'metric_a': metric_map.get(int(a)),
+                    'metric_b': metric_map.get(int(b)),
+                    'shared_entities': int(shared or 0),
+                    'shared_pct_a': float(pct_a or 0.0),
+                    'shared_pct_b': float(pct_b or 0.0),
+                })
+            self._audit_overlap(run_id, None, "recurring_pairs", created_by)
+            return {
+                'behavior_run_id': int(run_id),
+                'universe_id': int(universe_id),
+                'pairs': pairs,
+            }
+        finally:
+            conn.close()
+
+    def get_entity_footprint(self, run_id: int, entity_id: str, created_by: str = "user") -> Dict:
+        universe_id, run_ids = self._ensure_interaction_cache(run_id)
+        conn = duckdb.connect(str(self.db_path))
+        try:
+            rows = conn.execute(
+                """
+                SELECT behavior_run_id, first_seen, last_seen, active_days, activity_dates_json
+                FROM behavior_entity_footprint
+                WHERE entity_id = ? AND behavior_run_id IN ({runs})
+                """.format(runs=",".join([str(r) for r in run_ids])),
+                [str(entity_id)],
+            ).fetchall()
+            meta_rows = conn.execute(
+                """
+                SELECT behavior_run_id, config_json
+                FROM behavior_runs
+                WHERE behavior_run_id IN ({runs})
+                """.format(runs=",".join([str(r) for r in run_ids]))
+            ).fetchall()
+            metric_map = {}
+            window_map = {}
+            for rid, cfg in meta_rows:
+                try:
+                    c = json.loads(cfg) if cfg else {}
+                    metric = (c.get('metrics') or [{}])[0] if c.get('metrics') else {}
+                    metric_map[int(rid)] = metric.get('name')
+                    window_map[int(rid)] = metric.get('window')
+                except Exception:
+                    metric_map[int(rid)] = None
+                    window_map[int(rid)] = None
+            footprint = []
+            for r in rows:
+                days = []
+                if r[4]:
+                    try:
+                        days = json.loads(r[4])
+                    except Exception:
+                        days = []
+                footprint.append({
+                    'behavior_run_id': int(r[0]),
+                    'metric_name': metric_map.get(int(r[0])),
+                    'window': window_map.get(int(r[0])),
+                    'first_seen': str(r[1]) if r[1] is not None else None,
+                    'last_seen': str(r[2]) if r[2] is not None else None,
+                    'active_days': int(r[3] or 0),
+                    'activity_dates': days,
+                })
+            self._audit_overlap(run_id, entity_id, "entity_footprint", created_by)
+            return {
+                'behavior_run_id': int(run_id),
+                'entity_id': str(entity_id),
+                'universe_id': int(universe_id),
+                'footprint': footprint,
+            }
+        finally:
+            conn.close()
 
     def _ensure_evidence(self, run_id: int, universe_db_path: Optional[Path] = None):
         conn = duckdb.connect(str(self.db_path))

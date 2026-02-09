@@ -239,6 +239,97 @@ def behavior_evidence(run_id):
         logger.error(f"[BEHAVIOR] Evidence failed: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+
+@behavior_bp.route('/behavior/run/<int:run_id>/overlap/overview', methods=['GET'])
+def behavior_overlap_overview(run_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        created_by = request.args.get('created_by', default='user', type=str)
+        behavior_service, universe_service = _get_services(env_id)
+        data = behavior_service.get_overlap_overview(run_id, created_by=created_by)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[BEHAVIOR] Overlap overview failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@behavior_bp.route('/behavior/run/<int:run_id>/overlap/matrix', methods=['GET'])
+def behavior_overlap_matrix(run_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        created_by = request.args.get('created_by', default='user', type=str)
+        behavior_service, universe_service = _get_services(env_id)
+        data = behavior_service.get_overlap_matrix(run_id, created_by=created_by)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[BEHAVIOR] Overlap matrix failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@behavior_bp.route('/behavior/run/<int:run_id>/overlap/population', methods=['GET'])
+def behavior_overlap_population(run_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        created_by = request.args.get('created_by', default='user', type=str)
+        behavior_service, universe_service = _get_services(env_id)
+        data = behavior_service.get_population_interaction_stats(run_id, created_by=created_by)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[BEHAVIOR] Overlap population failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@behavior_bp.route('/behavior/run/<int:run_id>/overlap/recurring', methods=['GET'])
+def behavior_overlap_recurring(run_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        created_by = request.args.get('created_by', default='user', type=str)
+        limit = request.args.get('limit', default=10, type=int)
+        behavior_service, universe_service = _get_services(env_id)
+        data = behavior_service.get_recurring_pairs(run_id, limit=limit, created_by=created_by)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[BEHAVIOR] Overlap recurring failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@behavior_bp.route('/behavior/run/<int:run_id>/overlap/entity/<entity_id>', methods=['GET'])
+def behavior_overlap_entity(run_id, entity_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        created_by = request.args.get('created_by', default='user', type=str)
+        behavior_service, universe_service = _get_services(env_id)
+        data = behavior_service.get_entity_footprint(run_id, entity_id, created_by=created_by)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[BEHAVIOR] Entity footprint failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@behavior_bp.route('/behavior/run/<int:run_id>/signal_intelligence', methods=['GET'])
+def behavior_signal_intelligence(run_id):
+    try:
+        env_id = request.headers.get('X-Environment-ID')
+        if not env_id:
+            return jsonify({'error': 'X-Environment-ID header required'}), 400
+        compare_run_id = request.args.get('compare_run_id', default=None, type=int)
+        behavior_service, universe_service = _get_services(env_id)
+        data = behavior_service.get_signal_intelligence(run_id, universe_service.db_path, compare_run_id=compare_run_id)
+        return jsonify({'success': True, 'data': data}), 200
+    except Exception as e:
+        logger.error(f"[BEHAVIOR] Signal intelligence failed: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @behavior_bp.route('/behavior/run/<int:run_id>/export', methods=['GET'])
 def behavior_export(run_id):
     try:

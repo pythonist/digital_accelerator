@@ -5,22 +5,14 @@ import {
   Toolbar,
   Typography,
   Box,
-  IconButton,
-  Tooltip,
+  Button,
   Avatar,
   Menu,
   MenuItem,
   Divider,
-  ListItemIcon,
   ListItemText,
 } from '@mui/material';
 
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import SettingsIcon from '@mui/icons-material/Settings';
-import DnsIcon from '@mui/icons-material/Dns';
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import PersonIcon from '@mui/icons-material/Person';
-import LogoutIcon from '@mui/icons-material/Logout';
 
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '@context/AppContext';
@@ -37,12 +29,12 @@ const Header = () => {
       position="static"
       elevation={0}
       sx={{
-        backgroundColor: '#D04A02', // PwC Orange
+        backgroundColor: '#0f172a',
         height: TOOL_HEADER_HEIGHT,
         width: '100%',
         zIndex: (theme) => theme.zIndex.drawer + 1,
         borderRadius: 0,
-        borderBottom: '2px solid #b13f02',
+        borderBottom: '1px solid #1f2937',
         flexShrink: 0,
         boxSizing: 'border-box'
       }}
@@ -61,16 +53,13 @@ const Header = () => {
       >
         {/* LEFT */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-          <Tooltip title="Back to Tools">
-            <IconButton
-              size="small"
-              onClick={() => navigate('/tools')}
-              sx={{ color: 'white' }}
-            >
-              <ArrowBackIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-
+          <Button
+            size="small"
+            onClick={() => navigate('/tools')}
+            sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 1, px: 1 }}
+          >
+            Back
+          </Button>
           <Typography
             sx={{
               color: 'white',
@@ -99,63 +88,54 @@ const Header = () => {
               <Typography sx={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.7rem' }}>
                 |
               </Typography>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <DnsIcon sx={{ fontSize: 14, color: 'rgba(255,255,255,0.7)' }} />
-                <Typography
-                  sx={{
-                    color: 'white',
-                    fontSize: '0.7rem',
-                    fontFamily: 'monospace',
-                    fontWeight: 600,
-                    lineHeight: 1,
-                  }}
-                >
-                  {activeBankName}
-                </Typography>
-              </Box>
+              <Typography
+                sx={{
+                  color: 'white',
+                  fontSize: '0.7rem',
+                  fontFamily: 'monospace',
+                  fontWeight: 600,
+                  lineHeight: 1,
+                }}
+              >
+                {activeBankName}
+              </Typography>
             </>
           )}
         </Box>
 
         {/* RIGHT */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Tooltip title="Help">
-            <IconButton size="small" sx={{ color: 'white' }}>
-              <HelpOutlineIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-
           <Divider
             orientation="vertical"
             sx={{
               height: 16,
               alignSelf: 'center',
               mx: 0.75,
-              borderColor: 'rgba(255,255,255,0.6)',
-              borderRightWidth: '2px',
+              borderColor: 'rgba(255,255,255,0.4)',
+              borderRightWidth: '1px',
             }}
           />
 
-          <Tooltip title="Account">
-            <IconButton
-              size="small"
-              onClick={(e) => setAnchorElUser(e.currentTarget)}
-              sx={{ color: 'white' }}
+          <Button
+            size="small"
+            onClick={(e) => setAnchorElUser(e.currentTarget)}
+            sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 1, px: 1 }}
+          >
+            <Avatar
+              sx={{
+                width: 18,
+                height: 18,
+                bgcolor: 'rgba(255,255,255,0.2)',
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                borderRadius: 0,
+                mr: 0.5
+              }}
             >
-              <Avatar
-                sx={{
-                  width: 20,
-                  height: 20,
-                  bgcolor: 'rgba(255,255,255,0.2)',
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  borderRadius: 0
-                }}
-              >
-                {username?.[0]?.toUpperCase() || 'U'}
-              </Avatar>
-            </IconButton>
-          </Tooltip>
+              {username?.[0]?.toUpperCase() || 'U'}
+            </Avatar>
+            {username || 'User'}
+          </Button>
 
           <Menu
             anchorEl={anchorElUser}
@@ -166,26 +146,20 @@ const Header = () => {
             transformOrigin={{ horizontal: 'right', vertical: 'top' }}
           >
             <MenuItem onClick={() => setAnchorElUser(null)}>
-              <ListItemIcon><PersonIcon fontSize="small" /></ListItemIcon>
               <ListItemText primary="Profile" />
             </MenuItem>
             <MenuItem onClick={() => setAnchorElUser(null)}>
-              <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
               <ListItemText primary="Settings" />
             </MenuItem>
             <Divider />
             <MenuItem
-              sx={{ color: '#ef4444' }}
               onClick={async () => {
                 setAnchorElUser(null);
                 await handleLogout();
                 navigate('/login');
               }}
             >
-              <ListItemIcon sx={{ color: '#ef4444' }}>
-                <LogoutIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary="Logout" />
+              <ListItemText primary="Sign out" />
             </MenuItem>
           </Menu>
         </Box>

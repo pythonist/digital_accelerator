@@ -17,13 +17,7 @@ import muleApi from '../services/muleApi';
 import { useMuleStore } from '../store/muleStore';
 import AccountSelector from './AccountSelector';
 import RiskChip from './RiskChip';
-
-const fmt = (v, digits = 3) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return '-';
-  if (Math.abs(n) >= 1000) return n.toFixed(0);
-  return n.toFixed(digits);
-};
+import { formatProbability } from '../utils/formatters';
 
 const getPrimaryDrivers = ({ shapTop = [], rules = null, flow = null }) => {
   const drivers = [];
@@ -193,19 +187,19 @@ const InvestigationPanel = ({ embedded = false }) => {
                   <Stack direction="row" justifyContent="space-between">
                     <Typography variant="body2">ML Score</Typography>
                     <Typography variant="body2" fontWeight={800}>
-                      {breakdown.ml != null ? fmt(breakdown.ml, 4) : '-'}
+                      {breakdown.ml != null ? formatProbability(breakdown.ml, 3) : '-'}
                     </Typography>
                   </Stack>
                   <Stack direction="row" justifyContent="space-between">
                     <Typography variant="body2">Rule Score</Typography>
                     <Typography variant="body2" fontWeight={800}>
-                      {breakdown.rule != null ? fmt(breakdown.rule, 4) : '-'}
+                      {breakdown.rule != null ? formatProbability(breakdown.rule, 3) : '-'}
                     </Typography>
                   </Stack>
                   <Stack direction="row" justifyContent="space-between">
                     <Typography variant="body2">Money Flow Score</Typography>
                     <Typography variant="body2" fontWeight={800}>
-                      {breakdown.flow != null ? fmt(breakdown.flow, 4) : '-'}
+                      {breakdown.flow != null ? formatProbability(breakdown.flow, 3) : '-'}
                     </Typography>
                   </Stack>
                   <Divider />
@@ -214,7 +208,7 @@ const InvestigationPanel = ({ embedded = false }) => {
                       Final Hybrid Score
                     </Typography>
                     <Typography variant="body1" fontWeight={900}>
-                      {breakdown.hybrid != null ? fmt(breakdown.hybrid, 4) : '-'}
+                      {breakdown.hybrid != null ? formatProbability(breakdown.hybrid, 3) : '-'}
                     </Typography>
                   </Stack>
 

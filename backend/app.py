@@ -24,6 +24,8 @@ if __name__ == "__main__" and (not os.path.exists(_VENV_PY)) and os.path.exists(
 
 from config import CALIBRATION_DB_PATH
 from api.services import services
+from core.module_registry import REGISTRY
+from core.compat import log_startup_compat
 from config_btsy import configure_btsy_app
 
 from api.middleware.tenant_context import tenant_context_middleware
@@ -119,6 +121,9 @@ def _register_blueprints(app: Flask) -> None:
     app.register_blueprint(auth_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/api")
 
+    from api.tools.btsy.behaviour_reconstruction.routes import behaviour_reconstruction_bp
+    app.register_blueprint(behaviour_reconstruction_bp, url_prefix="/api")
+
     app.register_blueprint(env_bp, url_prefix="/api/v2")
     app.register_blueprint(llm_bp, url_prefix="/api/v2")
     app.register_blueprint(audit_bp, url_prefix="/api/v2")
@@ -194,6 +199,31 @@ def create_app() -> Flask:
     @app.route("/health")
     def health():
         return jsonify({"status": "healthy"})
+
+    @app.route("/health/deep")
+    def health_deep():
+        return jsonify({
+            "status": "healthy",
+            "modules": REGISTRY.status()
+        })
+
+    @app.route("/system/compatibility")
+    def system_compatibility():
+        from core.compat import get_python_info, detect_optional_libs, get_supported_features
+        return jsonify({
+            "python": get_python_info(),
+            "optional_libs": detect_optional_libs(),
+            "features": get_supported_features(REGISTRY, pdf_service_available=bool(getattr(services, "get_pdf_generator_service", None))),
+        })
+
+    warmup = os.getenv("WARMUP_MODULES", "").strip()
+    if warmup:
+        names = [s.strip() for s in warmup.split(",") if s.strip()]
+        REGISTRY.warmup_async(names=names, delay_sec=0.2)
+    else:
+        REGISTRY.warmup_defaults(delay_sec=0.2)
+
+    log_startup_compat(REGISTRY, pdf_service_available=bool(getattr(services, "get_pdf_generator_service", None)))
 
     _print_startup_summary(app, core_ok)
     _print_debug_routes(app)

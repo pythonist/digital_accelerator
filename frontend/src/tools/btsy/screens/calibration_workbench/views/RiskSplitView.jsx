@@ -285,7 +285,7 @@ const RiskSplitView = ({ session, aggregateView, selectedBoundaryId: externalSel
   if (!aggregateView?.summary) {
     return (
       <Alert severity="info">
-        Step-3.4 reuses the Step-3.1 reduced entity distribution. Apply an aggregation lens first.
+        Step-3.4 reuses the Step-3.1 reduced entity distribution. Apply an interpretation lens first.
       </Alert>
     );
   }
@@ -305,7 +305,7 @@ const RiskSplitView = ({ session, aggregateView, selectedBoundaryId: externalSel
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
               Risk Population Delineation & Boundary Stress Lab
             </Typography>
-            <Typography variant="body2" sx={{ color: '#64748b', mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
               ATL/BTL is a derived population boundary. This tab exposes fragility rather than hiding it.
             </Typography>
 
@@ -403,7 +403,7 @@ const RiskSplitView = ({ session, aggregateView, selectedBoundaryId: externalSel
                       {boundaryHeader.buffer_params?.band_pct !== undefined && boundaryHeader.buffer_type !== 'hard' && (
                         <Chip label={`Band: ±${Number(boundaryHeader.buffer_params.band_pct).toFixed(2)}%`} />
                       )}
-                      {boundaryHeader.aggregation_lens && <Chip label={`Lens: ${boundaryHeader.aggregation_lens}`} />}
+                      {boundaryHeader.aggregation_lens && <Chip label={`Interpretation Lens: ${boundaryHeader.aggregation_lens}`} />}
                     </Box>
                   )}
                   {boundaryBucketLines && (
@@ -596,7 +596,7 @@ const RiskSplitView = ({ session, aggregateView, selectedBoundaryId: externalSel
                             </LineChart>
                           </ResponsiveContainer>
                           <Typography variant="caption" sx={{ color: '#64748b' }}>
-                            Interpretation uses the current aggregation lens (peak vs sustained etc.).
+                            Interpretation uses the current interpretation lens (peak vs sustained, last vs average).
                           </Typography>
                         </>
                       )}

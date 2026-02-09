@@ -9,7 +9,7 @@ const WorkbenchEvidencePanel = ({ bottomTab, session, aggregation, aggregateView
       `Entity level: ${session.entity_level?.toUpperCase()}.`,
       `Metric: ${session.metric_name}.`,
       session.window ? `Window: ${session.window}.` : null,
-      aggregation ? `Aggregation lens: entity=${aggregation.entity_collapse}, time=${aggregation.time_lens}, sustained_days=${aggregation.sustained_days}.` : null,
+      aggregation ? `Interpretation lens: entity=${aggregation.entity_collapse}, time=${aggregation.time_lens}, sustained_days=${aggregation.sustained_days}.` : null,
       'Step-3 consumes Step-2 behaviour outputs only. No transactions or rolling logic are recalculated here.'
     ].filter(Boolean);
     return parts.join(' ');
@@ -39,7 +39,7 @@ const WorkbenchEvidencePanel = ({ bottomTab, session, aggregation, aggregateView
     const s = aggregateView.summary;
     return (
       <Box>
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Aggregate Summary</Typography>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Lens Summary</Typography>
         <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 0 }}>
           <Table size="small">
             <TableHead>
@@ -133,7 +133,7 @@ const WorkbenchEvidencePanel = ({ bottomTab, session, aggregation, aggregateView
         <Chip label={`Step 3 Session S-${session?.session_id ? String(session.session_id).padStart(3, '0') : '—'}`} onClick={() => navigate('calibration')} clickable />
         {aggregation && (
           <Chip
-            label={`Lens ${String(aggregation.entity_collapse || 'max').toUpperCase()} • ${String(aggregation.time_lens || 'full').toUpperCase()}`}
+            label={`Interpretation Lens ${String(aggregation.entity_collapse || 'max').toUpperCase()} • ${String(aggregation.time_lens || 'full').toUpperCase()}`}
             onClick={() => navigateWorkbench({ stage: 'reduce', bottomTab: 'evidence' })}
             clickable
           />
@@ -147,7 +147,7 @@ const WorkbenchEvidencePanel = ({ bottomTab, session, aggregation, aggregateView
         )}
         <Chip label="Validation" onClick={() => navigateWorkbench({ stage: 'validate' })} clickable />
       </Stack>
-      <Typography variant="body2" sx={{ color: '#475569', mb: 1 }}>{lineageText || 'No lineage available.'}</Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 1 }}>{lineageText || 'No lineage available.'}</Typography>
       <Button variant="outlined" size="small" onClick={() => navigate('runs')}>
         Go to Calibration Runs
       </Button>

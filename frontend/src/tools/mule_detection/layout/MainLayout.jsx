@@ -5,6 +5,7 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import { TOOL_HEADER_HEIGHT } from './layout.constants';
 import InvestigationDrawer from '../components/InvestigationDrawer';
+import ModelRegistryDrawer from '../components/ModelRegistryDrawer';
 
 const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLModel, dataStats }) => {
   return (
@@ -43,6 +44,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLMod
         </Box>
       </Box>
       <InvestigationDrawer />
+      <ModelRegistryDrawer />
     </Box>
   );
 };

@@ -6,10 +6,10 @@ import MainLayout from './layout/MainLayout';
 import FoundationHomeScreen from './screens/FoundationHomeScreen';
 import AutoRunCalibrationRunsScreen from './screens/autorun/AutoRunCalibrationRunsScreen';
 import TransactionUniverseScreen from './screens/calibration/transaction_universe/TransactionUniverseScreen';
-import { PageTransition } from '@components/LoadingAnimations';
 import { SnapshotProvider, useSnapshot } from './context/SnapshotContext';
 import { CalibrationRunProvider, useCalibrationRun } from './context/CalibrationRunContext';
 import CortexScenarioBuilderScreen from './screens/behavior/CortexScenarioBuilderScreen';
+import BehaviorReconstructionScreen from './screens/behavior/BehaviorReconstructionScreen';
 import ScenarioCalibrationWorkbench from './screens/calibration_workbench/ScenarioCalibrationWorkbench';
 import MLValidationWorkbench from './screens/advanced_analysis/MLValidationWorkbench';
 import EligibilityAlertGenerationWorkbench from './screens/alerting/EligibilityAlertGenerationWorkbench';
@@ -66,6 +66,8 @@ const BTSYRouterInner = ({ activeScreen, setActiveScreen }) => {
       return (
         <CortexScenarioBuilderScreen calibrationRunId={activeCalibrationRunId ? parseInt(activeCalibrationRunId, 10) : null} />
       );
+    case 'behavior_reconstruction':
+      return <BehaviorReconstructionScreen />;
       
     case 'calibration':
       return <ScenarioCalibrationWorkbench />;
@@ -144,12 +146,10 @@ const BTSYPlatform = () => {
     <SnapshotProvider>
       <CalibrationRunProvider>
         <MainLayout activeScreen={activeScreen} setActiveScreen={setActiveScreen}>
-          <PageTransition>
-            <BTSYRouterInner 
-              activeScreen={activeScreen} 
-              setActiveScreen={setActiveScreen} 
-            />
-          </PageTransition>
+          <BTSYRouterInner 
+            activeScreen={activeScreen} 
+            setActiveScreen={setActiveScreen} 
+          />
         </MainLayout>
       </CalibrationRunProvider>
     </SnapshotProvider>

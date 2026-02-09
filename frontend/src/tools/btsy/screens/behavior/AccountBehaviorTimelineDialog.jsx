@@ -12,7 +12,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Chip,
   Stack,
   Alert,
   CircularProgress,
@@ -29,7 +28,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import btsyApi from '../../services/btsyApi';
 import { getWindowIntent } from './windowIntent';
 
-const colors = ['#D04A02', '#0ea5e9', '#10b981', '#6366f1', '#f59e0b', '#ec4899'];
+const colors = ['#334155', '#475569', '#64748b', '#94a3b8', '#0f172a', '#1e293b'];
 
 const AccountBehaviorTimelineDialog = ({
   open,
@@ -154,16 +153,14 @@ const AccountBehaviorTimelineDialog = ({
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
         <Box>
-          <Typography variant="h6" sx={{ fontWeight: 800, color: '#0f172a' }}>
-            View Behaviour Timeline
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            Behaviour Timeline
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             Account: <Box component="span" sx={{ fontFamily: 'monospace' }}>{entityId || '—'}</Box>
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Chip label="Exploration only" variant="outlined" />
-        </Box>
+        <Typography variant="body2" sx={{ color: 'text.secondary' }}>Exploration only</Typography>
       </DialogTitle>
       <DialogContent dividers>
         <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
@@ -179,10 +176,14 @@ const AccountBehaviorTimelineDialog = ({
               label="Windows"
               onChange={(e) => setSelectedRunIds(e.target.value)}
               renderValue={(selected) => (
-                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                   {selected.map((rid) => {
                     const meta = selectableRuns.find((r) => String(r.id) === String(rid));
-                    return <Chip key={String(rid)} size="small" label={meta?.label || `Run ${rid}`} />;
+                    return (
+                      <Typography key={String(rid)} variant="caption">
+                        {meta?.label || `Run ${rid}`}
+                      </Typography>
+                    );
                   })}
                 </Box>
               )}
@@ -195,9 +196,11 @@ const AccountBehaviorTimelineDialog = ({
             </Select>
           </FormControl>
 
-          <Box sx={{ flex: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Box sx={{ flex: 1 }}>
             {selectedRunMeta.map((m, idx) => (
-              <Chip key={String(m.id)} label={`${m.window}${getWindowIntent(m.window) ? ` • ${getWindowIntent(m.window)}` : ''}`} sx={{ borderRadius: 1 }} />
+              <Typography key={String(m.id)} variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
+                {`${m.window}${getWindowIntent(m.window) ? ` • ${getWindowIntent(m.window)}` : ''}`}
+              </Typography>
             ))}
           </Box>
         </Stack>
@@ -274,18 +277,34 @@ const AccountBehaviorTimelineDialog = ({
                   <MenuItem value={365}>Last 365 days</MenuItem>
                 </Select>
               </FormControl>
-              {txData?.summary?.total_txns != null && (
-                <Chip variant="outlined" label={`Transactions: ${Number(txData.summary.total_txns).toLocaleString()}`} />
-              )}
-              {txData?.summary?.active_days != null && (
-                <Chip variant="outlined" label={`Active days: ${Number(txData.summary.active_days).toLocaleString()}`} />
-              )}
-              {txData?.summary?.total_amount != null && (
-                <Chip variant="outlined" label={`Total amount: ${Number(txData.summary.total_amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
-              )}
-              {txData?.summary?.midnight_pct != null && (
-                <Chip variant="outlined" label={`Midnight %: ${Number(txData.summary.midnight_pct).toFixed(1)}%`} />
-              )}
+              <Table size="small" sx={{ minWidth: 380 }}>
+                <TableBody>
+                  {txData?.summary?.total_txns != null && (
+                    <TableRow>
+                      <TableCell>Transactions</TableCell>
+                      <TableCell>{Number(txData.summary.total_txns).toLocaleString()}</TableCell>
+                    </TableRow>
+                  )}
+                  {txData?.summary?.active_days != null && (
+                    <TableRow>
+                      <TableCell>Active days</TableCell>
+                      <TableCell>{Number(txData.summary.active_days).toLocaleString()}</TableCell>
+                    </TableRow>
+                  )}
+                  {txData?.summary?.total_amount != null && (
+                    <TableRow>
+                      <TableCell>Total amount</TableCell>
+                      <TableCell>{Number(txData.summary.total_amount).toLocaleString(undefined, { maximumFractionDigits: 2 })}</TableCell>
+                    </TableRow>
+                  )}
+                  {txData?.summary?.midnight_pct != null && (
+                    <TableRow>
+                      <TableCell>Midnight %</TableCell>
+                      <TableCell>{Number(txData.summary.midnight_pct).toFixed(1)}%</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </Box>
 
             {txError && <Alert severity="error" sx={{ mb: 2 }}>{txError}</Alert>}
@@ -299,7 +318,7 @@ const AccountBehaviorTimelineDialog = ({
             {!txLoading && !txError && dailyChart.length > 0 && (
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Transaction Count per Day</Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Transaction Count per Day</Typography>
                   <Box sx={{ width: '100%', height: 260 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dailyChart}>
@@ -307,13 +326,13 @@ const AccountBehaviorTimelineDialog = ({
                         <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="#64748b" minTickGap={24} />
                         <YAxis tick={{ fontSize: 11 }} stroke="#64748b" />
                         <Tooltip />
-                        <Bar dataKey="txn_count" fill="#0ea5e9" opacity={0.7} />
+                        <Bar dataKey="txn_count" fill="#64748b" opacity={0.7} />
                       </BarChart>
                     </ResponsiveContainer>
                   </Box>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Transaction Amount per Day</Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Transaction Amount per Day</Typography>
                   <Box sx={{ width: '100%', height: 260 }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dailyChart}>
@@ -321,7 +340,7 @@ const AccountBehaviorTimelineDialog = ({
                         <XAxis dataKey="day" tick={{ fontSize: 11 }} stroke="#64748b" minTickGap={24} />
                         <YAxis tick={{ fontSize: 11 }} stroke="#64748b" tickFormatter={(v) => Number(v || 0).toLocaleString()} />
                         <Tooltip formatter={(v) => Number(v || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} />
-                        <Bar dataKey="total_amount" fill="#D04A02" opacity={0.7} />
+                        <Bar dataKey="total_amount" fill="#475569" opacity={0.7} />
                       </BarChart>
                     </ResponsiveContainer>
                   </Box>

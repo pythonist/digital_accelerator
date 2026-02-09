@@ -8,7 +8,6 @@ from typing import Any, Dict, Optional
 
 from api.tools.btsy.duckdb_pool import duckdb_pool
 from api.tools.btsy.evidence.evidence_store import CalibrationEvidenceStore
-from llm.ollama_wrapper import OllamaWrapper
 
 
 _DIGIT_RE = re.compile(r"[0-9]")
@@ -23,6 +22,7 @@ class ControlledInferenceService:
         self.run_db_path = run_db_path
         buf = io.StringIO()
         with redirect_stdout(buf), redirect_stderr(buf):
+            from llm.ollama_wrapper import OllamaWrapper
             self._ollama = OllamaWrapper()
 
     def available(self) -> bool:

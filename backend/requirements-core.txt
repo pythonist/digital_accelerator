@@ -1,0 +1,12 @@
+Flask==3.1.2
+Flask_Cors==3.0.10
+Werkzeug==3.1.5
+Requests==2.32.5
+pydantic==2.12.5
+python_dateutil==2.9.0.post0
+sqlparse==0.5.5
+bcrypt==4.2.1
+pyotp==2.9.0
+duckdb==1.4.4
+numpy==2.4.2
+pandas==3.0.0
