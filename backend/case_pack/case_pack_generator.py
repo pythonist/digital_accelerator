@@ -350,8 +350,83 @@ class CasePackGenerator:
                     txn_df = pd.read_sql(txn_query + " LIMIT 500", conn, params=params)
                     transactions = txn_df.fillna("").to_dict(orient='records')
                 else:
-                    # Fallback: If we can't link, return empty or check if master has extracted txns (rare)
-                    pass
+                    # Fallback: Infer transaction linkage via alerts-derived account IDs
+                    try:
+                        alert_accounts = []
+                        alerts_table = self._pick_table(conn, ['alerts', 'alert'])
+                        if alerts_table:
+                            # Inspect alert columns to locate potential account identifiers
+                            alert_head = pd.read_sql(f'SELECT * FROM {alerts_table} LIMIT 1', conn)
+                            a_cols = [str(c) for c in alert_head.columns]
+                            cand_acc_cols = [c for c in a_cols if any(k in c.lower() for k in ['account_id', 'acct_id', 'accountid', 'account_no', 'account', 'src_account', 'source_account', 'from_account', 'sender'])]
+                            # Pull alerts for the case and collect unique account IDs
+                            a_case_col = self._get_col_name(alert_head, ['case_id', 'caseid'])
+                            if a_case_col:
+                                alerts_df2 = pd.read_sql(f'SELECT * FROM {alerts_table} WHERE "{a_case_col}" = ?', conn, params=(case_id,))
+                                for c in cand_acc_cols:
+                                    if c in alerts_df2.columns:
+                                        vals = alerts_df2[c].dropna().astype(str).tolist()
+                                        alert_accounts.extend(vals)
+                            alert_accounts = list(dict.fromkeys([v for v in alert_accounts if v not in [None, ""]]))
+                        # If we discovered account IDs from alerts, try fetching transactions that reference them
+                        if alert_accounts:
+                            transactions_table = transactions_table or self._pick_table(conn, ['transactions', 'transaction', 'txns', 'txn'])
+                            if transactions_table:
+                                txn_limit_df2 = pd.read_sql(f"SELECT * FROM {transactions_table} LIMIT 1", conn)
+                                t_acct_col2 = self._get_col_name(txn_limit_df2, ['account_id', 'acct_id', 'accountid', 'account_no'])
+                                if t_acct_col2:
+                                    placeholders = ','.join(['?'] * len(alert_accounts))
+                                    txn_df2 = pd.read_sql(
+                                        f'SELECT * FROM {transactions_table} WHERE "{t_acct_col2}" IN ({placeholders}) LIMIT 500',
+                                        conn,
+                                        params=alert_accounts
+                                    )
+                                    transactions = txn_df2.fillna("").to_dict(orient='records')
+                    except Exception:
+                        # Keep transactions empty if inference fails
+                        transactions = []
+
+                # Final fallback: If still no transactions, synthesize them from alerts
+                if not transactions:
+                    try:
+                        alerts_table = alerts_table or self._pick_table(conn, ['alerts', 'alert'])
+                        if alerts_table:
+                            alerts_df = pd.read_sql(f'SELECT * FROM {alerts_table}', conn)
+                            a_case_col = self._get_col_name(alerts_df, ['case_id', 'caseid'])
+                            if a_case_col:
+                                alerts_df = pd.read_sql(f'SELECT * FROM {alerts_table} WHERE "{a_case_col}" = ?', conn, params=(case_id,))
+                            # Find likely columns
+                            src_col = self._get_col_name(alerts_df, ['account_id', 'acct_id', 'accountid', 'account_no', 'account', 'src_account', 'source_account', 'from_account', 'sender'])
+                            dst_col = self._get_col_name(alerts_df, ['counterparty_account', 'counterparty', 'beneficiary', 'dest', 'to_account', 'receiver_account', 'payee', 'cp_account'])
+                            ts_col = self._get_col_name(alerts_df, ['txn_timestamp', 'timestamp', 'transaction_date', 'txn_date', 'date', 'time', 'created_at'])
+                            amt_col = self._get_col_name(alerts_df, ['amount', 'txn_amount', 'transaction_amount', 'amt', 'value', 'rule_metric'])
+                            id_col = self._get_col_name(alerts_df, ['transaction_id', 'txn_id', 'id', 'trans_id', 'ref', 'reference'])
+                            dir_col = self._get_col_name(alerts_df, ['direction', 'dr_cr', 'debit_credit', 'type', 'txn_type', 'transaction_type'])
+                            synth = []
+                            if not alerts_df.empty and (src_col or dst_col):
+                                for _, r in alerts_df.iterrows():
+                                    src = r.get(src_col) if src_col else None
+                                    dst = r.get(dst_col) if dst_col else None
+                                    if not src and not dst:
+                                        continue
+                                    amt = r.get(amt_col)
+                                    ts = r.get(ts_col)
+                                    tid = r.get(id_col)
+                                    direction = r.get(dir_col)
+                                    synth.append(
+                                        {
+                                            'account_id': str(src) if src not in [None, ""] else (str(dst) if dst not in [None, ""] else None),
+                                            'counterparty_account': str(dst) if dst not in [None, ""] else (str(src) if src not in [None, ""] else None),
+                                            'txn_timestamp': ts,
+                                            'amount': amt,
+                                            'direction': direction,
+                                            'transaction_id': tid,
+                                        }
+                                    )
+                                # Limit to 500
+                                transactions = pd.DataFrame(synth).fillna("").to_dict(orient='records')[:500]
+                    except Exception:
+                        transactions = []
 
             except Exception as e:
                 print(f"⚠️ Transaction fetch error: {e}")
