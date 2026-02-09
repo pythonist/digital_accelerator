@@ -380,11 +380,129 @@ def build_full_case():
         return jsonify({'success': False, 'error': pack.get("error") if pack else 'Failed to build case pack'}), 404
 
     txns = pack.get("transactions") or []
-    if not txns:
-        return jsonify({'success': False, 'error': 'No transactions available for this case'}), 200
 
     df = _canonicalize_transactions(pd.DataFrame(txns))
     if df.empty:
+        try:
+            alerts = pack.get("alerts") or []
+            if alerts:
+                adf = pd.DataFrame(alerts)
+                acc_col = _pick_col(adf, ["account_id", "acct_id", "accountid", "account_no", "account", "ACCOUNT_ID"])
+                id_col = _pick_col(adf, ["alert_id", "id", "ALERT_ID", "ref"])
+                amt_col = _pick_col(adf, ["amount", "amt", "value", "rule_metric"])
+                ts_col = _pick_col(adf, ["txn_timestamp", "timestamp", "transaction_date", "txn_date", "date", "time", "created_at", "ALERT_DATE"])
+                accounts = []
+                nodes = []
+                links = []
+                seen_acc = set()
+                for _, r in adf.iterrows():
+                    a = r.get(acc_col)
+                    if a not in [None, ""]:
+                        aid = str(a)
+                        if aid not in seen_acc:
+                            nodes.append({"id": aid, "label": aid, "type": "account", "risk_score": 0, "volume": 0.0, "val": 6})
+                            seen_acc.add(aid)
+                        accounts.append(aid)
+                    alid = r.get(id_col)
+                    alnode = None
+                    if alid not in [None, ""]:
+                        alnode = f"ALERT_{str(alid)}"
+                        nodes.append({"id": alnode, "label": str(alid), "type": "alert", "risk_score": 50, "volume": 0.0, "val": 6})
+                    if a not in [None, ""] and alnode:
+                        amt = float(r.get(amt_col) or 0.0)
+                        ts = r.get(ts_col)
+                        links.append(
+                            {
+                                "id": None,
+                                "source": str(a),
+                                "target": alnode,
+                                "amount": amt,
+                                "ts": ts,
+                                "channel": None,
+                                "txn_type": None,
+                                "device_id": None,
+                                "ip_address": None,
+                                "geo_location": None,
+                                "counterparty_bank": None,
+                                "relation": "txn",
+                                "width": 1.0,
+                                "volume": amt,
+                            }
+                        )
+                        for i in range(len(nodes)):
+                            if str(nodes[i].get("id") or "") == str(a):
+                                nodes[i]["volume"] = float(nodes[i].get("volume") or 0.0) + amt
+                accounts = list(dict.fromkeys([x for x in accounts if x not in [None, ""]]))
+                focal = str(focal_account_id or (accounts[0] if accounts else "") or "")
+                graph = {"nodes": nodes, "links": links, "paths": [], "patterns": {}, "case_id": case_id, "account_id": focal, "parameters": {}}
+                narrative = f"Case {case_id} alert-derived minimal network with {len(nodes)} entities and {len(links)} links."
+                return jsonify({"success": True, "graph": graph, "narrative": narrative, "accounts": accounts})
+            if services.graph_builder:
+                services.graph_builder.build_full_case_network(case_id)
+                exported = services.graph_builder.export_graph_data() or {}
+                nodes = exported.get("nodes") or []
+                raw_links = exported.get("links") or []
+                links = []
+                def _norm_id(x):
+                    s = str(x or "")
+                    if s.startswith("ACC_"):
+                        return s[len("ACC_"):]
+                    if s.startswith("CP_"):
+                        return s[len("CP_"):]
+                    if s.startswith("CASE_"):
+                        return s[len("CASE_"):]
+                    if s.startswith("CUST_"):
+                        return s[len("CUST_"):]
+                    if s.startswith("ALERT_"):
+                        return s[len("ALERT_"):]
+                    return s
+                for l in raw_links:
+                    links.append(
+                        {
+                            "id": None,
+                            "source": _norm_id(l.get("source")),
+                            "target": _norm_id(l.get("target")),
+                            "amount": float(l.get("volume") or 0.0),
+                            "ts": (
+                                (l.get("transactions") or [{}])[0].get("date")
+                                if isinstance(l.get("transactions"), list) and len(l.get("transactions")) > 0
+                                else None
+                            ),
+                            "channel": None,
+                            "txn_type": None,
+                            "device_id": None,
+                            "ip_address": None,
+                            "geo_location": None,
+                            "counterparty_bank": None,
+                            "relation": "txn",
+                            "width": float(l.get("width") or 1.0),
+                            "volume": float(l.get("volume") or 0.0),
+                        }
+                    )
+                norm_nodes = []
+                for n in nodes:
+                    nid = _norm_id(n.get("id"))
+                    lbl = n.get("label") or nid
+                    norm_nodes.append({**n, "id": nid, "label": lbl})
+                volmap = {}
+                for e in links:
+                    volmap[e["source"]] = volmap.get(e["source"], 0.0) + float(e.get("volume") or 0.0)
+                    volmap[e["target"]] = volmap.get(e["target"], 0.0) + 0.0
+                for i in range(len(norm_nodes)):
+                    nid = str(norm_nodes[i].get("id") or "")
+                    norm_nodes[i]["volume"] = float(volmap.get(nid) or 0.0)
+                acct_nodes = [n for n in norm_nodes if str(n.get("type")).lower() == "account"]
+                accounts = []
+                for n in acct_nodes:
+                    nid = str(n.get("id") or "")
+                    if nid:
+                        accounts.append(nid)
+                focal = str(focal_account_id or (accounts[0] if accounts else "") or "")
+                graph = {"nodes": norm_nodes, "links": links, "paths": [], "patterns": {}, "case_id": case_id, "account_id": focal, "parameters": {}}
+                narrative = f"Case {case_id} alert-based network with {len(nodes)} entities and {len(links)} relationships."
+                return jsonify({"success": True, "graph": graph, "narrative": narrative, "accounts": accounts})
+        except Exception:
+            pass
         return jsonify({'success': False, 'error': 'No usable transactions rows for flow graph'}), 200
 
     if not focal_account_id:
@@ -399,6 +517,83 @@ def build_full_case():
     analyzer = MoneyFlowAnalyzer(cfg)
     flow = analyzer.build_account_flow_graph(df, str(focal_account_id), start_ts=start_ts, end_ts=end_ts)
     if not flow.get("success"):
+        # Fallback: Use alert-based graph and adapt for UI expectations
+        try:
+            if services.graph_builder:
+                services.graph_builder.build_full_case_network(case_id)
+                exported = services.graph_builder.export_graph_data() or {}
+                nodes = exported.get("nodes") or []
+                raw_links = exported.get("links") or []
+                def _norm_id(x):
+                    s = str(x or "")
+                    if s.startswith("ACC_"):
+                        return s[len("ACC_"):]
+                    if s.startswith("CP_"):
+                        return s[len("CP_"):]
+                    if s.startswith("CASE_"):
+                        return s[len("CASE_"):]
+                    if s.startswith("CUST_"):
+                        return s[len("CUST_"):]
+                    if s.startswith("ALERT_"):
+                        return s[len("ALERT_"):]
+                    return s
+                links = []
+                for l in raw_links:
+                    links.append(
+                        {
+                            "id": None,
+                            "source": _norm_id(l.get("source")),
+                            "target": _norm_id(l.get("target")),
+                            "amount": float(l.get("volume") or 0.0),
+                            "ts": (
+                                (l.get("transactions") or [{}])[0].get("date")
+                                if isinstance(l.get("transactions"), list) and len(l.get("transactions")) > 0
+                                else None
+                            ),
+                            "channel": None,
+                            "txn_type": None,
+                            "device_id": None,
+                            "ip_address": None,
+                            "geo_location": None,
+                            "counterparty_bank": None,
+                            "relation": "txn",
+                            "width": float(l.get("width") or 1.0),
+                            "volume": float(l.get("volume") or 0.0),
+                        }
+                    )
+                norm_nodes = []
+                for n in nodes:
+                    t = str(n.get("type") or "").lower()
+                    nid = _norm_id(n.get("id"))
+                    lbl = n.get("label") or nid
+                    norm_nodes.append({**n, "id": nid, "label": lbl})
+                volmap = {}
+                for e in links:
+                    volmap[e["source"]] = volmap.get(e["source"], 0.0) + float(e.get("volume") or 0.0)
+                    volmap[e["target"]] = volmap.get(e["target"], 0.0) + 0.0
+                for i in range(len(norm_nodes)):
+                    nid = str(norm_nodes[i].get("id") or "")
+                    norm_nodes[i]["volume"] = float(volmap.get(nid) or 0.0)
+                acct_nodes = [n for n in norm_nodes if str(n.get("type")).lower() == "account"]
+                accounts = []
+                for n in acct_nodes:
+                    nid = str(n.get("id") or "")
+                    if nid:
+                        accounts.append(nid)
+                focal = str(focal_account_id or (accounts[0] if accounts else "") or "")
+                graph = {
+                    "nodes": norm_nodes,
+                    "links": links,
+                    "paths": [],
+                    "patterns": {},
+                    "case_id": case_id,
+                    "account_id": focal,
+                    "parameters": {},
+                }
+                narrative = f"Case {case_id} alert-based network with {len(norm_nodes)} entities and {len(links)} relationships."
+                return jsonify({"success": True, "graph": graph, "narrative": narrative, "accounts": accounts})
+        except Exception:
+            pass
         return jsonify(flow), 200
 
     nodes = [dict(n) for n in (flow.get("graph") or {}).get("nodes", [])]
