@@ -19,6 +19,7 @@ import {
   LinearProgress
 } from '@mui/material';
 import axios from 'axios';
+import btsyApi from '../../services/btsyApi';
 import { useCalibrationRun } from '../../context/CalibrationRunContext';
 
 const API_BASE = '/api/btsy';
@@ -121,29 +122,6 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
     setError(null);
     setLoading(true);
     try {
-      const res = await axios.post(
-        `${API_BASE}/cortex/scenario/run-by-run`,
-        {
-          run_id: (sessionStorage.getItem(`btsy_active_run_id_text:${getEnvId()}`) || ''),
-          created_by: 'user',
-          config: {
-            transaction_type: config.transaction_type,
-            aggregation_level: config.aggregation_level,
-            lookback_days: parseInt(config.lookback_days, 10)
-          }
-        },
-        { headers: getHeaders() }
-      );
-      if (res.data?.success) {
-        const data = res.data.data || {};
-        setRunId(data.run_id || null);
-        setStats(data.stats || null);
-        setThresholdRows(data.threshold_preview || []);
-        setWorstRows(data.worst_case_preview || []);
-        setMonthlyRows(data.monthly_threshold_preview || []);
-        return;
-      }
-      // Fallback: load selected universe and run regular scenario
       let sel = null;
       if (calibrationRunId) {
         const g = await axios.get(
@@ -162,22 +140,85 @@ const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
       }
       if (!sel) throw new Error('No selected universe found for this run');
       setUniverse(sel);
-      const payload = {
-        universe_id: sel.id,
-        config: {
-          transaction_type: config.transaction_type,
-          aggregation_level: config.aggregation_level,
-          lookback_days: parseInt(config.lookback_days, 10)
-        },
-        created_by: 'user'
+
+      const runIdText = (sessionStorage.getItem(`btsy_active_run_id_text:${getEnvId()}`) || '').trim();
+      let scenarioRunId = null;
+      if (runIdText) {
+        try {
+          const scenarioRes = await axios.post(
+            `${API_BASE}/cortex/scenario/run-by-run`,
+            {
+              run_id: runIdText,
+              created_by: 'user',
+              config: {
+                transaction_type: config.transaction_type,
+                aggregation_level: config.aggregation_level,
+                lookback_days: parseInt(config.lookback_days, 10)
+              }
+            },
+            { headers: getHeaders() }
+          );
+          if (scenarioRes.data?.success) {
+            const data = scenarioRes.data.data || {};
+            scenarioRunId = data.run_id || null;
+            setRunId(data.run_id || null);
+            setStats(data.stats || null);
+            setThresholdRows(data.threshold_preview || []);
+            setWorstRows(data.worst_case_preview || []);
+            setMonthlyRows(data.monthly_threshold_preview || []);
+          }
+        } catch {}
+      }
+
+      if (!scenarioRunId) {
+        const scenarioRes = await axios.post(
+          `${API_BASE}/cortex/scenario/run`,
+          {
+            universe_id: sel.id,
+            config: {
+              transaction_type: config.transaction_type,
+              aggregation_level: config.aggregation_level,
+              lookback_days: parseInt(config.lookback_days, 10)
+            },
+            created_by: 'user'
+          },
+          { headers: getHeaders() }
+        );
+        if (!scenarioRes.data?.success) {
+          throw new Error(scenarioRes.data?.error || 'Scenario run failed');
+        }
+        const data = scenarioRes.data.data || {};
+        scenarioRunId = data.run_id || null;
+        setRunId(data.run_id || null);
+        setStats(data.stats || null);
+        setThresholdRows(data.threshold_preview || []);
+        setWorstRows(data.worst_case_preview || []);
+        setMonthlyRows(data.monthly_threshold_preview || []);
+      }
+
+      if (scenarioRunId != null) {
+        sessionStorage.setItem('btsy_step3_cortex_run_id', String(scenarioRunId));
+      }
+
+      const behaviorConfig = {
+        entity_level: 'account',
+        entity_id_col: 'account_id',
+        time_col: 'transaction_datetime',
+        metrics: [
+          {
+            name: 'cash_1d_sum',
+            type: 'SUM',
+            column: 'transaction_amount',
+            window: config.aggregation_level === 'monthly' ? '1M' : '1D'
+          }
+        ]
       };
-      const r2 = await axios.post(`${API_BASE}/cortex/scenario/run`, payload, { headers: getHeaders() });
-      if (!r2.data?.success) throw new Error(r2.data?.error || 'Scenario run failed');
-      const data = r2.data.data || {};
-      setStats(data.stats || null);
-      setThresholdRows(data.threshold_preview || []);
-      setWorstRows(data.worst_case_preview || []);
-      setMonthlyRows(data.monthly_threshold_preview || []);
+      const res = await btsyApi.behavior.createRun(sel.id, behaviorConfig, 'user');
+      if (!res?.success) throw new Error(res?.error || 'Failed to create behavior run');
+      const behaviorRunId = res.data?.behavior_run_id;
+      if (!behaviorRunId) throw new Error('Behavior run id missing');
+      sessionStorage.setItem('btsy_step3_behavior_run_id', String(behaviorRunId));
+      window.dispatchEvent(new CustomEvent('btsy:navigate', { detail: { screen: 'calibration' } }));
     } catch (e) {
       setError(e.message || 'Run-by-run failed');
     } finally {
