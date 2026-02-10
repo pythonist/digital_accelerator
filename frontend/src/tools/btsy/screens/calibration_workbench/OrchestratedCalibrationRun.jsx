@@ -43,6 +43,17 @@ const OrchestratedCalibrationRun = ({ sessionId }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const finalBoundaryId = useMemo(() => {
+    const v =
+      activeRun?.run?.final_boundary_id ??
+      activeRun?.final_boundary?.boundary_id ??
+      activeRun?.report?.report?.results?.boundary_id ??
+      null;
+    if (v == null) return null;
+    const n = parseInt(String(v), 10);
+    return Number.isFinite(n) ? n : null;
+  }, [activeRun]);
+
   const refreshRuns = async () => {
     if (!sid) return;
     const res = await btsyApi.orchestrated.listRuns(sid);
@@ -135,7 +146,12 @@ const OrchestratedCalibrationRun = ({ sessionId }) => {
     setError('');
     const res = await btsyApi.orchestrated.approveBoundary(sid, parseInt(activeOcrRunId, 10), 'user');
     setBusy(false);
-    if (res.success) setApproved(res.data);
+    if (res.success) {
+      setApproved(res.data);
+      refreshRuns();
+      refreshApproved();
+      refreshActive(activeOcrRunId);
+    }
     else setError(res.error || 'Failed to approve boundary');
   };
 
@@ -347,7 +363,7 @@ const OrchestratedCalibrationRun = ({ sessionId }) => {
               <Button
                 variant="contained"
                 onClick={approveBoundary}
-                disabled={!activeRun?.run?.final_boundary_id || busy || (approved?.approved && approved.boundary_id === activeRun?.run?.final_boundary_id)}
+                disabled={!finalBoundaryId || busy || (approved?.approved && approved.boundary_id === finalBoundaryId)}
               >
                 Approve Boundary for Downstream Use
               </Button>
