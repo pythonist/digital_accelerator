@@ -32,6 +32,7 @@ const ScenarioCalibrationWorkbench = () => {
   const [mode, setMode] = useState('manual');
   const [behaviorRuns, setBehaviorRuns] = useState([]);
   const [selectedBehaviorRunId, setSelectedBehaviorRunId] = useState('');
+  const [hintedCortexRunId, setHintedCortexRunId] = useState('');
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState('');
   const [sessionData, setSessionData] = useState(null);
@@ -211,6 +212,12 @@ const ScenarioCalibrationWorkbench = () => {
 
   useEffect(() => { loadBehaviorRuns(); }, []);
   useEffect(() => {
+    const hintedRunId = sessionStorage.getItem('btsy_step3_cortex_run_id');
+    if (!hintedRunId) return;
+    setHintedCortexRunId(String(hintedRunId));
+    sessionStorage.removeItem('btsy_step3_cortex_run_id');
+  }, []);
+  useEffect(() => {
     if (!behaviorRuns.length) return;
     const hintedRunId = sessionStorage.getItem('btsy_step3_behavior_run_id');
     if (!hintedRunId) return;
@@ -380,6 +387,10 @@ const ScenarioCalibrationWorkbench = () => {
                 <TableRow>
                   <TableCell>Run ID</TableCell>
                   <TableCell>{selectedRun?.behavior_run_id || sessionMeta?.behavior_run_id ? `R-${String(selectedRun?.behavior_run_id || sessionMeta?.behavior_run_id).padStart(3, '0')}` : '—'}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Scenario Run</TableCell>
+                  <TableCell>{hintedCortexRunId ? `C-${String(hintedCortexRunId).padStart(3, '0')}` : '—'}</TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell>Universe</TableCell>
