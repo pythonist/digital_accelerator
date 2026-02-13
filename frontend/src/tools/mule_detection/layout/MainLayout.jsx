@@ -6,6 +6,7 @@ import Header from './Header';
 import { TOOL_HEADER_HEIGHT } from './layout.constants';
 import InvestigationDrawer from '../components/InvestigationDrawer';
 import ModelRegistryDrawer from '../components/ModelRegistryDrawer';
+import OutcomeIntelligenceBanner from '../components/OutcomeIntelligenceBanner';
 
 const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLModel, dataStats }) => {
   return (
@@ -40,6 +41,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLMod
             bgcolor: '#fafafa'
           }}
         >
+          <OutcomeIntelligenceBanner />
           {children}
         </Box>
       </Box>

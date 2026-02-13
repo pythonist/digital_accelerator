@@ -13,6 +13,7 @@ from models.model_pipeline import ModelPipeline
 from models.model_pipeline import SMOTE
 from modules.inference_engine import InferenceEngine
 from services.mule_detection.db_service import get_md_db_service
+from services.mule_detection.model_training.trainers import get_trainer
 
 
 class ModelWorkbenchService:
@@ -318,6 +319,12 @@ class ModelWorkbenchService:
         if len(df) == 0:
             return {"success": False, "error": "No engineered features found"}
 
+        model_type = str(model_type or "").strip().lower()
+        supervised_types = {"xgboost", "randomforest", "logistic", "lightgbm", "lgbm"}
+        unsupervised_types = {"isolation_forest", "kmeans", "dbscan", "pca_autoencoder", "autoencoder"}
+        if model_type not in supervised_types and model_type not in unsupervised_types:
+            return {"success": False, "error": "Unknown model type"}
+
         include = feature_selection.get("include") or []
         exclude = set(feature_selection.get("exclude") or [])
         feature_cols = [c for c in df.columns if c not in ["account_id", "environment_id", "computed_at", "is_mule"]]
@@ -349,8 +356,8 @@ class ModelWorkbenchService:
         }
         corr_heatmap = getattr(pipeline, "last_corr_heatmap", None)
         y_unique = np.unique(y)
-        if model_type in ["xgboost", "randomforest"] and len(y_unique) < 2:
-            return {"success": False, "error": "Supervised training requires both classes in is_mule. Provide labels or use isolation_forest."}
+        if model_type in supervised_types and len(y_unique) < 2:
+            return {"success": False, "error": "Supervised training requires both classes in is_mule. Provide labels or use an unsupervised model."}
 
         if use_smote and SMOTE is not None and len(y_unique) > 1 and sum(y) < len(y) * 0.3:
             logs.append({"ts": now_iso(), "step": "balance", "message": "Applying SMOTE"})
@@ -366,51 +373,61 @@ class ModelWorkbenchService:
 
         logs.append({"ts": now_iso(), "step": "split", "message": f"Splitting train/test (test_size={test_size})"})
         X_train = X_test = y_train = y_test = None
-        for i in range(10):
-            rs = random_state + i
-            Xt, Xv, yt, yv = train_test_split(
-                X, y, test_size=test_size, random_state=rs, stratify=y if use_stratify else None
-            )
-            if model_type in ["xgboost", "randomforest"]:
+        if model_type in supervised_types:
+            for i in range(10):
+                rs = random_state + i
+                Xt, Xv, yt, yv = train_test_split(
+                    X, y, test_size=test_size, random_state=rs, stratify=y if use_stratify else None
+                )
                 if len(np.unique(yt)) < 2 or len(np.unique(yv)) < 2:
                     continue
+                X_train, X_test, y_train, y_test = Xt, Xv, yt, yv
+                break
+            if X_train is None:
+                return {"success": False, "error": "Not enough labeled data to produce a valid holdout split across both classes."}
+        else:
+            Xt, Xv, yt, yv = train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=None)
             X_train, X_test, y_train, y_test = Xt, Xv, yt, yv
-            break
-        if X_train is None:
-            return {"success": False, "error": "Not enough labeled data to produce a valid holdout split across both classes."}
 
         logs.append({"ts": now_iso(), "step": "scale", "message": "Scaling features"})
         X_train_scaled = pipeline.scaler.fit_transform(X_train)
         X_test_scaled = pipeline.scaler.transform(X_test)
 
         logs.append({"ts": now_iso(), "step": "train", "message": f"Training model ({model_type})"})
-        if model_type == "xgboost":
-            model = pipeline._train_xgboost(X_train_scaled, y_train, model_params=hyperparams, cv_folds=cv_folds, random_state=random_state)  # type: ignore[attr-defined]
-        elif model_type == "randomforest":
-            model = pipeline._train_random_forest(X_train_scaled, y_train, model_params=hyperparams, cv_folds=cv_folds, random_state=random_state)  # type: ignore[attr-defined]
-        elif model_type == "isolation_forest":
-            model = pipeline._train_isolation_forest(X_train_scaled, y_train, model_params=hyperparams, random_state=random_state)  # type: ignore[attr-defined]
-        else:
-            return {"success": False, "error": "Unknown model type"}
+        trainer = get_trainer(model_type)
+        train_res = trainer.train(X_train_scaled, y_train, cv_folds=cv_folds, random_state=random_state, model_params=hyperparams)
+        model = train_res.model
 
-        if model_type in ["xgboost", "randomforest"] and len(np.unique(y_train)) < 2:
+        if model_type in supervised_types and len(np.unique(y_train)) < 2:
             return {"success": False, "error": "Not enough labeled data for a holdout split. Increase labeled sample size or use isolation_forest."}
 
         logs.append({"ts": now_iso(), "step": "evaluate", "message": "Evaluating on holdout"})
         feature_importance = pipeline._get_feature_importance(model, feature_names)  # type: ignore[attr-defined]
 
         y_prob = self._predict_proba_safe(model, X_test_scaled)
-        y_pred = (y_prob >= 0.5).astype(int)
-        metrics = {
-            "accuracy": float(accuracy_score(y_test, y_pred)),
-            "precision": float(precision_score(y_test, y_pred, zero_division=0)),
-            "recall": float(recall_score(y_test, y_pred, zero_division=0)),
-            "f1_score": float(f1_score(y_test, y_pred, zero_division=0)),
-            "roc_auc": float(roc_auc_score(y_test, y_prob)) if len(np.unique(y_test)) > 1 else 0.0,
-            "confusion_matrix": confusion_matrix(y_test, y_pred, labels=[0, 1]).tolist(),
-        }
-
-        tradeoffs = self._tradeoffs_from_scores(y_test, y_prob, threshold)
+        if model_type in supervised_types:
+            y_pred = (y_prob >= 0.5).astype(int)
+            metrics = {
+                "accuracy": float(accuracy_score(y_test, y_pred)),
+                "precision": float(precision_score(y_test, y_pred, zero_division=0)),
+                "recall": float(recall_score(y_test, y_pred, zero_division=0)),
+                "f1_score": float(f1_score(y_test, y_pred, zero_division=0)),
+                "roc_auc": float(roc_auc_score(y_test, y_prob)) if len(np.unique(y_test)) > 1 else 0.0,
+                "confusion_matrix": confusion_matrix(y_test, y_pred, labels=[0, 1]).tolist(),
+                "mode": "supervised",
+            }
+            tradeoffs = self._tradeoffs_from_scores(y_test, y_prob, threshold)
+        else:
+            scores = np.asarray(y_prob).reshape(-1)
+            t = float(threshold)
+            metrics = {
+                "mode": "unsupervised",
+                "mean_score": float(np.mean(scores)) if len(scores) else 0.0,
+                "p95_score": float(np.quantile(scores, 0.95)) if len(scores) else 0.0,
+                "anomaly_rate": float((scores >= t).mean()) if len(scores) else 0.0,
+                "threshold": t,
+            }
+            tradeoffs = {"threshold": t, "confusion_matrix": None, "precision_recall": None, "suppression_vs_event_loss": self._suppression_curve_unsupervised(scores)}
 
         logs.append({"ts": now_iso(), "step": "save", "message": "Persisting model artifact"})
         training_config = {
@@ -495,6 +512,16 @@ class ModelWorkbenchService:
             "logs": logs,
         }
 
+    def _suppression_curve_unsupervised(self, scores: np.ndarray):
+        s = np.asarray(scores).reshape(-1)
+        out = []
+        for t in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+            pred = (s >= float(t)).astype(int)
+            suppressed = float((pred == 0).mean()) if len(pred) else 0.0
+            anomaly_rate = float((pred == 1).mean()) if len(pred) else 0.0
+            out.append({"threshold": float(t), "suppression": suppressed, "event_loss": None, "anomaly_rate": anomaly_rate})
+        return out
+
     def metrics(self, params: dict):
         experiment_id = params.get("experiment_id")
         model_version = params.get("model_version")
@@ -576,35 +603,156 @@ class ModelWorkbenchService:
         if not feature_cols:
             return {"success": False, "error": "Model metadata missing feature list"}
         model = model_data["model"]
-        x = x_row[feature_cols].copy()
-        x = x.replace([np.inf, -np.inf], np.nan)
-        x = x.fillna(0)
+        x = x_row.reindex(columns=feature_cols).copy()
+        x = x.replace([np.inf, -np.inf], np.nan).fillna(0)
         x = x.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0)
-        prob = float(self._predict_proba_safe(model, x.values)[0])
-        try:
-            import shap  # type: ignore
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(x)
-            if isinstance(shap_values, list) and len(shap_values) > 1:
-                sv = np.array(shap_values[1]).reshape(-1)
-            else:
-                sv = np.array(shap_values).reshape(-1)
-            contrib = []
+        arr = engine._prepare_features(x, feature_cols, metadata)  # type: ignore[attr-defined]
+        score = float(self._predict_proba_safe(model, arr)[0]) if len(arr) else 0.0
+
+        model_type = str(metadata.get("model_type") or metadata.get("training_config", {}).get("model_type") or "").strip().lower()
+        if not model_type:
+            model_type = str(getattr(model, "__class__", type("X", (), {})).__name__ or "").lower()
+
+        def _theme(f: str):
+            n = str(f or "").lower()
+            if "device" in n or "ip" in n or "vpn" in n or "fingerprint" in n:
+                return "DEVICE"
+            if "centrality" in n or "pagerank" in n or "community" in n or "degree" in n or "network" in n:
+                return "NETWORK"
+            if "cycle" in n or "circular" in n or "round_trip" in n or "loop" in n:
+                return "CIRCULARITY"
+            if "pass_through" in n or "in_out" in n or "out_in" in n:
+                return "PASS_THROUGH"
+            if "count_24h" in n or "tx_count" in n or "txn_count" in n or "velocity" in n:
+                return "VELOCITY"
+            if "cash" in n or "atm" in n or "withdraw" in n:
+                return "CASH_OUT"
+            if "kyc" in n or "occupation" in n or "income" in n or "age" in n or "risk_rating" in n:
+                return "KYC"
+            return "BEHAVIOR"
+
+        def _mule_types(themes: list[str]):
+            s = set([t for t in themes if t])
+            out = []
+            if "PASS_THROUGH" in s or "VELOCITY" in s or "CASH_OUT" in s:
+                out.append("PASS_THROUGH_MULE")
+            if "DEVICE" in s:
+                out.append("DEVICE_SHARING_RING")
+            if "NETWORK" in s:
+                out.append("NETWORK_COORDINATION")
+            if "CIRCULARITY" in s:
+                out.append("CIRCULAR_FLOW_MULE")
+            if "KYC" in s:
+                out.append("RISK_PROFILE_MULE")
+            return out[:3]
+
+        contrib = []
+        method = "zscore"
+
+        if model_type in ["logistic"] and hasattr(model, "coef_"):
+            method = "coefficients"
+            coef = np.asarray(getattr(model, "coef_", np.zeros((1, len(feature_cols))))).reshape(-1)
+            z = np.asarray(arr).reshape(-1)
             for i, f in enumerate(feature_cols):
-                contrib.append({"feature": f, "value": float(x.iloc[0][f]) if pd.notna(x.iloc[0][f]) else 0.0, "shap": float(sv[i]) if i < len(sv) else 0.0})
-            contrib.sort(key=lambda r: abs(r["shap"]), reverse=True)
+                v = float(x.iloc[0][f]) if f in x.columns and pd.notna(x.iloc[0][f]) else 0.0
+                c = float(coef[i] * z[i]) if i < len(coef) and i < len(z) else 0.0
+                contrib.append({"feature": f, "value": v, "importance": c})
+            contrib.sort(key=lambda r: abs(r["importance"]), reverse=True)
             contrib = contrib[:20]
-            return {"success": True, "method": "shap", "model_version": model_version, "account_id": account_id, "score": prob, "local": contrib, "timestamp": now_iso()}
-        except Exception:
-            contrib = []
-            fi = metadata.get("feature_importance", {}) or {}
-            all_fi = fi.get("all_features") if isinstance(fi, dict) else None
-            if isinstance(all_fi, dict):
-                for f in feature_cols:
-                    contrib.append({"feature": f, "value": float(x.iloc[0][f]) if pd.notna(x.iloc[0][f]) else 0.0, "importance": float(all_fi.get(f) or 0.0)})
+        elif model_type in ["pca_autoencoder", "autoencoder"] and hasattr(model, "reconstruction_residual"):
+            method = "reconstruction"
+            resid = np.asarray(model.reconstruction_residual(arr)).reshape(1, -1)
+            r0 = resid[0] if resid.size else np.zeros(len(feature_cols))
+            for i, f in enumerate(feature_cols):
+                v = float(x.iloc[0][f]) if f in x.columns and pd.notna(x.iloc[0][f]) else 0.0
+                c = float(r0[i]) if i < len(r0) else 0.0
+                contrib.append({"feature": f, "value": v, "importance": c})
+            contrib.sort(key=lambda r: abs(r["importance"]), reverse=True)
+            contrib = contrib[:20]
+        elif model_type in ["kmeans"] and hasattr(model, "cluster_centers_"):
+            method = "centroid_distance"
+            centers = np.asarray(getattr(model, "cluster_centers_", np.zeros((0, len(feature_cols)))))
+            v = np.asarray(arr).reshape(1, -1)
+            if centers.size:
+                d = np.linalg.norm(centers - v, axis=1)
+                idx = int(np.argmin(d))
+                delta = v.reshape(-1) - centers[idx].reshape(-1)
+            else:
+                delta = v.reshape(-1)
+            for i, f in enumerate(feature_cols):
+                raw = float(x.iloc[0][f]) if f in x.columns and pd.notna(x.iloc[0][f]) else 0.0
+                contrib.append({"feature": f, "value": raw, "importance": float(delta[i]) if i < len(delta) else 0.0})
+            contrib.sort(key=lambda r: abs(r["importance"]), reverse=True)
+            contrib = contrib[:20]
+        else:
+            if model_type in ["xgboost", "randomforest", "lightgbm", "lgbm"]:
+                try:
+                    import shap  # type: ignore
+                    explainer = shap.TreeExplainer(model)
+                    shap_values = explainer.shap_values(arr)
+                    if isinstance(shap_values, list) and len(shap_values) > 1:
+                        sv = np.array(shap_values[1]).reshape(-1)
+                    else:
+                        sv = np.array(shap_values).reshape(-1)
+                    method = "shap"
+                    for i, f in enumerate(feature_cols):
+                        raw = float(x.iloc[0][f]) if f in x.columns and pd.notna(x.iloc[0][f]) else 0.0
+                        contrib.append({"feature": f, "value": raw, "shap": float(sv[i]) if i < len(sv) else 0.0})
+                    contrib.sort(key=lambda r: abs(r["shap"]), reverse=True)
+                    contrib = contrib[:20]
+                except Exception:
+                    contrib = []
+            if not contrib:
+                method = "zscore"
+                z = np.asarray(arr).reshape(-1)
+                for i, f in enumerate(feature_cols):
+                    raw = float(x.iloc[0][f]) if f in x.columns and pd.notna(x.iloc[0][f]) else 0.0
+                    contrib.append({"feature": f, "value": raw, "importance": float(z[i]) if i < len(z) else 0.0})
                 contrib.sort(key=lambda r: abs(r["importance"]), reverse=True)
                 contrib = contrib[:20]
-            return {"success": True, "method": "importance_proxy", "model_version": model_version, "account_id": account_id, "score": prob, "local": contrib, "timestamp": now_iso()}
+
+        top_themes = []
+        for r in contrib[:12]:
+            t = _theme(r.get("feature"))
+            if t not in top_themes:
+                top_themes.append(t)
+            if len(top_themes) >= 4:
+                break
+
+        meaning = "Likelihood of mule involvement" if model_type in ["xgboost", "randomforest", "logistic", "lightgbm", "lgbm"] else "Behavioral abnormality requiring review"
+        bullets = []
+        for t in top_themes[:3]:
+            if t == "PASS_THROUGH":
+                bullets.append("rapid outward movement")
+            elif t == "VELOCITY":
+                bullets.append("high transaction velocity")
+            elif t == "DEVICE":
+                bullets.append("shares device identifiers across accounts")
+            elif t == "NETWORK":
+                bullets.append("network coordination patterns")
+            elif t == "CIRCULARITY":
+                bullets.append("circular transfer behavior")
+            elif t == "CASH_OUT":
+                bullets.append("cash-out intensity patterns")
+            elif t == "KYC":
+                bullets.append("risky KYC profile signals")
+            else:
+                bullets.append("unusual behavioral deviations")
+
+        return {
+            "success": True,
+            "method": method,
+            "model_type": model_type,
+            "model_version": model_version,
+            "account_id": account_id,
+            "score": score,
+            "meaning": meaning,
+            "narrative": {"headline": "Account is risky because:" if meaning.startswith("Likelihood") else "Account requires review because:", "bullets": bullets},
+            "themes": top_themes,
+            "mule_types": _mule_types(top_themes),
+            "local": contrib,
+            "timestamp": now_iso(),
+        }
 
     def _tradeoffs_from_scores(self, y_true, y_prob, threshold: float):
         y_true = np.asarray(y_true).astype(int).reshape(-1)
@@ -662,14 +810,14 @@ class ModelWorkbenchService:
         y = pd.to_numeric(df.get("is_mule"), errors="coerce").fillna(0).astype(int)
         engine = InferenceEngine(model_store_path=str(paths["models_dir"]))
         model_data = engine.load_model(model_version)
-        feature_cols = (model_data.get("metadata", {}) or {}).get("features", []) or []
+        meta = model_data.get("metadata", {}) or {}
+        feature_cols = meta.get("features", []) or []
         x = df.reindex(columns=feature_cols).copy()
         x = x.replace([np.inf, -np.inf], np.nan).fillna(0)
         model = model_data["model"]
-        if not hasattr(model, "predict_proba"):
-            return {"success": False, "error": "Model does not support probability scoring"}
         x = x.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0)
-        s = pd.Series(self._predict_proba_safe(model, x.values))
+        arr = engine._prepare_features(x, feature_cols, meta)  # type: ignore[attr-defined]
+        s = pd.Series(self._predict_proba_safe(model, arr))
         pred = (s >= threshold).astype(int)
         group_cols = [c for c in ["geo_location", "customer_type", "risk_rating"] if c in df.columns]
         out = []
@@ -712,13 +860,15 @@ class ModelWorkbenchService:
             x = x.replace([np.inf, -np.inf], np.nan).fillna(0)
             x = x.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan).fillna(0)
             model = model_data["model"]
-            if not hasattr(model, "predict_proba"):
-                return None, None, None
-            prob = pd.Series(model.predict_proba(x.values)[:, 1])
+            arr = engine._prepare_features(x, feature_cols, metadata)  # type: ignore[attr-defined]
+            prob = pd.Series(self._predict_proba_safe(model, arr))
             pred = (prob >= threshold).astype(int)
             cm = confusion_matrix(y, pred, labels=[0, 1]).tolist()
-            pr = precision_recall_curve(y, prob)
-            return float(prob.mean()), cm, {"precision": pr[0].tolist(), "recall": pr[1].tolist(), "thresholds": pr[2].tolist()}
+            pr_out = None
+            if len(np.unique(y)) > 1:
+                pr = precision_recall_curve(y, prob)
+                pr_out = {"precision": pr[0].tolist(), "recall": pr[1].tolist(), "thresholds": pr[2].tolist()}
+            return float(prob.mean()) if len(prob) else 0.0, cm, pr_out
 
         champ_mean, champ_cm, champ_pr = _score(champion)
         chall_mean, chall_cm, chall_pr = _score(challenger)

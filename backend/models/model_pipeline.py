@@ -62,9 +62,10 @@ class ModelPipeline:
         # Prepare data
         X, y, feature_names = self._prepare_data(data)
 
+        model_type = str(model_type or '').strip().lower()
         y_unique = np.unique(y)
-        if model_type in ['xgboost', 'randomforest'] and len(y_unique) < 2:
-            raise ValueError("Supervised training requires both classes in is_mule. Upload labels or use isolation_forest.")
+        if model_type in ['xgboost', 'randomforest', 'logistic', 'lightgbm', 'lgbm'] and len(y_unique) < 2:
+            raise ValueError("Supervised training requires both classes in is_mule. Upload labels or use an unsupervised algorithm.")
         
         # Handle class imbalance
         if use_smote and SMOTE is not None and sum(y) < len(y) * 0.3:  # If mules < 30%
@@ -85,15 +86,9 @@ class ModelPipeline:
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_test_scaled = self.scaler.transform(X_test)
         
-        # Train model
-        if model_type == 'xgboost':
-            model = self._train_xgboost(X_train_scaled, y_train, model_params=model_params, cv_folds=cv_folds, random_state=random_state)
-        elif model_type == 'randomforest':
-            model = self._train_random_forest(X_train_scaled, y_train, model_params=model_params, cv_folds=cv_folds, random_state=random_state)
-        elif model_type == 'isolation_forest':
-            model = self._train_isolation_forest(X_train_scaled, y_train, model_params=model_params, random_state=random_state)
-        else:
-            raise ValueError(f"Unknown model type: {model_type}")
+        trainer = get_trainer(model_type)
+        r = trainer.train(X_train_scaled, y_train, cv_folds=cv_folds, random_state=random_state, model_params=model_params)
+        model = r.model
         
         # Evaluate
         metrics = self._evaluate_model(model, X_test_scaled, y_test, X_train_scaled, y_train)

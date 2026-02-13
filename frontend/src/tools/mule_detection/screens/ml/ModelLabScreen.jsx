@@ -2,11 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Card,
-  CardActionArea,
   CardContent,
   CardHeader,
   Checkbox,
   Drawer,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Grid,
   Typography,
   Stack,
@@ -258,6 +261,170 @@ const MODEL_PARAM_SCHEMAS = {
       compute_cost: 'Lower sample size reduces compute per tree.'
     }
   ]
+  ,
+  logistic: [
+    {
+      key: 'C',
+      label: 'Regularization (C)',
+      type: 'number',
+      min: 0.01,
+      max: 10.0,
+      step: 0.01,
+      defaultValue: 1.0,
+      level: 'beginner',
+      what: 'Controls how strongly coefficients are regularized (lower = more regularization).',
+      overfit_risk: 'High C can overfit when many correlated features exist.',
+      compute_cost: 'Low; trains fast.'
+    },
+    {
+      key: 'class_weight',
+      label: 'Class weight',
+      type: 'text',
+      defaultValue: 'balanced',
+      level: 'beginner',
+      what: 'Balances mule vs non-mule classes when positives are rare.',
+      overfit_risk: 'Incorrect weighting can shift decision boundary.',
+      compute_cost: 'Minimal.'
+    },
+    {
+      key: 'max_iter',
+      label: 'Max iterations',
+      type: 'number',
+      min: 50,
+      max: 2000,
+      step: 50,
+      defaultValue: 500,
+      level: 'expert',
+      what: 'Optimization iterations.',
+      overfit_risk: 'Not a direct overfit driver; affects convergence.',
+      compute_cost: 'Higher iterations increase training time.'
+    }
+  ],
+  lightgbm: [
+    {
+      key: 'n_estimators',
+      label: 'Trees',
+      type: 'number',
+      min: 50,
+      max: 3000,
+      step: 50,
+      defaultValue: 600,
+      level: 'beginner',
+      what: 'Number of boosting rounds.',
+      overfit_risk: 'Very high tree counts can overfit without regularization.',
+      compute_cost: 'Increases training time.'
+    },
+    {
+      key: 'learning_rate',
+      label: 'Learning rate',
+      type: 'number',
+      min: 0.01,
+      max: 0.5,
+      step: 0.01,
+      defaultValue: 0.05,
+      level: 'beginner',
+      what: 'Step size per boosting round.',
+      overfit_risk: 'Higher values can overfit and destabilize.',
+      compute_cost: 'Lower values often need more trees.'
+    },
+    {
+      key: 'num_leaves',
+      label: 'Leaves',
+      type: 'number',
+      min: 8,
+      max: 255,
+      step: 1,
+      defaultValue: 31,
+      level: 'beginner',
+      what: 'Model complexity per tree.',
+      overfit_risk: 'More leaves increases overfit risk.',
+      compute_cost: 'More leaves can increase compute.'
+    },
+    {
+      key: 'subsample',
+      label: 'Row subsample',
+      type: 'number',
+      min: 0.5,
+      max: 1.0,
+      step: 0.05,
+      defaultValue: 0.9,
+      level: 'beginner',
+      what: 'Fraction of rows per tree.',
+      overfit_risk: 'Lower values reduce overfitting by adding randomness.',
+      compute_cost: 'Slightly lower cost.'
+    },
+    {
+      key: 'colsample_bytree',
+      label: 'Column subsample',
+      type: 'number',
+      min: 0.5,
+      max: 1.0,
+      step: 0.05,
+      defaultValue: 0.9,
+      level: 'beginner',
+      what: 'Fraction of features per tree.',
+      overfit_risk: 'Lower values reduce correlation and overfit risk.',
+      compute_cost: 'Lower values reduce compute.'
+    }
+  ],
+  kmeans: [
+    {
+      key: 'n_clusters',
+      label: 'Clusters',
+      type: 'number',
+      min: 2,
+      max: 30,
+      step: 1,
+      defaultValue: 8,
+      level: 'beginner',
+      what: 'How many population segments to form.',
+      overfit_risk: 'Too many clusters can fragment population and create unstable scoring.',
+      compute_cost: 'More clusters increases training cost.'
+    }
+  ],
+  dbscan: [
+    {
+      key: 'eps',
+      label: 'Epsilon',
+      type: 'number',
+      min: 0.1,
+      max: 5.0,
+      step: 0.1,
+      defaultValue: 0.8,
+      level: 'beginner',
+      what: 'Neighborhood radius used to define dense regions.',
+      overfit_risk: 'Too small flags many outliers; too large hides anomalies.',
+      compute_cost: 'Higher eps can increase neighbor checks.'
+    },
+    {
+      key: 'min_samples',
+      label: 'Min samples',
+      type: 'number',
+      min: 3,
+      max: 200,
+      step: 1,
+      defaultValue: 10,
+      level: 'beginner',
+      what: 'Minimum points to form a dense region.',
+      overfit_risk: 'Too low marks noise as clusters; too high may miss small rings.',
+      compute_cost: 'Higher values may reduce sensitivity.'
+    }
+  ],
+  pca_autoencoder: [
+    {
+      key: 'n_components',
+      label: 'Components',
+      type: 'number',
+      min: 2,
+      max: 80,
+      step: 1,
+      defaultValue: 10,
+      level: 'beginner',
+      what: 'How much behavior is treated as “normal structure”.',
+      overfit_risk: 'Too many components can memorize; too few can miss structure.',
+      compute_cost: 'More components increases compute.'
+    }
+  ]
 };
 
 const defaultHyperparams = (modelType) => {
@@ -407,6 +574,9 @@ const ModelLabScreen = () => {
 
   const [approval, setApproval] = useState({ model_version: '', reviewer: '', decision: 'approve', comments: '', valid_until: '', activate: false });
   const [approvalResult, setApprovalResult] = useState(null);
+
+  const [autoPickOpen, setAutoPickOpen] = useState(false);
+  const [autoPickReport, setAutoPickReport] = useState(null);
 
   const selectedExperiment = useMemo(() => experiments.find((e) => e.experiment_id === selectedExperimentId) || null, [experiments, selectedExperimentId]);
 
@@ -697,21 +867,76 @@ const ModelLabScreen = () => {
 
   const autoPickOptimalSet = () => {
     const excluded = new Set((featureSelection.exclude || []).map((x) => String(x)));
-    const candidates = mergedFeatures.filter((f) => f.eligible === true && !excluded.has(f.feature_name));
+    const supervised = Boolean(labelStats?.has_results && Number(labelStats?.positives || 0) > 0 && Number(labelStats?.positives || 0) < Number(labelStats?.total || 0));
+
+    const all = mergedFeatures || [];
+    const ineligible = all.filter((f) => f.eligible !== true).length;
+    const excludedByUser = excluded.size;
+
+    const candidates = all.filter((f) => f.eligible === true && !excluded.has(f.feature_name));
+    const leakageFlagged = candidates.filter((f) => (Array.isArray(f.warnings) ? f.warnings : []).some((w) => String(w).includes('LEAKAGE'))).length;
+    const unstableFlagged = candidates.filter((f) => (Array.isArray(f.warnings) ? f.warnings : []).some((w) => String(w).includes('STABILITY') || String(w).includes('UNSTABLE'))).length;
+    const corrFlagged = candidates.filter((f) => f.correlation_risk === 'HIGH').length;
+
     const scored = candidates
-      .map((f) => ({
-        name: f.feature_name,
-        score: (f.importance_score || 0) - (f.correlation_risk === 'HIGH' ? 0.25 : 0)
-      }))
+      .map((f) => {
+        const iv = Number(f.iv);
+        const rarity = String(f.rarity_verdict || '').toUpperCase();
+        const ivBoost = supervised && Number.isFinite(iv) ? Math.min(1.5, Math.max(0, iv)) * 0.9 : 0;
+        const rarityBoost = !supervised ? (rarity === 'EXTREME' ? 0.45 : rarity === 'UNUSUAL' ? 0.2 : 0) : 0;
+        const corrPenalty = f.correlation_risk === 'HIGH' ? 0.25 : 0;
+        const score = Number(f.importance_score || 0) + ivBoost + rarityBoost - corrPenalty;
+        return { name: f.feature_name, score, typology: String(f.typology || 'UNMAPPED') };
+      })
       .sort((a, b) => b.score - a.score);
 
     const maxFeatures = 50;
-    const out = [];
+    const picked = [];
+    const seenTypologies = new Set();
+    const byTypology = new Map();
     for (const s of scored) {
-      if (out.length >= maxFeatures) break;
-      out.push(s.name);
+      if (!byTypology.has(s.typology)) byTypology.set(s.typology, []);
+      byTypology.get(s.typology).push(s);
     }
-    setFeatureSelection((prev) => ({ ...prev, include: out }));
+    const typologyLeaders = Array.from(byTypology.entries())
+      .map(([_t, list]) => list[0])
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+    for (const s of typologyLeaders) {
+      if (picked.length >= Math.min(12, maxFeatures)) break;
+      picked.push(s.name);
+      seenTypologies.add(s.typology);
+    }
+    for (const s of scored) {
+      if (picked.length >= maxFeatures) break;
+      if (picked.includes(s.name)) continue;
+      picked.push(s.name);
+      seenTypologies.add(s.typology);
+    }
+
+    setFeatureSelection((prev) => ({ ...prev, include: picked }));
+
+    setAutoPickReport({
+      supervised,
+      total_available: all.length,
+      ineligible,
+      excluded_by_user: excludedByUser,
+      candidates: candidates.length,
+      leakage_flagged: leakageFlagged,
+      unstable_flagged: unstableFlagged,
+      correlation_flagged: corrFlagged,
+      typology_covered: seenTypologies.size,
+      picked: picked.length,
+      max_features: maxFeatures,
+      rules: {
+        remove_leakage: Boolean(featureFilter.drop_high_leakage),
+        leakage_threshold: Number(featureFilter.leakage_threshold),
+        remove_unstable: Boolean(featureFilter.drop_unstable),
+        stability_threshold: Number(featureFilter.stability_threshold),
+        correlation_threshold: 0.85
+      }
+    });
+    setAutoPickOpen(true);
   };
 
   const runValidation = async () => {
@@ -967,6 +1192,139 @@ const ModelLabScreen = () => {
     return { warnings, recommendations };
   }, [eligibleFeatures, featureSelection.include, labelStats, training, trainingResult, validation.type]);
 
+  const modeInfo = useMemo(() => {
+    const total = Number(labelStats?.total || 0);
+    const positives = Number(labelStats?.positives || 0);
+    const supervised = Boolean(labelStats?.has_results && total > 0 && positives > 0 && positives < total);
+    const eligibleCount = (eligibleFeatures || []).filter((f) => f?.eligible === true).length;
+    const positiveRate = labelStats?.positive_rate != null ? Number(labelStats.positive_rate) : null;
+    return {
+      supervised,
+      target: 'is_mule',
+      eligibleCount,
+      totalLabelled: total || null,
+      positives: positives || null,
+      positiveRate: positiveRate != null && Number.isFinite(positiveRate) ? positiveRate : null
+    };
+  }, [eligibleFeatures, labelStats]);
+
+  const leaderboard = useMemo(() => {
+    const list = Array.isArray(models) ? models : [];
+    const rows = list
+      .map((m) => ({
+        model_version: m.model_version,
+        algorithm: m.algorithm,
+        trained_at: m.trained_at,
+        auc: m.auc != null ? Number(m.auc) : null,
+        recall: m.recall != null ? Number(m.recall) : null,
+        precision: m.precision != null ? Number(m.precision) : null,
+        f1: m.f1 != null ? Number(m.f1) : null,
+        status: m.status
+      }))
+      .filter((m) => m.model_version)
+      .sort((a, b) => (Number.isFinite(b.auc) ? b.auc : -1) - (Number.isFinite(a.auc) ? a.auc : -1));
+    return { champion: rows[0]?.model_version || '', rows: rows.slice(0, 12) };
+  }, [models]);
+
+  const businessThreshold = useMemo(() => {
+    if (!tradeoffs?.confusion_matrix?.length) return null;
+    const cm = tradeoffs.confusion_matrix;
+    const tn = Number(cm?.[0]?.[0] ?? 0);
+    const fp = Number(cm?.[0]?.[1] ?? 0);
+    const fn = Number(cm?.[1]?.[0] ?? 0);
+    const tp = Number(cm?.[1]?.[1] ?? 0);
+    const total = tn + fp + fn + tp;
+    const alerts = fp + tp;
+    const suppressed = tn + fn;
+    const suppressionPct = total > 0 ? suppressed / total : null;
+    const positives = (labelStats?.positives != null ? Number(labelStats.positives) : null);
+    const missedRate = positives && positives > 0 ? fn / positives : null;
+    const t = Number(tradeoffs.threshold ?? training.threshold ?? 0.5);
+    const curve = Array.isArray(suppressionData) ? suppressionData : [];
+    const closest = curve.length
+      ? curve.reduce((best, cur) => (Math.abs(Number(cur.threshold) - t) < Math.abs(Number(best.threshold) - t) ? cur : best), curve[0])
+      : null;
+    return {
+      threshold: t,
+      alerts,
+      suppressionPct: closest?.suppression != null ? Number(closest.suppression) : suppressionPct,
+      missed: fn,
+      missedRate: closest?.event_loss != null ? Number(closest.event_loss) : missedRate
+    };
+  }, [labelStats, suppressionData, tradeoffs, training.threshold]);
+
+  const featureTheme = (featureName) => {
+    const name = String(featureName || '');
+    const n = name.toLowerCase();
+    const meta = catalogByName.get(name) || {};
+    const cat = String(meta.category || '').trim();
+    const typ = String(meta.typology || '').trim();
+
+    if (/(pass[_-]?through|in[_-]?out|out[_-]?in|outbound[_-]?to[_-]?inbound)/i.test(n)) return { theme: 'Velocity', statement: 'rapid outward movement' };
+    if (/(count_24h|tx_count|txn_count|velocity|avg_per_day|peak_day)/i.test(n)) return { theme: 'Velocity', statement: 'high transaction velocity' };
+    if (/(device|ip|vpn|fingerprint|imei|mac)/i.test(n)) return { theme: 'Device', statement: 'shares devices across accounts' };
+    if (/(centrality|pagerank|community|clustering|degree|network|graph)/i.test(n)) return { theme: 'Network', statement: 'network coordination patterns' };
+    if (/(cycle|circular|round_trip|loop)/i.test(n)) return { theme: 'Circularity', statement: 'circular transfer behavior' };
+    if (/(time_to|dwell|hold|minutes|hours)/i.test(n)) return { theme: 'Timing', statement: 'funds exit unusually fast' };
+    if (/(cash|atm|withdraw)/i.test(n)) return { theme: 'Cash', statement: 'cash intensity patterns' };
+    if (/(counterparty|unique_counterparty|distinct_counterparty)/i.test(n)) return { theme: 'Counterparties', statement: 'unusually broad counterparty activity' };
+    if (/(kyc|age|occupation|income|risk_rating)/i.test(n)) return { theme: 'KYC', statement: 'risky KYC profile signals' };
+
+    const fallbackTheme = cat || (typ ? 'Typology' : 'Behavior');
+    const fallbackStatement = typ ? typ.toLowerCase() : (cat ? `${cat.toLowerCase()} pattern` : 'unusual behavior');
+    return { theme: fallbackTheme, statement: fallbackStatement };
+  };
+
+  const globalNarrative = useMemo(() => {
+    if (!Array.isArray(globalExplain) || globalExplain.length === 0) return null;
+    const themes = [];
+    const seen = new Set();
+    for (const r of globalExplain.slice(0, 12)) {
+      const t = featureTheme(r?.feature).theme;
+      const key = String(t || '').trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      themes.push(key);
+      if (themes.length >= 4) break;
+    }
+    if (themes.length === 0) return null;
+    return { themes, sentence: `High impact drivers → ${themes.join(' + ')}` };
+  }, [globalExplain, catalogByName]);
+
+  const localNarrative = useMemo(() => {
+    if (!localExplain?.success) return null;
+    const rows = Array.isArray(localExplain.local) ? localExplain.local : [];
+    if (rows.length === 0) return null;
+    const method = String(localExplain.method || '');
+    const scored = rows
+      .map((r) => {
+        const value = r?.value;
+        const contrib = method === 'shap' ? Number(r?.shap || 0) : Number(r?.importance || 0);
+        return { feature: String(r?.feature || ''), value, contrib };
+      })
+      .filter((r) => r.feature);
+    const positives = scored.filter((r) => r.contrib > 0).sort((a, b) => b.contrib - a.contrib);
+    const picked = (method === 'shap' && positives.length ? positives : scored.sort((a, b) => Math.abs(b.contrib) - Math.abs(a.contrib))).slice(0, 6);
+
+    const bullets = [];
+    const seen = new Set();
+    const themes = [];
+    for (const p of picked) {
+      const { theme, statement } = featureTheme(p.feature);
+      const key = String(statement || '').trim();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        bullets.push(statement);
+      }
+      if (theme && !themes.includes(theme)) themes.push(theme);
+      if (bullets.length >= 3) break;
+    }
+    if (bullets.length === 0) return null;
+    const meaning = modeInfo.supervised ? 'Likelihood of mule involvement' : 'Behavioral abnormality requiring review';
+    const headline = modeInfo.supervised ? 'Account is risky because:' : 'Account requires review because:';
+    return { meaning, headline, bullets, themes };
+  }, [catalogByName, localExplain, modeInfo.supervised]);
+
   return (
     <Box sx={{ p: 0 }}>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>{error}</Alert>}
@@ -976,6 +1334,26 @@ const ModelLabScreen = () => {
           <Card elevation={0}>
             <CardHeader title="Model Lab" subheader="Experiment → validate → train → explain → govern → register" />
             <CardContent>
+              <Box sx={{ p: 2, mb: 2, borderRadius: 1, border: '1px solid rgba(15,23,42,0.12)', bgcolor: modeInfo.supervised ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.10)' }}>
+                <Typography sx={{ fontWeight: 900, letterSpacing: 1.1 }}>
+                  {modeInfo.supervised ? 'YOU ARE IN SUPERVISED LEARNING MODE' : 'YOU ARE IN BEHAVIORAL / ANOMALY MODE'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  {modeInfo.supervised ? 'Models are validated against an approved outcome label.' : 'Outcome label unavailable. This run focuses on defensible behavioral ranking and monitoring.'}
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1.25 }}>
+                  <Chip label={`Target: ${modeInfo.target}`} />
+                  <Chip label={`Eligible features: ${formatInteger(modeInfo.eligibleCount)}`} />
+                  {modeInfo.supervised ? (
+                    <>
+                      <Chip label={`Positives: ${formatInteger(modeInfo.positives || 0)}`} />
+                      <Chip label={`Positive rate: ${formatPercentFromRatio(modeInfo.positiveRate || 0)}`} />
+                    </>
+                  ) : (
+                    <Chip label="Output: abnormality ranking" />
+                  )}
+                </Stack>
+              </Box>
               <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
                 <Chip label={`Status: ${readiness.label}`} sx={{ bgcolor: readiness.bg, color: readiness.color }} />
                 <Chip label={`Experiment: ${selectedExperimentId || '-'}`} />
@@ -1181,94 +1559,118 @@ const ModelLabScreen = () => {
 
                 <Grid item xs={12} md={9}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
-                    <Grid container spacing={2}>
-                      {filteredFeatures.map((f) => {
-                        const included = (featureSelection.include || []).includes(f.feature_name);
-                        const excluded = (featureSelection.exclude || []).includes(f.feature_name);
-                        const eligible = f.eligible === true;
-                        const impNorm = maxImportance > 0 ? Number(f.importance_score || 0) / maxImportance : 0;
-                        const impLabel = impNorm >= 0.67 ? 'High' : impNorm >= 0.34 ? 'Medium' : 'Low';
-                        const corrLabel = f.correlation_risk === 'HIGH' ? 'High' : 'Not evaluated';
-                        const missing = f.missing_pct != null ? formatPercentFromRatio(f.missing_pct, 1) : '-';
-                        const stable = f.stability != null ? formatProbability(f.stability, 2) : '-';
-                        const leak = f.leakage_risk != null ? formatProbability(f.leakage_risk, 2) : '-';
-                        return (
-                          <Grid item xs={12} sm={6} md={4} lg={3} key={f.feature_name}>
-                            <Card variant="outlined" sx={{ height: '100%', borderColor: excluded ? pwcColors.errorText : included ? pwcColors.primary : !eligible ? '#cbd5e1' : undefined, opacity: !eligible ? 0.85 : 1 }}>
-                              <CardActionArea onClick={() => openFeaturePreview(f.feature_name)} sx={{ height: '100%' }}>
-                                <CardContent>
-                                  <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
-                                    <Box sx={{ minWidth: 0 }}>
-                                      <Typography variant="subtitle2" sx={{ fontWeight: 900 }} noWrap>
-                                        {f.feature_name}
-                                      </Typography>
-                                      <Typography variant="caption" color="text.secondary" noWrap>
-                                        {f.category} · freshness {f.freshness}
-                                      </Typography>
-                                    </Box>
-                                    <Checkbox
-                                      checked={included}
-                                      disabled={!eligible}
-                                      onClick={(e) => { e.stopPropagation(); toggleInclude(f.feature_name); }}
-                                    />
+                    <TableContainer sx={{ maxHeight: 520 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Feature</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Category</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Freshness</TableCell>
+                            <TableCell>Importance</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Correlation</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Nulls</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Stability</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Leakage</TableCell>
+                            <TableCell>Status</TableCell>
+                            <TableCell align="center">Select</TableCell>
+                            <TableCell align="center">Exclude</TableCell>
+                            <TableCell align="center">Preview</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {filteredFeatures.map((f) => {
+                            const included = (featureSelection.include || []).includes(f.feature_name);
+                            const excluded = (featureSelection.exclude || []).includes(f.feature_name);
+                            const eligible = f.eligible === true;
+                            const impNorm = maxImportance > 0 ? Number(f.importance_score || 0) / maxImportance : 0;
+                            const impLabel = impNorm >= 0.67 ? 'High' : impNorm >= 0.34 ? 'Medium' : 'Low';
+                            const corrLabel = f.correlation_risk === 'HIGH' ? 'High' : 'Not evaluated';
+                            const missing = f.missing_pct != null ? formatPercentFromRatio(f.missing_pct, 1) : '-';
+                            const stable = f.stability != null ? formatProbability(f.stability, 2) : '-';
+                            const leak = f.leakage_risk != null ? formatProbability(f.leakage_risk, 2) : '-';
+                            return (
+                              <TableRow
+                                key={f.feature_name}
+                                hover
+                                onClick={() => openFeaturePreview(f.feature_name)}
+                                sx={{ opacity: !eligible ? 0.85 : 1 }}
+                              >
+                                <TableCell>
+                                  <Stack spacing={0.25}>
+                                    <Typography variant="subtitle2" sx={{ fontWeight: 900 }} noWrap>
+                                      {f.feature_name}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" noWrap>
+                                      {f.description}
+                                    </Typography>
                                   </Stack>
-
-                                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1, minHeight: 44, display: '-webkit-box', overflow: 'hidden', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                                    {f.description}
-                                  </Typography>
-
-                                  <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
-                                    <Chip size="small" label={`Importance: ${impLabel}`} color={impLabel === 'High' ? 'primary' : impLabel === 'Medium' ? 'warning' : 'default'} />
-                                    <Chip size="small" label={`Correlation: ${corrLabel}`} color={f.correlation_risk === 'HIGH' ? 'error' : 'default'} />
+                                </TableCell>
+                                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>{f.category || '-'}</TableCell>
+                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{f.freshness || '-'}</TableCell>
+                                <TableCell>
+                                  <Chip size="small" label={impLabel} color={impLabel === 'High' ? 'primary' : impLabel === 'Medium' ? 'warning' : 'default'} />
+                                </TableCell>
+                                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                                  <Chip size="small" label={corrLabel} color={f.correlation_risk === 'HIGH' ? 'error' : 'default'} />
+                                </TableCell>
+                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{missing}</TableCell>
+                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{stable}</TableCell>
+                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{leak}</TableCell>
+                                <TableCell>
+                                  <Stack direction="row" spacing={1} flexWrap="wrap">
                                     {!eligible ? <Chip size="small" variant="outlined" label="Ineligible" /> : null}
+                                    {f.used_in_current_model ? <Chip size="small" color="success" label="Used" /> : null}
                                   </Stack>
-
-                                  <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
-                                    <Chip size="small" variant="outlined" label={`Nulls: ${missing}`} />
-                                    <Chip size="small" variant="outlined" label={`Stability: ${stable}`} />
-                                    <Chip size="small" variant="outlined" label={`Leakage: ${leak}`} />
-                                    {f.used_in_current_model ? <Chip size="small" color="success" label="Used in model" /> : null}
-                                  </Stack>
-
-                                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                                    <Button
-                                      size="small"
-                                      variant={excluded ? 'contained' : 'outlined'}
-                                      onClick={(e) => { e.stopPropagation(); toggleExclude(f.feature_name); }}
-                                      color={excluded ? 'error' : 'inherit'}
-                                    >
-                                      {excluded ? 'Excluded' : 'Exclude'}
-                                    </Button>
-                                  </Stack>
-                                </CardContent>
-                              </CardActionArea>
-                            </Card>
-                          </Grid>
-                        );
-                      })}
-                      {filteredFeatures.length === 0 ? (
-                        <Grid item xs={12}>
-                          <Alert
-                            severity="info"
-                            variant="outlined"
-                            action={
-                              <Stack direction="row" spacing={1}>
-                                {marketFilters.eligible_only ? (
-                                  <Button size="small" onClick={() => setMarketFilters((p) => ({ ...p, eligible_only: false }))}>
-                                    Show all
+                                </TableCell>
+                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                  <Checkbox
+                                    checked={included}
+                                    disabled={!eligible}
+                                    onClick={() => toggleInclude(f.feature_name)}
+                                  />
+                                </TableCell>
+                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                  <Button
+                                    size="small"
+                                    variant={excluded ? 'contained' : 'outlined'}
+                                    onClick={() => toggleExclude(f.feature_name)}
+                                    color={excluded ? 'error' : 'inherit'}
+                                  >
+                                    {excluded ? 'Excluded' : 'Exclude'}
                                   </Button>
-                                ) : null}
-                                <Button size="small" onClick={() => setMarketFilters((p) => ({ ...p, q: '', category: '', risk: '', used_only: false, eligible_only: false }))}>
-                                  Clear filters
-                                </Button>
-                              </Stack>
-                            }
-                          >
-                            No features match the current filters{eligibleFeatures.length ? `. ${formatInteger(eligibleFeatures.length)} features are available; try widening filters.` : '.'}
-                          </Alert>
-                        </Grid>
-                      ) : null}
-                    </Grid>
+                                </TableCell>
+                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                  <Button size="small" variant="text" onClick={() => openFeaturePreview(f.feature_name)}>
+                                    Preview
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    {filteredFeatures.length === 0 ? (
+                      <Alert
+                        severity="info"
+                        variant="outlined"
+                        sx={{ mt: 2 }}
+                        action={
+                          <Stack direction="row" spacing={1}>
+                            {marketFilters.eligible_only ? (
+                              <Button size="small" onClick={() => setMarketFilters((p) => ({ ...p, eligible_only: false }))}>
+                                Show all
+                              </Button>
+                            ) : null}
+                            <Button size="small" onClick={() => setMarketFilters((p) => ({ ...p, q: '', category: '', risk: '', used_only: false, eligible_only: false }))}>
+                              Clear filters
+                            </Button>
+                          </Stack>
+                        }
+                      >
+                        No features match the current filters{eligibleFeatures.length ? `. ${formatInteger(eligibleFeatures.length)} features are available; try widening filters.` : '.'}
+                      </Alert>
+                    ) : null}
                   </Paper>
                 </Grid>
               </Grid>
@@ -1490,8 +1892,13 @@ const ModelLabScreen = () => {
                             }}
                           >
                             <MenuItem value="xgboost">XGBoost</MenuItem>
+                            <MenuItem value="lightgbm">LightGBM</MenuItem>
+                            <MenuItem value="logistic">Logistic Regression</MenuItem>
                             <MenuItem value="randomforest">Random Forest</MenuItem>
                             <MenuItem value="isolation_forest">Isolation Forest</MenuItem>
+                            <MenuItem value="kmeans">KMeans (Anomaly)</MenuItem>
+                            <MenuItem value="dbscan">DBSCAN (Anomaly)</MenuItem>
+                            <MenuItem value="pca_autoencoder">Autoencoder (PCA)</MenuItem>
                           </Select>
                         </FormControl>
 
@@ -1699,12 +2106,74 @@ const ModelLabScreen = () => {
 
         <Grid item xs={12}>
           <Card elevation={0}>
+            <CardHeader title="Training Leaderboard" subheader="Best performing trained models (decision view)" />
+            <CardContent>
+              {leaderboard.rows.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">Train at least one model to populate the leaderboard.</Typography>
+              ) : (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        {['Champion', 'Model', 'Algo', 'AUC', 'Recall', 'Precision', 'F1', 'Trained'].map((h) => (
+                          <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {leaderboard.rows.map((m) => {
+                        const isChampion = String(m.model_version) === String(leaderboard.champion);
+                        return (
+                          <TableRow
+                            key={m.model_version}
+                            hover
+                            onClick={() => {
+                              setCompare((p) => ({ ...p, champion_model: m.model_version }));
+                              setApproval((p) => ({ ...p, model_version: m.model_version }));
+                            }}
+                            sx={{ cursor: 'pointer', bgcolor: isChampion ? 'rgba(34,197,94,0.08)' : undefined }}
+                          >
+                            <TableCell>{isChampion ? '★' : ''}</TableCell>
+                            <TableCell sx={{ fontFamily: 'monospace', fontWeight: 800 }}>{m.model_version}</TableCell>
+                            <TableCell>{m.algorithm || '—'}</TableCell>
+                            <TableCell>{Number.isFinite(m.auc) ? m.auc.toFixed(3) : '—'}</TableCell>
+                            <TableCell>{Number.isFinite(m.recall) ? m.recall.toFixed(3) : '—'}</TableCell>
+                            <TableCell>{Number.isFinite(m.precision) ? m.precision.toFixed(3) : '—'}</TableCell>
+                            <TableCell>{Number.isFinite(m.f1) ? m.f1.toFixed(3) : '—'}</TableCell>
+                            <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{String(m.trained_at || '').slice(0, 19) || '—'}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card elevation={0}>
             <CardHeader title="Performance & Tradeoffs" subheader="Suppression vs event loss, thresholds, confusion matrix, PR curve" />
             <CardContent>
               {!tradeoffs ? (
                 <Typography variant="body2" color="text.secondary">Train a model to populate performance tradeoffs.</Typography>
               ) : (
-                <Grid container spacing={2}>
+                <>
+                  {businessThreshold && (
+                    <Box sx={{ p: 2, mb: 2, borderRadius: 1, border: '1px solid rgba(15,23,42,0.12)', bgcolor: 'rgba(15,23,42,0.02)' }}>
+                      <Typography sx={{ fontWeight: 900, mb: 0.75 }}>Business impact at selected threshold</Typography>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        <Chip label={`Threshold: ${Number(businessThreshold.threshold).toFixed(2)}`} />
+                        <Chip label={`Alerts: ${formatInteger(businessThreshold.alerts)}`} />
+                        <Chip label={`Alerts ↓: ${formatPercentFromRatio(businessThreshold.suppressionPct || 0)}`} />
+                        <Chip label={`Missed STR: ${formatInteger(businessThreshold.missed)}`} />
+                        <Chip label={`Event loss: ${formatPercentFromRatio(businessThreshold.missedRate || 0)}`} />
+                      </Stack>
+                    </Box>
+                  )}
+
+                  <Grid container spacing={2}>
                   <Grid item xs={12} md={4}>
                     <Card elevation={0}>
                       <CardHeader title="Confusion Matrix" />
@@ -1776,7 +2245,8 @@ const ModelLabScreen = () => {
                       </CardContent>
                     </Card>
                   </Grid>
-                </Grid>
+                  </Grid>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1794,22 +2264,30 @@ const ModelLabScreen = () => {
                       {globalExplain.length === 0 ? (
                         <Typography variant="body2" color="text.secondary">Train a model to populate global drivers.</Typography>
                       ) : (
-                        <Table size="small">
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Feature</TableCell>
-                              <TableCell align="right">Importance</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {globalExplain.slice(0, 15).map((r) => (
-                              <TableRow key={r.feature}>
-                                <TableCell>{r.feature}</TableCell>
-                                <TableCell align="right">{Number(r.importance || 0).toFixed(4)}</TableCell>
+                        <>
+                          {globalNarrative && (
+                            <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
+                              <Typography variant="body2" fontWeight={900}>Narrative</Typography>
+                              <Typography variant="body2">{globalNarrative.sentence}</Typography>
+                            </Alert>
+                          )}
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Feature</TableCell>
+                                <TableCell align="right">Importance</TableCell>
                               </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                            </TableHead>
+                            <TableBody>
+                              {globalExplain.slice(0, 15).map((r) => (
+                                <TableRow key={r.feature}>
+                                  <TableCell>{r.feature}</TableCell>
+                                  <TableCell align="right">{Number(r.importance || 0).toFixed(4)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </>
                       )}
                     </CardContent>
                   </Card>
@@ -1823,7 +2301,25 @@ const ModelLabScreen = () => {
                         <Button variant="outlined" onClick={runLocalExplain} disabled={loading}>Explain Account</Button>
                         {localExplain?.success && (
                           <Box>
-                            <Chip label={`Score: ${Number(localExplain.score || 0).toFixed(4)}`} />
+                            {localNarrative && (
+                              <Box sx={{ p: 1.5, borderRadius: 1, border: '1px solid rgba(15,23,42,0.12)', bgcolor: 'rgba(15,23,42,0.02)', mb: 2 }}>
+                                <Typography sx={{ fontWeight: 900 }}>{localNarrative.meaning}</Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{localNarrative.headline}</Typography>
+                                <Box sx={{ mt: 1 }}>
+                                  {localNarrative.bullets.map((b) => (
+                                    <Typography key={b} variant="body2">+ {b}</Typography>
+                                  ))}
+                                </Box>
+                              </Box>
+                            )}
+
+                            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
+                              <Chip label={`Score: ${Number(localExplain.score || 0).toFixed(4)}`} />
+                              <Chip label={`Method: ${String(localExplain.method || '').toUpperCase()}`} />
+                              {(localExplain.mule_types || []).slice(0, 3).map((t) => (
+                                <Chip key={t} label={`Type: ${String(t).replaceAll('_', ' ')}`} />
+                              ))}
+                            </Stack>
                             <Table size="small" sx={{ mt: 2 }}>
                               <TableHead>
                                 <TableRow>
@@ -2051,6 +2547,78 @@ const ModelLabScreen = () => {
           </Card>
         </Grid>
       </Grid>
+
+      <Dialog open={autoPickOpen} onClose={() => setAutoPickOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 900 }}>Auto Pick Optimal Set</DialogTitle>
+        <DialogContent dividers>
+          {!autoPickReport ? (
+            <Typography variant="body2" color="text.secondary">No selection report available.</Typography>
+          ) : (
+            <Stack spacing={2}>
+              <Box sx={{ p: 1.5, borderRadius: 1, border: '1px solid rgba(15,23,42,0.12)', bgcolor: autoPickReport.supervised ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.10)' }}>
+                <Typography sx={{ fontWeight: 900 }}>
+                  {autoPickReport.supervised ? 'SUPERVISED SELECTION STRATEGY' : 'BEHAVIORAL SELECTION STRATEGY'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  {autoPickReport.supervised
+                    ? 'Optimizes for clean, stable signals and predictive strength while protecting typology coverage.'
+                    : 'Optimizes for stable, high-contrast behavioral signals while protecting typology coverage.'}
+                </Typography>
+              </Box>
+
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Chip label={`Available: ${formatInteger(autoPickReport.total_available)}`} />
+                <Chip label={`Ineligible: ${formatInteger(autoPickReport.ineligible)}`} />
+                <Chip label={`Excluded (manual): ${formatInteger(autoPickReport.excluded_by_user)}`} />
+                <Chip label={`Candidates: ${formatInteger(autoPickReport.candidates)}`} />
+                <Chip label={`Picked: ${formatInteger(autoPickReport.picked)} / ${formatInteger(autoPickReport.max_features)}`} />
+                <Chip label={`Typology covered: ${formatInteger(autoPickReport.typology_covered)}`} />
+              </Stack>
+
+              <Box>
+                <Typography sx={{ fontWeight: 900, mb: 0.75 }}>Selection checks</Typography>
+                <Stack spacing={1}>
+                  <Paper variant="outlined" sx={{ p: 1.25 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                      Remove leakage
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {autoPickReport.rules.remove_leakage ? 'ENFORCED' : 'WARN ONLY'} · threshold {Number(autoPickReport.rules.leakage_threshold).toFixed(2)} · flagged {formatInteger(autoPickReport.leakage_flagged)}
+                    </Typography>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 1.25 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                      Remove unstable features
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {autoPickReport.rules.remove_unstable ? 'ENFORCED' : 'WARN ONLY'} · stability threshold {Number(autoPickReport.rules.stability_threshold).toFixed(2)} · flagged {formatInteger(autoPickReport.unstable_flagged)}
+                    </Typography>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 1.25 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                      Reduce redundancy
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Penalize known correlation risk · target correlation threshold {Number(autoPickReport.rules.correlation_threshold).toFixed(2)} · flagged {formatInteger(autoPickReport.correlation_flagged)}
+                    </Typography>
+                  </Paper>
+                  <Paper variant="outlined" sx={{ p: 1.25 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                      Preserve typology diversity
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Seed from top feature per typology first, then fill by score (importance + IV/rarity adjustments).
+                    </Typography>
+                  </Paper>
+                </Stack>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAutoPickOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

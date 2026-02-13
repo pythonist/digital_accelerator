@@ -10,6 +10,22 @@ api.interceptors.request.use((config) => {
   config.headers['X-Environment-ID'] = envId;
   return config;
 });
+api.interceptors.response.use((response) => {
+  if (typeof response.data === "string") {
+    try {
+      const sanitized = response.data
+        .replace(/:\s*Nan\b/g, ":null")
+        .replace(/:\s*Infinity\b/g, ":null")
+        .replace(/:\s*-\s*Infinity\b/g, ":null");
+
+      response.data = JSON.parse(sanitized);
+    } catch (e) {
+      // ignore parse error
+    }
+  }
+
+  return response;
+});
 
 const muleApi = {
   async uploadData(files, envId = null) {
@@ -116,10 +132,31 @@ const muleApi = {
     const res = await api.get('/api/v2/mule/risk/signal-preview');
     return res.data;
   },
+
+  async getTargetSummary(targetName = 'is_mule') {
+    const res = await api.get('/api/v2/mule/targets/summary', { params: { target_name: targetName } });
+    return res.data;
+  },
+
+  async getTypologyMapping() {
+    const res = await api.get('/api/v2/mule/typology/mapping');
+    return res.data;
+  },
+  async getFeatureOrigin(featureName) {
+    const res = await api.get('/api/v2/mule/features/origin', { params: { feature: featureName } });
+    return res.data;
+  },
+  async getFeatureExplanation(featureName) {
+    const res = await api.get('/api/v2/mule/features/explanation', { params: { feature: featureName } });
+    return res.data;
+  },
+
   async engineerFeatures(payload = {}) {
     const res = await api.post('/api/v2/mule/features/engineer', payload);
     return res.data;
   },
+
+
 
   async getFeatureEngineeringStatus(jobId) {
     const params = jobId ? { job_id: jobId } : undefined;
@@ -149,20 +186,20 @@ const muleApi = {
     const res = await api.get('/api/v2/mule/runs/details', { params: { run_id } });
     return res.data;
   },
-  async getFeaturesCatalog() {
-    const res = await api.get('/api/v2/mule/features/catalog');
+  async getFeaturesCatalog(params = {}) {
+    const res = await api.get('/api/v2/mule/features/catalog', { params });
     return res.data;
   },
-  async getFeatureProfile(feature, run_id) {
-    const res = await api.get('/api/v2/mule/features/profile', { params: { feature, run_id } });
+  async getFeatureProfile(feature, run_id, target_name) {
+    const res = await api.get('/api/v2/mule/features/profile', { params: { feature, run_id, target_name } });
     return res.data;
   },
   async getFeatureDrift(feature) {
     const res = await api.get('/api/v2/mule/features/drift', { params: { feature } });
     return res.data;
   },
-  async getFeatureLeakage(feature) {
-    const res = await api.get('/api/v2/mule/features/leakage', { params: { feature } });
+  async getFeatureLeakage(feature, target_name) {
+    const res = await api.get('/api/v2/mule/features/leakage', { params: { feature, target_name } });
     return res.data;
   },
   async compareFeatures(feature, left_run, right_run) {
@@ -175,6 +212,18 @@ const muleApi = {
   },
   async getFeatureLineage(feature) {
     const res = await api.get('/api/v2/mule/features/lineage', { params: { feature } });
+    return res.data;
+  },
+  async getFeatureCorrelations(feature, limit = 10) {
+    const res = await api.get('/api/v2/mule/features/correlations', { params: { feature, limit } });
+    return res.data;
+  },
+  async getFeatureGovernanceHistory(feature, limit = 50) {
+    const res = await api.get('/api/v2/mule/features/governance/history', { params: { feature, limit } });
+    return res.data;
+  },
+  async getFeatureExtremes(feature, limit = 20) {
+    const res = await api.get('/api/v2/mule/features/extremes', { params: { feature, limit } });
     return res.data;
   },
   async createExperiment(payload = {}) {

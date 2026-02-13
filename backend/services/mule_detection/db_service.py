@@ -6,6 +6,17 @@ import duckdb
 
 _schema_lock = threading.Lock()
 _schema_ensured = set()
+_connect_locks = {}
+_connect_locks_guard = threading.Lock()
+
+
+def _get_connect_lock(db_key: str) -> threading.Lock:
+    with _connect_locks_guard:
+        lock = _connect_locks.get(db_key)
+        if lock is None:
+            lock = threading.Lock()
+            _connect_locks[db_key] = lock
+        return lock
 
 class MuleDetectionDBService:
     def __init__(self, base_env_path: str = "data/environments"):
@@ -34,7 +45,8 @@ class MuleDetectionDBService:
         with _schema_lock:
             if db_key in _schema_ensured:
                 return
-            conn = duckdb.connect(str(db_path))
+            with _get_connect_lock(db_key):
+                conn = duckdb.connect(str(db_path))
             try:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS mule_transactions_raw (
@@ -122,6 +134,56 @@ class MuleDetectionDBService:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_target_governance (
+                        target_name TEXT,
+                        environment_id TEXT,
+                        description TEXT,
+                        source_system TEXT,
+                        approved_by TEXT,
+                        owner TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_typology_registry (
+                        typology TEXT,
+                        environment_id TEXT,
+                        description TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS mule_feature_metadata (
+                        feature_name TEXT,
+                        environment_id TEXT,
+                        typology TEXT,
+                        business_description TEXT,
+                        expected_risk_direction TEXT,
+                        owner TEXT,
+                        window_spec TEXT,
+                        data_source TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                for col, dtype in [
+                    ("window_spec", "TEXT"),
+                    ("entity_level", "TEXT"),
+                    ("aggregation", "TEXT"),
+                    ("direction", "TEXT"),
+                    ("transformation_sql", "TEXT"),
+                    ("origin_module", "TEXT"),
+                    ("built_by", "TEXT"),
+                    ("code_location", "TEXT"),
+                ]:
+                    try:
+                        conn.execute(f"ALTER TABLE mule_feature_metadata ADD COLUMN {col} {dtype}")
+                    except Exception:
+                        pass
+                try:
+                    conn.execute('UPDATE mule_feature_metadata SET window_spec = "window" WHERE window_spec IS NULL')
+                except Exception:
+                    pass
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS mule_feature_profiles (
                         run_id TEXT,
@@ -342,6 +404,24 @@ class MuleDetectionDBService:
                 conn.close()
 
             _schema_ensured.add(db_key)
+
+    def connect(self, env_id: str, read_only: bool = False):
+        paths = self.init_env_structure(env_id)
+        db_key = str(paths["duckdb"])
+        last_err = None
+        for attempt in range(12):
+            with _get_connect_lock(db_key):
+                try:
+                    conn = duckdb.connect(str(paths["duckdb"]), read_only=bool(read_only))
+                    return conn, paths
+                except Exception as e:
+                    last_err = e
+            msg = str(last_err or "")
+            if "being used by another process" in msg or "Cannot open file" in msg:
+                time.sleep(min(0.75, 0.05 * (attempt + 1) ** 2))
+                continue
+            raise last_err
+        raise last_err
 
 _svc = None
 

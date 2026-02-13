@@ -1,6 +1,8 @@
 import json
+import time
 import uuid
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 import hashlib
 import pickle
 from pathlib import Path
@@ -22,6 +24,8 @@ from services.mule_detection.feature_workbench_service import FeatureWorkbenchSe
 from services.mule_detection.model_workbench_service import ModelWorkbenchService
 from services.mule_detection.mule_inference_service import MuleInferenceService
 from services.mule_detection.explanation_provider import ExplanationProvider
+from services.mule_detection.target_service import TargetService
+from services.mule_detection.feature_origin_service import FeatureOriginService
 from services.mule_detection.db_service import get_md_db_service
 
 platform_bp = Blueprint("mule_platform", __name__)
@@ -38,8 +42,10 @@ def _env_id() -> str:
 
 
 def _conn(env_id: str):
-    paths = md_db.init_env_structure(env_id)
-    return duckdb.connect(str(paths["duckdb"])), paths
+    return md_db.connect(env_id)
+
+def _conn_ro(env_id: str):
+    return md_db.connect(env_id)
 
 
 def _hash_jsonable(obj) -> str:
@@ -53,8 +59,10 @@ def _hash_jsonable(obj) -> str:
 def _to_jsonable(obj):
     if obj is None:
         return None
-    if isinstance(obj, (str, int, float, bool)):
+    if isinstance(obj, (str, int, bool)):
         return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
     if isinstance(obj, dict):
         return {str(k): _to_jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set)):
@@ -62,7 +70,8 @@ def _to_jsonable(obj):
     if isinstance(obj, (np.integer,)):
         return int(obj)
     if isinstance(obj, (np.floating,)):
-        return float(obj)
+        v = float(obj)
+        return v if math.isfinite(v) else None
     if isinstance(obj, (np.bool_,)):
         return bool(obj)
     if isinstance(obj, np.ndarray):
@@ -167,6 +176,14 @@ def get_last_run():
     if not last:
         return jsonify({"success": True, "has_results": False})
     return jsonify({"success": True, "has_results": True, **last})
+
+
+@platform_bp.route("/targets/summary", methods=["GET"])
+def targets_summary():
+    env_id = _env_id()
+    target_name = request.args.get("target_name") or "is_mule"
+    svc = TargetService(env_id)
+    return jsonify(svc.target_summary(target_name=target_name))
 
 
 def _load_tx_acc(env_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -808,7 +825,16 @@ def engineer_features():
     if not ok:
         return jsonify({"success": False, "error": msg}), 400
     payload = request.get_json(silent=True) or {}
+    mode = payload.get("mode") or payload.get("run_type") or "run"
     config = payload.get("config") if isinstance(payload.get("config"), dict) else payload
+    if isinstance(config, dict):
+        config = {**config, "run_type": mode}
+    persist_payload = {
+        "mode": mode,
+        "config": config,
+        "custom_feature": payload.get("custom_feature"),
+        "feature_metadata": payload.get("feature_metadata"),
+    }
     job_id = str(uuid.uuid4())
     conn, _paths = _conn(env_id)
     try:
@@ -826,7 +852,7 @@ def engineer_features():
                 0,
                 None,
                 0.0,
-                json.dumps({"config": config}, default=str),
+                json.dumps(persist_payload, default=str),
                 None,
                 None,
                 env_id,
@@ -844,7 +870,10 @@ def engineer_features_status():
     env_id = _env_id()
     job_id = request.args.get("job_id")
     _ensure_env_feature_worker(env_id)
-    conn, _paths = _conn(env_id)
+    try:
+        conn, _paths = _conn_ro(env_id)
+    except Exception as e:
+        return jsonify({"success": True, "state": "busy", "job_id": job_id, "error": str(e)}), 200
     try:
         def _row_to_status(row, queue_position: int | None = None):
             return {
@@ -1019,9 +1048,237 @@ def _update_job(env_id: str, job_id: str, state: str, step: str, message: str, p
         conn.close()
 
 
+def _safe_feature_name(name: str) -> str:
+    s = str(name or "").strip()
+    out = []
+    for ch in s:
+        if ch.isalnum() or ch == "_":
+            out.append(ch.lower())
+        elif ch in [" ", "-", "."]:
+            out.append("_")
+    cleaned = "".join(out).strip("_")
+    return cleaned or "custom_feature"
+
+
+def _parse_window_days(spec: dict) -> int:
+    v = spec.get("window_days")
+    if v is not None:
+        try:
+            n = int(v)
+            return max(1, min(3650, n))
+        except Exception:
+            pass
+    w = str(spec.get("window") or "").strip().lower()
+    if w.endswith("d"):
+        try:
+            return max(1, min(3650, int(w[:-1])))
+        except Exception:
+            return 30
+    if w in ["7", "7d"]:
+        return 7
+    if w in ["30", "30d"]:
+        return 30
+    if w in ["90", "90d"]:
+        return 90
+    return 30
+
+
+def _compute_custom_feature(tx: pd.DataFrame, acc: pd.DataFrame, spec: dict) -> tuple[str, pd.DataFrame]:
+    feature_name = _safe_feature_name(spec.get("feature_name"))
+    agg = str(spec.get("aggregation") or "sum").strip().lower()
+    direction = str(spec.get("direction") or "both").strip().lower()
+    window_days = _parse_window_days(spec)
+
+    df = tx.copy()
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    ref_ts = df["timestamp"].max() if "timestamp" in df.columns and len(df) else None
+    if ref_ts is None or pd.isna(ref_ts):
+        ref_ts = datetime.now()
+    start_ts = pd.Timestamp(ref_ts) - pd.Timedelta(days=int(window_days))
+    if "timestamp" in df.columns:
+        df = df[df["timestamp"] >= start_ts]
+
+    if direction in ["inbound", "outbound"]:
+        if "direction" in df.columns:
+            df = df[df["direction"].astype(str).str.lower() == direction]
+        else:
+            df = df.iloc[0:0]
+
+    account_ids = []
+    if acc is not None and len(acc) and "account_id" in acc.columns:
+        account_ids = acc["account_id"].dropna().astype(str).unique().tolist()
+    elif df is not None and len(df) and "account_id" in df.columns:
+        account_ids = df["account_id"].dropna().astype(str).unique().tolist()
+
+    out = pd.DataFrame({"account_id": account_ids})
+    if len(out) == 0:
+        return feature_name, pd.DataFrame({"account_id": [], feature_name: []})
+
+    if agg == "count":
+        g = df.groupby("account_id").size()
+        out[feature_name] = out["account_id"].map(g).fillna(0).astype(float)
+        return feature_name, out
+
+    if agg == "sum":
+        s = pd.to_numeric(df.get("amount"), errors="coerce").fillna(0.0)
+        g = s.groupby(df["account_id"]).sum()
+        out[feature_name] = out["account_id"].map(g).fillna(0.0).astype(float)
+        return feature_name, out
+
+    if agg == "distinct_counterparty":
+        if "counterparty_account" not in df.columns:
+            out[feature_name] = 0.0
+            return feature_name, out
+        g = df.groupby("account_id")["counterparty_account"].nunique(dropna=True)
+        out[feature_name] = out["account_id"].map(g).fillna(0).astype(float)
+        return feature_name, out
+
+    if agg == "out_in_ratio":
+        df2 = tx.copy()
+        if "timestamp" in df2.columns:
+            df2["timestamp"] = pd.to_datetime(df2["timestamp"], errors="coerce")
+            df2 = df2[df2["timestamp"] >= start_ts]
+        dir_norm = df2["direction"].astype(str).str.lower() if "direction" in df2.columns else pd.Series([""] * len(df2))
+        amt = pd.to_numeric(df2.get("amount"), errors="coerce").fillna(0.0)
+        out_sum = amt[dir_norm == "outbound"].groupby(df2["account_id"][dir_norm == "outbound"]).sum()
+        in_sum = amt[dir_norm == "inbound"].groupby(df2["account_id"][dir_norm == "inbound"]).sum()
+        eps = 1e-9
+        out[feature_name] = out["account_id"].map(out_sum).fillna(0.0) / (out["account_id"].map(in_sum).fillna(0.0) + eps)
+        out[feature_name] = out[feature_name].astype(float)
+        return feature_name, out
+
+    if agg == "avg_time_gap_seconds":
+        if "timestamp" not in df.columns or len(df) == 0:
+            out[feature_name] = None
+            return feature_name, out
+        vals = {}
+        for aid, g in df.sort_values("timestamp").groupby("account_id"):
+            ts = pd.to_datetime(g["timestamp"], errors="coerce").dropna()
+            if len(ts) < 2:
+                vals[str(aid)] = None
+                continue
+            diffs = ts.diff().dt.total_seconds().dropna()
+            vals[str(aid)] = float(diffs.mean()) if len(diffs) else None
+        out[feature_name] = out["account_id"].map(vals)
+        return feature_name, out
+
+    out[feature_name] = None
+    return feature_name, out
+
+
+def _ensure_feature_column(conn: duckdb.DuckDBPyConnection, feature_name: str) -> None:
+    cols = conn.execute("PRAGMA table_info('mule_account_features')").df()
+    if len(cols) and feature_name in cols["name"].tolist():
+        return
+    conn.execute(f'ALTER TABLE mule_account_features ADD COLUMN "{feature_name}" DOUBLE')
+
+
+def _upsert_custom_feature(conn: duckdb.DuckDBPyConnection, env_id: str, feature_name: str, values_df: pd.DataFrame) -> None:
+    if values_df is None or len(values_df) == 0:
+        return
+    values_df = values_df.copy()
+    values_df["account_id"] = values_df["account_id"].astype(str)
+
+    conn.register("feat_ids", values_df[["account_id"]].drop_duplicates())
+    conn.execute(
+        """
+        INSERT INTO mule_account_features(account_id, environment_id, computed_at)
+        SELECT feat_ids.account_id, ?, CURRENT_TIMESTAMP
+        FROM feat_ids
+        WHERE NOT EXISTS (
+            SELECT 1 FROM mule_account_features f WHERE f.environment_id = ? AND f.account_id = feat_ids.account_id
+        )
+        """,
+        [env_id, env_id],
+    )
+
+    _ensure_feature_column(conn, feature_name)
+    conn.register("feat_update", values_df[["account_id", feature_name]])
+    conn.execute(
+        f"""
+        UPDATE mule_account_features AS f
+        SET "{feature_name}" = feat_update."{feature_name}", computed_at = CURRENT_TIMESTAMP
+        FROM feat_update
+        WHERE f.environment_id = ? AND f.account_id = feat_update.account_id
+        """,
+        [env_id],
+    )
+
+
+def _persist_feature_metadata(conn: duckdb.DuckDBPyConnection, env_id: str, feature_name: str, meta: dict | None) -> None:
+    if not isinstance(meta, dict):
+        return
+    typology = meta.get("typology")
+    typology_description = meta.get("typology_description")
+    business_description = meta.get("business_description")
+    expected_risk_direction = meta.get("expected_risk_direction")
+    owner = meta.get("owner")
+    window = meta.get("window")
+    data_source = meta.get("data_source")
+    entity_level = meta.get("entity_level")
+    aggregation = meta.get("aggregation")
+    direction = meta.get("direction")
+    transformation_sql = meta.get("transformation_sql")
+    origin_module = meta.get("origin_module")
+    built_by = meta.get("built_by")
+    code_location = meta.get("code_location")
+
+    if typology and str(typology).strip():
+        conn.execute(
+            """
+            INSERT INTO mule_typology_registry(typology, environment_id, description)
+            VALUES (?, ?, ?)
+            """,
+            [str(typology), env_id, str(typology_description) if typology_description is not None else None],
+        )
+
+    cols_df = conn.execute("PRAGMA table_info('mule_feature_metadata')").df()
+    col_set = set(cols_df["name"].tolist()) if len(cols_df) else set()
+
+    window_col = "window_spec" if "window_spec" in col_set else ('"window"' if "window" in col_set else None)
+    cols = ["feature_name", "environment_id", "typology", "business_description", "expected_risk_direction", "owner"]
+    if window_col:
+        cols.append(window_col)
+    cols += ["data_source"]
+    vals = [
+        str(feature_name),
+        env_id,
+        str(typology) if typology is not None else None,
+        str(business_description) if business_description is not None else None,
+        str(expected_risk_direction) if expected_risk_direction is not None else None,
+        str(owner) if owner is not None else None,
+        str(data_source) if data_source is not None else None,
+    ]
+    if window_col:
+        vals.insert(6, str(window) if window is not None else None)
+
+    extra = [
+        ("entity_level", entity_level),
+        ("aggregation", aggregation),
+        ("direction", direction),
+        ("transformation_sql", transformation_sql),
+        ("origin_module", origin_module),
+        ("built_by", built_by),
+        ("code_location", code_location),
+    ]
+    for c, v in extra:
+        if c in col_set:
+            cols.append(c)
+            vals.append(str(v) if v is not None else None)
+
+    placeholders = ", ".join(["?"] * len(cols))
+    cols_sql = ", ".join(cols)
+    conn.execute(f"INSERT INTO mule_feature_metadata({cols_sql}) VALUES ({placeholders})", vals)
+
+
 def _feature_worker_loop(env_id: str):
     while True:
-        conn, _paths = _conn(env_id)
+        try:
+            conn, _paths = _conn(env_id)
+        except Exception:
+            time.sleep(0.25)
+            continue
         try:
             row = conn.execute(
                 """
@@ -1041,12 +1298,130 @@ def _feature_worker_loop(env_id: str):
         payload_json = row[1]
         payload = json.loads(payload_json) if payload_json else {}
         config = payload.get("config") or {}
+        mode = payload.get("mode") or (config.get("run_type") if isinstance(config, dict) else None) or "run"
+        custom_feature = payload.get("custom_feature") if isinstance(payload, dict) else None
+        feature_metadata = payload.get("feature_metadata") if isinstance(payload, dict) else None
+        triggered_by = None
+        if isinstance(config, dict):
+            triggered_by = config.get("triggered_by") or config.get("owner")
+            config = {**config, "run_type": mode, "triggered_by": triggered_by}
+        logs = []
+        input_version = None
+        conn0, _paths0 = _conn(env_id)
+        try:
+            input_version = _get_data_version(conn0, env_id)
+        finally:
+            conn0.close()
 
         try:
+            if isinstance(custom_feature, dict) and (mode in ["custom_feature", "feature_build", "build"]):
+                safe_name = _safe_feature_name(custom_feature.get("feature_name"))
+                logs.append({"ts": datetime.now().isoformat(), "step": "load_data", "message": "Loading transactions/accounts"})
+                _update_job(env_id, job_id, "running", "load_data", "Loading transactions/accounts")
+                tx, acc = _load_tx_acc(env_id)
+                total_accounts = int(acc["account_id"].nunique()) if acc is not None and len(acc) and "account_id" in acc.columns else int(tx["account_id"].nunique()) if len(tx) else 0
+                started = datetime.now()
+                logs.append({"ts": datetime.now().isoformat(), "step": "persist_metadata", "message": "Persisting feature metadata"})
+                _update_job(env_id, job_id, "running", "persist_metadata", "Persisting feature metadata", processed=0, total=total_accounts)
+                connm, _pathsm = _conn(env_id)
+                try:
+                    _persist_feature_metadata(connm, env_id, safe_name, feature_metadata)
+                finally:
+                    connm.close()
+
+                logs.append({"ts": datetime.now().isoformat(), "step": "compute_feature", "message": f"Computing feature {safe_name}"})
+                _update_job(env_id, job_id, "running", "compute_feature", f"Computing feature {safe_name}", processed=0, total=total_accounts)
+                feature_name, values_df = _compute_custom_feature(tx, acc, {**custom_feature, "feature_name": safe_name})
+                conn2, _paths2 = _conn(env_id)
+                try:
+                    _upsert_custom_feature(conn2, env_id, feature_name, values_df)
+                    data_version = _get_data_version(conn2, env_id)
+                    duration_seconds = int((datetime.now() - started).total_seconds())
+                    summary = {
+                        "accounts": int(len(values_df)),
+                        "features": 1,
+                        "duration_seconds": duration_seconds,
+                        "failures": 0,
+                        "status": "success",
+                        "run_type": mode,
+                        "triggered_by": triggered_by,
+                        "input_version": input_version,
+                        "output_version": data_version,
+                        "custom_feature": feature_name,
+                    }
+                    meta = _persist_module_run(
+                        conn2,
+                        env_id,
+                        "feature_engineering",
+                        data_version=data_version,
+                        config_version=_hash_jsonable(config or {}),
+                        summary=summary,
+                        result={
+                            "config": config,
+                            "job_id": job_id,
+                            "run_type": mode,
+                            "triggered_by": triggered_by,
+                            "input_version": input_version,
+                            "output_version": data_version,
+                            "custom_feature": feature_name,
+                            "logs": logs,
+                        },
+                    )
+                    run_id = meta.get("run_id")
+                    if run_id and feature_name in values_df.columns:
+                        s = pd.to_numeric(values_df[feature_name], errors="coerce")
+                        missing_pct = float(s.isna().mean()) if len(values_df) else 0.0
+                        sn = s.dropna()
+                        if len(sn):
+                            conn2.execute(
+                                """
+                                INSERT INTO mule_feature_profiles(run_id, feature_name, environment_id, missing_pct, mean, std, min, p25, p50, p75, max)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                [
+                                    run_id,
+                                    feature_name,
+                                    env_id,
+                                    missing_pct,
+                                    float(sn.mean()),
+                                    float(sn.std() or 0.0),
+                                    float(sn.min()),
+                                    float(sn.quantile(0.25)),
+                                    float(sn.quantile(0.50)),
+                                    float(sn.quantile(0.75)),
+                                    float(sn.max()),
+                                ],
+                            )
+                            counts, edges = np.histogram(sn, bins=10)
+                            for i in range(len(counts)):
+                                conn2.execute(
+                                    """
+                                    INSERT INTO mule_feature_bins(run_id, feature_name, environment_id, bin_start, bin_end, count)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                    """,
+                                    [run_id, feature_name, env_id, float(edges[i]), float(edges[i + 1]), int(counts[i])],
+                                )
+                finally:
+                    conn2.close()
+
+                _update_job(
+                    env_id,
+                    job_id,
+                    "completed",
+                    "completed",
+                    "Completed",
+                    processed=int(total_accounts),
+                    total=int(total_accounts),
+                    result={"accounts": int(total_accounts), "features": 1, "run_id": meta.get("run_id") if "meta" in locals() else None, "dataset_version": data_version, "feature_name": feature_name},
+                )
+                continue
+
+            logs.append({"ts": datetime.now().isoformat(), "step": "load_data", "message": "Loading transactions/accounts"})
             _update_job(env_id, job_id, "running", "load_data", "Loading transactions/accounts")
             tx, acc = _load_tx_acc(env_id)
             started = datetime.now()
             total_accounts = int(tx["account_id"].nunique()) if len(tx) and "account_id" in tx.columns else 0
+            logs.append({"ts": datetime.now().isoformat(), "step": "engineer_features", "message": f"Engineering features 0/{total_accounts}"})
             _update_job(env_id, job_id, "running", "engineer_features", f"Engineering features 0/{total_accounts}", processed=0, total=total_accounts)
             fe = FeatureEngineer()
 
@@ -1055,13 +1430,24 @@ def _feature_worker_loop(env_id: str):
                 _update_job(env_id, job_id, "running", "engineer_features", f"Engineering features {done}/{total} · {elapsed}s", processed=int(done), total=int(total))
 
             features_df = fe.engineer_all_features(tx, acc, progress_cb=_progress)
+            logs.append({"ts": datetime.now().isoformat(), "step": "persist", "message": "Persisting features to DuckDB"})
             _update_job(env_id, job_id, "running", "persist", "Persisting features to DuckDB")
             conn2, _paths2 = _conn(env_id)
             try:
                 _persist_features(conn2, env_id, features_df)
                 data_version = _get_data_version(conn2, env_id)
                 duration_seconds = int((datetime.now() - started).total_seconds())
-                summary = {"accounts": int(len(features_df)), "features": int(len(features_df.columns)), "duration_seconds": duration_seconds, "failures": 0}
+                summary = {
+                    "accounts": int(len(features_df)),
+                    "features": int(len(features_df.columns)),
+                    "duration_seconds": duration_seconds,
+                    "failures": 0,
+                    "status": "success",
+                    "run_type": mode,
+                    "triggered_by": triggered_by,
+                    "input_version": input_version,
+                    "output_version": data_version,
+                }
                 meta = _persist_module_run(
                     conn2,
                     env_id,
@@ -1069,7 +1455,15 @@ def _feature_worker_loop(env_id: str):
                     data_version=data_version,
                     config_version=_hash_jsonable(config or {}),
                     summary=summary,
-                    result={"config": config, "job_id": job_id},
+                    result={
+                        "config": config,
+                        "job_id": job_id,
+                        "run_type": mode,
+                        "triggered_by": triggered_by,
+                        "input_version": input_version,
+                        "output_version": data_version,
+                        "logs": logs,
+                    },
                 )
                 run_id = meta.get("run_id")
                 if run_id:
@@ -1114,6 +1508,20 @@ def _feature_worker_loop(env_id: str):
                             )
             finally:
                 conn2.close()
+            example_feature = None
+            try:
+                preferred = ["inbound_amount_24h", "funds_exit_within_1h_flag", "shared_device_flag"]
+                for p in preferred:
+                    if p in features_df.columns:
+                        example_feature = p
+                        break
+                if example_feature is None:
+                    for c in list(features_df.columns):
+                        if c not in ["account_id", "environment_id", "computed_at"]:
+                            example_feature = str(c)
+                            break
+            except Exception:
+                example_feature = None
             _update_job(
                 env_id,
                 job_id,
@@ -1122,9 +1530,50 @@ def _feature_worker_loop(env_id: str):
                 "Completed",
                 processed=int(len(features_df)),
                 total=int(len(features_df)),
-                result={"accounts": int(len(features_df)), "features": int(len(features_df.columns)), "run_id": meta.get("run_id") if "meta" in locals() else None},
+                result={
+                    "accounts": int(len(features_df)),
+                    "features": int(len(features_df.columns)),
+                    "run_id": meta.get("run_id") if "meta" in locals() else None,
+                    "dataset_version": data_version,
+                    "feature_name": example_feature,
+                },
             )
         except Exception as e:
+            logs.append({"ts": datetime.now().isoformat(), "step": "failed", "message": str(e)})
+            conn3, _paths3 = _conn(env_id)
+            try:
+                fail_summary = {
+                    "accounts": 0,
+                    "features": 0,
+                    "duration_seconds": None,
+                    "failures": 1,
+                    "status": "failed",
+                    "run_type": mode,
+                    "triggered_by": triggered_by,
+                    "input_version": input_version,
+                    "output_version": None,
+                    "error": str(e),
+                }
+                _persist_module_run(
+                    conn3,
+                    env_id,
+                    "feature_engineering",
+                    data_version=input_version,
+                    config_version=_hash_jsonable(config or {}),
+                    summary=fail_summary,
+                    result={
+                        "config": config,
+                        "job_id": job_id,
+                        "run_type": mode,
+                        "triggered_by": triggered_by,
+                        "input_version": input_version,
+                        "output_version": None,
+                        "logs": logs,
+                        "error": str(e),
+                    },
+                )
+            finally:
+                conn3.close()
             _update_job(env_id, job_id, "failed", "failed", "Failed", error=str(e))
 
 
@@ -2125,6 +2574,9 @@ def queue_priority():
         "risk_level": request.args.get("risk_level"),
         "tag": request.args.get("tag"),
         "signal": request.args.get("signal"),
+        "trigger": request.args.get("trigger"),
+        "from_level": request.args.get("from_level"),
+        "to_level": request.args.get("to_level"),
         "min_score": request.args.get("min_score"),
         "max_score": request.args.get("max_score"),
     }
@@ -2171,21 +2623,47 @@ def feature_runs_details():
     svc = FeatureWorkbenchService(env_id)
     return jsonify(svc.runs_details(run_id))
 
+@platform_bp.route("/typology/mapping", methods=["GET"])
+def typology_mapping():
+    env_id = _env_id()
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.typology_mapping())
+
 @platform_bp.route("/features/catalog", methods=["GET"])
 def features_catalog():
     env_id = _env_id()
     svc = FeatureWorkbenchService(env_id)
-    return jsonify(svc.features_catalog())
+    target_name = request.args.get("target_name") or request.args.get("target") or None
+    return _jsonify_safe(svc.features_catalog(target_name=target_name))
+
+@platform_bp.route("/features/origin", methods=["GET"])
+def features_origin():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureOriginService(env_id)
+    return jsonify(svc.feature_origin(feature_name=feature))
+
+@platform_bp.route("/features/explanation", methods=["GET"])
+def features_explanation():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_explanation(feature_name=str(feature)))
 
 @platform_bp.route("/features/profile", methods=["GET"])
 def features_profile():
     env_id = _env_id()
     feature = request.args.get("feature")
     run_id = request.args.get("run_id")
+    target_name = request.args.get("target_name") or request.args.get("target") or None
     if not feature:
         return jsonify({"success": False, "error": "feature is required"}), 400
     svc = FeatureWorkbenchService(env_id)
-    return jsonify(svc.feature_profile(feature_name=feature, run_id=run_id))
+    return jsonify(svc.feature_profile(feature_name=feature, run_id=run_id, target_name=target_name))
 
 @platform_bp.route("/features/drift", methods=["GET"])
 def features_drift():
@@ -2200,10 +2678,11 @@ def features_drift():
 def features_leakage():
     env_id = _env_id()
     feature = request.args.get("feature")
+    target_name = request.args.get("target_name") or request.args.get("target") or None
     if not feature:
         return jsonify({"success": False, "error": "feature is required"}), 400
     svc = FeatureWorkbenchService(env_id)
-    return jsonify(svc.feature_leakage(feature_name=feature))
+    return jsonify(svc.feature_leakage(feature_name=feature, target_name=target_name))
 
 @platform_bp.route("/features/compare", methods=["GET"])
 def features_compare():
@@ -2238,6 +2717,37 @@ def features_lineage():
         return jsonify({"success": False, "error": "feature is required"}), 400
     svc = FeatureWorkbenchService(env_id)
     return jsonify(svc.feature_lineage(feature_name=feature))
+
+
+@platform_bp.route("/features/correlations", methods=["GET"])
+def features_correlations():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    limit = request.args.get("limit", 10, type=int)
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_correlations(feature_name=feature, limit=limit))
+
+@platform_bp.route("/features/governance/history", methods=["GET"])
+def features_governance_history():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    limit = request.args.get("limit", 50, type=int)
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_governance_history(feature_name=feature, limit=limit))
+
+@platform_bp.route("/features/extremes", methods=["GET"])
+def features_extremes():
+    env_id = _env_id()
+    feature = request.args.get("feature")
+    limit = request.args.get("limit", 20, type=int)
+    if not feature:
+        return jsonify({"success": False, "error": "feature is required"}), 400
+    svc = FeatureWorkbenchService(env_id)
+    return jsonify(svc.feature_extremes(feature_name=feature, limit=limit))
 
 # ==================== MODEL WORKBENCH ====================
 @platform_bp.route("/experiments/create", methods=["POST"])
