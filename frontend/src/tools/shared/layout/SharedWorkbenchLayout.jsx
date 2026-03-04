@@ -15,13 +15,14 @@ import {
   ListItemText,
   Menu,
   MenuItem,
+  useMediaQuery,
   Toolbar,
   Tooltip,
   Typography,
   Collapse,
   alpha,
 } from '@mui/material';
-import { styled } from '@mui/material/styles';
+import { styled, useTheme } from '@mui/material/styles';
 import {
   ArrowBack,
   ChevronLeft,
@@ -31,6 +32,7 @@ import {
   ExpandMore,
   HelpOutline,
   Logout,
+  MenuOpen,
   Person,
   Settings,
 } from '@mui/icons-material';
@@ -64,6 +66,17 @@ const StyledDrawer = styled(Drawer, {
   },
 }));
 
+const MobileDrawer = styled(Drawer)(() => ({
+  '& .MuiDrawer-paper': {
+    width: DRAWER_WIDTH,
+    maxWidth: '84vw',
+    background: 'linear-gradient(180deg, #0f172a 0%, #111827 42%, #162133 100%)',
+    color: '#f8fafc',
+    borderRight: `1px solid ${alpha('#fff', 0.1)}`,
+    boxShadow: '18px 0 40px rgba(15, 23, 42, 0.26)',
+  },
+}));
+
 const GroupHeader = styled(ListItemButton)(({ theme }) => ({
   backgroundColor: 'transparent',
   paddingTop: theme.spacing(2.5),
@@ -86,7 +99,11 @@ const SharedWorkbenchLayout = ({
   accentColor = '#cbd5e1',
   navShape = 'rounded',
 }) => {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorElUser, setAnchorElUser] = useState(null);
   const isSharp = navShape === 'sharp';
 
@@ -106,6 +123,7 @@ const SharedWorkbenchLayout = ({
   const handleItemClick = (item) => {
     if (item?.disabled) return;
     setActiveScreen(item.id);
+    if (isMobile) setMobileOpen(false);
   };
 
   const activeItemLabel = useMemo(() => {
@@ -116,255 +134,273 @@ const SharedWorkbenchLayout = ({
     return '';
   }, [activeScreen, sections]);
 
+  const effectiveCollapsed = !isMobile && (isCollapsed || isCompact);
+
+  const renderDrawerContent = () => (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflowX: 'hidden',
+        overflowY: 'auto',
+        '&::-webkit-scrollbar': { width: '4px' },
+        '&::-webkit-scrollbar-track': { background: 'transparent' },
+        '&::-webkit-scrollbar-thumb': { background: '#334155', borderRadius: '4px' },
+      }}
+    >
+      <Box
+        component={motion.div}
+        initial={{ opacity: 0, x: -12 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+        sx={{
+          height: 64,
+          display: 'flex',
+          alignItems: 'center',
+          px: effectiveCollapsed ? 2 : 3,
+          borderBottom: '1px solid',
+          borderColor: alpha('#fff', 0.1),
+          mb: 1,
+          flexShrink: 0,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0))',
+        }}
+      >
+        <Box
+          component="img"
+          src={SentinelLogo}
+          alt="FCIP"
+          sx={{ width: 28, height: 28, filter: 'brightness(0) invert(1)' }}
+        />
+        {!effectiveCollapsed && (
+          <Box sx={{ ml: 2, display: 'flex', flexDirection: 'column' }}>
+            <Typography
+              variant="subtitle2"
+              sx={{
+                fontWeight: 800,
+                lineHeight: 1,
+                color: '#f8fafc',
+                letterSpacing: '0.22em',
+              }}
+            >
+              FCIP
+            </Typography>
+
+            <Typography
+              variant="caption"
+              sx={{
+                mt: 0.4,
+                color: '#94a3b8',
+                fontSize: '0.675rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                fontFamily: 'monospace',
+                fontWeight: 600,
+              }}
+            >
+              {activeEnvironment || 'Workspace'}
+            </Typography>
+          </Box>
+        )}
+      </Box>
+
+      <Box sx={{ flex: 1 }}>
+        {(sections || []).map((section, sectionIndex) => (
+          <Box
+            key={section.key}
+            component={motion.div}
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.22, delay: sectionIndex * 0.04 }}
+          >
+            <List disablePadding>
+              {!effectiveCollapsed && (
+                <GroupHeader onClick={() => handleGroupToggle(section.key)}>
+                  <ListItemText
+                    primary={section.label}
+                    primaryTypographyProps={{
+                      fontSize: '0.85rem',
+                      fontWeight: 800,
+                      letterSpacing: '1px',
+                      color: '#94a3b8',
+                      textTransform: 'uppercase',
+                    }}
+                  />
+                  {openGroups[section.key] ? (
+                    <ExpandLess sx={{ fontSize: 18, color: '#94a3b8' }} />
+                  ) : (
+                    <ExpandMore sx={{ fontSize: 18, color: '#94a3b8' }} />
+                  )}
+                </GroupHeader>
+              )}
+
+              {effectiveCollapsed && <Divider sx={{ my: 1.5, borderColor: alpha('#fff', 0.1), mx: 2 }} />}
+
+              <Collapse in={effectiveCollapsed ? true : !!openGroups[section.key]} timeout="auto" unmountOnExit>
+                <List component="div" disablePadding>
+                  {(section.items || []).map((item) => {
+                    const active = activeScreen === item.id;
+                    const disabled = !!item.disabled;
+                    const IconComp = item.icon;
+                    return (
+                      <ListItem
+                        key={item.id}
+                        disablePadding
+                        sx={{ display: 'block', mb: isSharp ? 0.35 : 0.5 }}
+                        component={motion.li}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.2, delay: sectionIndex * 0.04 }}
+                      >
+                        <Tooltip title={effectiveCollapsed ? item.label : ''} placement="right" arrow>
+                          <span>
+                            <ListItemButton
+                              disabled={disabled}
+                              onClick={() => handleItemClick(item)}
+                              sx={{
+                                minHeight: 36,
+                                justifyContent: effectiveCollapsed ? 'center' : 'initial',
+                                px: 2.5,
+                                py: 0.75,
+                                mx: 1.5,
+                                borderRadius: isSharp ? 1 : 2,
+                                transition: 'all 0.18s ease',
+                                position: 'relative',
+                                ...(active && {
+                                  bgcolor: item.highlight ? alpha('#f59e0b', 0.16) : alpha(accentColor, isSharp ? 0.18 : 0.14),
+                                  color: '#f8fafc',
+                                  fontWeight: 600,
+                                  boxShadow: isSharp
+                                    ? `inset 0 0 0 1px ${alpha(accentColor, 0.24)}`
+                                    : 'inset 0 0 0 1px rgba(255,255,255,0.05)',
+                                  '&::before': {
+                                    content: '""',
+                                    position: 'absolute',
+                                    left: 8,
+                                    top: 8,
+                                    bottom: 8,
+                                    width: 3,
+                                    borderRadius: isSharp ? 1 : 999,
+                                    bgcolor: item.highlight ? '#f59e0b' : accentColor,
+                                  },
+                                }),
+                                ...(!active && {
+                                  color: '#94a3b8',
+                                  '&:hover': {
+                                    bgcolor: alpha(accentColor, isSharp ? 0.1 : 0.08),
+                                    color: '#e2e8f0',
+                                    transform: `translateX(${isSharp ? 1 : 2}px)`,
+                                  },
+                                }),
+                              }}
+                            >
+                              <ListItemIcon
+                                sx={{
+                                  minWidth: 0,
+                                  mr: effectiveCollapsed ? 0 : 2,
+                                  justifyContent: 'center',
+                                  color: 'inherit !important',
+                                  '& .MuiSvgIcon-root': {
+                                    fontSize: 18,
+                                    color: 'inherit !important',
+                                  },
+                                }}
+                              >
+                                {IconComp ? <IconComp fontSize="small" /> : null}
+                              </ListItemIcon>
+                              <ListItemText
+                                primary={item.label}
+                                primaryTypographyProps={{
+                                  fontSize: '0.8rem',
+                                  fontWeight: active ? 600 : 400,
+                                  lineHeight: 1.2,
+                                  whiteSpace: 'normal',
+                                  overflow: 'visible',
+                                  textOverflow: 'clip',
+                                  wordBreak: 'break-word',
+                                }}
+                                sx={{ opacity: effectiveCollapsed ? 0 : 1 }}
+                              />
+                            </ListItemButton>
+                          </span>
+                        </Tooltip>
+                      </ListItem>
+                    );
+                  })}
+                </List>
+              </Collapse>
+            </List>
+          </Box>
+        ))}
+      </Box>
+
+      <Box
+        sx={{
+          p: 2,
+          borderTop: '1px solid',
+          borderColor: alpha('#fff', 0.1),
+          bgcolor: 'rgba(15, 23, 42, 0.5)',
+          display: 'flex',
+          justifyContent: effectiveCollapsed ? 'center' : 'flex-start',
+          alignItems: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: '0.6875rem', fontWeight: 500 }}>
+          {effectiveCollapsed ? 'Ready' : 'Workspace Status: Ready'}
+        </Typography>
+      </Box>
+    </Box>
+  );
+
   return (
     <Box sx={{ display: 'flex', height: '100dvh', overflow: 'hidden' }}>
       <CssBaseline />
 
-      <StyledDrawer variant="permanent" open={!isCollapsed}>
-        <Box
-          sx={{
-            position: 'absolute',
-            top: '50%',
-            right: -12,
-            transform: 'translateY(-50%)',
-            zIndex: 1300,
-          }}
-        >
-          <IconButton
-            size="small"
-            onClick={() => setIsCollapsed((prev) => !prev)}
-            sx={{
-              bgcolor: '#182234',
-              color: '#e5e7eb',
-              border: '1px solid #334155',
-              width: 24,
-              height: 24,
-              boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-              '&:hover': {
-                bgcolor: '#22324a',
-                color: '#ffffff',
-              },
-            }}
-          >
-            {isCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
-          </IconButton>
-        </Box>
-
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            height: '100%',
-            overflowX: 'hidden',
-            overflowY: 'auto',
-            '&::-webkit-scrollbar': { width: '4px' },
-            '&::-webkit-scrollbar-track': { background: 'transparent' },
-            '&::-webkit-scrollbar-thumb': { background: '#334155', borderRadius: '4px' },
-          }}
-        >
-          <Box
-            component={motion.div}
-            initial={{ opacity: 0, x: -12 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            sx={{
-              height: 64,
-              display: 'flex',
-              alignItems: 'center',
-              px: isCollapsed ? 2 : 3,
-              borderBottom: '1px solid',
-              borderColor: alpha('#fff', 0.1),
-              mb: 1,
-              flexShrink: 0,
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0))',
-            }}
-          >
-            <Box
-              component="img"
-              src={SentinelLogo}
-              alt="FCIP"
-              sx={{ width: 28, height: 28, filter: 'brightness(0) invert(1)' }}
-            />
-            {!isCollapsed && (
-              <Box sx={{ ml: 2, display: 'flex', flexDirection: 'column' }}>
-                <Typography
-                  variant="subtitle2"
-                  sx={{
-                    fontWeight: 800,
-                    lineHeight: 1,
-                    color: '#f8fafc',
-                    letterSpacing: '0.22em',
-                  }}
-                >
-                  FCIP
-                </Typography>
-
-                <Typography
-                  variant="caption"
-                  sx={{
-                    mt: 0.4,
-                    color: '#94a3b8',
-                    fontSize: '0.675rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    fontFamily: 'monospace',
-                    fontWeight: 600,
-                  }}
-                >
-                  {activeEnvironment || 'Workspace'}
-                </Typography>
-              </Box>
-            )}
-          </Box>
-
-          <Box sx={{ flex: 1 }}>
-            {(sections || []).map((section, sectionIndex) => (
-              <Box
-                key={section.key}
-                component={motion.div}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.22, delay: sectionIndex * 0.04 }}
-              >
-              <List disablePadding>
-                {!isCollapsed && (
-                  <GroupHeader onClick={() => handleGroupToggle(section.key)}>
-                    <ListItemText
-                      primary={section.label}
-                      primaryTypographyProps={{
-                        fontSize: '0.85rem',
-                        fontWeight: 800,
-                        letterSpacing: '1px',
-                        color: '#94a3b8',
-                        textTransform: 'uppercase',
-                      }}
-                    />
-                    {openGroups[section.key] ? (
-                      <ExpandLess sx={{ fontSize: 18, color: '#94a3b8' }} />
-                    ) : (
-                      <ExpandMore sx={{ fontSize: 18, color: '#94a3b8' }} />
-                    )}
-                  </GroupHeader>
-                )}
-
-                {isCollapsed && <Divider sx={{ my: 1.5, borderColor: alpha('#fff', 0.1), mx: 2 }} />}
-
-                <Collapse in={isCollapsed ? true : !!openGroups[section.key]} timeout="auto" unmountOnExit>
-                  <List component="div" disablePadding>
-                    {(section.items || []).map((item) => {
-                      const active = activeScreen === item.id;
-                      const disabled = !!item.disabled;
-                      const IconComp = item.icon;
-                      return (
-                        <ListItem
-                          key={item.id}
-                          disablePadding
-                          sx={{ display: 'block', mb: isSharp ? 0.35 : 0.5 }}
-                          component={motion.li}
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ duration: 0.2, delay: sectionIndex * 0.04 }}
-                        >
-                          <Tooltip title={isCollapsed ? item.label : ''} placement="right" arrow>
-                            <span>
-                              <ListItemButton
-                                disabled={disabled}
-                                onClick={() => handleItemClick(item)}
-                                sx={{
-                                  minHeight: 36,
-                                  justifyContent: isCollapsed ? 'center' : 'initial',
-                                  px: 2.5,
-                                  py: 0.75,
-                                  mx: 1.5,
-                                  borderRadius: isSharp ? 1 : 2,
-                                  transition: 'all 0.18s ease',
-                                  position: 'relative',
-                                  ...(active && {
-                                    bgcolor: item.highlight ? alpha('#f59e0b', 0.16) : alpha(accentColor, isSharp ? 0.18 : 0.14),
-                                    color: '#f8fafc',
-                                    fontWeight: 600,
-                                    boxShadow: isSharp
-                                      ? `inset 0 0 0 1px ${alpha(accentColor, 0.24)}`
-                                      : 'inset 0 0 0 1px rgba(255,255,255,0.05)',
-                                    '&::before': {
-                                      content: '""',
-                                      position: 'absolute',
-                                      left: 8,
-                                      top: 8,
-                                      bottom: 8,
-                                      width: 3,
-                                      borderRadius: isSharp ? 1 : 999,
-                                      bgcolor: item.highlight ? '#f59e0b' : accentColor,
-                                    },
-                                  }),
-                                  ...(!active && {
-                                    color: '#94a3b8',
-                                    '&:hover': {
-                                      bgcolor: alpha(accentColor, isSharp ? 0.1 : 0.08),
-                                      color: '#e2e8f0',
-                                      transform: `translateX(${isSharp ? 1 : 2}px)`,
-                                    },
-                                  }),
-                                }}
-                              >
-                                <ListItemIcon
-                                  sx={{
-                                    minWidth: 0,
-                                    mr: isCollapsed ? 0 : 2,
-                                    justifyContent: 'center',
-                                    color: 'inherit !important',
-                                    '& .MuiSvgIcon-root': {
-                                      fontSize: 18,
-                                      color: 'inherit !important',
-                                    },
-                                  }}
-                                >
-                                  {IconComp ? <IconComp fontSize="small" /> : null}
-                                </ListItemIcon>
-                                <ListItemText
-                                  primary={item.label}
-                                  primaryTypographyProps={{
-                                    fontSize: '0.8rem',
-                                    fontWeight: active ? 600 : 400,
-                                    lineHeight: 1.2,
-                                    whiteSpace: 'normal',
-                                    overflow: 'visible',
-                                    textOverflow: 'clip',
-                                    wordBreak: 'break-word',
-                                  }}
-                                  sx={{ opacity: isCollapsed ? 0 : 1 }}
-                                />
-                              </ListItemButton>
-                            </span>
-                          </Tooltip>
-                        </ListItem>
-                      );
-                    })}
-                  </List>
-                </Collapse>
-              </List>
-              </Box>
-            ))}
-          </Box>
-
+      {!isMobile && (
+        <StyledDrawer variant="permanent" open={!effectiveCollapsed}>
           <Box
             sx={{
-              p: 2,
-              borderTop: '1px solid',
-              borderColor: alpha('#fff', 0.1),
-              bgcolor: 'rgba(15, 23, 42, 0.5)',
-              display: 'flex',
-              justifyContent: isCollapsed ? 'center' : 'flex-start',
-              alignItems: 'center',
-              flexShrink: 0,
+              position: 'absolute',
+              top: '50%',
+              right: -12,
+              transform: 'translateY(-50%)',
+              zIndex: 1300,
             }}
           >
-            <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: '0.6875rem', fontWeight: 500 }}>
-              {isCollapsed ? 'Ready' : 'Workspace Status: Ready'}
-            </Typography>
+            <IconButton
+              size="small"
+              onClick={() => setIsCollapsed((prev) => !prev)}
+              sx={{
+                bgcolor: '#182234',
+                color: '#e5e7eb',
+                border: '1px solid #334155',
+                width: 24,
+                height: 24,
+                boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                '&:hover': {
+                  bgcolor: '#22324a',
+                  color: '#ffffff',
+                },
+              }}
+            >
+              {effectiveCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
+            </IconButton>
           </Box>
-        </Box>
-      </StyledDrawer>
+          {renderDrawerContent()}
+        </StyledDrawer>
+      )}
+
+      {isMobile && (
+        <MobileDrawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={() => setMobileOpen(false)}
+          ModalProps={{ keepMounted: true }}
+        >
+          {renderDrawerContent()}
+        </MobileDrawer>
+      )}
 
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <AppBar
@@ -372,7 +408,7 @@ const SharedWorkbenchLayout = ({
           elevation={0}
           sx={{
             background: 'linear-gradient(90deg, #111827 0%, #172032 60%, #1d2738 100%)',
-            height: HEADER_HEIGHT,
+            minHeight: { xs: 44, md: HEADER_HEIGHT },
             width: '100%',
             zIndex: (theme) => theme.zIndex.drawer + 1,
             borderRadius: 0,
@@ -385,15 +421,23 @@ const SharedWorkbenchLayout = ({
             variant="dense"
             disableGutters
             sx={{
-              minHeight: HEADER_HEIGHT,
-              height: HEADER_HEIGHT,
-              px: 2,
+              minHeight: { xs: 44, md: HEADER_HEIGHT },
+              height: { xs: 'auto', md: HEADER_HEIGHT },
+              px: { xs: 1.25, sm: 2 },
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
+              gap: 1,
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+              {isMobile && (
+                <Tooltip title="Open navigation">
+                  <IconButton size="small" onClick={() => setMobileOpen(true)} sx={{ color: 'white', p: 0.5 }}>
+                    <MenuOpen sx={{ fontSize: 18, transform: 'rotate(180deg)' }} />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="Back to Tools">
                 <IconButton size="small" onClick={onBackToTools} sx={{ color: 'white', p: 0.5 }}>
                   <ArrowBack sx={{ fontSize: 18 }} />
@@ -407,10 +451,11 @@ const SharedWorkbenchLayout = ({
                   fontWeight: 600,
                   letterSpacing: 0.5,
                   whiteSpace: 'nowrap',
-                  display: 'flex',
+                  display: { xs: 'none', sm: 'flex' },
                   alignItems: 'center',
                   lineHeight: 1,
                   userSelect: 'none',
+                  minWidth: 0,
                 }}
               >
                 <Box component="span" sx={{ fontWeight: 800, letterSpacing: 1.5 }}>FCIP</Box>
@@ -421,7 +466,7 @@ const SharedWorkbenchLayout = ({
               {activeEnvironment && (
                 <Box
                   sx={{
-                    display: 'flex',
+                    display: { xs: 'none', sm: 'flex' },
                     alignItems: 'center',
                     ml: 1,
                     px: 1,
@@ -438,11 +483,11 @@ const SharedWorkbenchLayout = ({
               )}
             </Box>
 
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-              {!isCollapsed && activeItemLabel && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, minWidth: 0 }}>
+              {!effectiveCollapsed && activeItemLabel && (
                 <Box
                   sx={{
-                    display: { xs: 'none', md: 'flex' },
+                    display: { xs: 'none', lg: 'flex' },
                     alignItems: 'center',
                     px: 1.2,
                     py: 0.45,
@@ -534,6 +579,7 @@ const SharedWorkbenchLayout = ({
             minHeight: 0,
             overflow: 'auto',
             background: 'linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%)',
+            width: '100%',
           }}
         >
           <AnimatePresence mode="wait" initial={false}>
@@ -544,7 +590,7 @@ const SharedWorkbenchLayout = ({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-              sx={{ minHeight: '100%' }}
+              sx={{ minHeight: '100%', width: '100%', minWidth: 0 }}
             >
               {children}
             </Box>

@@ -69,8 +69,8 @@ const ToolLayout = () => {
   if (!activeEnv) return <Navigate to="/environments" replace />;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden animate-in fade-in duration-700">
-      <div className="relative flex-1 overflow-hidden bg-slate-100">
+    <div className="flex h-screen min-h-0 flex-col overflow-hidden animate-in fade-in duration-700">
+      <div className="relative flex-1 min-h-0 overflow-hidden bg-slate-100">
         <PageTransition className="h-full w-full">
           <Outlet />
         </PageTransition>

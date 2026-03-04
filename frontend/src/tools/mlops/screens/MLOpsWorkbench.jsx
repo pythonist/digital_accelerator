@@ -15,12 +15,14 @@ import {
   Alert,
   Box, Button, Chip, Divider, IconButton, LinearProgress,
   Dialog, DialogActions, DialogContent, DialogTitle,
-  Stack, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
+  Drawer, Stack, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   AccountTree, Add, Analytics, Article, AutoFixHigh, Build, CheckCircle, ChevronLeft, ChevronRight,
   CloudUpload, Close, Dashboard, DeleteForever, Engineering, Flag, Lock,
-  ModelTraining, Person, PlayArrow, Refresh, Restore, SaveAlt, Settings,
+  MenuOpen, ModelTraining, Person, PlayArrow, Refresh, Restore, SaveAlt, Settings,
   Tune, ViewSidebar,
 } from '@mui/icons-material';
 
@@ -265,6 +267,9 @@ const ContextPanel = ({
 // ══════════════════════════════════════════════════════════════════════════════
 const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('lg'));
   // ── Read localStorage synchronously on first render ────────────────────────
   const saved              = useMemo(() => lsRead(), []);
   const savedPipelineSession = useMemo(() => readPipelineSession(), []);
@@ -277,6 +282,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const [experimentName,  setExperimentName]  = useState(saved.experimentName || 'Experiment 1');
   const [railCollapsed,   setRailCollapsed]   = useState(Boolean(saved.railCollapsed));
   const [showContext,     setShowContext]      = useState(true);
+  const [mobileRailOpen,  setMobileRailOpen]  = useState(false);
   const [viewportWidth,   setViewportWidth]   = useState(
     typeof window === 'undefined' ? 1600 : window.innerWidth,
   );
@@ -357,6 +363,11 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+  useEffect(() => {
+    if (!isMobile) return;
+    setShowContext(false);
+    setMobileRailOpen(false);
+  }, [isMobile]);
 
   // ── Data hydration ──────────────────────────────────────────────────────────
   const ARTEFACT_TYPES = useMemo(() => new Set([
@@ -499,10 +510,10 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const progressPct    = Math.round((doneCount / Math.max(progressSteps.length, 1)) * 100);
   const currentFlowIdx = useMemo(() => progressSteps.findIndex((s) => s.id === activeStep), [progressSteps, activeStep]);
   const isDashboard    = activeStep === 'dashboard';
-  const contextMinViewport = 1820;
-  const forceRailCollapse = viewportWidth < 1320;
+  const contextMinViewport = 1680;
+  const forceRailCollapse = isTablet || viewportWidth < 1320;
   const effectiveRailCollapsed = railCollapsed || forceRailCollapse;
-  const showContextPanel = showContext && !isDashboard && viewportWidth >= contextMinViewport;
+  const showContextPanel = !isMobile && showContext && !isDashboard && viewportWidth >= contextMinViewport;
   const contextPanelWidth = viewportWidth >= 1880 ? D.contextW : 260;
 
   const unfinishedPipelines = useMemo(
@@ -760,6 +771,135 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     setActiveStep('reports');
   }, []);
 
+  const renderStepRail = (collapsed, onStepSelect) => (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ px: collapsed ? 1 : 2.5, pt: 1.6, pb: 1.2, display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between' }}>
+        {!collapsed && (
+          <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+            ML Pipeline
+          </Typography>
+        )}
+        {!isMobile && (
+          <Tooltip title={collapsed ? 'Expand ML pipeline' : 'Collapse ML pipeline'}>
+            <IconButton
+              size="small"
+              onClick={() => setRailCollapsed((v) => !v)}
+              disabled={forceRailCollapse}
+              sx={{ color: '#64748b', bgcolor: 'rgba(255,255,255,0.03)', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }}
+            >
+              {collapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+
+      <Box sx={{ flex: 1, overflowY: 'auto' }}>
+        {STEPS.map((step, idx) => {
+          const status = stepStatus(step.id, stepCtx);
+          const isActive = activeStep === step.id;
+          const isLocked = status === 'locked';
+          const canNavigate = ALLOW_LOCKED_NAV || !isLocked;
+          const isDone = status === 'done';
+          const Icon = step.icon;
+          return (
+            <Box key={step.id}>
+              {idx > 0 && (
+                <Box sx={{ ml: collapsed ? '41px' : '36px', width: 1.5, height: 12, bgcolor: isDone ? D.done : 'rgba(255,255,255,0.05)' }} />
+              )}
+              <Tooltip title={collapsed ? (persona === 'business' ? step.biz : step.label) : ''} placement="right">
+                <Box
+                  component={motion.div}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.16, delay: idx * 0.015 }}
+                  onClick={() => {
+                    if (!canNavigate) return;
+                    setActiveStep(step.id);
+                    onStepSelect?.();
+                  }}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: collapsed ? 0 : 1.5,
+                    px: collapsed ? 1.25 : 2,
+                    py: 1.25,
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    cursor: canNavigate ? 'pointer' : 'default',
+                    bgcolor: isActive ? D.railActive : 'transparent',
+                    borderLeft: `3px solid ${isActive ? D.orange : 'transparent'}`,
+                    transition: 'all 0.12s ease',
+                    '&:hover': canNavigate ? { bgcolor: D.railHover } : {},
+                    position: 'relative',
+                  }}
+                >
+                  <Box sx={{
+                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    bgcolor: isDone ? 'rgba(34,197,94,0.15)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
+                    border: `1.5px solid ${isDone ? D.done : isActive ? D.orange : isLocked ? '#1e293b' : '#334155'}`,
+                  }}>
+                    {isDone ? <CheckCircle sx={{ fontSize: 14, color: D.done }} />
+                      : isLocked ? <Lock sx={{ fontSize: 11, color: '#334155' }} />
+                        : <Icon sx={{ fontSize: 13, color: isActive ? D.orange : '#64748b' }} />}
+                  </Box>
+                  {!collapsed && (
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, lineHeight: 1.3, color: isLocked ? D.lockedText : isActive ? '#f0f2f5' : '#94a3b8' }}>
+                        {persona === 'business' ? step.biz : step.label}
+                      </Typography>
+                      <Typography sx={{ fontSize: 10, lineHeight: 1.3, display: 'block', color: isDone ? 'rgba(34,197,94,0.8)' : isLocked ? '#334155' : '#64748b' }}>
+                        {isDone ? 'Done' : isLocked ? 'Blocked' : isActive ? 'Current' : 'Pending'}
+                      </Typography>
+                    </Box>
+                  )}
+                  {isActive && !collapsed && (
+                    <Box sx={{ position: 'absolute', right: 8, width: 5, height: 5, borderRadius: '50%', bgcolor: D.orange }} />
+                  )}
+                </Box>
+              </Tooltip>
+            </Box>
+          );
+        })}
+      </Box>
+
+      <Box sx={{ px: collapsed ? 1 : 2.5, py: 2, borderTop: `1px solid ${D.railBorder}` }}>
+        {!collapsed && datasets.length > 0 && (
+          <Stack spacing={0.4} sx={{ mb: 1.5 }}>
+            <Typography sx={{ fontSize: 10, color: '#334155' }}>{datasets.length} table{datasets.length !== 1 ? 's' : ''} loaded</Typography>
+            {masterDataset && <Typography sx={{ fontSize: 10, color: '#334155' }}>Master: {fmt(masterDataset.row_count)} rows</Typography>}
+            {targetColumn && (
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: 'rgba(34,197,94,0.1)', px: 1, py: 0.25, borderRadius: 1 }}>
+                <Flag sx={{ fontSize: 9, color: D.done }} />
+                <Typography sx={{ fontSize: 10, color: D.done, fontWeight: 600 }}>{targetColumn}</Typography>
+              </Box>
+            )}
+            {activeModelRun && (
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: 'rgba(208,74,2,0.12)', px: 1, py: 0.25, borderRadius: 1 }}>
+                <ModelTraining sx={{ fontSize: 9, color: D.orange }} />
+                <Typography sx={{ fontSize: 10, color: D.orange, fontWeight: 600 }}>
+                  {(activeModelRun.algorithm || activeModelRun.algorithm_id || '').replace(/_/g, ' ')} · AUC{' '}
+                  {(activeModelRun.auc ?? activeModelRun.results?.metrics?.roc_auc)?.toFixed(3) ?? '-'}
+                </Typography>
+              </Box>
+            )}
+          </Stack>
+        )}
+        <Button
+          size="small" fullWidth variant="outlined"
+          startIcon={<DeleteForever sx={{ fontSize: 14 }} />}
+          onClick={handleReset} disabled={resetting}
+          sx={{
+            fontSize: 10, textTransform: 'none', color: '#475569',
+            borderColor: '#1e293b',
+            '&:hover': { borderColor: '#ef4444', color: '#ef4444', bgcolor: 'rgba(239,68,68,0.06)' },
+          }}
+        >
+          {collapsed ? '' : (resetting ? 'Resetting...' : 'Start Fresh')}
+        </Button>
+      </Box>
+    </Box>
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <Box sx={{ height: '100%', minHeight: 0, width: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: D.canvas }}>
@@ -767,12 +907,34 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       {/* ══ UNIFIED CHROME BAR ══════════════════════════════════════════════ */}
       <Box component={motion.div} initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.22 }}
         sx={{
-        height: D.topH, bgcolor: D.chrome, flexShrink: 0, zIndex: 20,
+        minHeight: { xs: 56, md: D.topH }, bgcolor: D.chrome, flexShrink: 0, zIndex: 20,
         borderBottom: `1px solid ${D.chromeBorder}`,
-        display: 'flex', alignItems: 'center', px: 2, gap: 0,
+        display: 'flex', alignItems: 'center', px: { xs: 1.25, md: 2 }, gap: 0, flexWrap: 'wrap',
       }}>
         {/* Brand */}
-        <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flexShrink: 0, mr: 1.5 }}>
+        <Stack direction="row" alignItems="center" spacing={1.25} sx={{ flexShrink: 0, mr: 1.25, minWidth: 0 }}>
+          {mode === 'expert' && isMobile && (
+            <Tooltip title="Open pipeline navigation">
+              <IconButton
+                size="small"
+                onClick={() => setMobileRailOpen(true)}
+                sx={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: '6px',
+                  color: D.textMuted,
+                  border: `1px solid ${D.chromeBorder}`,
+                  '&:hover': {
+                    color: D.orange,
+                    borderColor: D.orange,
+                    bgcolor: 'rgba(208,74,2,0.12)',
+                  },
+                }}
+              >
+                <MenuOpen sx={{ fontSize: 16, transform: 'rotate(180deg)' }} />
+              </IconButton>
+            </Tooltip>
+          )}
           <Tooltip title="Back to module selection">
             <IconButton
               size="small"
@@ -794,23 +956,23 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             </IconButton>
           </Tooltip>
           <Box component="img" src={PwCLogo} alt="PwC" sx={{ height: 20, width: 'auto' }} />
-          <Typography sx={{ fontSize: 12, fontWeight: 700, color: D.textPrimary, whiteSpace: 'nowrap' }}>
+          <Typography sx={{ fontSize: { xs: 11, md: 12 }, fontWeight: 700, color: D.textPrimary, whiteSpace: 'nowrap' }}>
             FCC Workbench
           </Typography>
         </Stack>
 
-        <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mr: 0.5 }} />
+        <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mr: 0.5, display: { xs: 'none', md: 'block' } }} />
 
         {/* ── Mode toggle buttons ── */}
         <ModeButton
           icon={AutoFixHigh}
-          label="AutoBuild Workbench"
+          label={isMobile ? 'AutoBuild' : 'AutoBuild Workbench'}
           active={mode === 'auto'}
           onClick={() => setMode('auto')}
         />
         <ModeButton
           icon={Engineering}
-          label="Expert Workbench"
+          label={isMobile ? 'Expert' : 'Expert Workbench'}
           active={mode === 'expert'}
           onClick={() => setMode('expert')}
         />
@@ -818,12 +980,13 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
         {/* ── Expert-only controls (hidden in AutoBuild mode) ── */}
         {mode === 'expert' && (
           <>
-            <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mx: 1 }} />
+            <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mx: 1, display: { xs: 'none', xl: 'block' } }} />
 
             <TextField
               size="small" value={experimentName} onChange={(e) => setExperimentName(e.target.value)} variant="outlined"
               sx={{
-                width: 180,
+                width: { xs: 132, sm: 160, xl: 180 },
+                display: { xs: 'none', sm: 'block' },
                 '& .MuiOutlinedInput-root': {
                   height: 28, fontSize: 12,
                   bgcolor: 'rgba(255,255,255,0.05)', color: D.textPrimary, borderRadius: '6px',
@@ -845,11 +1008,12 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   bgcolor: 'rgba(208,74,2,0.18)',
                   border: '1px solid rgba(208,74,2,0.45)',
                   flexShrink: 0,
+                  display: { xs: 'none', lg: 'inline-flex' },
                 }}
               />
             )}
 
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1, maxWidth: 300, mx: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1, maxWidth: 300, mx: 2, display: { xs: 'none', lg: 'flex' } }}>
               <LinearProgress
                 variant="determinate" value={progressPct}
                 sx={{ flex: 1, height: 4, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.08)', '& .MuiLinearProgress-bar': { bgcolor: D.orange, borderRadius: 4 } }}
@@ -857,11 +1021,12 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
               <Typography sx={{ fontSize: 10, color: D.textMuted, flexShrink: 0 }}>{doneCount}/{progressSteps.length}</Typography>
             </Stack>
 
-            <Box sx={{ flex: 1 }} />
+            <Box sx={{ flex: 1, minWidth: 0 }} />
 
             <ToggleButtonGroup
               size="small" value={persona} exclusive onChange={(_, v) => v && setPersona(v)}
               sx={{
+                display: { xs: 'none', md: 'inline-flex' },
                 '& .MuiToggleButton-root': {
                   height: 28, px: 1.5, fontSize: 11, textTransform: 'none',
                   color: D.textMuted, border: `1px solid ${D.chromeBorder}`,
@@ -874,7 +1039,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
               <ToggleButton value="technical"><Settings sx={{ fontSize: 13, mr: 0.5 }} /> Technical</ToggleButton>
             </ToggleButtonGroup>
 
-            <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mx: 1 }} />
+            <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mx: 1, display: { xs: 'none', md: 'block' } }} />
 
             <Tooltip title="Reload data from server">
               <IconButton size="small" onClick={() => loadDatasets({ sync: true })} sx={{ color: D.textMuted, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.06)' } }}>
@@ -926,7 +1091,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2 }}
-            sx={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', p: 2.5 }}
+            sx={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', p: { xs: 1, md: 2.5 } }}
           >
             {renderAutoBuild ? renderAutoBuild() : null}
           </Box>
@@ -944,6 +1109,8 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             sx={{ display: 'flex', flex: 1, minWidth: 0, overflow: 'hidden' }}
           >
 
+          {!isMobile && (
+          <>
           {/* ── LEFT NAV RAIL ── */}
           <Box
             component={motion.div}
@@ -1081,18 +1248,42 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             </Box>
           </Box>
 
+          </>
+          )}
+
+          {isMobile && (
+            <Drawer
+              anchor="left"
+              variant="temporary"
+              open={mobileRailOpen}
+              onClose={() => setMobileRailOpen(false)}
+              ModalProps={{ keepMounted: true }}
+              PaperProps={{
+                sx: {
+                  width: Math.min(D.railW, Math.round(viewportWidth * 0.82)),
+                  maxWidth: '84vw',
+                  bgcolor: D.rail,
+                  borderRight: `1px solid ${D.railBorder}` ,
+                  color: D.textPrimary,
+                },
+              }}
+            >
+              {renderStepRail(false, () => setMobileRailOpen(false))}
+            </Drawer>
+          )}
+
           {/* ── MAIN CANVAS ── */}
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
             {!isDashboard && (
-              <Box sx={{ px: 3, py: 1.5, bgcolor: 'white', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexShrink: 0 }}>
+              <Box sx={{ px: { xs: 1.5, md: 3 }, py: 1.5, bgcolor: 'white', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, flexShrink: 0, flexWrap: 'wrap' }}>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, overflow: 'hidden' }}>
-                  <Typography sx={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>{experimentName}</Typography>
-                  <ChevronRight sx={{ fontSize: 12, color: '#94a3b8' }} />
+                  <Typography sx={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, display: { xs: 'none', sm: 'block' } }}>{experimentName}</Typography>
+                  <ChevronRight sx={{ fontSize: 12, color: '#94a3b8', display: { xs: 'none', sm: 'block' } }} />
                   <Typography sx={{ fontSize: 10, color: D.orange, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
                     {persona === 'business' ? STEPS[currentIdx]?.biz : STEPS[currentIdx]?.label}
                   </Typography>
-                  <Typography sx={{ fontSize: 10, color: '#94a3b8' }}>
+                  <Typography sx={{ fontSize: 10, color: '#94a3b8', display: { xs: 'none', md: 'block' } }}>
                     {currentFlowIdx >= 0 ? `Step ${currentFlowIdx + 1} of ${progressSteps.length}` : 'Pipeline Hub'}
                   </Typography>
                 </Stack>
@@ -1109,7 +1300,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
               </Box>
             )}
 
-            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? 1 : 2 }}>
+            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? { xs: 0.5, md: 1 } : { xs: 1, md: 2 } }}>
               {guardMessage && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{guardMessage}</Alert>}
               <AnimatePresence mode="wait" initial={false}>
                 <Box

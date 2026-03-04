@@ -15,11 +15,45 @@ function Convert-ToSingleQuotedLiteral {
 }
 
 function Resolve-PythonLaunchCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$BackendDir
+    )
+
+    $candidatePaths = @()
+
+    if ($env:VIRTUAL_ENV) {
+        $candidatePaths += Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"
+    }
+
+    $candidatePaths += @(
+        (Join-Path $BackendDir ".venv\Scripts\python.exe"),
+        (Join-Path $BackendDir ".venv312\Scripts\python.exe"),
+        (Join-Path $BackendDir ".venv311\Scripts\python.exe"),
+        (Join-Path $BackendDir ".venv310\Scripts\python.exe"),
+        (Join-Path $RepoRoot ".venv\Scripts\python.exe")
+    )
+
+    foreach ($candidate in ($candidatePaths | Select-Object -Unique)) {
+        if (-not $candidate) { continue }
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        try {
+            & $candidate -c "import flask" *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $pythonSource = Convert-ToSingleQuotedLiteral -PathValue $candidate
+                return "& '$pythonSource'"
+            }
+        } catch {
+        }
+    }
+
     $pyCmd = Get-Command py -ErrorAction SilentlyContinue
     if ($pyCmd) {
         foreach ($version in @("-3.12", "-3.11", "-3.10")) {
             try {
-                & $pyCmd.Source $version -c "import sys" *> $null
+                & $pyCmd.Source $version -c "import flask" *> $null
                 if ($LASTEXITCODE -eq 0) {
                     return "& py $version"
                 }
@@ -30,11 +64,17 @@ function Resolve-PythonLaunchCommand {
 
     $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
     if ($pythonCmd) {
-        $pythonSource = Convert-ToSingleQuotedLiteral -PathValue $pythonCmd.Source
-        return "& '$pythonSource'"
+        try {
+            & $pythonCmd.Source -c "import flask" *> $null
+            if ($LASTEXITCODE -eq 0) {
+                $pythonSource = Convert-ToSingleQuotedLiteral -PathValue $pythonCmd.Source
+                return "& '$pythonSource'"
+            }
+        } catch {
+        }
     }
 
-    throw "Python launcher not found. Install Python 3.11 or 3.12 and ensure 'py' or 'python' is on PATH."
+    throw "No usable Python with Flask found. Activate the correct venv or install backend dependencies into backend\\.venv."
 }
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -81,7 +121,7 @@ if (-not (Test-Path -LiteralPath $frontendNodeModules)) {
 
 $backendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendDir
 $frontendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $frontendDir
-$pythonLaunchCommand = Resolve-PythonLaunchCommand
+$pythonLaunchCommand = Resolve-PythonLaunchCommand -RepoRoot $repoRoot -BackendDir $backendDir
 $backendProfileCommand = if ($MlopsOnly) { "$env:AML_BACKEND_PROFILE='mlops'; " } else { "" }
 
 $backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; $backendProfileCommand $pythonLaunchCommand app.py"
@@ -99,4 +139,4 @@ Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-Command", $frontendCommand
 ) | Out-Null
 
-Write-Host "Started backend (python app.py) and frontend (npm run dev) in separate PowerShell windows."
+Write-Host "Started backend using $pythonLaunchCommand and frontend (npm run dev) in separate PowerShell windows."
