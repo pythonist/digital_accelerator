@@ -56,8 +56,6 @@ mule_data/
 tmp/
 tmp_*/
 mlops_smoke_*/
-data_generation_scripts/aml_pipeline_output*/
-data_generation_scripts/banks_data/
 
 # DB / binary outputs
 *.db
@@ -67,6 +65,7 @@ data_generation_scripts/banks_data/
 *.wal
 *.bin
 *.pkl
+!data_generation_scripts/**/*.pkl
 
 # Logs
 *.log

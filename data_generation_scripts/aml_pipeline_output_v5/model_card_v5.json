@@ -1,0 +1,34 @@
+{
+  "name": "AML FP Suppression v5.0",
+  "version": "5.0",
+  "user_targets": {
+    "TARGET_SUPPRESSION_PCT": 42.0,
+    "MAX_EVENT_LOSS_PCT": 2.0,
+    "note": "Modify these at top of script. Pipeline searches thresholds automatically."
+  },
+  "fixes_from_v4": [
+    "STR simplified to 2 columns: ACCOUNT_ID + str_filed_date",
+    "RULE_TRIGGERED removed from features (leakage/dominance risk)",
+    "RULE_RISK_PROFILE kept as ordinal proxy (1-4 scale)",
+    "Case model rebuilt on full alert set (was biased 15% subsample \u2192 44% event loss)",
+    "Alert-model score used as prior in case model",
+    "Threshold search: 0.01 step grid (was 0.05), dual-constraint logic",
+    "LOG_BALANCE / LOG_W*_VOL explained inline in code",
+    "Feature categories A-K documented with exact column names"
+  ],
+  "alert_model": {
+    "threshold": 0.05,
+    "threshold_status": "EVENT_LOSS_EXCEEDS_TARGET_2.1%",
+    "suppression_pct": 15.52,
+    "event_loss_pct": 2.08,
+    "auc": 0.7972304073614557
+  },
+  "case_model": {
+    "threshold": 0.05,
+    "threshold_status": "EVENT_LOSS_EXCEEDS_TARGET_25.0%",
+    "suppression_pct": 72.07,
+    "event_loss_pct": 25.0,
+    "auc": 0.8316144540942927
+  },
+  "str_dataset_note": "str_reports.csv has only 2 columns: ACCOUNT_ID, str_filed_date. All other fields (JURISDICTION, STR_CATEGORY) removed \u2014 not used in labelling."
+}

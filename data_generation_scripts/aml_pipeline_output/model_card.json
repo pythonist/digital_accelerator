@@ -1,0 +1,20 @@
+{
+  "model_card": {
+    "name": "AML False Positive Suppression Model v1.0",
+    "algorithm": "Gradient Boosting",
+    "purpose": "Predict whether an AML alert is a genuine SAR candidate or a false positive",
+    "performance": {
+      "model_name": "Gradient Boosting",
+      "trained_on": "2026-02-22",
+      "train_size": 8156,
+      "test_auc": 0.9823752996900766,
+      "optimal_threshold": 0.8,
+      "event_loss_pct": 3.67,
+      "suppression_pct": 17.56
+    },
+    "features_used": 42,
+    "regulatory_note": "Deployed at threshold 0.8 to keep Event Loss \u2264 5.0%",
+    "retraining_cadence": "Monthly or when performance drift > 2% AUC",
+    "owner": "AML Analytics Team"
+  }
+}
