@@ -708,14 +708,43 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     }
   }, [clearActivePipeline, clearLocalWorkbenchState, loadDatasets, loadSavedPipelines]);
 
+  const adoptModelRun = useCallback((run, options = {}) => {
+    const nextJobId = String(run?.job_id || run?.run_id || '').trim();
+    if (!nextJobId) return;
+    const previousJobId = String(activeModelRun?.job_id || modelRun?.job_id || '').trim();
+    const isNewRun = previousJobId !== nextJobId;
+    const normalizedRun = {
+      ...(activeModelRun || {}),
+      ...(modelRun || {}),
+      ...(run || {}),
+      job_id: nextJobId,
+      algorithm_id: run?.algorithm_id || run?.algo_id || run?.results?.algorithm || activeModelRun?.algorithm_id,
+      algorithm: run?.algorithm || run?.algorithm_display || run?.algorithm_id || run?.algo_id || run?.results?.algorithm || activeModelRun?.algorithm,
+      auc: run?.auc ?? run?.results?.metrics?.roc_auc ?? run?.metrics?.roc_auc ?? activeModelRun?.auc,
+      metrics: run?.results?.metrics || run?.metrics || activeModelRun?.metrics || {},
+    };
+    setActiveModelRun(normalizedRun);
+    setModelRun({
+      job_id: normalizedRun.job_id,
+      algorithm: normalizedRun.algorithm,
+      algorithm_id: normalizedRun.algorithm_id,
+      auc: normalizedRun.auc,
+      metrics: normalizedRun.metrics || {},
+      results: normalizedRun.results,
+      grain: normalizedRun.grain,
+      threshold: normalizedRun.threshold,
+    });
+    setReportRunId(nextJobId);
+    if (isNewRun && options.resetDownstream !== false) {
+      setValidationReport(null);
+      setRegistryEntry(null);
+    }
+    if (options.nextStep) setActiveStep(options.nextStep);
+  }, [activeModelRun, modelRun]);
+
   const handleModelComplete = useCallback((run) => {
-    setActiveModelRun(run);
-    setReportRunId(String(run?.job_id || run?.run_id || ''));
-    setModelRun({ job_id: run.job_id, algorithm: run.algorithm || run.algorithm_id, auc: run.auc ?? run.results?.metrics?.roc_auc, metrics: run.results?.metrics || run.metrics || {} });
-    setValidationReport(null);
-    setRegistryEntry(null);
-    setActiveStep('validation');
-  }, []);
+    adoptModelRun(run, { resetDownstream: true, nextStep: 'validation' });
+  }, [adoptModelRun]);
 
   const handleRegistered = useCallback((entry) => { setRegistryEntry(entry); }, []);
 
@@ -1134,7 +1163,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   )}
                   {activeStep === 'validation' && (
                     <ModelValidationScreen persona={persona} jobId={activeModelRun?.job_id || modelRun?.job_id}
-                      activeModelRun={activeModelRun} onValidationComplete={setValidationReport}
+                      activeModelRun={activeModelRun}
+                      onActiveRunChange={(run) => adoptModelRun(run, { resetDownstream: true })}
+                      onValidationComplete={setValidationReport}
                     />
                   )}
                   {activeStep === 'registry' && (

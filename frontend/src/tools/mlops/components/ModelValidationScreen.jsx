@@ -18,7 +18,7 @@ const tabs = [
   { id: 'stability', label: 'Stability & Risks' },
 ];
 
-const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationComplete }) => {
+const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationComplete, onActiveRunChange }) => {
   const resolvedJobId = jobId || activeModelRun?.job_id || '';
   const [activeTab, setActiveTab] = useState(0);
   const [runs, setRuns] = useState([]);
@@ -28,6 +28,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
   const [compareLoading, setCompareLoading] = useState(false);
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [error, setError] = useState(null);
+  const [currentJobId, setCurrentJobId] = useState(resolvedJobId || '');
 
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
@@ -105,18 +106,22 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
   }, [loadRuns, loadSummary]);
 
   useEffect(() => {
+    if (resolvedJobId && resolvedJobId !== currentJobId) setCurrentJobId(resolvedJobId);
+  }, [resolvedJobId, currentJobId]);
+
+  useEffect(() => {
     if (!selectedJobIds.length && runs.length) {
       setSelectedJobIds([runs[0].job_id]);
     }
   }, [runs, selectedJobIds.length]);
 
   useEffect(() => {
-    if (!resolvedJobId) return;
+    if (!currentJobId) return;
     setSelectedJobIds((prev) => {
-      if (prev.includes(resolvedJobId)) return prev;
-      return [resolvedJobId, ...prev].slice(0, 4);
+      if (prev.includes(currentJobId)) return prev;
+      return [currentJobId, ...prev].slice(0, 4);
     });
-  }, [resolvedJobId]);
+  }, [currentJobId]);
 
   useEffect(() => {
     if ((activeTab === 1 || activeTab === 4) && selectedJobIds.length) {
@@ -125,12 +130,19 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
   }, [activeTab, selectedJobIds, loadCompare]);
 
   const activeModel = useMemo(() => (
-    runs.find((r) => r.job_id === resolvedJobId)
-    || compareData.find((r) => r.job_id === resolvedJobId)
+    [...runs, ...compareData].find((r) => String(r?.job_id || '') === String(currentJobId || ''))
+    || (String(activeModelRun?.job_id || '') === String(currentJobId || '') ? activeModelRun : null)
+    || activeModelRun
+    || runs.find((r) => String(r?.job_id || '') === String(selectedJobIds[0] || ''))
+    || compareData.find((r) => String(r?.job_id || '') === String(selectedJobIds[0] || ''))
     || runs[0]
     || null
-  ), [runs, compareData, resolvedJobId]);
-  const effectiveJobId = resolvedJobId || activeModel?.job_id || '';
+  ), [runs, compareData, currentJobId, activeModelRun, selectedJobIds]);
+  const effectiveJobId = currentJobId || activeModel?.job_id || '';
+
+  useEffect(() => {
+    if (activeModel?.job_id) onActiveRunChange?.(activeModel);
+  }, [activeModel, onActiveRunChange]);
 
   const headerSubtitle = activeModel
     ? `Active model: ${normalizeLabel(activeModel)} | ${activeModel.algorithm_display || activeModel.algorithm}`
@@ -199,6 +211,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
           <ThresholdTuningTab
             jobId={effectiveJobId}
             runs={runs}
+            onJobChange={setCurrentJobId}
             onValidationComplete={onValidationComplete}
           />
         )}

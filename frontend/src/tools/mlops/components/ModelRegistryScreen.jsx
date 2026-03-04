@@ -543,7 +543,7 @@ const AuditLogPanel = () => {
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegistered }) => {
-  const resolvedJobId = jobId || activeModelRun?.job_id || '';
+  const resolvedJobId = String(jobId || validationReport?.job_id || activeModelRun?.job_id || '').trim();
   const [rows,        setRows]        = useState([]);
   const [loading,     setLoading]     = useState(false);
   const [submitting,  setSubmitting]  = useState(false);
@@ -642,6 +642,13 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
       {!resolvedJobId && (
         <Alert severity="warning" sx={{ borderRadius: 2 }}>
           Select a model run in Step 6 before registering.
+        </Alert>
+      )}
+
+      {resolvedJobId && (
+        <Alert severity="info" sx={{ borderRadius: 2 }}>
+          Registering current run <strong>{resolvedJobId.slice(0, 8)}</strong>
+          {activeModelRun?.algorithm ? ` (${String(activeModelRun.algorithm).replace(/_/g, ' ')})` : ''}.
         </Alert>
       )}
 

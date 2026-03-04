@@ -2004,6 +2004,31 @@ const ModelTrainingPanel = ({
     return TRAINING_LIBRARY.find((algo) => algo.id === algoId)?.label || algoIdOrLabel || 'Model';
   }, []);
 
+  const emitModelComplete = useCallback((run, resultData = null) => {
+    if (!onModelComplete || !run?.job_id) return;
+    const result = resultData || run?.results || results || null;
+    const algorithmId = run?.algorithm_id || run?.algo_id || result?.algorithm || selectedTrainingAlgorithm;
+    const metrics = result?.metrics || run?.metrics || {};
+    const selectedThreshold = run?.selected_threshold
+      ?? run?.threshold
+      ?? result?.metrics?.threshold_table?.[2]?.threshold
+      ?? threshold;
+    onModelComplete({
+      ...run,
+      job_id: run.job_id,
+      algorithm_id: algorithmId,
+      algorithm: run?.algorithm || resolveAlgorithmLabel(algorithmId),
+      results: result,
+      metrics,
+      auc: run?.auc ?? metrics?.roc_auc,
+      grain: run?.grain || grain,
+      threshold: selectedThreshold,
+      selected_threshold: selectedThreshold,
+      hml_high_threshold: run?.hml_high_threshold ?? hmlHigh,
+      hml_low_threshold: run?.hml_low_threshold ?? hmlLow,
+    });
+  }, [onModelComplete, results, selectedTrainingAlgorithm, threshold, resolveAlgorithmLabel, grain, hmlHigh, hmlLow]);
+
   const trainRows = Math.round(rowCount * (1 - testSplit / 100));
   const testRows  = Math.round(rowCount * testSplit / 100);
 
@@ -2068,7 +2093,10 @@ const ModelTrainingPanel = ({
         if (status === 'complete') {
           clearInterval(pollRef.current);
           const rData = await fetchResults(jobId);
-          if (rData) setActiveTab(2);
+          if (rData) {
+            emitModelComplete({ job_id: jobId, grain }, rData);
+            setActiveTab(2);
+          }
         } else if (status === 'failed') {
           clearInterval(pollRef.current);
           setTrainingError(data?.error || 'Training failed');
@@ -2252,7 +2280,8 @@ const ModelTrainingPanel = ({
     if (run.hml_high_threshold) setHmlHigh(run.hml_high_threshold);
     if (run.hml_low_threshold)  setHmlLow(run.hml_low_threshold);
     setJobId(run.job_id);
-    await fetchResults(run.job_id);
+    const loadedResults = await fetchResults(run.job_id);
+    emitModelComplete(run, loadedResults);
     setActiveTab(2);
   };
 
@@ -2311,7 +2340,7 @@ const ModelTrainingPanel = ({
 
   const handleSelectRun = (run) => {
     setSelectedRunId(run.job_id);
-    if (onModelComplete) onModelComplete(run);
+    emitModelComplete(run);
   };
 
   const handleExport = async (runJobId) => {

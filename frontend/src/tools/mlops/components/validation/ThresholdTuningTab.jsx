@@ -27,7 +27,7 @@ import { V } from './validationTheme';
 import { unwrap, fmt, num, pct, safeNumber, normalizeLabel } from './validationUtils';
 import { SectionCard, SectionTitle, StatCard, ConfusionMatrixGrid, DeltaPill, TableHeader } from './ValidationShared';
 
-const ThresholdTuningTab = ({ jobId, runs, onValidationComplete }) => {
+const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) => {
   const [maxEventLoss, setMaxEventLoss] = useState(5);
   const [optimizationMode, setOptimizationMode] = useState('max_suppression_under_event_loss');
   const [targetSuppression, setTargetSuppression] = useState(70);
@@ -48,6 +48,10 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete }) => {
       setActiveJobId(String(runs[0].job_id || ''));
     }
   }, [activeJobId, runs]);
+
+  useEffect(() => {
+    if (activeJobId) onJobChange?.(activeJobId);
+  }, [activeJobId, onJobChange]);
 
   const chartData = useMemo(() => {
     const rows = report?.threshold_table || [];
@@ -97,7 +101,11 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete }) => {
         specificity: Number(optimalRow?.specificity ?? 0),
         accuracy: Number(optimalRow?.accuracy ?? 0),
       });
-      onValidationComplete?.(data);
+      onValidationComplete?.({
+        ...data,
+        job_id: activeJobId,
+        algorithm: (runs || []).find((run) => String(run?.job_id || '') === String(activeJobId || ''))?.algorithm,
+      });
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to generate validation report');
     } finally {

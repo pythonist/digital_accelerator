@@ -1399,7 +1399,6 @@ const AlertImbalanceTab = ({ ds, persona, targetColumn, detectedCols }) => {
   useEffect(() => {
     if (!trendLoading) return;
     if (trendData.length || trendError || trendReason) setTrendLoading(false);
-    return () => { alive = false; };
   }, [trendData.length, trendError, trendLoading, trendReason]);
 
   if (loading) return <Spinner label="Analysing alert imbalance..." />;
