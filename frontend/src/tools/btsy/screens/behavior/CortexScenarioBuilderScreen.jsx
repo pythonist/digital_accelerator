@@ -1,479 +1,654 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Typography,
   Paper,
   Grid,
+  TextField,
+  Button,
+  Alert,
+  LinearProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Chip,
+  Stack,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  TextField,
-  Button,
-  Alert,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  LinearProgress
+  Divider
 } from '@mui/material';
-import axios from 'axios';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { DataGrid } from '@mui/x-data-grid';
 import btsyApi from '../../services/btsyApi';
-import { useCalibrationRun } from '../../context/CalibrationRunContext';
 
-const API_BASE = '/api/btsy';
-
-const getEnvId = () => sessionStorage.getItem('btsy_env_id') || 'default';
-const getHeaders = () => ({ 'X-Environment-ID': getEnvId() });
-
-const defaultConfig = {
-  transaction_type: 'DEBIT',
+const defaultGrouping = {
   aggregation_level: 'daily',
+  entity_level: 'account',
+  transaction_type: 'ALL'
+};
+
+const defaultLookback = {
   lookback_days: 10
+};
+
+const toTitle = (value) => {
+  if (!value) return '';
+  return String(value)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+};
+
+const buildColumns = (rows) => {
+  if (!rows || rows.length === 0) return [];
+  return Object.keys(rows[0]).map((key) => ({
+    field: key,
+    headerName: toTitle(key),
+    flex: 1,
+    minWidth: 140
+  }));
+};
+
+const buildRows = (rows) => {
+  if (!rows) return [];
+  return rows.map((row, idx) => ({
+    id: `${idx}-${row.account_id || ''}-${row.customer_id || ''}-${row.transaction_datetime || ''}`,
+    ...row
+  }));
+};
+
+const Metric = ({ label, value }) => (
+  <Stack spacing={0.25}>
+    <Typography variant="caption" sx={{ color: 'text.secondary' }}>{label}</Typography>
+    <Typography variant="body2" sx={{ fontWeight: 600 }}>{value}</Typography>
+  </Stack>
+);
+
+const StageHeader = ({ title, stats, right }) => (
+  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+    <Box>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{title}</Typography>
+      {stats && (
+        <Stack direction="row" spacing={2} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+          <Metric label="Rows" value={(stats.rows || 0).toLocaleString()} />
+          <Metric label="Accounts" value={(stats.accounts || 0).toLocaleString()} />
+          <Metric label="Customers" value={(stats.customers || 0).toLocaleString()} />
+        </Stack>
+      )}
+    </Box>
+    {right}
+  </Box>
+);
+
+const PreviewGrid = ({ rows }) => {
+  const columns = useMemo(() => buildColumns(rows), [rows]);
+  const gridRows = useMemo(() => buildRows(rows), [rows]);
+  if (columns.length === 0) {
+    return (
+      <Box sx={{ py: 3, textAlign: 'center', color: 'text.secondary' }}>
+        No rows yet.
+      </Box>
+    );
+  }
+  return (
+    <Box sx={{ height: 360 }}>
+      <DataGrid
+        rows={gridRows}
+        columns={columns}
+        density="compact"
+        disableRowSelectionOnClick
+        pageSizeOptions={[50, 100, 200]}
+        initialState={{ pagination: { paginationModel: { pageSize: 50 } } }}
+      />
+    </Box>
+  );
 };
 
 const CortexScenarioBuilderScreen = ({ calibrationRunId }) => {
   const [universe, setUniverse] = useState(null);
-  const [config, setConfig] = useState(defaultConfig);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [stats, setStats] = useState(null);
-  const [thresholdRows, setThresholdRows] = useState([]);
-  const [worstRows, setWorstRows] = useState([]);
-  const [monthlyRows, setMonthlyRows] = useState([]);
+  const [error, setError] = useState('');
   const [runId, setRunId] = useState(null);
-  const { activeRunLogic } = useCalibrationRun();
+  const [availableTypes, setAvailableTypes] = useState([]);
+  const [categories, setCategories] = useState({});
+  const [expanded, setExpanded] = useState('static');
+  const [loadingUniverse, setLoadingUniverse] = useState(false);
+  const [selectedThreshold, setSelectedThreshold] = useState(null);
+
+  const [staticState, setStaticState] = useState({ loading: false, stats: null, rows: [] });
+  const [groupState, setGroupState] = useState({ loading: false, stats: null, rows: [] });
+  const [lookbackState, setLookbackState] = useState({ loading: false, stats: null, rows: [] });
+  const [thresholdState, setThresholdState] = useState({ loading: false, stats: null, rows: [], worst: [] });
+
+  const [grouping, setGrouping] = useState(defaultGrouping);
+  const [lookback, setLookback] = useState(defaultLookback);
+
+  const [staticFilters, setStaticFilters] = useState({ account_id: '', customer_id: '' });
+  const [groupFilters, setGroupFilters] = useState({ account_id: '', customer_id: '' });
+  const [lookbackFilters, setLookbackFilters] = useState({ account_id: '', customer_id: '', as_of_date: '' });
+  const [thresholdFilters, setThresholdFilters] = useState({ account_id: '', customer_id: '' });
 
   useEffect(() => {
     const loadSelected = async () => {
+      setLoadingUniverse(true);
+      setError('');
       try {
+        let sel = null;
         const hintUniverseId = sessionStorage.getItem('btsy_selected_universe_id');
         if (hintUniverseId) {
-          const res = await axios.get(
-            `${API_BASE}/universe/${hintUniverseId}`,
-            { headers: getHeaders() }
-          );
-          if (res.data?.success) setUniverse(res.data.data);
-          return;
+          const res = await btsyApi.universe.getUniverse(hintUniverseId);
+          if (res?.success) sel = res.data;
+        } else if (calibrationRunId) {
+          const res = await btsyApi.universe.getSelected(calibrationRunId);
+          if (res?.success) sel = res.data;
         }
-        if (calibrationRunId) {
-          const res = await axios.get(
-            `${API_BASE}/universe/selected?calibration_run_id=${calibrationRunId}`,
-            { headers: getHeaders() }
-          );
-          if (res.data?.success) setUniverse(res.data.data);
+        if (!sel && (sessionStorage.getItem(`btsy_active_run_id_text:${sessionStorage.getItem('btsy_env_id') || 'default'}`) || '').trim()) {
+          const rid = sessionStorage.getItem(`btsy_active_run_id_text:${sessionStorage.getItem('btsy_env_id') || 'default'}`);
+          const res = await btsyApi.universe.getSelected(null, rid);
+          if (res?.success) sel = res.data;
         }
+        if (!sel) {
+          setError('No selected universe found for this run.');
+        }
+        setUniverse(sel);
       } catch (e) {
-        setError('Failed to load selected universe');
+        setError(e.message || 'Failed to load selected universe');
+      } finally {
+        setLoadingUniverse(false);
       }
     };
     loadSelected();
   }, [calibrationRunId]);
 
-  useEffect(() => {
-    if (!activeRunLogic) return;
-    setConfig((prev) => ({
-      transaction_type: String(activeRunLogic.transaction_type || prev.transaction_type).toUpperCase(),
-      aggregation_level: String(activeRunLogic.aggregation_level || prev.aggregation_level).toLowerCase(),
-      lookback_days: Number(activeRunLogic.lookback_days ?? prev.lookback_days)
-    }));
-  }, [activeRunLogic]);
+  const universeTypes = useMemo(() => {
+    const fromFilter = universe?.filter_spec?.types;
+    const normalized = Array.isArray(fromFilter) && fromFilter.length
+      ? fromFilter.map((t) => String(t).toUpperCase())
+      : availableTypes;
+    return Array.from(new Set(normalized.filter(Boolean)));
+  }, [universe, availableTypes]);
 
-  const runScenario = async () => {
-    if (!universe) {
+  const allowTxSelect = universeTypes.length > 1;
+  const universeTypeLabel = universeTypes.length === 1 ? universeTypes[0] : universeTypes.length > 1 ? universeTypes.join(' + ') : 'UNKNOWN';
+
+  const runStatic = async () => {
+    if (!universe?.id) {
       setError('No universe selected. Create or select a universe first.');
       return;
     }
-    setError(null);
-    setLoading(true);
+    setStaticState((s) => ({ ...s, loading: true }));
+    setError('');
     try {
-      const payload = {
+      const res = await btsyApi.thresholdConstruction.start({
         universe_id: universe.id,
-        config: {
-          transaction_type: config.transaction_type,
-          aggregation_level: config.aggregation_level,
-          lookback_days: parseInt(config.lookback_days, 10)
-        },
-        created_by: 'user'
-      };
-      const res = await axios.post(
-        `${API_BASE}/cortex/scenario/run`,
-        payload,
-        { headers: getHeaders() }
-      );
-      if (!res.data?.success) {
-        throw new Error(res.data?.error || 'Scenario run failed');
-      }
-      const data = res.data.data || {};
+        created_by: 'user',
+        limit: 200,
+        offset: 0
+      });
+      if (!res?.success) throw new Error(res?.error || 'Static stage failed');
+      const data = res.data || {};
       setRunId(data.run_id || null);
-      setStats(data.stats || null);
-      setThresholdRows(data.threshold_preview || []);
-      setWorstRows(data.worst_case_preview || []);
-      setMonthlyRows(data.monthly_threshold_preview || []);
+      setAvailableTypes(data.available_transaction_types || []);
+      setCategories(data.categories || {});
+      setStaticState({ loading: false, stats: data.stats || null, rows: data.preview || [] });
     } catch (e) {
-      setError(e.message || 'Scenario run failed');
-    } finally {
-      setLoading(false);
+      setStaticState((s) => ({ ...s, loading: false }));
+      setError(e.message || 'Static stage failed');
     }
   };
 
-  const runUsingSelectedUniverseForRun = async () => {
-    setError(null);
-    setLoading(true);
+  const runGrouping = async (withFilters = false) => {
+    if (!runId) return;
+    setGroupState((s) => ({ ...s, loading: true }));
+    setError('');
     try {
-      let sel = null;
-      if (calibrationRunId) {
-        const g = await axios.get(
-          `${API_BASE}/universe/selected?calibration_run_id=${calibrationRunId}`,
-          { headers: getHeaders() }
-        );
-        if (g.data?.success) sel = g.data.data;
-      }
-      if (!sel && (sessionStorage.getItem(`btsy_active_run_id_text:${getEnvId()}`) || '').trim()) {
-        const rid = sessionStorage.getItem(`btsy_active_run_id_text:${getEnvId()}`);
-        const g = await axios.get(
-          `${API_BASE}/universe/selected?run_id=${encodeURIComponent(String(rid))}`,
-          { headers: getHeaders() }
-        );
-        if (g.data?.success) sel = g.data.data;
-      }
-      if (!sel) throw new Error('No selected universe found for this run');
-      setUniverse(sel);
-
-      const runIdText = (sessionStorage.getItem(`btsy_active_run_id_text:${getEnvId()}`) || '').trim();
-      let scenarioRunId = null;
-      if (runIdText) {
-        try {
-          const scenarioRes = await axios.post(
-            `${API_BASE}/cortex/scenario/run-by-run`,
-            {
-              run_id: runIdText,
-              created_by: 'user',
-              config: {
-                transaction_type: config.transaction_type,
-                aggregation_level: config.aggregation_level,
-                lookback_days: parseInt(config.lookback_days, 10)
-              }
-            },
-            { headers: getHeaders() }
-          );
-          if (scenarioRes.data?.success) {
-            const data = scenarioRes.data.data || {};
-            scenarioRunId = data.run_id || null;
-            setRunId(data.run_id || null);
-            setStats(data.stats || null);
-            setThresholdRows(data.threshold_preview || []);
-            setWorstRows(data.worst_case_preview || []);
-            setMonthlyRows(data.monthly_threshold_preview || []);
-          }
-        } catch {}
-      }
-
-      if (!scenarioRunId) {
-        const scenarioRes = await axios.post(
-          `${API_BASE}/cortex/scenario/run`,
-          {
-            universe_id: sel.id,
-            config: {
-              transaction_type: config.transaction_type,
-              aggregation_level: config.aggregation_level,
-              lookback_days: parseInt(config.lookback_days, 10)
-            },
-            created_by: 'user'
-          },
-          { headers: getHeaders() }
-        );
-        if (!scenarioRes.data?.success) {
-          throw new Error(scenarioRes.data?.error || 'Scenario run failed');
-        }
-        const data = scenarioRes.data.data || {};
-        scenarioRunId = data.run_id || null;
-        setRunId(data.run_id || null);
-        setStats(data.stats || null);
-        setThresholdRows(data.threshold_preview || []);
-        setWorstRows(data.worst_case_preview || []);
-        setMonthlyRows(data.monthly_threshold_preview || []);
-      }
-
-      if (scenarioRunId != null) {
-        sessionStorage.setItem('btsy_step3_cortex_run_id', String(scenarioRunId));
-      }
-
-      const behaviorConfig = {
-        entity_level: 'account',
-        entity_id_col: 'account_id',
-        time_col: 'transaction_datetime',
-        metrics: [
-          {
-            name: 'cash_1d_sum',
-            type: 'SUM',
-            column: 'transaction_amount',
-            window: config.aggregation_level === 'monthly' ? '1M' : '1D'
-          }
-        ]
-      };
-      const res = await btsyApi.behavior.createRun(sel.id, behaviorConfig, 'user');
-      if (!res?.success) throw new Error(res?.error || 'Failed to create behavior run');
-      const behaviorRunId = res.data?.behavior_run_id;
-      if (!behaviorRunId) throw new Error('Behavior run id missing');
-      sessionStorage.setItem('btsy_step3_behavior_run_id', String(behaviorRunId));
-      window.dispatchEvent(new CustomEvent('btsy:navigate', { detail: { screen: 'calibration' } }));
+      const res = await btsyApi.thresholdConstruction.group({
+        run_id: runId,
+        aggregation_level: grouping.aggregation_level,
+        entity_level: grouping.entity_level,
+        transaction_type: allowTxSelect ? grouping.transaction_type : universeTypes[0] || 'ALL',
+        limit: 200,
+        offset: 0,
+        account_id: withFilters ? groupFilters.account_id || undefined : undefined,
+        customer_id: withFilters ? groupFilters.customer_id || undefined : undefined
+      });
+      if (!res?.success) throw new Error(res?.error || 'Grouping stage failed');
+      const data = res.data || {};
+      setGroupState({ loading: false, stats: data.stats || null, rows: data.preview || [] });
     } catch (e) {
-      setError(e.message || 'Run-by-run failed');
-    } finally {
-      setLoading(false);
+      setGroupState((s) => ({ ...s, loading: false }));
+      setError(e.message || 'Grouping stage failed');
     }
+  };
+
+  const runLookback = async (overrideFilters = null) => {
+    if (!runId) return;
+    setLookbackState((s) => ({ ...s, loading: true }));
+    setError('');
+    try {
+      const filters = overrideFilters || {};
+      const res = await btsyApi.thresholdConstruction.lookback({
+        run_id: runId,
+        lookback_days: lookback.lookback_days,
+        limit: 200,
+        offset: 0,
+        account_id: filters.account_id || undefined,
+        customer_id: filters.customer_id || undefined,
+        as_of_date: filters.as_of_date || undefined
+      });
+      if (!res?.success) throw new Error(res?.error || 'Lookback stage failed');
+      const data = res.data || {};
+      setLookbackState({ loading: false, stats: data.stats || null, rows: data.preview || [] });
+    } catch (e) {
+      setLookbackState((s) => ({ ...s, loading: false }));
+      setError(e.message || 'Lookback stage failed');
+    }
+  };
+
+  const runThreshold = async (withFilters = false) => {
+    if (!runId) return;
+    setThresholdState((s) => ({ ...s, loading: true }));
+    setError('');
+    try {
+      const res = await btsyApi.thresholdConstruction.threshold({
+        run_id: runId,
+        limit: 200,
+        offset: 0,
+        account_id: withFilters ? thresholdFilters.account_id || undefined : undefined,
+        customer_id: withFilters ? thresholdFilters.customer_id || undefined : undefined
+      });
+      if (!res?.success) throw new Error(res?.error || 'Threshold stage failed');
+      const data = res.data || {};
+      setThresholdState({ loading: false, stats: data.stats || null, rows: data.preview || [], worst: data.worst_case || [] });
+    } catch (e) {
+      setThresholdState((s) => ({ ...s, loading: false }));
+      setError(e.message || 'Threshold stage failed');
+    }
+  };
+
+  const onReconstruct = (row) => {
+    const nextFilters = {
+      account_id: row.account_id || '',
+      customer_id: row.customer_id || '',
+      as_of_date: row.transaction_datetime || ''
+    };
+    setLookbackFilters(nextFilters);
+    setExpanded('lookback');
+    runLookback(nextFilters);
+  };
+
+  const runStaticInspect = async () => {
+    if (!runId) return;
+    setStaticState((s) => ({ ...s, loading: true }));
+    setError('');
+    try {
+      const res = await btsyApi.thresholdConstruction.start({
+        run_id: runId,
+        limit: 200,
+        offset: 0,
+        account_id: staticFilters.account_id || undefined,
+        customer_id: staticFilters.customer_id || undefined
+      });
+      if (!res?.success) throw new Error(res?.error || 'Static inspection failed');
+      const data = res.data || {};
+      setStaticState((s) => ({ ...s, loading: false, rows: data.preview || [] }));
+    } catch (e) {
+      setStaticState((s) => ({ ...s, loading: false }));
+      setError(e.message || 'Static inspection failed');
+    }
+  };
+
+  const runGroupInspect = async () => {
+    await runGrouping(true);
+  };
+
+  const runLookbackInspect = async () => {
+    if (!runId) return;
+    await runLookback({ ...lookbackFilters });
+  };
+
+  const runThresholdInspect = async () => {
+    await runThreshold(true);
   };
 
   return (
     <Box sx={{ p: 2 }}>
-      <Box sx={{ mb: 1.5 }}>
-        <Typography variant="h6" sx={{ fontWeight: 700 }}>Step 2 — Cortex Scenario Builder</Typography>
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h6" sx={{ fontWeight: 700 }}>Threshold Construction Studio</Typography>
         <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-          Builds lookback-based thresholds from the frozen transaction universe.
+          Transparent, stepwise threshold construction with persistent intermediate datasets.
         </Typography>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 1.5 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      {!universe && (
-        <Alert severity="warning" sx={{ mb: 1.5 }}>
+      {loadingUniverse && (
+        <Paper sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 0, mb: 2 }}>
+          <LinearProgress />
+        </Paper>
+      )}
+
+      {!loadingUniverse && !universe && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
           Select a transaction universe to proceed.
         </Alert>
       )}
 
       {universe && (
-        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Selected Universe</Typography>
-          <Table size="small">
-            <TableBody>
-              <TableRow>
-                <TableCell>Universe</TableCell>
-                <TableCell>{universe.universe_name}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Rows</TableCell>
-                <TableCell>{(universe.transaction_count || 0).toLocaleString()}</TableCell>
-              </TableRow>
-              {universe.unique_accounts && (
-                <TableRow>
-                  <TableCell>Accounts</TableCell>
-                  <TableCell>{universe.unique_accounts}</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </Paper>
-      )}
-
-      <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Scenario Configuration</Typography>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Transaction Type</InputLabel>
-              <Select
-                value={config.transaction_type}
-                label="Transaction Type"
-                onChange={(e) => setConfig({ ...config, transaction_type: e.target.value })}
-                disabled={Boolean(activeRunLogic?.locked && activeRunLogic?.transaction_type)}
-              >
-                <MenuItem value="DEBIT">DEBIT</MenuItem>
-                <MenuItem value="CREDIT">CREDIT</MenuItem>
-                <MenuItem value="ALL">ALL</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Aggregation Level</InputLabel>
-              <Select
-                value={config.aggregation_level}
-                label="Aggregation Level"
-                onChange={(e) => setConfig({ ...config, aggregation_level: e.target.value })}
-                disabled={Boolean(activeRunLogic?.locked && activeRunLogic?.aggregation_level)}
-              >
-                <MenuItem value="daily">daily</MenuItem>
-                <MenuItem value="monthly">monthly</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              size="small"
-              label="Lookback Days"
-              type="number"
-              value={config.lookback_days}
-              onChange={(e) => setConfig({ ...config, lookback_days: e.target.value })}
-              disabled={Boolean(activeRunLogic?.locked && (activeRunLogic?.lookback_days != null))}
-            />
-          </Grid>
-        </Grid>
-        <Button
-          variant="contained"
-          sx={{ mt: 1.5 }}
-          onClick={runScenario}
-          disabled={!universe || loading}
-        >
-          {loading ? 'Running...' : 'Run Scenario Builder'}
-        </Button>
-        <Button
-          variant="outlined"
-          sx={{ ml: 2, mt: 1.5 }}
-          onClick={runUsingSelectedUniverseForRun}
-          disabled={loading}
-        >
-          Use Selected Universe (Active Run)
-        </Button>
-      </Paper>
-
-      {loading && (
-        <Box sx={{ mb: 1.5 }}>
-          <LinearProgress />
-        </Box>
-      )}
-
-      {stats && (
-        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Run Statistics</Typography>
-          <Grid container spacing={1}>
-            <Grid item xs={12}>
-              <Table size="small">
-                <TableBody>
-                  <TableRow><TableCell>Input rows</TableCell><TableCell>{stats.rows_input || 0}</TableCell></TableRow>
-                  <TableRow><TableCell>Daily rows</TableCell><TableCell>{stats.rows_step_daily || 0}</TableCell></TableRow>
-                  <TableRow><TableCell>Threshold rows</TableCell><TableCell>{stats.rows_threshold || 0}</TableCell></TableRow>
-                  <TableRow><TableCell>Worst case rows</TableCell><TableCell>{stats.rows_worst_case || 0}</TableCell></TableRow>
-                  {stats.avg_threshold != null && (
-                    <TableRow><TableCell>Average threshold</TableCell><TableCell>{Number(stats.avg_threshold).toFixed(2)}</TableCell></TableRow>
-                  )}
-                  {stats.median_threshold != null && (
-                    <TableRow><TableCell>Median threshold</TableCell><TableCell>{Number(stats.median_threshold).toFixed(2)}</TableCell></TableRow>
-                  )}
-                  {stats.max_threshold != null && (
-                    <TableRow><TableCell>Max threshold</TableCell><TableCell>{Number(stats.max_threshold).toFixed(2)}</TableCell></TableRow>
-                  )}
-                  {stats.min_threshold != null && (
-                    <TableRow><TableCell>Min threshold</TableCell><TableCell>{Number(stats.min_threshold).toFixed(2)}</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
+        <Paper sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 0, mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Universe Context</Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={8}>
+              <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Chip label={`Rows: ${(universe.transaction_count || staticState.stats?.rows || 0).toLocaleString()}`} />
+                <Chip label={`Accounts: ${(universe.unique_accounts || staticState.stats?.accounts || 0).toLocaleString()}`} />
+                <Chip label={`Customers: ${(universe.unique_customers || staticState.stats?.customers || 0).toLocaleString()}`} />
+                <Chip label={`Universe: ${universeTypeLabel}`} color="primary" />
+                <Chip label={`Date: ${universe.date_range_start || staticState.stats?.date_start || '—'} → ${universe.date_range_end || staticState.stats?.date_end || '—'}`} />
+              </Stack>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>Categories</Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
+                {Object.keys(universe.category_breakdown || categories || {}).length === 0 && (
+                  <Chip label="None" size="small" />
+                )}
+                {Object.entries(universe.category_breakdown || categories || {}).map(([key, value]) => (
+                  <Chip key={key} label={`${key}: ${value}`} size="small" />
+                ))}
+              </Stack>
             </Grid>
           </Grid>
         </Paper>
       )}
 
-      <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Threshold Preview</Typography>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Account</TableCell>
-              <TableCell>Customer</TableCell>
-              <TableCell>As Of</TableCell>
-              <TableCell align="right">Threshold Amt</TableCell>
-              <TableCell align="right">Count</TableCell>
-              <TableCell align="right">Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {thresholdRows.map((row, idx) => (
-              <TableRow key={idx}>
-                <TableCell sx={{ fontFamily: 'monospace' }}>{row.account_id}</TableCell>
-                <TableCell sx={{ fontFamily: 'monospace' }}>{row.customer_id}</TableCell>
-                <TableCell>{row.transaction_datetime}</TableCell>
-                <TableCell align="right">{(row.threshold_amt || 0).toLocaleString()}</TableCell>
-                <TableCell align="right">{row.trxn_count}</TableCell>
-                <TableCell align="right">
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={!runId}
-                    onClick={() => {
-                      const payload = {
-                        behavior_run_id: runId,
-                        entity_id: row.account_id,
-                        as_of_date: row.transaction_datetime,
-                        entity_level: 'account'
-                      };
-                      sessionStorage.setItem('btsy_behavior_recon_payload', JSON.stringify(payload));
-                      window.dispatchEvent(new CustomEvent('btsy:navigate', { detail: { screen: 'behavior_reconstruction' } }));
-                    }}
+      <Accordion expanded={expanded === 'static'} onChange={() => setExpanded(expanded === 'static' ? false : 'static')}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <StageHeader title="Static Filtration Output" stats={staticState.stats} right={null} />
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Dataset already filtered by universe selection.
+            </Typography>
+          </Box>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="contained" onClick={runStatic} disabled={staticState.loading}>
+                {staticState.loading ? 'Running...' : 'Build Static Output'}
+              </Button>
+              {staticState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Inspect Specific Entity (Optional)</Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Account ID"
+                value={staticFilters.account_id}
+                onChange={(e) => setStaticFilters((s) => ({ ...s, account_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Customer ID"
+                value={staticFilters.customer_id}
+                onChange={(e) => setStaticFilters((s) => ({ ...s, customer_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="outlined" onClick={runStaticInspect} disabled={!runId || staticState.loading}>
+                Inspect
+              </Button>
+              {staticState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <PreviewGrid rows={staticState.rows} />
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion expanded={expanded === 'group'} onChange={() => setExpanded(expanded === 'group' ? false : 'group')}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <StageHeader
+            title="Grouping Stage"
+            stats={groupState.stats}
+            right={allowTxSelect ? null : <Chip label={`Universe: ${universeTypeLabel}`} />}
+          />
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Aggregate by time and entity to create grouped datasets for lookback expansion.
+            </Typography>
+          </Box>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            {allowTxSelect && (
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Transaction Type</InputLabel>
+                  <Select
+                    label="Transaction Type"
+                    value={grouping.transaction_type}
+                    onChange={(e) => setGrouping((s) => ({ ...s, transaction_type: e.target.value }))}
                   >
-                    Reconstruct
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {thresholdRows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={6} sx={{ color: 'text.secondary' }}>
-                  No rows yet.
-                </TableCell>
-              </TableRow>
+                    <MenuItem value="ALL">ALL</MenuItem>
+                    {universeTypes.map((t) => (
+                      <MenuItem key={t} value={t}>{t}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
             )}
-          </TableBody>
-        </Table>
-      </Paper>
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Aggregation Level</InputLabel>
+                <Select
+                  label="Aggregation Level"
+                  value={grouping.aggregation_level}
+                  onChange={(e) => setGrouping((s) => ({ ...s, aggregation_level: e.target.value }))}
+                >
+                  <MenuItem value="daily">daily</MenuItem>
+                  <MenuItem value="monthly">monthly</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Entity Level</InputLabel>
+                <Select
+                  label="Entity Level"
+                  value={grouping.entity_level}
+                  onChange={(e) => setGrouping((s) => ({ ...s, entity_level: e.target.value }))}
+                >
+                  <MenuItem value="account">account</MenuItem>
+                  <MenuItem value="customer">customer</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={3} sx={{ display: 'flex', alignItems: 'center' }}>
+              <Button variant="contained" onClick={runGrouping} disabled={!runId || groupState.loading}>
+                {groupState.loading ? 'Running...' : 'Build Grouped Dataset'}
+              </Button>
+            </Grid>
+          </Grid>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Inspect Specific Entity (Optional)</Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Account ID"
+                value={groupFilters.account_id}
+                onChange={(e) => setGroupFilters((s) => ({ ...s, account_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Customer ID"
+                value={groupFilters.customer_id}
+                onChange={(e) => setGroupFilters((s) => ({ ...s, customer_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="outlined" onClick={runGroupInspect} disabled={!runId || groupState.loading}>
+                Inspect
+              </Button>
+              {groupState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <PreviewGrid rows={groupState.rows} />
+        </AccordionDetails>
+      </Accordion>
 
-      <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0, mb: 1.5 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Worst Case (Top Accounts)</Typography>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Account</TableCell>
-              <TableCell align="right">Total Threshold</TableCell>
-              <TableCell align="right">Periods</TableCell>
-              <TableCell align="right">Total Count</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {worstRows.map((row, idx) => (
-              <TableRow key={idx}>
-                <TableCell sx={{ fontFamily: 'monospace' }}>{row.account_id}</TableCell>
-                <TableCell align="right">{(row.total_threshold || 0).toLocaleString()}</TableCell>
-                <TableCell align="right">{row.count_periods}</TableCell>
-                <TableCell align="right">{row.total_trxn_count}</TableCell>
-              </TableRow>
-            ))}
-            {worstRows.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} sx={{ color: 'text.secondary' }}>
-                  No rows yet.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </Paper>
+      <Accordion expanded={expanded === 'lookback'} onChange={() => setExpanded(expanded === 'lookback' ? false : 'lookback')}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <StageHeader title="Lookback Expansion Stage" stats={lookbackState.stats} right={null} />
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Generate lookback-expanded rows for each period based on dynamic lookback days.
+            </Typography>
+          </Box>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Lookback Days"
+                type="number"
+                value={lookback.lookback_days}
+                onChange={(e) => setLookback((s) => ({ ...s, lookback_days: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="contained" onClick={() => runLookback()} disabled={!runId || lookbackState.loading}>
+                {lookbackState.loading ? 'Running...' : 'Build Lookback'}
+              </Button>
+              {lookbackState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Inspect Specific Entity (Optional)</Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Account ID"
+                value={lookbackFilters.account_id}
+                onChange={(e) => setLookbackFilters((s) => ({ ...s, account_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Customer ID"
+                value={lookbackFilters.customer_id}
+                onChange={(e) => setLookbackFilters((s) => ({ ...s, customer_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="As Of Date"
+                value={lookbackFilters.as_of_date}
+                onChange={(e) => setLookbackFilters((s) => ({ ...s, as_of_date: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={3} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="outlined" onClick={runLookbackInspect} disabled={!runId || lookbackState.loading}>
+                Inspect
+              </Button>
+              {lookbackState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <PreviewGrid rows={lookbackState.rows} />
+        </AccordionDetails>
+      </Accordion>
 
-      {monthlyRows.length > 0 && (
-        <Paper sx={{ p: 1.5, border: '1px solid #e2e8f0', borderRadius: 0 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>Monthly Reference Thresholds</Typography>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Account</TableCell>
-                <TableCell>Month End</TableCell>
-                <TableCell align="right">Threshold Amt</TableCell>
-                <TableCell align="right">Count</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {monthlyRows.map((row, idx) => (
-                <TableRow key={idx}>
-                  <TableCell sx={{ fontFamily: 'monospace' }}>{row.account_id}</TableCell>
-                  <TableCell>{row.month_last_date}</TableCell>
-                  <TableCell align="right">{(row.threshold_amt || 0).toLocaleString()}</TableCell>
-                  <TableCell align="right">{row.transaction_count}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Paper>
-      )}
+      <Accordion expanded={expanded === 'threshold'} onChange={() => setExpanded(expanded === 'threshold' ? false : 'threshold')}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <StageHeader title="Threshold Population Stage" stats={thresholdState.stats} right={null} />
+        </AccordionSummary>
+        <AccordionDetails>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+              Aggregate worst-case thresholds and inspect final population before reconstruction.
+            </Typography>
+          </Box>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="contained" onClick={() => runThreshold(false)} disabled={!runId || thresholdState.loading}>
+                {thresholdState.loading ? 'Running...' : 'Build Thresholds'}
+              </Button>
+              {thresholdState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Inspect Specific Entity (Optional)</Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Account ID"
+                value={thresholdFilters.account_id}
+                onChange={(e) => setThresholdFilters((s) => ({ ...s, account_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Customer ID"
+                value={thresholdFilters.customer_id}
+                onChange={(e) => setThresholdFilters((s) => ({ ...s, customer_id: e.target.value }))}
+              />
+            </Grid>
+            <Grid item xs={12} md={6} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Button variant="outlined" onClick={runThresholdInspect} disabled={!runId || thresholdState.loading}>
+                Inspect
+              </Button>
+              {thresholdState.loading && <LinearProgress sx={{ flex: 1 }} />}
+            </Grid>
+          </Grid>
+          <Box sx={{ height: 360 }}>
+            <DataGrid
+              rows={buildRows(thresholdState.rows)}
+              columns={buildColumns(thresholdState.rows)}
+              density="compact"
+              disableRowSelectionOnClick
+              pageSizeOptions={[50, 100, 200]}
+              initialState={{ pagination: { paginationModel: { pageSize: 50 } } }}
+              onRowClick={(params) => setSelectedThreshold(params.row)}
+            />
+          </Box>
+          {selectedThreshold && (
+            <Paper sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 0, mt: 2 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Reconstruction Panel</Typography>
+              <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', mb: 1 }}>
+                <Chip label={`Account: ${selectedThreshold.account_id || '—'}`} />
+                <Chip label={`Customer: ${selectedThreshold.customer_id || '—'}`} />
+                <Chip label={`As Of: ${selectedThreshold.transaction_datetime || '—'}`} />
+                <Chip label={`Threshold: ${(selectedThreshold.threshold_amt || 0).toLocaleString()}`} />
+              </Stack>
+              <Button variant="contained" onClick={() => onReconstruct(selectedThreshold)} disabled={!runId}>
+                Show Lookback Rows
+              </Button>
+            </Paper>
+          )}
+          <Divider sx={{ my: 2 }} />
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>Worst Case Population</Typography>
+          <PreviewGrid rows={thresholdState.worst} />
+        </AccordionDetails>
+      </Accordion>
     </Box>
   );
 };

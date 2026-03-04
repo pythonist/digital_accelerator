@@ -3,7 +3,7 @@
 Environment Routes: FIXED to accept both body and query params
 """
 from flask import Blueprint, request, jsonify
-from api.services import services
+from api.service_locator import services
 from api.middleware.auth_middleware import require_auth
 import shutil
 import os

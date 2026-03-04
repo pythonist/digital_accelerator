@@ -33,7 +33,7 @@ class ControlledInferenceService:
 
     def _load_step_metrics(self, run_id: int, step_id: str) -> Dict[str, Any]:
         metrics: Dict[str, Any] = {}
-        with duckdb_pool.connection(self.run_db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.run_db_path) as conn:
             try:
                 rows = conn.execute(
                     """

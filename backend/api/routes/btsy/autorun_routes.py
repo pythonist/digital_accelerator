@@ -145,7 +145,7 @@ def get_evidence_steps(run_id: int):
         run_db_path = Path(r.get('run_db_path') or '')
         if not run_db_path.exists():
             return jsonify({'error': 'Run DB missing'}), 404
-        con = duckdb.connect(str(run_db_path), read_only=True)
+        con = duckdb.connect(str(run_db_path))
         try:
             rows = con.execute(
                 """
@@ -192,7 +192,7 @@ def get_evidence_artifacts(run_id: int):
         run_db_path = Path(r.get('run_db_path') or '')
         if not run_db_path.exists():
             return jsonify({'error': 'Run DB missing'}), 404
-        con = duckdb.connect(str(run_db_path), read_only=True)
+        con = duckdb.connect(str(run_db_path))
         try:
             if step_id:
                 rows = con.execute(
@@ -248,7 +248,7 @@ def get_evidence_inferences(run_id: int):
         run_db_path = Path(r.get('run_db_path') or '')
         if not run_db_path.exists():
             return jsonify({'error': 'Run DB missing'}), 404
-        con = duckdb.connect(str(run_db_path), read_only=True)
+        con = duckdb.connect(str(run_db_path))
         try:
             if step_id:
                 rows = con.execute(
@@ -308,7 +308,7 @@ def get_evidence_table(run_id: int, table_name: str):
         run_db_path = Path(r.get('run_db_path') or '')
         if not run_db_path.exists():
             return jsonify({'error': 'Run DB missing'}), 404
-        con = duckdb.connect(str(run_db_path), read_only=True)
+        con = duckdb.connect(str(run_db_path))
         try:
             cols = [c[1] for c in con.execute(f"PRAGMA table_info('{table_name}')").fetchall()]
             if not cols:

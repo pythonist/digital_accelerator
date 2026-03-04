@@ -89,6 +89,9 @@ const DataLoadScreen = ({ setActiveScreen }) => {
     try {
       await apiClient.post('/api/v2/db/purge');
       setExistingStats(null);
+      setDatasetLoaded(false);
+      await checkDatasetStatus();
+      await fetchStats();
       setSnackbar({ open: true, message: 'Data purged', severity: 'success' });
     } catch (err) {
       setSnackbar({ open: true, message: `Failed to purge data: ${err.message}`, severity: 'error' });

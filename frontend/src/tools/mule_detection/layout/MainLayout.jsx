@@ -1,53 +1,50 @@
-// frontend/src/tools/mule_detection/layout/MainLayout.jsx
 import React from 'react';
-import { Box } from '@mui/material';
-import Sidebar from './Sidebar';
-import Header from './Header';
-import { TOOL_HEADER_HEIGHT } from './layout.constants';
+import { Box, CssBaseline, ThemeProvider } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import { useAppContext } from '@context/AppContext';
+import SharedWorkbenchLayout from '../../shared/layout/SharedWorkbenchLayout';
+import { getMuleNavigationSections } from './navigationConfig';
+import { muleTheme } from '../theme';
 import InvestigationDrawer from '../components/InvestigationDrawer';
 import ModelRegistryDrawer from '../components/ModelRegistryDrawer';
 import OutcomeIntelligenceBanner from '../components/OutcomeIntelligenceBanner';
 
-const MainLayout = ({ children, activeScreen, setActiveScreen, hasData, hasMLModel, dataStats }) => {
+const MainLayout = ({ children, activeScreen, setActiveScreen, hasData }) => {
+  const navigate = useNavigate();
+  const { username, activeBankName, activeEnv, handleLogout } = useAppContext();
+
   return (
-    <Box sx={{ display: 'flex', height: '100vh', bgcolor: '#fafafa' }}>
-      <Sidebar
+    <ThemeProvider theme={muleTheme}>
+      <CssBaseline />
+      <SharedWorkbenchLayout
+        moduleLabel="Mule Detection Workbench"
         activeScreen={activeScreen}
         setActiveScreen={setActiveScreen}
-        hasData={hasData}
-        hasMLModel={hasMLModel}
-        dataStats={dataStats}
-      />
-      
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          bgcolor: '#fafafa',
-          overflow: 'hidden',
-          height: '100vh',
-          p: 0,
-          display: 'flex',
-          flexDirection: 'column'
+        sections={getMuleNavigationSections(hasData)}
+        username={username}
+        activeEnvironment={activeBankName || activeEnv}
+        onBackToTools={() => navigate('/tools')}
+        onLogout={async () => {
+          await handleLogout();
+          navigate('/login');
         }}
       >
-        <Header hasData={hasData} />
         <Box
           sx={{
             flex: 1,
+            minHeight: 0,
             overflow: 'auto',
-            height: `calc(100vh - ${TOOL_HEADER_HEIGHT}px)`,
-            p: 3,
-            bgcolor: '#fafafa'
+            p: { xs: 2, md: 3 },
+            bgcolor: 'transparent',
           }}
         >
           <OutcomeIntelligenceBanner />
           {children}
         </Box>
-      </Box>
+      </SharedWorkbenchLayout>
       <InvestigationDrawer />
       <ModelRegistryDrawer />
-    </Box>
+    </ThemeProvider>
   );
 };
 

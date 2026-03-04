@@ -47,8 +47,8 @@ def health_check():
     return {'status': 'healthy', 'service': 'calibration', 'version': '3.0.0'}, 200
 
 # DEBUG: Print registered routes
-print("✅ Calibration Routes Loaded:")
-print("   - /data/* (Step 0: Data Foundation) ✨ NEW")
+print("Calibration Routes Loaded:")
+print("   - /data/* (Step 0: Data Foundation) NEW")
 print("   - /data/* (Existing)")
 print("   - /run/*")
 print("   - /scenario/*")

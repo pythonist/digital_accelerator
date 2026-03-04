@@ -161,7 +161,7 @@ class STRAlignmentService:
                 raise ValueError("Session not found")
             universe_id = int(row[0])
 
-        uconn = duckdb.connect(str(self.universes_db_path), read_only=True)
+        uconn = duckdb.connect(str(self.universes_db_path))
         try:
             u = uconn.execute(
                 "SELECT snapshot_id FROM transaction_universe_runs WHERE id = ?",

@@ -338,7 +338,7 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
               <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 600, color: '#1e293b' }}>
                 Transaction Volume Over Time
               </Typography>
-              <ResponsiveContainer width="100%" height={150}>
+              <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis 
@@ -364,7 +364,7 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
                     {chartData.map((entry, index) => (
                       <Cell 
                         key={`cell-${index}`} 
-                        fill={entry.isSelected ? '#0f172a' : '#cbd5e1'} 
+                        fill={entry.isSelected ? '#D04A02' : '#cbd5e1'} 
                       />
                     ))}
                   </Bar>
@@ -644,7 +644,7 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
                       borderRadius: 5,
                       bgcolor: '#e2e8f0',
                       '& .MuiLinearProgress-bar': {
-                        bgcolor: '#0f172a',
+                        bgcolor: '#D04A02',
                         borderRadius: 5
                       }
                     }}
@@ -670,8 +670,8 @@ const UniverseFilterBuilder = ({ onPreview, loading, snapshotId, preset }) => {
               disabled={loading || !dateStart || !dateEnd || !universeName.trim()}
               startIcon={<PlayArrowIcon />}
               sx={{
-                bgcolor: '#0f172a',
-                '&:hover': { bgcolor: '#111827' },
+                bgcolor: '#D04A02',
+                '&:hover': { bgcolor: '#b83d00' },
                 '&:disabled': { bgcolor: '#cbd5e1', color: '#94a3b8' },
                 fontWeight: 600,
                 textTransform: 'none',

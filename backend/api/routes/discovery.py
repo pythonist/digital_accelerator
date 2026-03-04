@@ -163,93 +163,164 @@ def query_multi_table():
     1. Single Table Group By (Aggregation)
     2. Multi-Table Auto-Join
     """
-    req = request.json
-    tables = req.get('tables', [])
-    x_axis = req.get('x_axis') 
-    y_axis = req.get('y_axis') 
-    group_by = req.get('group_by') # RESTORED GROUP BY
-    agg = req.get('aggregation', 'count')
-    
+    req = request.json or {}
+    tables = [str(t).strip() for t in (req.get('tables') or []) if str(t).strip()]
+    x_axis = req.get('x_axis')
+    y_axis = req.get('y_axis')
+    group_by = req.get('group_by')
+    agg = str(req.get('aggregation') or 'count').lower()
+
     if not tables or not x_axis:
-        return jsonify({'success': False, 'error': 'Invalid config'})
+        return jsonify({'success': False, 'error': 'Invalid config'}), 400
 
     env_id, db = _get_env_db()
     if not db:
         return jsonify({'success': False, 'error': 'DB not ready', 'env_id': env_id}), 503
+
     conn = db.connect()
     try:
-        query = ""
-        
-        # --- PARSE COLUMNS ---
-        # Helper to strip "table." prefix if present
+        agg_map = {
+            'count': 'COUNT',
+            'sum': 'SUM',
+            'avg': 'AVG',
+            'min': 'MIN',
+            'max': 'MAX',
+        }
+        agg_sql = agg_map.get(agg, 'COUNT')
+
+        def qid(identifier: str) -> str:
+            return '"' + str(identifier).replace('"', '""') + '"'
+
         def parse_col(full_name, default_table):
-            if '.' in full_name: return full_name.split('.', 1)
-            return default_table, full_name
+            raw = str(full_name or '').strip()
+            if '.' in raw:
+                t, c = raw.split('.', 1)
+                return t.strip(), c.strip()
+            return default_table, raw
 
-        x_tbl, x_col = parse_col(x_axis, tables[0])
-        
-        # --- BUILD QUERY ---
-        
-        # SCENARIO A: SINGLE TABLE (Advanced Aggregation)
-        if len(tables) == 1:
-            tbl = tables[0]
-            
-            # Select Clause
-            selects = [f'"{x_col}" as name']
-            
-            # Y-Axis (Metric)
-            if y_axis:
-                _, y_col = parse_col(y_axis, tbl)
-                agg_func = "AVG" if agg == 'avg' else "SUM" if agg == 'sum' else "MAX"
-                selects.append(f'{agg_func}("{y_col}") as value')
+        # Load column metadata for join/validation.
+        table_cols = {}
+        for tbl in tables:
+            rows = conn.execute(f'PRAGMA table_info({qid(tbl)})').fetchall()
+            cols = [r[1] for r in rows]
+            if not cols:
+                return jsonify({'success': False, 'error': f"Table '{tbl}' not found or has no columns"}), 400
+            table_cols[tbl] = cols
+
+        def resolve_ref(full_name, default_table):
+            tbl, col = parse_col(full_name, default_table)
+            if tbl not in table_cols:
+                raise ValueError(f"Table '{tbl}' is not in selected tables")
+            if col not in table_cols[tbl]:
+                raise ValueError(f"Column '{tbl}.{col}' does not exist")
+            return tbl, col
+
+        x_tbl, x_col = resolve_ref(x_axis, tables[0])
+
+        alias_by_table = {tables[0]: 't0'}
+        join_clauses = []
+        join_plan = []
+
+        preferred_keys = [
+            'transaction_id',
+            'account_id',
+            'customer_id',
+            'alert_id',
+            'case_id',
+            'id',
+        ]
+
+        # Build resilient joins for multi-table queries.
+        for i, target_tbl in enumerate(tables[1:], start=1):
+            target_alias = f't{i}'
+            target_cols = set(table_cols[target_tbl])
+            found = None
+
+            for pref in preferred_keys:
+                if pref not in target_cols:
+                    continue
+                for left_tbl, left_alias in alias_by_table.items():
+                    if pref in table_cols[left_tbl]:
+                        found = (left_tbl, left_alias, pref, pref)
+                        break
+                if found:
+                    break
+
+            if not found:
+                for left_tbl, left_alias in alias_by_table.items():
+                    commons = [c for c in table_cols[left_tbl] if c in target_cols]
+                    if not commons:
+                        continue
+                    id_like = [c for c in commons if c.lower().endswith('_id') or c.lower() == 'id']
+                    picked = id_like[0] if id_like else commons[0]
+                    found = (left_tbl, left_alias, picked, picked)
+                    break
+
+            if not found:
+                return jsonify({
+                    'success': False,
+                    'error': f"No safe join key found for table '{target_tbl}'",
+                }), 400
+
+            left_tbl, left_alias, left_key, right_key = found
+            join_clauses.append(
+                f'LEFT JOIN {qid(target_tbl)} {target_alias} ON {left_alias}.{qid(left_key)} = {target_alias}.{qid(right_key)}'
+            )
+            alias_by_table[target_tbl] = target_alias
+            join_plan.append({
+                'left_table': left_tbl,
+                'left_key': left_key,
+                'right_table': target_tbl,
+                'right_key': right_key,
+                'type': 'LEFT',
+            })
+
+        x_expr = f'{alias_by_table[x_tbl]}.{qid(x_col)}'
+
+        select_parts = [f'{x_expr} AS name']
+        group_parts = [x_expr]
+
+        if y_axis:
+            y_tbl, y_col = resolve_ref(y_axis, tables[0])
+            y_expr = f'{alias_by_table[y_tbl]}.{qid(y_col)}'
+            if agg_sql == 'COUNT':
+                metric_expr = f'COUNT({y_expr})'
+            elif agg_sql in {'SUM', 'AVG'}:
+                metric_expr = f'{agg_sql}(TRY_CAST({y_expr} AS DOUBLE))'
             else:
-                selects.append('COUNT(*) as value')
-                
-            # Group By Clause (e.g. Stacked Bar Chart logic)
-            group_clause = "GROUP BY 1"
-            if group_by:
-                _, g_col = parse_col(group_by, tbl)
-                selects.append(f'"{g_col}" as group_key')
-                group_clause += ", 3" # Group by X (1) and GroupKey (3)
-
-            query = f'SELECT {", ".join(selects)} FROM "{tbl}" {group_clause} ORDER BY 1 LIMIT 500'
-
-        # SCENARIO B: MULTI TABLE (Join Strategy)
+                metric_expr = f'{agg_sql}({y_expr})'
+            select_parts.append(f'{metric_expr} AS value')
         else:
-            main_tbl = tables[0]
-            joins = ""
-            
-            # Simple heuristic join: T1.customer_id = T2.customer_id
-            for i in range(1, len(tables)):
-                target_tbl = tables[i]
-                # In production, use real Foreign Keys. Here we guess based on 'id'.
-                join_col = 'customer_id' # Default guess
-                # (You would add logic here to find the actual intersection column)
-                joins += f' INNER JOIN "{target_tbl}" ON "{main_tbl}"."{join_col}" = "{target_tbl}"."{join_col}"'
+            select_parts.append('COUNT(*) AS value')
 
-            # Build Select for Multi-Table
-            selects = [f'"{x_tbl}"."{x_col}" as name']
-            
-            if y_axis:
-                y_tbl, y_col = parse_col(y_axis, main_tbl)
-                agg_func = "AVG" if agg == 'avg' else "SUM" if agg == 'sum' else "MAX"
-                selects.append(f'{agg_func}("{y_tbl}"."{y_col}") as value')
-            else:
-                selects.append('COUNT(*) as value')
+        if group_by:
+            g_tbl, g_col = resolve_ref(group_by, tables[0])
+            g_expr = f'{alias_by_table[g_tbl]}.{qid(g_col)}'
+            select_parts.append(f'{g_expr} AS group_key')
+            group_parts.append(g_expr)
 
-            # Multi-table Group By (if requested)
-            group_clause = "GROUP BY 1"
-            if group_by:
-                g_tbl, g_col = parse_col(group_by, main_tbl)
-                selects.append(f'"{g_tbl}"."{g_col}" as group_key')
-                group_clause += ", 3"
+        main_from = f'FROM {qid(tables[0])} {alias_by_table[tables[0]]}'
+        joins_sql = ' '.join(join_clauses)
+        group_sql = ', '.join(group_parts)
 
-            query = f'SELECT {", ".join(selects)} FROM "{main_tbl}" {joins} {group_clause} LIMIT 500'
+        query = f"""
+            SELECT {", ".join(select_parts)}
+            {main_from}
+            {joins_sql}
+            WHERE {x_expr} IS NOT NULL
+            GROUP BY {group_sql}
+            ORDER BY {x_expr}
+            LIMIT 500
+        """
 
-        # EXECUTE
         df = pd.read_sql_query(query, conn)
-        return jsonify({'success': True, 'data': df.to_dict(orient='records')})
-
+        return jsonify({
+            'success': True,
+            'data': df.to_dict(orient='records'),
+            'join_plan': join_plan,
+        })
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:

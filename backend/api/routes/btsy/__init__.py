@@ -27,6 +27,7 @@ from .scenario_routes import scenario_bp
 from .extension_routes import extension_bp
 from .datatype_routes import datatype_bp
 from .cortex_scenario_routes import cortex_scenario_bp
+from .threshold_construction_routes import threshold_construction_bp
 # Create main BTSY blueprint
 btsy_bp = Blueprint('btsy', __name__)
 
@@ -56,3 +57,4 @@ btsy_bp.register_blueprint(scenario_bp)
 btsy_bp.register_blueprint(extension_bp)
 btsy_bp.register_blueprint(datatype_bp)
 btsy_bp.register_blueprint(cortex_scenario_bp)
+btsy_bp.register_blueprint(threshold_construction_bp)

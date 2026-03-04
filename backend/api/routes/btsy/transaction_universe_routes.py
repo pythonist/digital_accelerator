@@ -549,21 +549,44 @@ def universe_statistics(universe_id):
             return jsonify({'error': 'Universe data not found'}), 404
         
         import duckdb
+        parquet_sql = str(parquet_path).replace("'", "''")
         conn = duckdb.connect()
         
         # Basic counts
-        total_count = conn.execute(f"SELECT COUNT(*) FROM read_parquet('{parquet_path}')").fetchone()[0]
+        total_count = conn.execute(f"SELECT COUNT(*) FROM read_parquet('{parquet_sql}')").fetchone()[0]
+
+        # Distinct entity counts (some universes may not carry both IDs)
+        unique_accounts = None
+        unique_customers = None
+        try:
+            unique_accounts = int(conn.execute(
+                f"SELECT COUNT(DISTINCT account_id) FROM read_parquet('{parquet_sql}') WHERE account_id IS NOT NULL"
+            ).fetchone()[0] or 0)
+        except Exception:
+            unique_accounts = None
+        try:
+            unique_customers = int(conn.execute(
+                f"SELECT COUNT(DISTINCT customer_id) FROM read_parquet('{parquet_sql}') WHERE customer_id IS NOT NULL"
+            ).fetchone()[0] or 0)
+        except Exception:
+            unique_customers = None
+
+        unique_entities = None
+        if unique_accounts is not None and unique_customers is not None:
+            unique_entities = max(unique_accounts, unique_customers)
+        elif unique_accounts is not None:
+            unique_entities = unique_accounts
+        elif unique_customers is not None:
+            unique_entities = unique_customers
         
-        # Coverage vs base snapshot
-        # Read normalized base to compute base total for coverage percentage
+        # Coverage vs base snapshot (same snapshot transaction table)
         base_total = None
         try:
-            # universe dict contains snapshot_id
             snapshot_id = universe.get('snapshot_id')
-            normalized_base = universe_service.snapshot_storage_path.parent / 'normalized'
-            tx_file = normalized_base / 'transactions.parquet'
-            if tx_file.exists():
-                base_total = conn.execute(f"SELECT COUNT(*) FROM read_parquet('{tx_file}')").fetchone()[0]
+            tx_file = universe_service._resolve_snapshot_domain_path(snapshot_id, 'transactions') if snapshot_id else None
+            if tx_file and tx_file.exists():
+                tx_sql = str(tx_file).replace("'", "''")
+                base_total = conn.execute(f"SELECT COUNT(*) FROM read_parquet('{tx_sql}')").fetchone()[0]
         except Exception:
             base_total = None
         
@@ -571,7 +594,7 @@ def universe_statistics(universe_id):
         min_max = conn.execute(f"""
             SELECT MIN(transaction_datetime) AS min_date,
                    MAX(transaction_datetime) AS max_date
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
         """).fetchone()
         
         # Amount stats
@@ -580,7 +603,7 @@ def universe_statistics(universe_id):
                    MAX(CAST(transaction_amount AS DOUBLE)) AS max_amount,
                    AVG(CAST(transaction_amount AS DOUBLE)) AS avg_amount,
                    MEDIAN(CAST(transaction_amount AS DOUBLE)) AS median_amount
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
         """).fetchone()
         
         # Type distribution
@@ -588,7 +611,7 @@ def universe_statistics(universe_id):
         try:
             type_dist = conn.execute(f"""
                 SELECT transaction_type, COUNT(*) AS count
-                FROM read_parquet('{parquet_path}')
+                FROM read_parquet('{parquet_sql}')
                 WHERE transaction_type IS NOT NULL
                 GROUP BY transaction_type
                 ORDER BY count DESC
@@ -601,7 +624,7 @@ def universe_statistics(universe_id):
         try:
             category_dist = conn.execute(f"""
                 SELECT transaction_category, COUNT(*) AS count
-                FROM read_parquet('{parquet_path}')
+                FROM read_parquet('{parquet_sql}')
                 WHERE transaction_category IS NOT NULL
                 GROUP BY transaction_category
                 ORDER BY count DESC
@@ -612,7 +635,7 @@ def universe_statistics(universe_id):
         # Monthly distribution
         monthly_dist = conn.execute(f"""
             SELECT strftime(transaction_datetime, '%Y-%m') AS month, COUNT(*) AS count
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             GROUP BY month
             ORDER BY month
         """).fetchall()
@@ -620,7 +643,7 @@ def universe_statistics(universe_id):
         # Day of week
         dow = conn.execute(f"""
             SELECT strftime(transaction_datetime, '%A') AS day, COUNT(*) AS count
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             GROUP BY day
             ORDER BY day
         """).fetchall()
@@ -628,7 +651,7 @@ def universe_statistics(universe_id):
         # Hour of day
         hod = conn.execute(f"""
             SELECT strftime(transaction_datetime, '%H') AS hour, COUNT(*) AS count
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             GROUP BY hour
             ORDER BY hour
         """).fetchall()
@@ -641,7 +664,7 @@ def universe_statistics(universe_id):
                 transaction_datetime, 
                 transaction_category, 
                 transaction_type
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             WHERE transaction_amount IS NOT NULL
             ORDER BY amount DESC
             LIMIT 10
@@ -653,7 +676,7 @@ def universe_statistics(universe_id):
                 account_id, 
                 COUNT(*) AS txn_count, 
                 SUM(CAST(transaction_amount AS DOUBLE)) AS total_amount
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             GROUP BY account_id
             ORDER BY txn_count DESC
             LIMIT 10
@@ -664,7 +687,7 @@ def universe_statistics(universe_id):
                 account_id, 
                 COUNT(*) AS txn_count, 
                 SUM(CAST(transaction_amount AS DOUBLE)) AS total_amount
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             GROUP BY account_id
             ORDER BY total_amount DESC
             LIMIT 10
@@ -678,7 +701,7 @@ def universe_statistics(universe_id):
                 quantile(CAST(transaction_amount AS DOUBLE), 0.95) AS p95,
                 quantile(CAST(transaction_amount AS DOUBLE), 0.97) AS p97,
                 quantile(CAST(transaction_amount AS DOUBLE), 0.99) AS p99
-            FROM read_parquet('{parquet_path}')
+            FROM read_parquet('{parquet_sql}')
             WHERE transaction_amount IS NOT NULL
         """).fetchone()
         
@@ -686,6 +709,9 @@ def universe_statistics(universe_id):
         
         stats = {
             'total_transactions': int(total_count),
+            'unique_accounts': unique_accounts,
+            'unique_customers': unique_customers,
+            'unique_entities': unique_entities,
             'base_total_transactions': int(base_total) if base_total is not None else None,
             'coverage_percentage': round((total_count / base_total) * 100, 2) if base_total else None,
             'date_range': {

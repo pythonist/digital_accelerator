@@ -229,10 +229,11 @@ def _load_tx_acc(env_id: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 def _ensure_has_data(env_id: str) -> tuple[bool, str | None]:
     conn, _paths = _conn(env_id)
     try:
-        txn_count = int(conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+        raw_count = int(conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+        base_count = int(conn.execute("SELECT COUNT(*) FROM mule_transactions WHERE environment_id = ?", [env_id]).fetchone()[0])
     finally:
         conn.close()
-    if txn_count == 0:
+    if raw_count == 0 and base_count == 0:
         return False, "Upload Transactions First"
     return True, None
 
@@ -725,9 +726,14 @@ def data_sample():
     if table not in ["transactions", "accounts"]:
         return jsonify({"success": False, "error": "Invalid table"}), 400
 
-    sql_table = "mule_transactions_raw" if table == "transactions" else "mule_accounts_raw"
     conn, _paths = _conn(env_id)
     try:
+        if table == "transactions":
+            raw_count = int(conn.execute("SELECT COUNT(*) FROM mule_transactions_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+            sql_table = "mule_transactions_raw" if raw_count > 0 else "mule_transactions"
+        else:
+            raw_count = int(conn.execute("SELECT COUNT(*) FROM mule_accounts_raw WHERE environment_id = ?", [env_id]).fetchone()[0])
+            sql_table = "mule_accounts_raw" if raw_count > 0 else "mule_accounts"
         df = conn.execute(f"SELECT * FROM {sql_table} WHERE environment_id = ? LIMIT ?", [env_id, limit]).df()
     finally:
         conn.close()

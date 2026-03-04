@@ -1,6 +1,8 @@
 import pandas as pd
 import sqlite3
 import re
+import traceback
+import numpy as np
 from services.db_schema import DatabaseManager
 
 class SchemaInspector:

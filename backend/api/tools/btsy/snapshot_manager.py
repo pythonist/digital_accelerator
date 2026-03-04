@@ -178,7 +178,7 @@ class SnapshotManager:
         conn.close()
 
     def get_latest_snapshot_id(self, env_id: str, tenant_id: str, status: str) -> Optional[str]:
-        conn = duckdb.connect(str(self.db_path), read_only=True)
+        conn = duckdb.connect(str(self.db_path))
         try:
             row = conn.execute(
                 """
@@ -252,7 +252,7 @@ class SnapshotManager:
         return {"created": created, "updated": updated}
 
     def list_extension_attributes(self, snapshot_id: str, entity_scope: Optional[str] = None) -> List[Dict]:
-        conn = duckdb.connect(str(self.db_path), read_only=True)
+        conn = duckdb.connect(str(self.db_path))
         try:
             if entity_scope:
                 rows = conn.execute(
@@ -299,7 +299,7 @@ class SnapshotManager:
         field_kind: str,
         field_key: str,
     ) -> Optional[Dict]:
-        conn = duckdb.connect(str(self.db_path), read_only=True)
+        conn = duckdb.connect(str(self.db_path))
         try:
             row = conn.execute(
                 """

@@ -139,7 +139,7 @@ class ServiceContainer:
     def init_services(self):
         """Fast cold-start: initialize only core, defer heavy modules to registry."""
         try:
-            print("🔧 System Startup (fast path)...")
+            print("System Startup (fast path)...")
             self.metadata_manager = MetadataManager()
             self.audit_logger = AuditLogger()
 
@@ -155,7 +155,7 @@ class ServiceContainer:
             self.percentile_engine = ModuleProxy(REGISTRY, "percentile_engine")
             self.threshold_simulator = ModuleProxy(REGISTRY, "threshold_simulator")
 
-            print("✅ Core System Ready.")
+            print("Core System Ready.")
             return True
         except Exception:
             traceback.print_exc()
@@ -315,7 +315,7 @@ class ServiceContainer:
             raise ValueError("Tenant ID required")
 
         try:
-            print(f"🚀 Activating Environment: {case_name} | Tenant: {tenant_id}")
+            print(f"Activating Environment: {case_name} | Tenant: {tenant_id}")
             env_info = self.metadata_manager.activate_environment(case_name, tenant_id)
             paths = env_info.get("paths", {})
 
@@ -362,7 +362,7 @@ class ServiceContainer:
             # Vector RAG
             # RAG will be initialized lazily via registry when accessed
 
-            print("✅ Environment Activated Successfully")
+            print("Environment Activated Successfully")
             return env_info
 
         except Exception as e:
@@ -630,9 +630,9 @@ class ServiceContainer:
             self._pdf_generator_service = PDFGeneratorService(ollama)
             
             if ollama:
-                print("✅ PDF Generator initialized WITH AI explanations")
+                print("PDF Generator initialized WITH AI explanations")
             else:
-                print("⚠️  PDF Generator initialized WITHOUT AI (Ollama not available)")
+                print("WARNING: PDF Generator initialized WITHOUT AI (Ollama not available)")
         
         return self._pdf_generator_service
     

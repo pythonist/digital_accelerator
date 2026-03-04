@@ -35,7 +35,7 @@ import {
 } from '@mui/icons-material';
 import btsyApi from '../../../../services/btsyApi';
 
-const StatCard = ({ icon: Icon, label, value, color = '#334155' }) => (
+const StatCard = ({ icon: Icon, label, value, color = '#D04A02' }) => (
   <Paper 
     sx={{ 
       p: 2, 
@@ -89,7 +89,7 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
   const [compareLookbackDays, setCompareLookbackDays] = useState(7);
 
   const formatNumber = (num, digits = 0) => {
-    if (num === null || num === undefined) return '—';
+    if (num === null || num === undefined) return '-';
     const n = Number(num);
     if (!Number.isFinite(n)) return String(num);
     return n.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -98,7 +98,7 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
   const formatAmount = (num) => formatNumber(num, 2);
 
   const formatDate = (dateStr) => {
-    if (!dateStr) return '—';
+    if (!dateStr) return '-';
     return new Date(dateStr).toLocaleDateString();
   };
 
@@ -192,7 +192,7 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
     <Dialog 
       open={true} 
       onClose={onClose}
-      maxWidth="md"
+      maxWidth="lg"
       fullWidth
       PaperProps={{
         sx: { borderRadius: 0 }
@@ -234,11 +234,15 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
                     Coverage
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#475569' }}>
-                    {coveragePct === null || coveragePct === undefined ? '—' : `${formatNumber(coveragePct, 2)}%`}
+                    {coveragePct === null || coveragePct === undefined ? '-' : `${formatNumber(coveragePct, 2)}%`}
                   </Typography>
                 </Stack>
                 <Box sx={{ mt: 1 }}>
-                  <LinearProgress variant="determinate" value={Math.max(0, Math.min(100, Number(coveragePct || 0)))} />
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.max(0, Math.min(100, Number(coveragePct || 0)))}
+                    sx={{ '& .MuiLinearProgress-bar': { backgroundColor: '#D04A02' } }}
+                  />
                 </Box>
               </Paper>
             </Grid>
@@ -258,7 +262,7 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
                 </Typography>
               </Box>
               <Typography variant="body2" sx={{ color: '#475569' }}>
-                {formatDate(dateStart)} → {formatDate(dateEnd)}
+                {formatDate(dateStart)} to {formatDate(dateEnd)}
               </Typography>
             </Paper>
           </Box>
@@ -442,7 +446,7 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
         <Button 
           onClick={onClose}
           variant="contained"
-          sx={{ bgcolor: '#0f172a' }}
+          sx={{ bgcolor: '#D04A02', '&:hover': { bgcolor: '#b83d00' } }}
         >
           Close
         </Button>
@@ -721,7 +725,7 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
           <Button
             onClick={() => setThresholdOpen(false)}
             variant="contained"
-            sx={{ bgcolor: '#0f172a' }}
+            sx={{ bgcolor: '#D04A02', '&:hover': { bgcolor: '#b83d00' } }}
           >
             Close
           </Button>
@@ -732,3 +736,4 @@ const UniverseDashboardPanel = ({ stats, onClose }) => {
 };
 
 export default UniverseDashboardPanel;
+

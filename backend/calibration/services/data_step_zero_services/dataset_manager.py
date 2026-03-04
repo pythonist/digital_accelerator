@@ -15,7 +15,7 @@ try:
     HAS_PYARROW = True
 except ImportError:
     HAS_PYARROW = False
-    print("⚠️ PyArrow not found. Install with: pip install pyarrow")
+    print("WARNING: PyArrow not found. Install with: pip install pyarrow")
 
 class DatasetManager:
     def __init__(self, db_manager):

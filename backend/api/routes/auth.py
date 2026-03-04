@@ -14,7 +14,7 @@ from typing import Dict, Optional
 import pyotp
 from flask import Blueprint, jsonify, request
 
-from api.services import services
+from api.service_locator import services
 from services.auth.identity_store import IdentityStore
 from services.auth.session_tokens import SessionTokenService
 from security.app_secrets import _is_production

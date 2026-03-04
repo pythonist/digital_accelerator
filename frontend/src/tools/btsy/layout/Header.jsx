@@ -29,12 +29,12 @@ const Header = () => {
       position="static"
       elevation={0}
       sx={{
-        backgroundColor: '#0f172a',
+        backgroundColor: '#D04A02',
         height: TOOL_HEADER_HEIGHT,
         width: '100%',
         zIndex: (theme) => theme.zIndex.drawer + 1,
         borderRadius: 0,
-        borderBottom: '1px solid #1f2937',
+        borderBottom: '1px solid #b83d00',
         flexShrink: 0,
         boxSizing: 'border-box'
       }}
@@ -56,7 +56,14 @@ const Header = () => {
           <Button
             size="small"
             onClick={() => navigate('/tools')}
-            sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 1, px: 1 }}
+            sx={{
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.35)',
+              borderRadius: 1,
+              px: 1,
+              bgcolor: 'rgba(255,255,255,0.1)',
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' },
+            }}
           >
             Back
           </Button>
@@ -119,7 +126,14 @@ const Header = () => {
           <Button
             size="small"
             onClick={(e) => setAnchorElUser(e.currentTarget)}
-            sx={{ color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 1, px: 1 }}
+            sx={{
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.35)',
+              borderRadius: 1,
+              px: 1,
+              bgcolor: 'rgba(255,255,255,0.08)',
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.18)' },
+            }}
           >
             <Avatar
               sx={{

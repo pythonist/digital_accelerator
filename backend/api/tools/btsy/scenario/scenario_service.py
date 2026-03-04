@@ -216,7 +216,7 @@ class ScenarioService:
                         )
 
     def list_scenarios(self, ownership: Optional[str] = None, status: Optional[str] = "ACTIVE") -> List[Dict[str, Any]]:
-        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.db_path) as conn:
             q = """
                 SELECT scenario_id, name, description, entity_level, ownership, status, created_by, created_at, version
                 FROM scenarios
@@ -247,7 +247,7 @@ class ScenarioService:
         ]
 
     def get_scenario(self, scenario_id: str) -> Dict[str, Any]:
-        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.db_path) as conn:
             row = conn.execute(
                 """
                 SELECT scenario_id, name, description, entity_level, ownership, status, created_by, created_at, version, scenario_json

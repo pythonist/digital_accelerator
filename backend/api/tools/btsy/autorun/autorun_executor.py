@@ -587,7 +587,7 @@ class AutoRunExecutor:
             ev.start_step(run_id=int(ctx.run_id), step_id="STEP_2", step_name="Behavioural Aggregation", config_obj=frozen.behavior_config or {})
             try:
                 behavior_run_id = self._step_behavior(ctx, frozen, universe_id)
-                bconn = duckdb.connect(str(ctx.behavior_db_path), read_only=True)
+                bconn = duckdb.connect(str(ctx.behavior_db_path))
                 try:
                     b_row = bconn.execute(
                         "SELECT COUNT(1) AS n, COUNT(DISTINCT metric_name) AS m FROM behavior_table WHERE behavior_run_id = ?",
@@ -620,7 +620,7 @@ class AutoRunExecutor:
             try:
                 cal = self._step_calibration(ctx, behavior_run_id)
                 ctx.session_id = int(cal['session_id'])
-                with duckdb_pool.connection(ctx.run_db_path, read_only=True) as conn:
+                with duckdb_pool.connection(ctx.run_db_path) as conn:
                     bf = conn.execute(
                         """
                         SELECT boundary_id, threshold_value, atl_count
@@ -665,7 +665,7 @@ class AutoRunExecutor:
             ev.start_step(run_id=int(ctx.run_id), step_id="STEP_4", step_name="Alerting & Validation", config_obj={})
             try:
                 ar = self._step_alert_generation(ctx, env_folders)
-                with duckdb_pool.connection(ctx.run_db_path, read_only=True) as conn:
+                with duckdb_pool.connection(ctx.run_db_path) as conn:
                     ac = conn.execute("SELECT COUNT(1) FROM alerts WHERE alert_run_id = ?", [int(ar["alert_run_id"])]).fetchone()
                 ev.insert_metrics(run_id=int(ctx.run_id), step_id="STEP_4", metrics={"alert_run_id": int(ar["alert_run_id"]), "alert_count": int(ac[0] or 0) if ac else 0})
                 ev.register_artifact(

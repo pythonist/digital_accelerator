@@ -22,7 +22,7 @@ const StyledDrawer = styled(Drawer, {
   flexShrink: 0,
   whiteSpace: 'nowrap',
   boxSizing: 'border-box',
-  '& .MuiDrawer-paper': {
+    '& .MuiDrawer-paper': {
     position: 'relative',
     height: '100%',
     overflow: 'visible',
@@ -31,9 +31,9 @@ const StyledDrawer = styled(Drawer, {
       easing: theme.transitions.easing.sharp,
       duration: theme.transitions.duration.enteringScreen,
     }),
-    backgroundColor: '#0f172a',
+    backgroundColor: '#0b1b3a',
     color: '#f8fafc',
-    borderRight: `1px solid ${alpha('#fff', 0.1)}`,
+    borderRight: `1px solid ${alpha('#D04A02', 0.35)}`,
     zIndex: 10,
     borderRadius: 0
   },
@@ -47,7 +47,7 @@ const GroupHeader = styled(ListItemButton)(({ theme }) => ({
   paddingRight: theme.spacing(2.5),
   minHeight: 32,
   '&:hover': {
-    backgroundColor: alpha('#fff', 0.05),
+    backgroundColor: alpha('#D04A02', 0.16),
   },
 }));
 
@@ -138,14 +138,14 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
           size="small"
           onClick={() => setIsCollapsed(!isCollapsed)}
           sx={{
-            bgcolor: '#111827',
-            color: '#e5e7eb',
-            border: '1px solid #1f2937',
+            bgcolor: '#D04A02',
+            color: '#ffffff',
+            border: '1px solid #b83d00',
             width: 24,
             height: 24,
             boxShadow: 'none',
             '&:hover': {
-              bgcolor: '#1f2937',
+              bgcolor: '#b83d00',
               color: '#ffffff',
             },
           }}
@@ -162,7 +162,7 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
           alignItems: 'center',
           px: isCollapsed ? 2 : 3,
           borderBottom: '1px solid',
-          borderColor: alpha('#fff', 0.1),
+          borderColor: alpha('#D04A02', 0.35),
           mb: 0.5
         }}
       >
@@ -207,9 +207,9 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
         overflowY: 'auto',
         overflowX: 'hidden',
         flex: 1,
-        '&::-webkit-scrollbar': { width: '4px' },
-        '&::-webkit-scrollbar-track': { background: 'transparent' },
-        '&::-webkit-scrollbar-thumb': { background: '#334155', borderRadius: '4px' }
+        msOverflowStyle: 'none',
+        scrollbarWidth: 'none',
+        '&::-webkit-scrollbar': { display: 'none' }
       }}>
         <List disablePadding sx={{ py: 0.5 }}>
           {menuSections.map((section) => (
@@ -222,13 +222,13 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
                       fontSize: '0.6875rem',
                       fontWeight: 600,
                       letterSpacing: '0.05em',
-                      color: '#64748b',
+                      color: '#f8b28e',
                       textTransform: 'uppercase'
                     }}
                   />
                   {openGroups[section.key] ?
-                    <ExpandLess sx={{ fontSize: 18, color: '#64748b' }} /> :
-                    <ExpandMore sx={{ fontSize: 18, color: '#64748b' }} />
+                    <ExpandLess sx={{ fontSize: 18, color: '#f8b28e' }} /> :
+                    <ExpandMore sx={{ fontSize: 18, color: '#f8b28e' }} />
                   }
                 </GroupHeader>
               )}
@@ -259,15 +259,16 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
                               transition: 'all 0.15s ease',
 
                               ...(isActive && {
-                                bgcolor: 'rgba(148, 163, 184, 0.12)',
-                                color: '#e2e8f0',
+                                bgcolor: 'rgba(208, 74, 2, 0.24)',
+                                color: '#fff',
+                                borderLeft: '2px solid #D04A02',
                               }),
 
                               ...(!isActive && {
                                 color: '#94a3b8',
                                 '&:hover': {
-                                  bgcolor: 'rgba(255, 255, 255, 0.05)',
-                                  color: '#cbd5e1'
+                                  bgcolor: 'rgba(208, 74, 2, 0.14)',
+                                  color: '#ffffff'
                                 }
                               }),
                             }}
@@ -304,8 +305,8 @@ const Sidebar = ({ activeScreen, setActiveScreen }) => {
       <Box sx={{
         p: 1.5,
         borderTop: '1px solid',
-        borderColor: alpha('#fff', 0.1),
-        bgcolor: 'rgba(15, 23, 42, 0.5)',
+        borderColor: alpha('#D04A02', 0.35),
+        bgcolor: 'rgba(11, 27, 58, 0.85)',
         display: 'flex',
         justifyContent: isCollapsed ? 'center' : 'flex-start',
         alignItems: 'center',

@@ -5,14 +5,100 @@ import './index.css'
 
 import { AppProvider } from './context/AppContext'
 
-// MUI imports
 import { ThemeProvider, CssBaseline } from '@mui/material'
 import { createTheme } from '@mui/material/styles'
 
-// Minimal, safe theme
 const theme = createTheme({
   palette: {
-    mode: 'light', // switch to 'dark' later if you want
+    mode: 'light',
+    primary: {
+      main: '#B45309',
+      light: '#F59E0B',
+      dark: '#92400E',
+      contrastText: '#FFFFFF',
+    },
+    secondary: {
+      main: '#0F172A',
+    },
+    background: {
+      default: '#EEF2F7',
+      paper: '#FFFFFF',
+    },
+    text: {
+      primary: '#0F172A',
+      secondary: '#475569',
+    },
+    divider: 'rgba(15, 23, 42, 0.08)',
+  },
+  typography: {
+    fontFamily: '"IBM Plex Sans", "Segoe UI", sans-serif',
+    h1: { fontWeight: 700 },
+    h2: { fontWeight: 700 },
+    h3: { fontWeight: 700 },
+    h4: { fontWeight: 700 },
+    h5: { fontWeight: 700 },
+    h6: { fontWeight: 700 },
+    button: {
+      fontWeight: 600,
+      letterSpacing: 0,
+      textTransform: 'none',
+    },
+  },
+  shape: {
+    borderRadius: 14,
+  },
+  transitions: {
+    duration: {
+      shortest: 120,
+      shorter: 160,
+      short: 200,
+      standard: 260,
+      complex: 360,
+    },
+  },
+  components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        ':root': {
+          colorScheme: 'light',
+        },
+      },
+    },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          backgroundImage: 'none',
+        },
+      },
+    },
+    MuiButton: {
+      defaultProps: {
+        disableElevation: true,
+      },
+      styleOverrides: {
+        root: {
+          borderRadius: 12,
+        },
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          transition: 'box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease',
+          '&.Mui-focused': {
+            boxShadow: '0 0 0 4px rgba(180, 83, 9, 0.10)',
+          },
+        },
+      },
+    },
+    MuiTab: {
+      styleOverrides: {
+        root: {
+          minHeight: 40,
+          borderRadius: 10,
+        },
+      },
+    },
   },
 })
 

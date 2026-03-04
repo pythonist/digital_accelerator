@@ -1445,4 +1445,4 @@ mule_bp.register_blueprint(intelligence_bp)
 from .platform_routes import platform_bp
 mule_bp.register_blueprint(platform_bp)
 
-print("✓ Mule detection routes with enhanced ML loaded successfully")
+print("Mule detection routes with enhanced ML loaded successfully")

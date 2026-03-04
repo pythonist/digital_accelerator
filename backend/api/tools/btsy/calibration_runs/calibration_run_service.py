@@ -120,7 +120,7 @@ class CalibrationRunService:
 
     def list_runs(self, env_id: str, limit: int = 200) -> List[Dict[str, Any]]:
         limit = max(1, min(int(limit or 200), 500))
-        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.db_path) as conn:
             rows = conn.execute(
                 """
                 SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes,
@@ -156,7 +156,7 @@ class CalibrationRunService:
         ]
 
     def get_run(self, env_id: str, calibration_run_id: int) -> Dict[str, Any]:
-        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.db_path) as conn:
             row = conn.execute(
                 """
                 SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes,
@@ -206,7 +206,7 @@ class CalibrationRunService:
         return self.get_run(env_id, int(calibration_run_id))
 
     def get_active(self, env_id: str) -> Optional[Dict[str, Any]]:
-        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.db_path) as conn:
             row = conn.execute(
                 """
                 SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes
@@ -233,7 +233,7 @@ class CalibrationRunService:
         }
 
     def get_run_by_id(self, env_id: str, run_id: str) -> Dict[str, Any]:
-        with duckdb_pool.connection(self.db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.db_path) as conn:
             row = conn.execute(
                 """
                 SELECT calibration_run_id, run_id, env_id, snapshot_id, status, active, created_by, created_at, updated_at, notes,

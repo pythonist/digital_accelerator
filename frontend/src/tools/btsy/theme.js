@@ -2,9 +2,9 @@
 import { createTheme } from '@mui/material';
 
 export const pwcColors = {
-  primary: '#0f172a',
-  secondary: '#334155',
-  accent: '#1f2937',
+  primary: '#D04A02',
+  secondary: '#B23F00',
+  accent: '#FFB085',
   bg: '#f8fafc',
   surface: '#ffffff',
   textMain: '#0f172a',
@@ -99,11 +99,21 @@ export const btsyTheme = createTheme({
           },
         },
         contained: {
+          backgroundColor: `${pwcColors.primary} !important`,
+          color: '#ffffff !important',
           boxShadow: 'none',
           '&:hover': {
+            backgroundColor: `${pwcColors.secondary} !important`,
             boxShadow: 'none',
           }
         }
+      },
+    },
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          borderRadius: '0 !important',
+        },
       },
     },
     MuiPaper: {
@@ -195,7 +205,7 @@ export const btsyTheme = createTheme({
           minHeight: 32,
         },
         indicator: {
-          backgroundColor: pwcColors.secondary,
+          backgroundColor: pwcColors.primary,
           height: 2,
         },
       },
@@ -230,7 +240,7 @@ export const btsyTheme = createTheme({
     MuiSvgIcon: {
       styleOverrides: {
         root: {
-          color: pwcColors.secondary,
+          color: 'inherit',
           fontSize: '1rem',
         },
       },

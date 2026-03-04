@@ -1431,4 +1431,39 @@ btsyApi.scenarios = {
   }
 };
 
+btsyApi.thresholdConstruction = {
+  start: async (payload) => {
+    const response = await axios.post(
+      `${API_BASE}/threshold/run/start`,
+      payload || {},
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  group: async (payload) => {
+    const response = await axios.post(
+      `${API_BASE}/threshold/run/group`,
+      payload || {},
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  lookback: async (payload) => {
+    const response = await axios.post(
+      `${API_BASE}/threshold/run/lookback`,
+      payload || {},
+      { headers: getHeaders() }
+    );
+    return response.data;
+  },
+  threshold: async (payload) => {
+    const response = await axios.post(
+      `${API_BASE}/threshold/run/threshold`,
+      payload || {},
+      { headers: getHeaders() }
+    );
+    return response.data;
+  }
+};
+
 export default btsyApi;

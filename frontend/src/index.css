@@ -1,3 +1,84 @@
 @import "tailwindcss";
 @import './styles/animations.css';
 
+:root {
+  --fcip-bg: linear-gradient(180deg, #f8fafc 0%, #eef2f7 52%, #e2e8f0 100%);
+  --fcip-panel: rgba(255, 255, 255, 0.92);
+  --fcip-border: rgba(15, 23, 42, 0.08);
+  --fcip-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+  --fcip-accent: #b45309;
+  --fcip-accent-soft: rgba(180, 83, 9, 0.14);
+  --fcip-text: #0f172a;
+  --fcip-muted: #475569;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  overscroll-behavior: none;
+  background: var(--fcip-bg);
+  color: var(--fcip-text);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  isolation: isolate;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: rgba(180, 83, 9, 0.18);
+  color: #7c2d12;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.6) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.58);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(71, 85, 105, 0.78);
+}
+
+.fcip-surface {
+  background: var(--fcip-panel);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--fcip-border);
+  box-shadow: var(--fcip-shadow);
+}
+

@@ -1,29 +1,72 @@
-# Python env
-backend/.venv/
-backend/.venv310/
-backend/.venv312/
-backend/.venv313/
-# Runtime data
-backend/data/
-backend/dist/
-backend/env/
-# Node
+# -----------------------------
+# OS / Editor
+# -----------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# -----------------------------
+# Python
+# -----------------------------
+**/.venv/
+**/.venv*/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# -----------------------------
+# Node / Vite
+# -----------------------------
 frontend/node_modules/
 frontend/dist/
-frontend/.next/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
 
-# Caches
-__pycache__/
-*.pyc
-frontend/.eslintrc.cjs
-# DB / index
+# -----------------------------
+# Environment files
+# -----------------------------
+.env
+.env.*
+backend/.env
+frontend/.env
+!backend/.env.example
+!frontend/.env.example
+
+# -----------------------------
+# Runtime artifacts
+# -----------------------------
+backend/dist/
+backend/env/
+backend/data/
+backend/tmp*/
+backend/tmp_*.py
+backend/feature_store.db
+
+# Local datasets / generated outputs
+DB/
+DB_bank/
+data/
+audit/
+mule_data/
+tmp/
+tmp_*/
+mlops_smoke_*/
+data_generation_scripts/aml_pipeline_output*/
+data_generation_scripts/banks_data/
+
+# DB / binary outputs
 *.db
 *.sqlite3
+*.duckdb
+*.duckdb.wal
+*.wal
 *.bin
 *.pkl
 
-# Misc
-.vscode/
-.idea/
+# Logs
 *.log
-.env

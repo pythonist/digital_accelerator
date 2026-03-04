@@ -15,7 +15,7 @@ def create_app():
     CORS(app, supports_credentials=True)
 
     # Initialize Services
-    from api.services import services
+    from api.service_locator import services
     services.init_services()
 
     # --- REGISTER BLUEPRINTS ---
@@ -31,6 +31,11 @@ def create_app():
     # NEW: Import Discovery
     from api.routes.discovery import discovery_bp 
     from api.routes.mule_detection import mule_bp
+    from api.routes.mlops import mlops_bp
+    from api.tools.mlops.autopilot_routes import autopilot_bp
+    from api.routes.mlops.eda_routes import eda_bp
+    from api.routes.mlops.model_training_routes import model_training_bp
+    from api.routes.mlops.deployment_dashboard_routes import deployment_dashboard_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api') 
     app.register_blueprint(data_bp, url_prefix='/api/v2')
@@ -45,6 +50,12 @@ def create_app():
     # NEW: Register Discovery with correct prefix
     app.register_blueprint(discovery_bp, url_prefix='/api/v2/discovery')
     app.register_blueprint(mule_bp, url_prefix='/api/v2/mule')
+    app.register_blueprint(mlops_bp, url_prefix='/api/mlops')
+    app.register_blueprint(autopilot_bp, url_prefix='/api/mlops/autopilot')
+    # High-performance EDA endpoints used by the frontend workbench
+    app.register_blueprint(eda_bp, url_prefix='/api/eda')
+    app.register_blueprint(model_training_bp, url_prefix='/api/model-training')
+    app.register_blueprint(deployment_dashboard_bp, url_prefix='/api/deployment-dashboard')
 
     @app.route('/data/logos/<path:filename>')
     def serve_logos(filename):

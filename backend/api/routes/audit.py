@@ -3,7 +3,7 @@ import sqlite3
 from flask import Blueprint, jsonify, request
 
 from api.middleware.auth_middleware import require_auth
-from api.services import services
+from api.service_locator import services
 from api.utils import handle_errors
 
 audit_bp = Blueprint("audit", __name__)

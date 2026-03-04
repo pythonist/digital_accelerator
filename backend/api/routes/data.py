@@ -387,7 +387,61 @@ def db_stats():
         return jsonify({"success": True, "stats": stats})
     except Exception as e:
         return jsonify({"success": False, "stats": {}, "error": str(e)})
-    
+
+
+@data_bp.route('/db/purge', methods=['POST'])
+@handle_errors
+def purge_environment_data():
+    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
+    if not env_id:
+        return jsonify({"success": False, "error": "No environment selected"}), 400
+
+    conn = None
+    try:
+        db = services.get_investigation_db(env_id, request.tenant_id)
+        conn = db.connect()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        table_names = [row[0] for row in cursor.fetchall()]
+
+        purged_tables = []
+        purged_rows = 0
+        for table_name in table_names:
+            safe_table = str(table_name).replace('"', '""')
+            try:
+                cursor.execute(f'SELECT COUNT(*) FROM "{safe_table}"')
+                row_count = cursor.fetchone()[0] or 0
+            except Exception:
+                row_count = 0
+
+            cursor.execute(f'DELETE FROM "{safe_table}"')
+            purged_tables.append(table_name)
+            purged_rows += row_count
+
+        conn.commit()
+
+        env_path = resolve_env_path(env_id, request.tenant_id)
+        data_dir = os.path.join(env_path, 'data')
+        deleted_files = []
+        if os.path.isdir(data_dir):
+            for filename in os.listdir(data_dir):
+                file_path = os.path.join(data_dir, filename)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    deleted_files.append(filename)
+
+        return jsonify({
+            "success": True,
+            "message": "Environment data purged successfully",
+            "purged_tables": purged_tables,
+            "purged_rows": purged_rows,
+            "deleted_files": deleted_files,
+        })
+    finally:
+        if conn is not None:
+            db.close_connection(conn)
+     
 
 
 """

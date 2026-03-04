@@ -1,33 +1,54 @@
 // frontend/src/App.jsx
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { useAppContext, AppProvider } from "@context/AppContext";
-import { Loader } from 'lucide-react';
+import { useAppContext } from "@context/AppContext";
+import { ScaleLoader } from 'react-spinners';
 import { PageTransition } from "./components/LoadingAnimations";
 
-// 1. Auth & Admin Screens
-import LoginScreen from "@screens/auth/LoginScreen";
-import RegisterScreen from "@screens/auth/RegisterScreen";
-import AdminDashboard from "@screens/admin/AdminDashboard";
-import EnvironmentSelectScreen from "@screens/admin/EnvironmentSelectScreen";
-import ToolSelectScreen from "@screens/admin/ToolSelectScreen";
+const LoginScreen = lazy(() => import("@screens/auth/LoginScreen"));
+const RegisterScreen = lazy(() => import("@screens/auth/RegisterScreen"));
+const AdminDashboard = lazy(() => import("@screens/admin/AdminDashboard"));
+const EnvironmentSelectScreen = lazy(() => import("@screens/admin/EnvironmentSelectScreen"));
+const ToolSelectScreen = lazy(() => import("@screens/admin/ToolSelectScreen"));
 
-// 2. The Three Isolated Platforms
-import InvestigationPlatform from "@tools/investigation/InvestigationPlatform";
-import CalibrationPlatform from "@tools/calibration/CalibrationPlatform";
-import MulePlatform from "@tools/mule_detection/MulePlatform";
-import BTSYPlatform from "@tools/btsy/BTSYPlatform";
+const InvestigationPlatform = lazy(() => import("@tools/investigation/InvestigationPlatform"));
+const CalibrationPlatform = lazy(() => import("@tools/calibration/CalibrationPlatform"));
+const MulePlatform = lazy(() => import("@tools/mule_detection/MulePlatform"));
+const BTSYPlatform = lazy(() => import("@tools/btsy/BTSYPlatform"));
+const MLOpsPlatform = lazy(() => import("@tools/mlops/MLOpsPlatform"));
+
+const RouteLoader = () => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-slate-100">
+    <div className="text-center space-y-4" role="status" aria-live="polite">
+      <div className="flex justify-center">
+        <ScaleLoader
+          color="#D04A02"
+          height={34}
+          width={5}
+          radius={3}
+          margin={4}
+          speedMultiplier={0.85}
+          aria-label="Switching module"
+        />
+      </div>
+      <div>
+        <p className="text-xs font-semibold tracking-[0.16em] uppercase text-[#9A3412]">Switching Module</p>
+        <p className="text-sm text-slate-600">Loading workspace...</p>
+      </div>
+    </div>
+  </div>
+);
+
+const RouteSuspense = ({ children }) => (
+  <Suspense fallback={<RouteLoader />}>{children}</Suspense>
+);
 
 // --- MAIN LAYOUT ---
 const MainLayout = () => {
   const { isAuthenticated, isAuthLoading } = useAppContext();
 
   if (isAuthLoading) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-50">
-        <Loader className="animate-spin h-10 w-10 text-blue-600" />
-      </div>
-    );
+    return <RouteLoader />;
   }
 
   if (!isAuthenticated) {
@@ -48,8 +69,8 @@ const ToolLayout = () => {
   if (!activeEnv) return <Navigate to="/environments" replace />;
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden animate-in fade-in duration-700">
-      <div className="flex-1 overflow-hidden relative bg-slate-100">
+    <div className="flex h-screen flex-col overflow-hidden animate-in fade-in duration-700">
+      <div className="relative flex-1 overflow-hidden bg-slate-100">
         <PageTransition className="h-full w-full">
           <Outlet />
         </PageTransition>
@@ -65,33 +86,52 @@ const AppRoutes = () => {
   return (
     <Routes>
       {/* PUBLIC ROUTES */}
-      <Route path="/login" element={
-        !isAuthenticated 
-          ? <PageTransition><LoginScreen /></PageTransition> 
-          : <Navigate to="/environments" />
-      } />
-      <Route path="/register" element={
-        !isAuthenticated 
-          ? <PageTransition><RegisterScreen /></PageTransition> 
-          : <Navigate to="/environments" />
-      } />
+      <Route
+        path="/login"
+        element={
+          !isAuthenticated
+            ? (
+              <PageTransition>
+                <RouteSuspense><LoginScreen /></RouteSuspense>
+              </PageTransition>
+            )
+            : <Navigate to="/environments" />
+        }
+      />
+      <Route
+        path="/register"
+        element={
+          !isAuthenticated
+            ? (
+              <PageTransition>
+                <RouteSuspense><RegisterScreen /></RouteSuspense>
+              </PageTransition>
+            )
+            : <Navigate to="/environments" />
+        }
+      />
 
       {/* PROTECTED ROUTES */}
       <Route element={<MainLayout />}>
-        
-        <Route path="/admin" element={
-          userRole === 'TENANT_ADMIN' ? <AdminDashboard /> : <Navigate to="/environments" />
-        } />
+        <Route
+          path="/admin"
+          element={
+            userRole === 'TENANT_ADMIN'
+              ? <RouteSuspense><AdminDashboard /></RouteSuspense>
+              : <Navigate to="/environments" />
+          }
+        />
 
-        <Route path="/environments" element={<EnvironmentSelectScreen />} />
-        <Route path="/tools" element={<ToolSelectScreen />} />
+        <Route path="/environments" element={<RouteSuspense><EnvironmentSelectScreen /></RouteSuspense>} />
+        <Route path="/tools" element={<RouteSuspense><ToolSelectScreen /></RouteSuspense>} />
 
-        {/* ✅ THE THREE PLATFORMS */}
+        {/* Tool Platforms */}
         <Route element={<ToolLayout />}>
-          <Route path="/investigation/*" element={<InvestigationPlatform />} />
-          <Route path="/calibration/*" element={<CalibrationPlatform />} />
-          <Route path="/mule/*" element={<MulePlatform />} />
-          <Route path="/btsy/*" element={<BTSYPlatform />} />
+          <Route path="/investigation/*" element={<RouteSuspense><InvestigationPlatform /></RouteSuspense>} />
+          <Route path="/calibration/*" element={<RouteSuspense><CalibrationPlatform /></RouteSuspense>} />
+          <Route path="/mule/*" element={<RouteSuspense><MulePlatform /></RouteSuspense>} />
+          <Route path="/btsy/*" element={<RouteSuspense><BTSYPlatform /></RouteSuspense>} />
+          <Route path="/mlops/*" element={<RouteSuspense><MLOpsPlatform /></RouteSuspense>} />
         </Route>
 
         <Route path="/" element={<Navigate to="/environments" replace />} />
@@ -104,11 +144,9 @@ const AppRoutes = () => {
 
 const App = () => {
   return (
-    <AppProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AppProvider>
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
   );
 };
 

@@ -80,11 +80,11 @@ class BTSYAdvancedReportGenerator:
         canvas.restoreState()
 
     def _safe_fetchall(self, sql: str, params: Optional[Sequence[Any]] = None) -> List[Tuple]:
-        with duckdb_pool.connection(self.run_db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.run_db_path) as conn:
             return conn.execute(sql, list(params or [])).fetchall()
 
     def _safe_fetchone(self, sql: str, params: Optional[Sequence[Any]] = None) -> Optional[Tuple]:
-        with duckdb_pool.connection(self.run_db_path, read_only=True) as conn:
+        with duckdb_pool.connection(self.run_db_path) as conn:
             return conn.execute(sql, list(params or [])).fetchone()
 
     def _table_exists(self, table_name: str) -> bool:

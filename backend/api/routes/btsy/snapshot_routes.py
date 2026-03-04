@@ -232,7 +232,7 @@ def list_foundation_audit():
 
         FoundationAuditService(db_path)
 
-        conn = duckdb.connect(str(db_path), read_only=True)
+        conn = duckdb.connect(str(db_path))
         try:
             where = ["tenant_id = ?", "env_id = ?"]
             params = [tenant_id, env_id]
@@ -290,7 +290,7 @@ def list_snapshots():
         used_by = {}
         workbench_db = folders['duckdb'] / 'calibration_workbench.duckdb'
         if workbench_db.exists():
-            conn = duckdb.connect(str(workbench_db), read_only=True)
+            conn = duckdb.connect(str(workbench_db))
             try:
                 rows = conn.execute(
                     "SELECT snapshot_id, COUNT(*) AS n FROM calibration_runs WHERE env_id = ? GROUP BY snapshot_id",
@@ -352,7 +352,7 @@ def get_snapshot(snapshot_id):
         used_by_runs = 0
         workbench_db = folders['duckdb'] / 'calibration_workbench.duckdb'
         if workbench_db.exists():
-            conn = duckdb.connect(str(workbench_db), read_only=True)
+            conn = duckdb.connect(str(workbench_db))
             try:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM calibration_runs WHERE env_id = ? AND snapshot_id = ?",
