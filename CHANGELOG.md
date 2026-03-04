@@ -1,5 +1,22 @@
 # Change History
 
+## 2026-03-04 - Cortex V2 naming restore
+
+Commit scope:
+- Restore the user-facing name of the bank-threshold module from `BTSY` back to `Cortex V2`.
+- Update the module selector icon to match the restored naming while keeping internal routes and module keys unchanged.
+
+Files changed:
+- `frontend/src/screens/admin/ToolSelectScreen.jsx`
+- `frontend/src/tools/btsy/layout/MainLayout.jsx`
+- `frontend/src/tools/btsy/layout/Header.jsx`
+
+Summary:
+- Changed the module card label to `Cortex V2`.
+- Updated the visible module chrome/header label to `Cortex V2`.
+- Swapped the module card icon to a more suitable circular workflow icon.
+- Preserved internal `/btsy` routing and implementation names so no functional wiring changed.
+
 ## 2026-03-04 - Global layout and startup fixes
 
 Commit scope:

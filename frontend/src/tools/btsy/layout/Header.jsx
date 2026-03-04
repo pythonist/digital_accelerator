@@ -86,7 +86,7 @@ const Header = () => {
               |
             </Box>
             <Box component="span" sx={{ fontWeight: 500, opacity: 0.9 }}>
-              BTSY
+              Cortex V2
             </Box>
           </Typography>
 

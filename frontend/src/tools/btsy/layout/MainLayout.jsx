@@ -15,7 +15,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen }) => {
     <ThemeProvider theme={btsyTheme}>
       <CssBaseline />
       <SharedWorkbenchLayout
-        moduleLabel="BTSY"
+        moduleLabel="Cortex V2"
         activeScreen={activeScreen}
         setActiveScreen={setActiveScreen}
         sections={btsyNavigationSections}
