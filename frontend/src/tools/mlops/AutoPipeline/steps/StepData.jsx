@@ -5,6 +5,7 @@
  */
 import React from 'react';
 import { Box, Stack, Typography, Checkbox } from '@mui/material';
+import { FCC_THEME } from '../../theme/fccWorkbenchTheme';
 
 const DATASET_LABELS = {
   transactions: { code: 'TXN', title: 'Transaction Records', hint: 'Payment and transfer history' },
@@ -29,18 +30,18 @@ const DatasetRow = ({ dataset, selected, onToggle }) => {
       sx={{
         display: 'flex', alignItems: 'center', gap: 1.5,
         px: 2, py: 1.5,
-        border: `2px solid ${selected ? '#D04A02' : '#e2e8f0'}`,
+        border: `2px solid ${selected ? FCC_THEME.accent : FCC_THEME.border}`,
         borderRadius: 2,
-        bgcolor: selected ? '#fff1ec' : '#fff',
+        bgcolor: selected ? FCC_THEME.accentSoft : FCC_THEME.panel,
         cursor: 'pointer',
         transition: 'all 0.15s',
-        '&:hover': { borderColor: '#D04A02', bgcolor: '#fff1ec' },
+        '&:hover': { borderColor: FCC_THEME.accent, bgcolor: FCC_THEME.accentSoft },
       }}
     >
       <Checkbox
         checked={selected}
         onChange={onToggle}
-        sx={{ p: 0, color: '#D04A02', '&.Mui-checked': { color: '#D04A02' } }}
+        sx={{ p: 0, color: FCC_THEME.accent, '&.Mui-checked': { color: FCC_THEME.accent } }}
         onClick={(e) => e.stopPropagation()}
       />
       <Box sx={{
@@ -48,20 +49,20 @@ const DatasetRow = ({ dataset, selected, onToggle }) => {
         px: 1,
         py: 0.5,
         borderRadius: 1.25,
-        border: '1px solid #f2c8b5',
-        bgcolor: '#fff7f3',
+        border: `1px solid ${FCC_THEME.accentBorder}`,
+        bgcolor: FCC_THEME.accentSoft,
       }}>
-        <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#A83A00', textAlign: 'center', letterSpacing: 0.3 }}>
+        <Typography sx={{ fontSize: 11, fontWeight: 800, color: FCC_THEME.accentHover, textAlign: 'center', letterSpacing: 0.3 }}>
           {meta.code}
         </Typography>
       </Box>
       <Box sx={{ flex: 1 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>{meta.title}</Typography>
-        <Typography sx={{ fontSize: 11, color: '#64748b' }}>{meta.hint}</Typography>
+        <Typography sx={{ fontSize: 13, fontWeight: 700, color: FCC_THEME.text }}>{meta.title}</Typography>
+        <Typography sx={{ fontSize: 11, color: FCC_THEME.textMuted }}>{meta.hint}</Typography>
       </Box>
       <Stack alignItems="flex-end">
-        <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>{rows} rows</Typography>
-        <Typography sx={{ fontSize: 10.5, color: '#94a3b8' }}>{cols} columns</Typography>
+        <Typography sx={{ fontSize: 12, fontWeight: 600, color: FCC_THEME.textMuted }}>{rows} rows</Typography>
+        <Typography sx={{ fontSize: 10.5, color: FCC_THEME.textSoft }}>{cols} columns</Typography>
       </Stack>
     </Box>
   );
@@ -70,9 +71,9 @@ const DatasetRow = ({ dataset, selected, onToggle }) => {
 const StepData = ({ datasets, selectedIds, onToggle }) => {
   if (!datasets?.length) {
     return (
-      <Box sx={{ p: 3, textAlign: 'center', bgcolor: '#f8fafc', borderRadius: 2, border: '1.5px dashed #e2e8f0' }}>
-        <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: '#1e293b', mb: 0.5 }}>No data uploaded yet</Typography>
-        <Typography sx={{ fontSize: 12, color: '#64748b' }}>
+      <Box sx={{ p: 3, textAlign: 'center', bgcolor: FCC_THEME.panelAlt, borderRadius: 2, border: `1.5px dashed ${FCC_THEME.border}` }}>
+        <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: FCC_THEME.text, mb: 0.5 }}>No data uploaded yet</Typography>
+        <Typography sx={{ fontSize: 12, color: FCC_THEME.textMuted }}>
           Go to the Data Upload step first, then come back here.
         </Typography>
       </Box>

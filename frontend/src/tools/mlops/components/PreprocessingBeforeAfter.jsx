@@ -16,7 +16,7 @@
  *
  * Props:
  *   masterDataset         dataset object (has dataset_id)
- *   preprocessedDataset   dataset object (has dataset_id) — null until run
+ *   preprocessedDataset   dataset object (has dataset_id) - null until run
  *   preview               preview result object from onPreview (has before/after sample)
  *   persona               'business' | 'technical'
  */
@@ -398,7 +398,7 @@ const PreprocessingBeforeAfter = ({
         <Alert severity="info" sx={{ borderRadius: 2 }}>
           {persona === 'business'
             ? 'Build a master dataset first to see before/after comparisons.'
-            : 'No masterDataset prop supplied — before sample unavailable.'}
+            : 'No masterDataset prop supplied - before sample unavailable.'}
         </Alert>
       )}
 
@@ -406,7 +406,7 @@ const PreprocessingBeforeAfter = ({
         <Alert severity="warning" icon={<Warning />} sx={{ borderRadius: 2 }}>
           {persona === 'business'
             ? 'Run the preprocessing pipeline to see the transformed data.'
-            : 'No preprocessed dataset yet — run the pipeline or click Preview.'}
+            : 'No preprocessed dataset yet - run the pipeline or click Preview.'}
         </Alert>
       )}
 

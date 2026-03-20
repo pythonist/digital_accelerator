@@ -9,6 +9,11 @@ import re
 from datetime import datetime
 
 llm_bp = Blueprint('llm', __name__)
+
+
+def _get_llm_service():
+    return getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
+
 def clean_sql_output(text):
     """
     Extracts purely the SQL query from the LLM response.
@@ -42,9 +47,18 @@ def is_conversational(msg):
 @llm_bp.route('/llm/models', methods=['GET'])
 def list_models():
     try:
-        if not services.ollama_wrapper or not services.ollama_wrapper.check_connection():
-            return jsonify({'success': False, 'models': [], 'error': 'Ollama service offline'}), 200
-        return jsonify({'success': True, 'models': services.ollama_wrapper.list_models()}), 200
+        llm_service = _get_llm_service()
+        if not llm_service:
+            return jsonify({'success': False, 'available': False, 'models': [], 'error': 'AI provider unavailable'}), 200
+        available = bool(llm_service.check_connection())
+        return jsonify({
+            'success': available,
+            'available': available,
+            'provider': getattr(llm_service, 'provider_name', 'ollama'),
+            'default_model': getattr(llm_service, 'default_model', None),
+            'models': llm_service.list_models(),
+            'error': None if available else 'AI provider unavailable',
+        }), 200
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -58,7 +72,14 @@ def chat():
     """
     start_time = time.time()
     msg = request.json.get('message', '')
-    model = request.json.get('model', 'llama3.2:1b')
+    llm_service = _get_llm_service()
+    model = request.json.get('model') or getattr(llm_service, 'default_model', 'llama3.2:1b')
+
+    if not llm_service or not llm_service.check_connection():
+        return jsonify({
+            'success': False,
+            'error': 'AI provider unavailable. Configure Ollama or GPT4All first.'
+        }), 503
     
     # --- STEP 1: IDENTIFY ACTIVE CONTEXT ---
     active_env_name = services.metadata_manager.active_env
@@ -109,7 +130,7 @@ def chat():
         """
         
         print("🤖 Generating SQL Plan...")
-        sql_response = services.ollama_wrapper.generate(
+        sql_response = llm_service.generate(
             prompt=msg, 
             model=model, 
             system_prompt=sql_system_prompt,
@@ -162,7 +183,7 @@ def chat():
     """
     
     print("📝 Generating Final Narrative...")
-    final_response = services.ollama_wrapper.chat(
+    final_response = llm_service.chat(
         msg, 
         model=model, 
         system_prompt=final_system_prompt
@@ -392,11 +413,11 @@ def explain_similarity():
                 'error': 'Both case_id_1 and case_id_2 are required'
             }), 400
         
-        # Check Ollama connection
-        if not services.ollama_wrapper or not services.ollama_wrapper.check_connection():
+        llm_service = _get_llm_service()
+        if not llm_service or not llm_service.check_connection():
             return jsonify({
                 'status': 'error',
-                'explanation': 'AI service unavailable. Ollama connection failed.'
+                'explanation': 'AI service unavailable. No provider is ready.'
             }), 503
         
         # Check RAG system
@@ -488,6 +509,8 @@ def rag_health_check():
             'timestamp': datetime.now().isoformat()
         }
         
+        llm_service = _get_llm_service()
+
         # Check RAG system
         if services.rag_system:
             health['rag_system'] = {
@@ -495,20 +518,20 @@ def rag_health_check():
                 'index_loaded': services.rag_system.index is not None,
                 'vector_count': services.rag_system.index.ntotal if services.rag_system.index else 0,
                 'embedding_model': services.rag_system.embedding_model,
-                'ollama_url': services.rag_system.ollama_base_url
+                'provider': getattr(llm_service, 'provider_name', 'ollama'),
             }
         else:
             health['rag_system'] = {'initialized': False}
             health['status'] = 'degraded'
         
-        # Check Ollama
-        if services.ollama_wrapper:
-            health['ollama'] = {
-                'available': services.ollama_wrapper.check_connection(),
-                'base_url': services.ollama_wrapper.base_url if hasattr(services.ollama_wrapper, 'base_url') else 'unknown'
+        if llm_service:
+            health['llm_provider'] = {
+                'provider': getattr(llm_service, 'provider_name', 'ollama'),
+                'available': llm_service.check_connection(),
+                'base_url': getattr(llm_service, 'base_url', 'unknown'),
             }
         else:
-            health['ollama'] = {'available': False}
+            health['llm_provider'] = {'available': False}
             health['status'] = 'degraded'
         
         status_code = 200 if health['status'] == 'healthy' else 503
@@ -605,7 +628,7 @@ def rag_statistics():
             },
             'system_config': {
                 'embedding_model': services.rag_system.embedding_model,
-                'ollama_url': services.rag_system.ollama_base_url,
+                'provider': getattr(_get_llm_service(), 'provider_name', 'ollama'),
                 'vector_store_path': services.rag_system.base_path
             }
         }
@@ -633,15 +656,16 @@ review_questions_gen = None
 def init_case_helpers():
     """Initialize case pack AI helpers"""
     global case_summary_builder, case_explainer, review_questions_gen
+    llm_service = _get_llm_service()
     
     if not case_summary_builder:
         case_summary_builder = CaseSummaryBuilder(services.investigation_db)
     
-    if not case_explainer and services.ollama_wrapper:
-        case_explainer = CaseExplainer(services.ollama_wrapper)
+    if not case_explainer and llm_service:
+        case_explainer = CaseExplainer(llm_service)
     
-    if not review_questions_gen and services.ollama_wrapper:
-        review_questions_gen = ReviewQuestionsGenerator(services.ollama_wrapper)
+    if not review_questions_gen and llm_service:
+        review_questions_gen = ReviewQuestionsGenerator(llm_service)
 
 
 # ============================================================================

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ModelReadyScreen.jsx â€” Step 9: Model Deployment & Export
  *
  * New features added:
@@ -175,7 +175,7 @@ const buildTechnicalSteps = ({ uploadedDatasets, masterDataset, targetColumn, pr
     steps.push({ step: '01', label: 'Data Ingestion', detail: `${ds.length} table${ds.length > 1 ? 's' : ''} uploaded â€” ${ds.map(d => d.dataset_type).join(', ')}` });
   }
   if (masterDataset) {
-    steps.push({ step: '02', label: 'Master Build', detail: `${(masterDataset.row_count || 0).toLocaleString()} rows Ã— ${masterDataset.col_count ?? '?'} columns` });
+    steps.push({ step: '02', label: 'Master Build', detail: `${(masterDataset.row_count || 0).toLocaleString()} rows Ã- ${masterDataset.col_count ?? '?'} columns` });
   }
   if (targetColumn) {
     steps.push({ step: '03', label: 'Target Variable', detail: `column: ${targetColumn}` });
@@ -189,7 +189,7 @@ const buildTechnicalSteps = ({ uploadedDatasets, masterDataset, targetColumn, pr
     const m = activeModelRun.results?.metrics || {};
     const aucValue = runAuc(activeModelRun);
     const threshold = runThreshold(activeModelRun);
-    steps.push({ step: '06', label: 'Training', detail: `${activeModelRun.algorithm} · AUC ${aucValue != null ? aucValue.toFixed(4) : '—'} · Threshold ${threshold.toFixed(2)}` });
+    steps.push({ step: '06', label: 'Training', detail: `${activeModelRun.algorithm} · AUC ${aucValue != null ? aucValue.toFixed(4) : '-'} · Threshold ${threshold.toFixed(2)}` });
     if (m.roc_auc || m.f1) {
       steps.push({ step: '07', label: 'Validation', detail: `ROC-AUC ${m.roc_auc?.toFixed(4) ?? 'â€”'} Â· F1 ${m.f1?.toFixed(4) ?? 'â€”'} Â· Precision ${m.precision?.toFixed(4) ?? 'â€”'} Â· Recall ${m.recall?.toFixed(4) ?? 'â€”'}` });
     }
@@ -240,7 +240,7 @@ const PipelineSummary = ({ persona, uploadedDatasets, masterDataset, targetColum
 
 // â”€â”€â”€ 2. Deployment Configuration Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-const DeployConfigPanel = ({ activeModelRun, onThresholdChange }) => {
+const DeployConfigPanel = ({ activeModelRun, onThresholdChange, actionsDisabled = false }) => {
   const thresholdTable = useMemo(() => {
     return (activeModelRun?.results?.metrics?.threshold_table || [])
       .filter(r => r.threshold != null)
@@ -283,6 +283,7 @@ const DeployConfigPanel = ({ activeModelRun, onThresholdChange }) => {
             <Slider
               value={threshold}
               onChange={handleChange}
+              disabled={actionsDisabled}
               min={0.1} max={0.9} step={0.01}
               sx={{ color: T.orange, '& .MuiSlider-thumb': { width: 16, height: 16 } }}
             />
@@ -325,12 +326,13 @@ const DeployConfigPanel = ({ activeModelRun, onThresholdChange }) => {
 const RISK_COLORS = { high: '#dc2626', medium: '#d97706', low: '#16a34a' };
 const RISK_BG     = { high: '#fef2f2', medium: '#fffbeb', low: '#f0fdf4' };
 
-const LiveInferencePanel = ({ activeModelRun, persona }) => {
+const LiveInferencePanel = ({ activeModelRun, persona, actionsDisabled = false, actionsMessage = '' }) => {
   const [input,     setInput]     = useState('');
   const [result,    setResult]    = useState(null);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState(null);
   const [jsonError, setJsonError] = useState(null);
+  const gatingMessage = actionsMessage || 'Deployment readiness actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
   const threshold = runThreshold(activeModelRun);
   const jobId     = activeModelRun?.job_id;
@@ -344,6 +346,10 @@ const LiveInferencePanel = ({ activeModelRun, persona }) => {
   }, [features]);
 
   const handleScore = async () => {
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setJsonError(null);
     setError(null);
     let record;
@@ -399,7 +405,7 @@ const LiveInferencePanel = ({ activeModelRun, persona }) => {
             />
             <Button
               variant="contained" fullWidth onClick={handleScore}
-              disabled={!input.trim() || loading}
+              disabled={actionsDisabled || !input.trim() || loading}
               startIcon={loading ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : <BugReport />}
               sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, textTransform: 'none', fontWeight: 700 }}
             >
@@ -504,7 +510,7 @@ const LiveInferencePanel = ({ activeModelRun, persona }) => {
 
 // â”€â”€â”€ 4. Batch CSV Scoring Panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-const BatchScoringPanel = ({ activeModelRun }) => {
+const BatchScoringPanel = ({ activeModelRun, actionsDisabled = false, actionsMessage = '' }) => {
   const [file,      setFile]      = useState(null);
   const [parsing,   setParsing]   = useState(false);
   const [scoring,   setScoring]   = useState(false);
@@ -512,6 +518,7 @@ const BatchScoringPanel = ({ activeModelRun }) => {
   const [error,     setError]     = useState(null);
   const [progress,  setProgress]  = useState(0);
   const fileRef = useRef();
+  const gatingMessage = actionsMessage || 'Deployment readiness actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
   const lowThreshold = numOrNull(activeModelRun?.hml_low_threshold ?? activeModelRun?.threshold) ?? 0.35;
   const highThreshold = numOrNull(activeModelRun?.hml_high_threshold) ?? 0.65;
@@ -543,6 +550,10 @@ const BatchScoringPanel = ({ activeModelRun }) => {
 
   const handleScore = async () => {
     if (!file || !activeModelRun?.job_id) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setParsing(true);
     setError(null);
     setProgress(0);
@@ -646,13 +657,14 @@ const BatchScoringPanel = ({ activeModelRun }) => {
           {/* Upload */}
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems="flex-start">
             <Box
-              onClick={() => fileRef.current?.click()}
+              onClick={() => !actionsDisabled && fileRef.current?.click()}
               sx={{
                 flex: 1, p: 2, border: `1.5px dashed ${file ? T.orange : T.border}`,
-                borderRadius: 2, cursor: 'pointer', textAlign: 'center',
+                borderRadius: 2, cursor: actionsDisabled ? 'not-allowed' : 'pointer', textAlign: 'center',
                 bgcolor: file ? T.orangeLight : '#fafbfc',
                 transition: 'all 0.12s',
                 '&:hover': { borderColor: T.orange, bgcolor: T.orangeLight },
+                opacity: actionsDisabled ? 0.72 : 1,
               }}
             >
               <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFile} />
@@ -665,7 +677,7 @@ const BatchScoringPanel = ({ activeModelRun }) => {
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Button
                 variant="contained" onClick={handleScore}
-                disabled={!file || parsing || scoring}
+                disabled={actionsDisabled || !file || parsing || scoring}
                 startIcon={(parsing || scoring) ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : <Assessment />}
                 sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, textTransform: 'none', fontWeight: 700, minWidth: 140 }}
               >
@@ -673,6 +685,7 @@ const BatchScoringPanel = ({ activeModelRun }) => {
               </Button>
               {result && (
                 <Button variant="outlined" onClick={handleDownloadScored} startIcon={<CloudDownload />}
+                  disabled={actionsDisabled}
                   sx={{ textTransform: 'none', borderColor: T.border, color: T.textMuted, '&:hover': { borderColor: T.orange, color: T.orange } }}>
                   Download scored CSV
                 </Button>
@@ -763,12 +776,15 @@ const ModelReadyScreen = ({
   activeModelRun,
   onDeploy,
   onViewReport,
+  actionsDisabled = false,
+  actionsMessage = '',
 }) => {
   const [deployThreshold, setDeployThreshold] = useState(runThreshold(activeModelRun));
   const [deploying,       setDeploying]       = useState(false);
   const [deployed,        setDeployed]        = useState(false);
   const [deployError,     setDeployError]     = useState(null);
   const [downloading,     setDownloading]     = useState(null);
+  const gatingMessage = actionsMessage || 'Deployment readiness actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
   // Update threshold if model changes
   useEffect(() => {
@@ -789,12 +805,16 @@ const ModelReadyScreen = ({
     { label: 'Master dataset built',    done: !!masterDataset,                        desc: masterDataset ? `${masterDataset.row_count?.toLocaleString()} rows` : 'Not yet built' },
     { label: 'Target variable defined', done: !!targetColumn,                         desc: targetColumn ? `Predicting: ${targetColumn}` : 'Not selected' },
     { label: 'Dataset preprocessed',    done: !!preprocessedDataset,                  desc: preprocessedDataset ? `${preprocessedDataset.row_count?.toLocaleString()} rows Â· ${preprocessedDataset.col_count ?? '?'} features` : 'Not run' },
-    { label: 'Model trained',           done: !!activeModelRun,                       desc: activeModelRun ? `${activeModelRun.algorithm} Â· AUC ${aucValue != null ? aucValue.toFixed(3) : '—'}` : 'Select in Step 6' },
+    { label: 'Model trained',           done: !!activeModelRun,                       desc: activeModelRun ? `${activeModelRun.algorithm} Â· AUC ${aucValue != null ? aucValue.toFixed(3) : '-'}` : 'Select in Step 6' },
   ];
   const allDone = checks.every(c => c.done);
 
   const handleDeploy = async () => {
     if (!activeModelRun?.job_id) return;
+    if (actionsDisabled) {
+      setDeployError(gatingMessage);
+      return;
+    }
     setDeploying(true);
     setDeployError(null);
     try {
@@ -810,6 +830,10 @@ const ModelReadyScreen = ({
 
   const handleDownloadCard = async () => {
     if (!activeModelRun?.job_id) return;
+    if (actionsDisabled) {
+      setDeployError(gatingMessage);
+      return;
+    }
     setDownloading('card');
     try {
       const res  = await mlopsApi.exportModel({ job_id: activeModelRun.job_id });
@@ -827,6 +851,10 @@ const ModelReadyScreen = ({
 
   const handleDownloadPkl = async () => {
     if (!activeModelRun?.job_id) return;
+    if (actionsDisabled) {
+      setDeployError(gatingMessage);
+      return;
+    }
     setDownloading('pkl');
     try {
       const res  = await mlopsApi.exportModel({ job_id: activeModelRun.job_id });
@@ -853,6 +881,11 @@ const ModelReadyScreen = ({
           {persona === 'business'
             ? 'Your model has been deployed. The scoring endpoint is now live.'
             : `Model ${activeModelRun?.job_id?.slice(0, 8)} deployed at threshold ${deployThreshold.toFixed(2)}.`}
+        </Alert>
+      )}
+      {actionsDisabled && (
+        <Alert severity="warning" sx={{ borderRadius: 2 }}>
+          {gatingMessage}
         </Alert>
       )}
 
@@ -889,15 +922,15 @@ const ModelReadyScreen = ({
           {activeModelRun ? (
             <>
               <StatRow label="Algorithm"    value={activeModelRun.algorithm} />
-              <StatRow label="ROC-AUC"      value={aucValue != null ? aucValue.toFixed(4) : '—'} mono />
+              <StatRow label="ROC-AUC"      value={aucValue != null ? aucValue.toFixed(4) : '-'} mono />
               {persona === 'technical' && <>
-                <StatRow label={`F1 @ ${runThreshold(activeModelRun).toFixed(2)}`} value={f1Value != null ? f1Value.toFixed(4) : '—'} mono />
-                <StatRow label="Precision"    value={precisionValue != null ? precisionValue.toFixed(4) : '—'} mono />
-                <StatRow label="Recall"       value={recallValue != null ? recallValue.toFixed(4) : '—'} mono />
+                <StatRow label={`F1 @ ${runThreshold(activeModelRun).toFixed(2)}`} value={f1Value != null ? f1Value.toFixed(4) : '-'} mono />
+                <StatRow label="Precision"    value={precisionValue != null ? precisionValue.toFixed(4) : '-'} mono />
+                <StatRow label="Recall"       value={recallValue != null ? recallValue.toFixed(4) : '-'} mono />
               </>}
               <StatRow label="Threshold"    value={`${deployThreshold.toFixed(2)} (active)`} mono highlight />
-              <StatRow label="Features"     value={featuresUsed != null ? String(featuresUsed) : '—'} />
-              <StatRow label="Training rows" value={trainRows != null ? trainRows.toLocaleString() : '—'} />
+              <StatRow label="Features"     value={featuresUsed != null ? String(featuresUsed) : '-'} />
+              <StatRow label="Training rows" value={trainRows != null ? trainRows.toLocaleString() : '-'} />
               <StatRow label="Job ID"       value={activeModelRun.job_id?.slice(0, 12) + 'â€¦'} mono />
             </>
           ) : (
@@ -912,13 +945,13 @@ const ModelReadyScreen = ({
       </Box>
 
       {/* 3. Deployment config */}
-      <DeployConfigPanel activeModelRun={activeModelRun} onThresholdChange={setDeployThreshold} />
+      <DeployConfigPanel activeModelRun={activeModelRun} onThresholdChange={setDeployThreshold} actionsDisabled={actionsDisabled} />
 
       {/* 4. Live inference test */}
-      <LiveInferencePanel activeModelRun={activeModelRun} persona={persona} />
+      <LiveInferencePanel activeModelRun={activeModelRun} persona={persona} actionsDisabled={actionsDisabled} actionsMessage={gatingMessage} />
 
       {/* 5. Batch scoring */}
-      <BatchScoringPanel activeModelRun={activeModelRun} />
+      <BatchScoringPanel activeModelRun={activeModelRun} actionsDisabled={actionsDisabled} actionsMessage={gatingMessage} />
 
       {/* 6. Export + Deploy */}
       <SectionCard title="Export and Deploy" subtitle={allDone ? 'All steps complete â€” ready to go live' : 'Complete all checklist steps before deploying'} icon={RocketLaunch} defaultOpen>
@@ -944,20 +977,20 @@ const ModelReadyScreen = ({
           </Button>
           <Button
             variant="contained" size="large" onClick={handleDeploy}
-            disabled={canDisable(!allDone || deploying || deployed)}
+            disabled={actionsDisabled || canDisable(!allDone || deploying || deployed)}
             startIcon={deploying ? <CircularProgress size={16} sx={{ color: '#fff' }} /> : <RocketLaunch />}
             sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, height: 42, px: 3, borderRadius: 2, fontWeight: 700, textTransform: 'none', boxShadow: 'none' }}
           >
             {deploying ? 'Deployingâ€¦' : deployed ? `Deployed at ${deployThreshold.toFixed(2)}` : `Deploy at threshold ${deployThreshold.toFixed(2)}`}
           </Button>
           <Button variant="outlined" size="large" onClick={handleDownloadCard}
-            disabled={canDisable(!activeModelRun || downloading === 'card')}
+            disabled={actionsDisabled || canDisable(!activeModelRun || downloading === 'card')}
             startIcon={downloading === 'card' ? <CircularProgress size={16} /> : <CloudDownload />}
             sx={{ height: 42, px: 2.5, borderRadius: 2, textTransform: 'none', fontWeight: 600, borderColor: T.border, color: T.textMuted, '&:hover': { borderColor: T.orange, color: T.orange } }}>
             Download model card
           </Button>
           <Button variant="outlined" size="large" onClick={handleDownloadPkl}
-            disabled={canDisable(!activeModelRun || downloading === 'pkl')}
+            disabled={actionsDisabled || canDisable(!activeModelRun || downloading === 'pkl')}
             startIcon={downloading === 'pkl' ? <CircularProgress size={16} /> : <CloudDownload />}
             sx={{ height: 42, px: 2.5, borderRadius: 2, textTransform: 'none', fontWeight: 600, borderColor: T.border, color: T.textMuted, '&:hover': { borderColor: T.orange, color: T.orange } }}>
             Download model (.pkl)

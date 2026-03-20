@@ -88,6 +88,7 @@ const ComparisonTab = ({
   onPromoteChampion,
   onArchive,
   onBulkLabel,
+  actionsDisabled = false,
 }) => {
   const [labelDrafts, setLabelDrafts] = useState({});
 
@@ -243,6 +244,7 @@ const ComparisonTab = ({
                           size="small"
                           variant="contained"
                           onClick={() => onPromoteChampion?.(model.job_id)}
+                          disabled={actionsDisabled}
                           sx={{ height: 24, fontSize: 10.5, bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none' }}
                         >
                           Promote
@@ -251,6 +253,7 @@ const ComparisonTab = ({
                           size="small"
                           variant="outlined"
                           onClick={() => onArchive?.(model.job_id)}
+                          disabled={actionsDisabled}
                           sx={{ height: 24, fontSize: 10.5, textTransform: 'none', borderColor: V.border, color: V.textMuted }}
                         >
                           Archive
@@ -268,6 +271,7 @@ const ComparisonTab = ({
             size="small"
             variant="contained"
             onClick={applyLabels}
+            disabled={actionsDisabled}
             sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', fontWeight: 700 }}
           >
             Apply Labels

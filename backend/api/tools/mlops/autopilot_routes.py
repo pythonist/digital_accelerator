@@ -235,8 +235,10 @@ def _coerce_dataset_ids(raw_ids: Any) -> List[int]:
 
 def _make_run(env_id: str, tenant_id: str, env_root: Path, config: Dict[str, Any]) -> Dict[str, Any]:
     run_id = str(uuid.uuid4())
+    created_at = _now_iso()
     run = {
         "run_id": run_id,
+        "run_name": str(config.get("run_name") or config.get("model_name") or run_id),
         "env_id": env_id,
         "tenant_id": tenant_id,
         "_env_root": str(env_root),
@@ -255,7 +257,8 @@ def _make_run(env_id: str, tenant_id: str, env_root: Path, config: Dict[str, Any
         ],
         "artifacts": {},
         "logs": [],
-        "created_at": _now_iso(),
+        "created_at": created_at,
+        "updated_at": created_at,
         "finished_at": None,
         "error": None,
     }
@@ -271,6 +274,7 @@ def _set_run(run_id: str, **updates: Any) -> None:
         run = _RUNS.get(run_id)
         if run:
             run.update(updates)
+            run["updated_at"] = _now_iso()
             _persist_run(run)
 
 
@@ -279,6 +283,7 @@ def _set_artifact(run_id: str, key: str, value: Any) -> None:
         run = _RUNS.get(run_id)
         if run:
             run.setdefault("artifacts", {})[key] = value
+            run["updated_at"] = _now_iso()
             _persist_run(run)
 
 
@@ -298,6 +303,7 @@ def _set_step(run_id: str, step_id: str, status: str, message: str = "", result:
                 step["started_at"] = _now_iso()
             if status in {"done", "error", "skipped"}:
                 step["finished_at"] = _now_iso()
+            run["updated_at"] = _now_iso()
             _persist_run(run)
             return
 
@@ -308,6 +314,7 @@ def _log_run(run_id: str, message: str, *, level: str = "info", step_id: str | N
         if not run:
             return
         _append_log_entry(run, message=message, level=level, step_id=step_id)
+        run["updated_at"] = _now_iso()
         _persist_run(run)
 
 
@@ -331,7 +338,44 @@ def _public_run(run: Dict[str, Any] | None) -> Dict[str, Any] | None:
         return None
     out = copy.deepcopy(run)
     out.pop("_env_root", None)
+    out.update(_run_progress_summary(out))
     return out
+
+
+def _run_progress_summary(run: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(run, dict):
+        return {
+            "completion_pct": 0,
+            "completed_steps": 0,
+            "total_steps": 0,
+            "current_step_id": None,
+            "current_step_label": None,
+            "current_substep": None,
+        }
+
+    steps = list(run.get("steps") or [])
+    total_steps = len(steps)
+    completed_steps = sum(1 for step in steps if str(step.get("status") or "").lower() == "done")
+    current = next((step for step in steps if str(step.get("status") or "").lower() == "running"), None)
+    if current is None:
+        current = next((step for step in steps if str(step.get("status") or "").lower() == "error"), None)
+    if current is None:
+        current = next((step for step in steps if str(step.get("status") or "").lower() == "pending"), None)
+    if current is None and steps:
+        current = steps[-1]
+
+    current_step_id = current.get("id") if isinstance(current, dict) else None
+    current_step_label = current.get("label") if isinstance(current, dict) else None
+    current_substep = current.get("message") if isinstance(current, dict) else None
+
+    return {
+        "completion_pct": int(round((completed_steps / max(total_steps, 1)) * 100)) if total_steps else 0,
+        "completed_steps": int(completed_steps),
+        "total_steps": int(total_steps),
+        "current_step_id": current_step_id,
+        "current_step_label": current_step_label,
+        "current_substep": current_substep,
+    }
 
 
 def _ensure_run_active(run_id: str, env_root: Path) -> None:
@@ -466,6 +510,7 @@ def _mark_run_failed(run_id: str, error_text: str) -> None:
         run["error"] = error_text
         run["failed_step"] = failed_step_id
         run["finished_at"] = _now_iso()
+        run["updated_at"] = _now_iso()
         _append_log_entry(
             run,
             message=f"Run failed: {error_text}",
@@ -491,6 +536,7 @@ def _mark_run_canceled(run_id: str, reason: str = "Run canceled by user") -> Non
         run["status"] = "canceled"
         run["error"] = reason
         run["finished_at"] = _now_iso()
+        run["updated_at"] = _now_iso()
         _append_log_entry(run, message=reason, level="warning")
         _persist_run(run)
 
@@ -775,6 +821,8 @@ def run_pipeline():
         target_column = str(body.get("target_column") or "").strip()
         business_goal = str(body.get("business_goal") or "balanced").strip()
         description = str(body.get("description") or "")
+        run_name = str(body.get("run_name") or body.get("model_name") or "").strip()
+        model_name = str(body.get("model_name") or run_name or "Fraud Detection Model").strip()
 
         if not dataset_ids:
             return _err("dataset_ids is required")
@@ -782,8 +830,12 @@ def run_pipeline():
             return _err("target_column is required")
         if business_goal not in GOAL_CONFIGS:
             business_goal = "balanced"
+        if not run_name:
+            run_name = f"FCC alert reduction run {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
 
         config = {
+            "run_name": run_name,
+            "model_name": model_name,
             "dataset_ids": dataset_ids,
             "target_column": target_column,
             "business_goal": business_goal,

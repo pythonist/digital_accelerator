@@ -98,12 +98,13 @@ export const findPipelineByName = (pipelines, name) => {
 
 export const derivePipelineStepCompletion = (pipeline) => {
   const steps = asArray(pipeline?.steps);
+  const edaState = getScreenState(steps, 'eda');
   const has = (screenKey) => Boolean(getScreenState(steps, screenKey));
   return {
     data: has('data_upload'),
     master: has('master'),
     target: has('target'),
+    eda: Boolean(edaState?.completed || edaState?.done || edaState?.status === 'completed'),
     preprocess: has('preprocess'),
   };
 };
-

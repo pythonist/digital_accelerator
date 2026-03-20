@@ -1,0 +1,1421 @@
+{
+  "tenant_id": "default",
+  "fcc_env": "sentinel_fcc_ppeline_fcc",
+  "sentinel_env": "sentinel_fcc_ppeline_sentinel",
+  "source_data": {
+    "training_rows": 420,
+    "training_event_rate": 0.8405,
+    "scoring_rows": 140,
+    "scoring_event_rate": 0.8071
+  },
+  "fcc_pipeline": {
+    "run_id": "6da04c7b-c292-43d7-a390-3946965d08db",
+    "model_run_id": "3a6cabfa-d181-462f-b4d4-167edac10557",
+    "deployment_id": "23a8e765-3ffa-4f11-8c0a-b5b02f26d38a",
+    "threshold": 0.58,
+    "validated_threshold": 0.2,
+    "steps": [
+      {
+        "id": "master",
+        "status": "done",
+        "message": "Combined 1 table(s) into one dataset."
+      },
+      {
+        "id": "target",
+        "status": "done",
+        "message": "Target set to 'IS_TRUE_POS'."
+      },
+      {
+        "id": "preprocess",
+        "status": "done",
+        "message": "Preprocessing complete."
+      },
+      {
+        "id": "train",
+        "status": "done",
+        "message": "Training complete using Logistic Regression."
+      },
+      {
+        "id": "validate",
+        "status": "done",
+        "message": "Validation complete. Recommended threshold: 0.20."
+      },
+      {
+        "id": "register",
+        "status": "done",
+        "message": "Model registered and ready for deployment."
+      }
+    ]
+  },
+  "scoring": {
+    "batch_id": "b4f3792a-2a32-4117-93f0-1b64723d542a",
+    "total": 140,
+    "suppressed": 26,
+    "escalated": 114,
+    "suppression_rate": 18.57,
+    "hidden_outcome_summary": {
+      "suppressed_true_positives": 0,
+      "suppressed_false_positives": 0,
+      "escalated_true_positives": 0,
+      "escalated_false_positives": 0
+    }
+  },
+  "bridge": {
+    "publish": {
+      "publish_id": "PUB-7ad5a07fd156",
+      "publish_label": "sentinel_fcc_ppeline_retained_queue",
+      "source_env_id": "sentinel_fcc_ppeline_fcc",
+      "source_batch_id": "b4f3792a-2a32-4117-93f0-1b64723d542a",
+      "run_id": "3a6cabfa-d181-462f-b4d4-167edac10557",
+      "deployment_id": "23a8e765-3ffa-4f11-8c0a-b5b02f26d38a",
+      "model_grain": "alert",
+      "threshold": 0.58,
+      "published_at": "2026-03-19T11:58:15Z",
+      "include_suppressed": false,
+      "total_scored_rows": 140,
+      "published_rows": 114,
+      "suppressed_rows_excluded": 26,
+      "table_counts": {
+        "cases": 66,
+        "alerts": 114,
+        "transactions": 114,
+        "accounts": 110,
+        "customers": 101
+      }
+    },
+    "import": {
+      "success": true,
+      "publish_id": "PUB-7ad5a07fd156",
+      "source_env_id": "sentinel_fcc_ppeline_fcc",
+      "target_env_id": "sentinel_fcc_ppeline_sentinel",
+      "imported_at": "2026-03-19T11:58:17Z",
+      "table_counts": {
+        "cases": 66,
+        "alerts": 114,
+        "transactions": 114,
+        "accounts": 110,
+        "customers": 101
+      },
+      "focus_result": {
+        "success": true,
+        "run_id": "RUN-20260319-172817-2525",
+        "stats": {
+          "total": 66,
+          "included": 66,
+          "excluded": 0
+        },
+        "buckets": {
+          "Review": 52,
+          "Monitor": 14
+        }
+      }
+    }
+  },
+  "sentinel": {
+    "checks": {
+      "rerank_ok": true,
+      "focus_inbox_ok": true,
+      "db_stats_ok": true,
+      "case_pack_ok": true,
+      "case_facts_ok": true,
+      "case_scope_ok": true,
+      "graph_ok": true,
+      "risk_index_ready": true
+    },
+    "rerank_result": {
+      "cases_processed": 66,
+      "message": "Focus Engine run successfully",
+      "success": true
+    },
+    "focus_inbox_result": {
+      "cases": [
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00010",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-09 00:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00011",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-09 03:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00013",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-11 12:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00018",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-14 10:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00021",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-16 11:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00022",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-17 12:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00025",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-18 09:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00032",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-23 11:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00042",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-01-31 06:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00048",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-02-02 05:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00054",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-02-08 09:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00055",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-02-07 07:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00057",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-02-09 19:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 2
+          },
+          "bucket": "Monitor",
+          "case_id": "FCCSCORE_CASE_00061",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 2,
+          "hybrid_score": 0.4,
+          "last_alert": "2025-02-11 06:00:00",
+          "reasons": [
+            "2 Critical Alerts"
+          ],
+          "risk_score": 40,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00002",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-04 07:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00006",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-06 20:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00007",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-06 13:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00008",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-06 14:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00012",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-11 03:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00015",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-12 10:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00016",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-14 03:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00019",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-15 19:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00020",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-16 13:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00023",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-17 00:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00024",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-18 09:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00026",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-20 20:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00030",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-22 23:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00036",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-27 13:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00037",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-26 16:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00039",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-28 14:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00044",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-01 09:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00045",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-31 17:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00046",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-01-31 18:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00051",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-06 07:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00056",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-08 04:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00058",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-10 18:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00062",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-13 09:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00064",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-14 10:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00067",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-15 05:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00068",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.3,
+          "last_alert": "2025-02-16 22:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 30,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "critical": 1,
+            "medium": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00059",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.25,
+          "last_alert": "2025-02-09 16:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 25,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00003",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-05 03:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00004",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-04 20:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00014",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-10 20:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00017",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-13 13:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00028",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-19 22:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00033",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-25 07:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00035",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-01-26 11:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00047",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-01 20:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00052",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-04 20:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00053",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-07 01:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00063",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-14 01:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00065",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-13 06:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "critical": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00066",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 1,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-15 16:00:00",
+          "reasons": [
+            "1 Critical Alerts"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00069",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-16 17:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 2,
+          "alert_types": {
+            "high": 2
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00070",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.2,
+          "last_alert": "2025-02-19 02:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 20,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00005",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-06 12:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00009",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-07 20:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00027",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-19 11:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00029",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-22 10:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00031",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-23 23:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00034",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-26 03:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00040",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-29 08:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00041",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-28 05:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00043",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-01-29 12:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        },
+        {
+          "alert_count": 1,
+          "alert_types": {
+            "high": 1
+          },
+          "bucket": "Review",
+          "case_id": "FCCSCORE_CASE_00049",
+          "context_run_id": "RUN-20260319-172817-2525",
+          "critical_alerts": 0,
+          "hybrid_score": 0.1,
+          "last_alert": "2025-02-04 07:00:00",
+          "reasons": [
+            "Routine Review"
+          ],
+          "risk_score": 10,
+          "rule_trigger_reason": "Rules are executed per-case via /api/v2/risk-intelligence/analyze"
+        }
+      ],
+      "run_at": "2026-03-19T17:28:17.743550",
+      "run_id": "RUN-20260319-172817-2525",
+      "success": true
+    },
+    "sample_case_id": "FCCSCORE_CASE_00002",
+    "stats": {
+      "stats": {
+        "accounts": 110,
+        "alerts": 114,
+        "audit_log": 0,
+        "baseline_profiles": 0,
+        "cases": 66,
+        "customers": 101,
+        "deviation_history": 0,
+        "fcc_bridge_imports": 1,
+        "fcc_scored_entities": 114,
+        "focus_results": 66,
+        "focus_runs": 1,
+        "investigation_risk_index": 66,
+        "master_case_summary": 66,
+        "master_cleaned_data": 66,
+        "system_master_registry": 0,
+        "transactions": 114,
+        "upload_history": 0
+      },
+      "success": true
+    },
+    "case_preview": [
+      {
+        "case_id": "FCCSCORE_CASE_00002",
+        "risk_rating": "High",
+        "risk_score": 76.68
+      },
+      {
+        "case_id": "FCCSCORE_CASE_00003",
+        "risk_rating": "Critical",
+        "risk_score": 88.09
+      },
+      {
+        "case_id": "FCCSCORE_CASE_00004",
+        "risk_rating": "High",
+        "risk_score": 84.66
+      },
+      {
+        "case_id": "FCCSCORE_CASE_00005",
+        "risk_rating": "High",
+        "risk_score": 81.63
+      },
+      {
+        "case_id": "FCCSCORE_CASE_00006",
+        "risk_rating": "Critical",
+        "risk_score": 86.69
+      }
+    ],
+    "risk_index_preview": [
+      {
+        "entity_key": "FCCSCORE_CASE_00002",
+        "entity_type": "case",
+        "risk_score": 2,
+        "alert_count": 2
+      },
+      {
+        "entity_key": "FCCSCORE_CASE_00004",
+        "entity_type": "case",
+        "risk_score": 2,
+        "alert_count": 2
+      },
+      {
+        "entity_key": "FCCSCORE_CASE_00006",
+        "entity_type": "case",
+        "risk_score": 2,
+        "alert_count": 2
+      },
+      {
+        "entity_key": "FCCSCORE_CASE_00007",
+        "entity_type": "case",
+        "risk_score": 2,
+        "alert_count": 2
+      },
+      {
+        "entity_key": "FCCSCORE_CASE_00008",
+        "entity_type": "case",
+        "risk_score": 2,
+        "alert_count": 2
+      }
+    ],
+    "case_pack_counts": {
+      "alerts": 2,
+      "transactions": 2,
+      "accounts": 2,
+      "customers": 2
+    },
+    "case_facts_summary": {
+      "case_id": "FCCSCORE_CASE_00002",
+      "customer_id": "FCCSCORE_CUST_1111",
+      "customer_name": "Customer 1111",
+      "risk_score": 65.0,
+      "risk_level": "high",
+      "transaction_count_30d": 2,
+      "transaction_volume_30d": 2028.15,
+      "risk_driver_count": 1
+    },
+    "case_scope_summary": {
+      "set": {
+        "scope": {
+          "case_count": 1,
+          "run_id": null,
+          "type": "CUSTOM",
+          "value": [
+            "FCCSCORE_CASE_00002"
+          ]
+        },
+        "success": true
+      },
+      "get": {
+        "scope": {
+          "case_count": 1,
+          "case_ids": [
+            "FCCSCORE_CASE_00002"
+          ],
+          "run_id": null,
+          "type": "CUSTOM",
+          "value": [
+            "FCCSCORE_CASE_00002"
+          ]
+        },
+        "success": true
+      },
+      "clear": {
+        "message": "Scope reset to GLOBAL",
+        "success": true
+      }
+    },
+    "graph_summary": {
+      "nodes": 5,
+      "links": 4,
+      "narrative": "Case FCCSCORE_CASE_00002 money flow graph centered on account FCCSCORE_ACC_12108 with 2 accounts and 1 transactions."
+    }
+  }
+}

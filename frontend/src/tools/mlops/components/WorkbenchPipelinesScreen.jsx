@@ -26,6 +26,7 @@ import {
   Save,
 } from '@mui/icons-material';
 import mlopsApi from '../services/mlopsApi';
+import { FCC_THEME as T } from '../theme/fccWorkbenchTheme';
 import {
   derivePipelineStepCompletion,
   getScreenState,
@@ -33,18 +34,18 @@ import {
 } from '../utils/pipelineState';
 
 const tone = {
-  border: '#e2e8f0',
-  bg: '#f8fafc',
-  text: '#1e293b',
-  muted: '#64748b',
-  orange: '#D04A02',
-  orangeSoft: '#fff1ec',
-  good: '#15803d',
-  goodBg: '#f0fdf4',
-  warn: '#b45309',
-  warnBg: '#fffbeb',
-  bad: '#b91c1c',
-  badBg: '#fef2f2',
+  border: T.border,
+  bg: T.page,
+  text: T.text,
+  muted: T.textMuted,
+  orange: T.accent,
+  orangeSoft: T.accentSoft,
+  good: T.success,
+  goodBg: T.successBg,
+  warn: T.warning,
+  warnBg: T.warningBg,
+  bad: T.error,
+  badBg: T.errorBg,
 };
 
 const stageCatalog = {
@@ -58,15 +59,30 @@ const stageCatalog = {
 };
 
 const defaultStageOrder = Object.keys(stageCatalog);
+const workflowStepLabels = {
+  data: 'Load Data',
+  master: 'Master Dataset',
+  target: 'Target Definition',
+  preprocess: 'Feature Preparation',
+  model: 'Model Development',
+  validation: 'Validation',
+  registry: 'Registry',
+  ready: 'Deployment Readiness',
+  dashboard: 'Monitoring',
+  reports: 'Reports',
+};
 
 const pick = (res) => res?.data ?? res;
 
 const statusTone = (status) => {
   const key = String(status || '').toLowerCase();
-  if (key === 'complete' || key === 'completed' || key === 'done') return { color: tone.good, bg: tone.goodBg, label: 'Complete' };
-  if (key === 'failed' || key === 'error') return { color: tone.bad, bg: tone.badBg, label: 'Failed' };
-  if (key === 'running') return { color: '#1d4ed8', bg: '#eff6ff', label: 'Running' };
-  return { color: tone.warn, bg: tone.warnBg, label: 'In Progress' };
+  if (key === 'stale' || key === 'needs_rerun' || key === 'needs-rerun') {
+    return { color: tone.warn, bg: '#ffffff', label: 'Needs rerun' };
+  }
+  if (key === 'complete' || key === 'completed' || key === 'done') return { color: tone.good, bg: '#ffffff', label: 'Complete' };
+  if (key === 'failed' || key === 'error') return { color: tone.bad, bg: '#ffffff', label: 'Failed' };
+  if (key === 'running') return { color: tone.orange, bg: '#ffffff', label: 'Running' };
+  return { color: tone.warn, bg: '#ffffff', label: 'In Progress' };
 };
 
 const normalizeSchedule = (raw) => {
@@ -118,6 +134,10 @@ const WorkbenchPipelinesScreen = ({
   }, [pipelines, selectedPipelineId]);
 
   const effectivePipeline = fullPipeline || selected;
+  const staleStepSet = useMemo(
+    () => new Set((effectivePipeline?.stale_steps || []).map((step) => String(step))),
+    [effectivePipeline],
+  );
   const completion = useMemo(() => derivePipelineStepCompletion(effectivePipeline || {}), [effectivePipeline]);
 
   const loadPipelines = useCallback(async () => {
@@ -240,9 +260,28 @@ const WorkbenchPipelinesScreen = ({
     };
   }, [effectivePipeline, completion, artefacts]);
 
+  const stageVisualStates = useMemo(() => {
+    const next = {};
+    stageOrder.forEach((key) => {
+      const stepId = String(stageCatalog[key]?.stepId || key);
+      if (staleStepSet.has(stepId)) next[key] = 'stale';
+      else if (stageDetails[key]?.done) next[key] = 'done';
+      else next[key] = 'pending';
+    });
+    return next;
+  }, [stageDetails, stageOrder, staleStepSet]);
+
+  const latestChange = effectivePipeline?.latest_change || null;
+  const impactedStepLabels = useMemo(() => {
+    const impacted = Array.isArray(latestChange?.impacted_steps) ? latestChange.impacted_steps : [];
+    return impacted
+      .map((step) => workflowStepLabels[String(step)] || String(step || '').replace(/_/g, ' ').trim())
+      .filter(Boolean);
+  }, [latestChange]);
+
   const firstIncompleteStage = useMemo(() => {
-    return stageOrder.find((key) => !stageDetails[key]?.done) || null;
-  }, [stageOrder, stageDetails]);
+    return stageOrder.find((key) => stageVisualStates[key] !== 'done') || null;
+  }, [stageOrder, stageVisualStates]);
 
   const handleSelect = useCallback((pipeline) => {
     if (!pipeline?.pipeline_id) return;
@@ -409,7 +448,7 @@ const WorkbenchPipelinesScreen = ({
     }
   }, [loadPipelineDetail, loadPipelines, scheduleDraft, selected]);
 
-  const currentStatus = statusTone(selected?.status);
+  const currentStatus = statusTone(effectivePipeline?.run_status || effectivePipeline?.status || selected?.run_status || selected?.status);
 
   return (
     <Box sx={{ display: 'flex', gap: 2, height: '100%', minHeight: 0 }}>
@@ -419,7 +458,7 @@ const WorkbenchPipelinesScreen = ({
           width: 320,
           minWidth: 320,
           borderColor: tone.border,
-          borderRadius: 2,
+          borderRadius: 0,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -429,11 +468,11 @@ const WorkbenchPipelinesScreen = ({
           <Stack direction="row" spacing={0.8} alignItems="center">
             <AccountTree sx={{ fontSize: 16, color: tone.orange }} />
             <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text }}>
-              Saved Pipelines
+              Past Runs
             </Typography>
           </Stack>
           <Typography sx={{ fontSize: 11, color: tone.muted, mt: 0.4 }}>
-            Select a pipeline to inspect DAG, finish edits, and re-run.
+            Select a saved FCC run to inspect progress, resume from the saved stage, or re-run.
           </Typography>
         </Box>
 
@@ -444,9 +483,9 @@ const WorkbenchPipelinesScreen = ({
               variant="contained"
               startIcon={<Add sx={{ fontSize: 14 }} />}
               onClick={onCreateNewPipeline}
-              sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' } }}
+              sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' }, borderRadius: 0 }}
             >
-              New Pipeline
+              New Run
             </Button>
             <Button
               size="small"
@@ -454,7 +493,7 @@ const WorkbenchPipelinesScreen = ({
               startIcon={<Refresh sx={{ fontSize: 14 }} />}
               onClick={loadPipelines}
               disabled={loading}
-              sx={{ textTransform: 'none' }}
+              sx={{ textTransform: 'none', borderRadius: 0 }}
             >
               Refresh
             </Button>
@@ -464,24 +503,23 @@ const WorkbenchPipelinesScreen = ({
         <Box sx={{ flex: 1, overflowY: 'auto', px: 1.5, pb: 1.5 }}>
           {pipelines.length === 0 ? (
             <Alert severity="info" sx={{ py: 0.5 }}>
-              No pipelines saved yet. Create one and start adding steps.
+              No runs saved yet. Create one and start capturing workbench progress.
             </Alert>
           ) : (
             <Stack spacing={0.8}>
               {pipelines.map((pipeline) => {
                 const isSelected = String(pipeline.pipeline_id) === String(selectedPipelineId);
-                const st = statusTone(pipeline.status);
-                const c = derivePipelineStepCompletion(pipeline || {});
-                const doneCount = ['data', 'master', 'target', 'preprocess'].filter((k) => c[k]).length;
+                const st = statusTone(pipeline.run_status || pipeline.status);
+                const staleCount = Array.isArray(pipeline.stale_steps) ? pipeline.stale_steps.length : 0;
                 return (
                   <Box
                     key={pipeline.pipeline_id}
                     onClick={() => handleSelect(pipeline)}
                     sx={{
                       p: 1.1,
-                      borderRadius: 1.5,
-                      border: `1px solid ${isSelected ? tone.orange : tone.border}`,
-                      bgcolor: isSelected ? tone.orangeSoft : 'white',
+                      borderRadius: 0,
+                      border: `1px solid ${isSelected ? tone.orange : staleCount ? T.warningBorder : tone.border}`,
+                      bgcolor: '#ffffff',
                       cursor: 'pointer',
                     }}
                   >
@@ -492,12 +530,20 @@ const WorkbenchPipelinesScreen = ({
                       <Chip
                         size="small"
                         label={st.label}
-                        sx={{ fontSize: 10, bgcolor: st.bg, color: st.color, fontWeight: 700 }}
+                        sx={{ fontSize: 10, bgcolor: st.bg, color: st.color, fontWeight: 700, border: `1px solid ${st.color}`, borderRadius: 0 }}
                       />
                     </Stack>
                     <Typography sx={{ mt: 0.35, fontSize: 10.5, color: tone.muted }}>
-                      v{pipeline.version || 1} · {doneCount}/4 core steps saved
+                      {pipeline.run_ref || `FCC-RUN-${pipeline.pipeline_id}`} · {pipeline.completion_pct ?? 0}% complete
                     </Typography>
+                    <Typography sx={{ mt: 0.15, fontSize: 10.5, color: tone.muted }}>
+                      {pipeline.current_step_label || 'Load Data'}{pipeline.current_substep_label ? ` > ${pipeline.current_substep_label}` : ''}
+                    </Typography>
+                    {staleCount > 0 && (
+                      <Typography sx={{ mt: 0.45, fontSize: 10.25, color: tone.warn, fontWeight: 600 }}>
+                        {staleCount} saved stage{staleCount === 1 ? '' : 's'} need rerun
+                      </Typography>
+                    )}
                   </Box>
                 );
               })}
@@ -507,23 +553,31 @@ const WorkbenchPipelinesScreen = ({
       </Paper>
 
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: tone.border }}>
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
             <Box>
               <Typography sx={{ fontSize: 16, fontWeight: 700, color: tone.text }}>
-                {selected?.name || activePipelineName || 'No pipeline selected'}
+                {selected?.name || activePipelineName || 'No run selected'}
               </Typography>
               <Typography sx={{ mt: 0.45, fontSize: 12, color: tone.muted }}>
                 {persona === 'business'
-                  ? 'Review progress, finish incomplete steps, and re-run.'
-                  : 'Inspect saved step artefacts, stage order, and scheduler.'}
+                  ? 'Review the outcome of this run, resume where it stopped, or finish pending stages.'
+                  : 'Inspect saved step artefacts, exact run progress, stage order, and scheduler.'}
               </Typography>
+              {selected && (
+                <Typography sx={{ mt: 0.45, fontSize: 11, color: tone.muted }}>
+                  {(selected.run_ref || `FCC-RUN-${selected.pipeline_id}`)}
+                  {selected.current_step_label ? ` · ${selected.current_step_label}` : ''}
+                  {selected.current_substep_label ? ` > ${selected.current_substep_label}` : ''}
+                  {selected.completion_pct != null ? ` · ${selected.completion_pct}% complete` : ''}
+                </Typography>
+              )}
             </Box>
             {selected && (
               <Chip
                 size="small"
                 label={currentStatus.label}
-                sx={{ fontSize: 11, fontWeight: 700, bgcolor: currentStatus.bg, color: currentStatus.color }}
+                sx={{ fontSize: 11, fontWeight: 700, bgcolor: currentStatus.bg, color: currentStatus.color, border: `1px solid ${currentStatus.color}`, borderRadius: 0 }}
               />
             )}
           </Stack>
@@ -535,18 +589,18 @@ const WorkbenchPipelinesScreen = ({
               startIcon={<Restore sx={{ fontSize: 14 }} />}
               onClick={handleResume}
               disabled={!selected}
-              sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' } }}
+              sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' }, borderRadius: 0 }}
             >
-              Edit Pipeline
+              Resume Run
             </Button>
             <Button
               size="small"
               variant="outlined"
               onClick={handleFinishPipeline}
               disabled={!selected}
-              sx={{ textTransform: 'none' }}
+              sx={{ textTransform: 'none', borderRadius: 0 }}
             >
-              {firstIncompleteStage ? 'Finish Incomplete' : 'Run / Schedule'}
+              {firstIncompleteStage ? 'Finish Pending Stages' : 'Run / Schedule'}
             </Button>
             <Button
               size="small"
@@ -554,7 +608,7 @@ const WorkbenchPipelinesScreen = ({
               startIcon={<PlayArrow sx={{ fontSize: 14 }} />}
               onClick={handleRun}
               disabled={!selected || running}
-              sx={{ textTransform: 'none' }}
+              sx={{ textTransform: 'none', borderRadius: 0 }}
             >
               {running ? 'Running...' : 'Re-Run DAG'}
             </Button>
@@ -566,17 +620,40 @@ const WorkbenchPipelinesScreen = ({
               disabled={!selected || deletingPipeline || running}
               sx={{
                 textTransform: 'none',
-                color: '#b91c1c',
-                borderColor: '#fecaca',
-                '&:hover': { borderColor: '#f87171', bgcolor: '#fef2f2' },
+                color: tone.bad,
+                borderColor: T.errorBorder,
+                '&:hover': { borderColor: tone.bad, bgcolor: tone.badBg },
+                borderRadius: 0,
               }}
             >
               {deletingPipeline ? 'Deleting...' : 'Delete Pipeline'}
             </Button>
           </Stack>
+          {latestChange?.message && (
+            <Alert severity="warning" sx={{ mt: 1.5, borderRadius: 0 }}>
+              <Typography sx={{ fontSize: 11.5, color: tone.text, fontWeight: 600 }}>
+                Change impact
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: tone.text, mt: 0.4 }}>
+                {latestChange.message}
+              </Typography>
+              {impactedStepLabels.length > 0 && (
+                <Stack direction="row" spacing={0.6} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
+                  {impactedStepLabels.map((label) => (
+                    <Chip
+                      key={label}
+                      size="small"
+                      label={label}
+                      sx={{ fontSize: 10, bgcolor: '#fff', color: tone.warn, fontWeight: 700, border: `1px solid ${tone.warn}`, borderRadius: 0 }}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Alert>
+          )}
         </Paper>
 
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: tone.border }}>
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1.1 }}>
             DAG View (Saved Steps)
           </Typography>
@@ -591,7 +668,9 @@ const WorkbenchPipelinesScreen = ({
                 {stageOrder.map((key, idx) => {
                   const stage = stageCatalog[key];
                   if (!stage) return null;
-                  const done = Boolean(stageDetails[key]?.done);
+                  const visualState = stageVisualStates[key] || 'pending';
+                  const done = visualState === 'done';
+                  const stale = visualState === 'stale';
                   return (
                     <React.Fragment key={key}>
                       <Paper
@@ -599,9 +678,9 @@ const WorkbenchPipelinesScreen = ({
                         sx={{
                           width: 220,
                           p: 1.2,
-                          borderRadius: 1.8,
-                          borderColor: done ? '#86efac' : tone.border,
-                          bgcolor: done ? tone.goodBg : '#ffffff',
+                          borderRadius: 0,
+                          borderColor: stale ? T.warningBorder : done ? T.successBorder : tone.border,
+                          bgcolor: '#ffffff',
                           flexShrink: 0,
                         }}
                       >
@@ -611,19 +690,26 @@ const WorkbenchPipelinesScreen = ({
                           </Typography>
                           <Chip
                             size="small"
-                            label={done ? 'Done' : 'Pending'}
+                            label={stale ? 'Needs rerun' : done ? 'Done' : 'Pending'}
                             sx={{
                               height: 16,
                               fontSize: 9,
                               fontWeight: 700,
-                              bgcolor: done ? '#dcfce7' : '#f8fafc',
-                              color: done ? '#166534' : '#475569',
+                              bgcolor: '#fff',
+                              color: stale ? tone.warn : done ? tone.good : tone.muted,
+                              border: `1px solid ${stale ? tone.warn : done ? tone.good : tone.border}`,
+                              borderRadius: 0,
                             }}
                           />
                         </Stack>
                         <Typography sx={{ fontSize: 10.5, color: tone.muted, minHeight: 32 }}>
                           {stageDetails[key]?.summary || 'No saved details yet'}
                         </Typography>
+                        {stale && (
+                          <Typography sx={{ mt: 0.45, fontSize: 10.25, color: tone.warn, minHeight: 28 }}>
+                            Outdated after an upstream change. Open this step and rerun it.
+                          </Typography>
+                        )}
                         <Button
                           size="small"
                           variant="text"
@@ -634,7 +720,7 @@ const WorkbenchPipelinesScreen = ({
                         </Button>
                       </Paper>
                       {idx < stageOrder.length - 1 && (
-                        <Typography sx={{ color: '#94a3b8', fontSize: 16, fontWeight: 700 }}>-&gt;</Typography>
+                        <Typography sx={{ color: tone.muted, fontSize: 16, fontWeight: 700 }}>-&gt;</Typography>
                       )}
                     </React.Fragment>
                   );
@@ -644,7 +730,7 @@ const WorkbenchPipelinesScreen = ({
           )}
         </Paper>
 
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: tone.border }}>
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
             <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text }}>
               Run Order (Drag to Reorder)
@@ -655,7 +741,7 @@ const WorkbenchPipelinesScreen = ({
               startIcon={<Save sx={{ fontSize: 14 }} />}
               onClick={saveStageOrder}
               disabled={!selected || !orderDirty || savingOrder}
-              sx={{ textTransform: 'none' }}
+              sx={{ textTransform: 'none', borderRadius: 0 }}
             >
               {savingOrder ? 'Saving...' : 'Save Order'}
             </Button>
@@ -664,7 +750,9 @@ const WorkbenchPipelinesScreen = ({
             {stageOrder.map((key) => {
               const stage = stageCatalog[key];
               if (!stage) return null;
-              const done = Boolean(stageDetails[key]?.done);
+              const visualState = stageVisualStates[key] || 'pending';
+              const done = visualState === 'done';
+              const stale = visualState === 'stale';
               return (
                 <Box
                   key={`order_${key}`}
@@ -675,7 +763,7 @@ const WorkbenchPipelinesScreen = ({
                   sx={{
                     px: 1.1,
                     py: 0.8,
-                    borderRadius: 1.25,
+                    borderRadius: 0,
                     border: `1px solid ${dragStageKey === key ? tone.orange : tone.border}`,
                     bgcolor: '#ffffff',
                     display: 'flex',
@@ -684,19 +772,21 @@ const WorkbenchPipelinesScreen = ({
                     cursor: 'grab',
                   }}
                 >
-                    <DragIndicator sx={{ fontSize: 16, color: '#94a3b8' }} />
+                    <DragIndicator sx={{ fontSize: 16, color: tone.muted }} />
                   <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: tone.text, flex: 1 }}>
                     {stage.label}
                   </Typography>
                   <Chip
                     size="small"
-                    label={done ? 'Completed' : 'Pending'}
+                    label={stale ? 'Needs rerun' : done ? 'Completed' : 'Pending'}
                     sx={{
                       height: 18,
                       fontSize: 9.5,
                       fontWeight: 700,
-                      bgcolor: done ? tone.goodBg : '#f8fafc',
-                      color: done ? tone.good : '#64748b',
+                      bgcolor: '#ffffff',
+                      color: stale ? tone.warn : done ? tone.good : tone.muted,
+                      border: `1px solid ${stale ? tone.warn : done ? tone.good : tone.border}`,
+                      borderRadius: 0,
                     }}
                   />
                 </Box>
@@ -705,7 +795,7 @@ const WorkbenchPipelinesScreen = ({
           </Stack>
         </Paper>
 
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: tone.border }}>
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1 }}>
             Scheduler (Airflow Style)
           </Typography>
@@ -793,7 +883,7 @@ const WorkbenchPipelinesScreen = ({
               startIcon={<Save sx={{ fontSize: 14 }} />}
               onClick={saveSchedule}
               disabled={!selected || savingSchedule}
-              sx={{ alignSelf: 'flex-start', textTransform: 'none' }}
+              sx={{ alignSelf: 'flex-start', textTransform: 'none', borderRadius: 0 }}
             >
               {savingSchedule ? 'Saving...' : 'Save Scheduler'}
             </Button>
@@ -801,7 +891,7 @@ const WorkbenchPipelinesScreen = ({
         </Paper>
 
         {runState && (
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: tone.border }}>
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
             <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 0.6 }}>
               Last Run Status
             </Typography>
@@ -814,7 +904,7 @@ const WorkbenchPipelinesScreen = ({
               </Alert>
             )}
             {Array.isArray(runState.log) && runState.log.length > 0 && (
-              <Box sx={{ mt: 1, maxHeight: 200, overflowY: 'auto', p: 1.2, bgcolor: '#0f172a', borderRadius: 1.5 }}>
+              <Box sx={{ mt: 1, maxHeight: 200, overflowY: 'auto', p: 1.2, bgcolor: '#0f172a', borderRadius: 0 }}>
                 {runState.log.slice(-12).map((line, idx) => (
                   <Typography key={`${idx}_${line}`} sx={{ fontFamily: 'monospace', fontSize: 10.5, color: '#cbd5e1' }}>
                     {line}
@@ -825,8 +915,8 @@ const WorkbenchPipelinesScreen = ({
           </Paper>
         )}
 
-        {message && <Alert severity="success">{message}</Alert>}
-        {error && <Alert severity="error">{error}</Alert>}
+        {message && <Alert severity="success" sx={{ borderRadius: 0 }}>{message}</Alert>}
+        {error && <Alert severity="error" sx={{ borderRadius: 0 }}>{error}</Alert>}
       </Box>
     </Box>
   );

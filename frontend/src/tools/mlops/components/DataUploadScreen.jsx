@@ -1,5 +1,5 @@
 /**
- * DataUploadScreen.jsx — AML MLOps Workbench — PwC Design System
+ * DataUploadScreen.jsx - AML MLOps Workbench - PwC Design System
  *
  * DUAL PERSONA:
  *   Business  → Narrative summaries, KPIs, alert volumes, coverage %, data freshness
@@ -71,11 +71,11 @@ const TYPE_META = Object.fromEntries(PRESET_TYPES.map(t => [t.value, t]));
 
 const MAX_MB = 500;
 const fmtBytes  = (b) => b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
-const fmtNum    = (n) => n == null ? '—' : Number(n).toLocaleString();
+const fmtNum    = (n) => n == null ? '-' : Number(n).toLocaleString();
 const ext       = (f) => (f.name || '').split('.').pop().toLowerCase();
 const safe      = (v) => String(v || '').trim().toLowerCase();
 const ratio     = (v) => { const n = Number(v); if (!Number.isFinite(n)) return null; return n > 1 ? n / 100 : n; };
-const pct       = (v, d = 1) => { const r = ratio(v); return r == null ? '—' : `${(r * 100).toFixed(d)}%`; };
+const pct       = (v, d = 1) => { const r = ratio(v); return r == null ? '-' : `${(r * 100).toFixed(d)}%`; };
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
 const toColumnName = (column) => {
   if (typeof column === 'string') return column;
@@ -194,7 +194,7 @@ const buildColumnRows = (dataset, schema, profile) => {
       null_pct: nullPct,
       unique_count: uniqueCount,
       cardinality_ratio: cardinalityRatio,
-      sample: sampleValue != null ? String(sampleValue) : '—',
+      sample: sampleValue != null ? String(sampleValue) : '-',
       identifier_confidence: idConfidence,
       model_action: modelAction,
       is_identifier: isIdentifier,
@@ -298,7 +298,7 @@ const QualityBar = ({ score }) => (
 // Null heatmap mini-bar for technical schema grid
 const NullBar = ({ value }) => {
   const r = ratio(value);
-  if (r == null) return <Typography sx={{ fontSize: 11, color: PwC.mist }}>—</Typography>;
+  if (r == null) return <Typography sx={{ fontSize: 11, color: PwC.mist }}>-</Typography>;
   const pctVal = r * 100;
   const color = pctVal > 20 ? PwC.red : pctVal > 5 ? PwC.amber : PwC.emerald;
   return (
@@ -824,7 +824,7 @@ const DataUploadScreen = ({
   const validateItem = (item) => {
     if (item.restoredPlaceholder) return 'Reattach the source file before upload';
     const e2 = ext(item.file);
-    if (!['csv', 'parquet'].includes(e2)) return `".${e2}" not supported — CSV or Parquet only`;
+    if (!['csv', 'parquet'].includes(e2)) return `".${e2}" not supported - CSV or Parquet only`;
     if (item.file.size / 1048576 > MAX_MB) return `File exceeds ${MAX_MB} MB limit`;
     const resolvedType = item.type === 'custom' ? item.customName : item.type;
     if (!resolvedType) return 'Select a dataset type';
@@ -1082,7 +1082,7 @@ const DataUploadScreen = ({
           </Typography>
           <Typography sx={{ fontSize: 13, color: PwC.ash }}>
             {persona === 'business'
-              ? 'Drop your data files below — we\'ll automatically detect the table type and surface key business insights.'
+              ? 'Drop your data files below - we\'ll automatically detect the table type and surface key business insights.'
               : 'Drop CSV or Parquet files. Auto-type detection active. Max 500 MB per file.'}
           </Typography>
         </Box>
@@ -1103,7 +1103,7 @@ const DataUploadScreen = ({
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <StatBadge label="Tables Loaded" value={datasets.length} accent={PwC.tangerine} icon={TableChart} />
             <StatBadge label="Total Records" value={fmtNum(totalRows)} accent={PwC.slate} icon={Assessment} />
-            <StatBadge label="Alert Records" value={estimatedFlagged != null ? fmtNum(estimatedFlagged) : '—'} accent={PwC.red} icon={Notifications} />
+            <StatBadge label="Alert Records" value={estimatedFlagged != null ? fmtNum(estimatedFlagged) : '-'} accent={PwC.red} icon={Notifications} />
             <StatBadge label="Data Quality" value={avgQuality == null ? 'Pending' : `${avgQuality.toFixed(0)}%`}
               accent={avgQuality == null ? PwC.slate : qualityColor(avgQuality)} icon={TrendingUp} />
             <StatBadge label="STR Labels" value={strDataset ? 'Linked' : 'None'} accent={strDataset ? PwC.emerald : PwC.amber} icon={Insights} />
@@ -1116,7 +1116,7 @@ const DataUploadScreen = ({
             <StatBadge label="Tables" value={datasets.length} accent={PwC.tangerine} icon={TableChart} />
             <StatBadge label="Total Rows" value={fmtNum(totalRows)} accent={PwC.slate} icon={Assessment} />
             <StatBadge label="Total Columns" value={fmtNum(totalCols)} accent={PwC.ash} icon={BubbleChart} />
-            <StatBadge label="Avg Quality" value={avgQuality == null ? '—' : `${avgQuality.toFixed(0)}%`}
+            <StatBadge label="Avg Quality" value={avgQuality == null ? '-' : `${avgQuality.toFixed(0)}%`}
               accent={avgQuality == null ? PwC.slate : qualityColor(avgQuality)} icon={TrendingUp} />
           </Stack>
         )}
@@ -1218,8 +1218,8 @@ const DataUploadScreen = ({
           icon={strDataset ? <CheckCircle fontSize="small" /> : <Info fontSize="small" />}
           sx={{ py: 0.5, fontSize: 11, borderRadius: '6px', '& .MuiAlert-message': { fontSize: 11 } }}>
           {strDataset
-            ? `STR/SAR labels linked — ${fmtNum(strDataset.row_count)} records`
-            : 'No STR/SAR dataset yet — upload to enable label attachment'}
+            ? `STR/SAR labels linked - ${fmtNum(strDataset.row_count)} records`
+            : 'No STR/SAR dataset yet - upload to enable label attachment'}
         </Alert>
 
         {/* Dataset cards */}

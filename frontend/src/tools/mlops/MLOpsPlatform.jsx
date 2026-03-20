@@ -59,8 +59,12 @@ const MLOpsPlatform = () => {
   return (
     <Box sx={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
       <MLOpsWorkbench
-        renderAutoBuild={() => (
-          <AutoPipelineScreen datasets={datasets} masterDataset={masterDataset} />
+        renderAutoBuild={(workbenchContext = {}) => (
+          <AutoPipelineScreen
+            datasets={datasets}
+            masterDataset={masterDataset}
+            {...workbenchContext}
+          />
         )}
       />
     </Box>

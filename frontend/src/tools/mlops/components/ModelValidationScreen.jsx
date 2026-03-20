@@ -18,7 +18,15 @@ const tabs = [
   { id: 'stability', label: 'Stability & Risks' },
 ];
 
-const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationComplete, onActiveRunChange }) => {
+const ModelValidationScreen = ({
+  persona,
+  jobId,
+  activeModelRun,
+  onValidationComplete,
+  onActiveRunChange,
+  actionsDisabled = false,
+  actionsMessage = '',
+}) => {
   const resolvedJobId = jobId || activeModelRun?.job_id || '';
   const [activeTab, setActiveTab] = useState(0);
   const [runs, setRuns] = useState([]);
@@ -29,6 +37,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [error, setError] = useState(null);
   const [currentJobId, setCurrentJobId] = useState(resolvedJobId || '');
+  const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
 
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
@@ -71,6 +80,10 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
 
   const handlePromoteChampion = useCallback(async (job_id) => {
     if (!job_id) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     try {
       await mlopsApi.workbenchChampion({ job_id });
       await loadSummary();
@@ -78,19 +91,27 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to promote champion');
     }
-  }, [loadSummary, loadRuns]);
+  }, [actionsDisabled, gatingMessage, loadSummary, loadRuns]);
 
   const handleArchive = useCallback(async (job_id) => {
     if (!job_id) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     try {
       await mlopsApi.updateRegistryStage(job_id, { stage: 'archived' });
       await loadRuns();
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to archive model');
     }
-  }, [loadRuns]);
+  }, [actionsDisabled, gatingMessage, loadRuns]);
 
   const handleBulkLabel = useCallback(async (labels) => {
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     try {
       await mlopsApi.workbenchBulkLabel({ labels });
       await loadRuns();
@@ -98,7 +119,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to update labels');
     }
-  }, [loadRuns, loadCompare]);
+  }, [actionsDisabled, gatingMessage, loadRuns, loadCompare]);
 
   useEffect(() => {
     loadRuns();
@@ -157,6 +178,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
       />
 
       {error && <Alert severity="error" sx={{ borderRadius: 2 }}>{error}</Alert>}
+      {actionsDisabled && <Alert severity="warning" sx={{ borderRadius: 2 }}>{gatingMessage}</Alert>}
 
       {!effectiveJobId && !loadingRuns && runs.length === 0 && (
         <Alert severity="warning" sx={{ borderRadius: 2 }}>
@@ -190,6 +212,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
             activeModel={activeModel}
             onPromoteChampion={handlePromoteChampion}
             persona={persona}
+            actionsDisabled={actionsDisabled}
           />
         )}
 
@@ -204,6 +227,7 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
             onPromoteChampion={handlePromoteChampion}
             onArchive={handleArchive}
             onBulkLabel={handleBulkLabel}
+            actionsDisabled={actionsDisabled}
           />
         )}
 
@@ -213,6 +237,8 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
             runs={runs}
             onJobChange={setCurrentJobId}
             onValidationComplete={onValidationComplete}
+            actionsDisabled={actionsDisabled}
+            actionsMessage={gatingMessage}
           />
         )}
 
@@ -220,6 +246,8 @@ const ModelValidationScreen = ({ persona, jobId, activeModelRun, onValidationCom
           <OOTValidationTab
             runs={runs}
             defaultJobId={effectiveJobId}
+            actionsDisabled={actionsDisabled}
+            actionsMessage={gatingMessage}
           />
         )}
 

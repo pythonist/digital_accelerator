@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogTitle, IconButton } from '@mui/material';
+import { Close } from '@mui/icons-material';
 import mlopsApi from '../../services/mlopsApi';
 import ScreenPipelineRail from '../ScreenPipelineRail';
 
-import { T, cardStyle } from './theme';
+import { T, buttonStyle, cardStyle } from './theme';
 import WizardSidebar from './WizardSidebar';
 import StepShell from './StepShell';
 import StepBaseTable from './StepBaseTable';
@@ -121,6 +123,7 @@ const MasterDatasetWizardContainer = ({
   const [currentStepId, setCurrentStepId] = useState('base');
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1600);
   const rootRef = useRef(null);
 
@@ -959,7 +962,7 @@ const MasterDatasetWizardContainer = ({
 
   const currentMeta = STEP_DEFS.find((s) => s.id === currentStepId) || STEP_DEFS[0];
 
-  const layoutMode = containerWidth >= 1360 ? 'three' : containerWidth >= 980 ? 'two' : 'one';
+  const layoutMode = containerWidth >= 980 ? 'two' : 'one';
 
   const sidebarNode = (
     <div style={{ display: 'grid', gap: 8 }}>
@@ -991,6 +994,15 @@ const MasterDatasetWizardContainer = ({
       canNext={canContinue}
       nextLabel={currentStepId === 'labels' ? 'Continue to Preview' : 'Continue'}
       hideNext={currentStepId === 'preview'}
+      headerActions={(
+        <button
+          type="button"
+          style={buttonStyle('secondary', false)}
+          onClick={() => setInspectorOpen(true)}
+        >
+          Open builder details
+        </button>
+      )}
     >
       {renderStepContent()}
     </StepShell>
@@ -1037,47 +1049,84 @@ const MasterDatasetWizardContainer = ({
     </div>
   );
 
-  if (layoutMode === 'three') {
-    return (
-      <div
-        ref={rootRef}
-        style={{
-          display: 'grid',
-          width: '100%',
-          height: '100%',
-          minHeight: 0,
-          minWidth: 0,
-          gap: 6,
-          alignItems: 'stretch',
-          overflowX: 'hidden',
-          gridTemplateColumns: 'minmax(220px, 245px) minmax(0, 1.6fr) minmax(300px, 1fr)',
-        }}
-      >
-        <div style={{ minWidth: 0, minHeight: 0 }}>{sidebarNode}</div>
-        <div style={{ minWidth: 0, minHeight: 0, height: '100%' }}>{stepNode}</div>
-        <div style={{ minWidth: 0, minHeight: 0 }}>{rightRailNode}</div>
-      </div>
-    );
-  }
-
   if (layoutMode === 'two') {
     return (
-      <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 6, alignItems: 'start', overflowX: 'hidden', gridTemplateColumns: 'minmax(220px, 240px) minmax(0, 1fr)' }}>
-        <div style={{ minWidth: 0, minHeight: 0 }}>{sidebarNode}</div>
-        <div style={{ minWidth: 0, minHeight: 0, display: 'grid', gap: 6 }}>
-          <div style={{ minWidth: 0, minHeight: 0 }}>{stepNode}</div>
-          <div style={{ minWidth: 0, minHeight: 0 }}>{rightRailNode}</div>
+      <>
+        <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 8, alignItems: 'start', overflowX: 'hidden', gridTemplateColumns: 'minmax(220px, 240px) minmax(0, 1fr)' }}>
+          <div style={{ minWidth: 0, minHeight: 0 }}>{sidebarNode}</div>
+          <div style={{ minWidth: 0, minHeight: 0, display: 'grid', gap: 8 }}>
+            <div style={{ minWidth: 0, minHeight: 0 }}>{stepNode}</div>
+          </div>
         </div>
-      </div>
+
+        <Dialog
+          open={inspectorOpen}
+          onClose={() => setInspectorOpen(false)}
+          fullWidth
+          maxWidth="xl"
+          PaperProps={{
+            sx: {
+              borderRadius: 0,
+              border: `1px solid ${T.border}`,
+              boxShadow: '0 18px 44px rgba(15, 23, 42, 0.18)',
+            },
+          }}
+        >
+          <DialogTitle sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset builder details</div>
+              <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
+                Review join impact, build guidance, and saved master dataset plans without crowding the main workflow screen.
+              </div>
+            </div>
+            <IconButton onClick={() => setInspectorOpen(false)} size="small" sx={{ borderRadius: 0, border: `1px solid ${T.border}` }}>
+              <Close fontSize="small" />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 2, bgcolor: '#f7f8f9' }}>
+            {rightRailNode}
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 
   return (
-    <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 6, overflowX: 'hidden' }}>
-      {sidebarNode}
-      {stepNode}
-      {rightRailNode}
-    </div>
+    <>
+      <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 8, overflowX: 'hidden' }}>
+        {sidebarNode}
+        {stepNode}
+      </div>
+
+      <Dialog
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+        fullWidth
+        maxWidth="xl"
+        PaperProps={{
+          sx: {
+            borderRadius: 0,
+            border: `1px solid ${T.border}`,
+            boxShadow: '0 18px 44px rgba(15, 23, 42, 0.18)',
+          },
+        }}
+      >
+        <DialogTitle sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset builder details</div>
+            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
+              Review join impact, build guidance, and saved master dataset plans without crowding the main workflow screen.
+            </div>
+          </div>
+          <IconButton onClick={() => setInspectorOpen(false)} size="small" sx={{ borderRadius: 0, border: `1px solid ${T.border}` }}>
+            <Close fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 2, bgcolor: '#f7f8f9' }}>
+          {rightRailNode}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 

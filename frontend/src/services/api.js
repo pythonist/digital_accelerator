@@ -211,6 +211,22 @@ class APIClient {
     return this.runFocusEngine(); 
   }
 
+  async listFccScoredBatches(params = {}) {
+    return this.get('/api/v2/fcc-bridge/scored-batches', params);
+  }
+
+  async publishFccBatch(payload = {}) {
+    return this.post('/api/v2/fcc-bridge/publish', payload);
+  }
+
+  async listFccPublishedRuns(params = {}) {
+    return this.get('/api/v2/fcc-bridge/published', params);
+  }
+
+  async importFccPublishedRun(payload = {}) {
+    return this.post('/api/v2/fcc-bridge/import', payload);
+  }
+
   // ==================== MULE DETECTION ====================
   
   async getMuleDataStatus() {

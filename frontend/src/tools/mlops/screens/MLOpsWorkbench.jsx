@@ -1,5 +1,5 @@
 /**
- * MLOpsWorkbench.jsx  — Desktop Workbench Orchestrator
+ * MLOpsWorkbench.jsx  - Desktop Workbench Orchestrator
  *
  * Single source of truth for the app chrome bar.
  * Left side:  PwC logo · "MLOps Workbench" title
@@ -8,19 +8,19 @@
  *             (only shown when Expert mode is active)
  */
 import PwCLogo from '@assets/PwC_2025_Logo_1.png';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
-  Box, Button, Chip, Divider, IconButton, LinearProgress,
+  Box, Button, Chip, CircularProgress, Divider, IconButton, LinearProgress, Paper,
   Dialog, DialogActions, DialogContent, DialogTitle,
   Drawer, Stack, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
 import {
-  AccountTree, Add, Analytics, Article, AutoFixHigh, Build, CheckCircle, ChevronLeft, ChevronRight,
+  AccountTree, Add, Analytics, Article, Build, CheckCircle, ChevronLeft, ChevronRight,
   CloudUpload, Close, Dashboard, DeleteForever, Engineering, Flag, Lock,
   MenuOpen, ModelTraining, Person, PlayArrow, Refresh, Restore, SaveAlt, Settings,
   Tune, ViewSidebar,
@@ -39,8 +39,10 @@ import ModelReadyScreen       from '../components/ModelReadyScreen';
 import DeploymentDashboard    from '../components/DeploymentDashboard';
 import RunReport              from '../components/RunReport';
 import WorkbenchPipelinesScreen from '../components/WorkbenchPipelinesScreen';
+import BusinessStaleStepCard  from '../components/BusinessStaleStepCard';
 import { SHOW_STEP_GUARDS } from '../utils/uiFlags';
 import { derivePipelineStepCompletion, getScreenState } from '../utils/pipelineState';
+import { FCC_THEME as T } from '../theme/fccWorkbenchTheme';
 import {
   normalizePreprocessSteps,
   normalizePreprocessSuggestions,
@@ -49,21 +51,31 @@ import {
 
 // ── Design Tokens ─────────────────────────────────────────────────────────────
 const D = {
-  orange:       '#B45309',
-  orangeHover:  '#92400E',
-  orangeLight:  '#FFF7ED',
-  chrome:       '#0f1117',
-  chromeBorder: '#1e2433',
-  rail:         '#151b27',
-  railBorder:   '#1e293b',
-  railHover:    'rgba(148,163,184,0.08)',
-  railActive:   'rgba(148,163,184,0.14)',
-  canvas:       '#f5f6f8',
-  textPrimary:  '#f0f2f5',
-  textMuted:    '#94a3b8',
-  done:         '#22c55e',
-  locked:       '#1e2d3d',
-  lockedText:   '#334155',
+  orange:       T.accent,
+  orangeHover:  T.accentHover,
+  orangeLight:  T.accentSoft,
+  chrome:       T.chrome,
+  chromeBorder: T.chromeBorder,
+  rail:         T.rail,
+  railBorder:   T.railBorder,
+  railHover:    T.railHover,
+  railActive:   T.railActive,
+  canvas:       T.canvas,
+  panel:        T.panel,
+  panelAlt:     T.panelAlt,
+  panelMuted:   T.panelMuted,
+  border:       T.border,
+  textPrimary:  T.textOnDark,
+  textMuted:    T.textMutedOnDark,
+  textBody:     T.text,
+  textSoft:     T.textMuted,
+  done:         T.success,
+  doneBg:       T.successBg,
+  warning:      T.warning,
+  warningBg:    T.warningBg,
+  error:        T.error,
+  locked:       'rgba(255,255,255,0.04)',
+  lockedText:   T.textMutedOnDark,
   railW:        260,
   railCollapsedW: 84,
   contextW:     280,
@@ -100,25 +112,42 @@ const STEPS = [
   { id: 'pipelines',  label: 'Pipeline Hub',     biz: 'Pipelines',         icon: AccountTree,   desc: 'Resume, run, and manage saved pipelines' },
 ];
 
+const RUN_REF_PREFIX = 'FCC-RUN-';
+const toRunRef = (pipelineId) => {
+  const id = Number(pipelineId || 0);
+  if (!Number.isFinite(id) || id <= 0) return '';
+  return `${RUN_REF_PREFIX}${String(id).padStart(5, '0')}`;
+};
+
+const formatDependencyStamp = (value) => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleString();
+};
+
 // ── Step Lock Logic ───────────────────────────────────────────────────────────
 function stepStatus(id, ctx) {
-  const { datasets, masterDataset, targetColumn, edaDone, preprocessDataset, modelRun, validationReport, registryEntry } = ctx;
+  const { datasets, masterDataset, targetColumn, edaDone, preprocessDataset, modelRun, validationReport, registryEntry, staleSteps = [] } = ctx;
   const hasData = (datasets || []).length > 0;
+  let baseStatus = 'locked';
   switch (id) {
-    case 'data':       return hasData ? 'done' : 'active';
-    case 'pipelines':  return 'active';
-    case 'reports':    return modelRun ? 'done' : 'active';
-    case 'master':     return !hasData ? 'locked' : masterDataset ? 'done' : 'active';
-    case 'target':     return !masterDataset ? 'locked' : targetColumn ? 'done' : 'active';
-    case 'eda':        return !masterDataset ? 'locked' : edaDone ? 'done' : 'active';
-    case 'preprocess': return !masterDataset ? 'locked' : preprocessDataset ? 'done' : 'active';
-    case 'model':      return (!preprocessDataset && !masterDataset) ? 'locked' : modelRun ? 'done' : 'active';
-    case 'validation': return !modelRun ? 'locked' : validationReport ? 'done' : 'active';
-    case 'registry':   return !modelRun ? 'locked' : registryEntry ? 'done' : 'active';
-    case 'ready':      return !modelRun ? 'locked' : registryEntry ? 'done' : 'active';
-    case 'dashboard':  return !modelRun ? 'locked' : 'active';
-    default:           return 'locked';
+    case 'data':       baseStatus = hasData ? 'done' : 'active'; break;
+    case 'pipelines':  baseStatus = 'active'; break;
+    case 'reports':    baseStatus = modelRun ? 'done' : 'active'; break;
+    case 'master':     baseStatus = !hasData ? 'locked' : masterDataset ? 'done' : 'active'; break;
+    case 'target':     baseStatus = !masterDataset ? 'locked' : targetColumn ? 'done' : 'active'; break;
+    case 'eda':        baseStatus = !masterDataset ? 'locked' : edaDone ? 'done' : 'active'; break;
+    case 'preprocess': baseStatus = !masterDataset ? 'locked' : preprocessDataset ? 'done' : 'active'; break;
+    case 'model':      baseStatus = (!preprocessDataset && !masterDataset) ? 'locked' : modelRun ? 'done' : 'active'; break;
+    case 'validation': baseStatus = !modelRun ? 'locked' : validationReport ? 'done' : 'active'; break;
+    case 'registry':   baseStatus = !modelRun ? 'locked' : registryEntry ? 'done' : 'active'; break;
+    case 'ready':      baseStatus = !modelRun ? 'locked' : registryEntry ? 'done' : 'active'; break;
+    case 'dashboard':  baseStatus = !modelRun ? 'locked' : 'active'; break;
+    default:           baseStatus = 'locked';
   }
+  const staleSet = new Set((staleSteps || []).map((step) => String(step)));
+  if (baseStatus === 'done' && staleSet.has(String(id))) return 'stale';
+  return baseStatus;
 }
 
 const fmt = (n) => (n == null ? '-' : Number(n).toLocaleString());
@@ -136,7 +165,7 @@ const ModeButton = ({ icon: Icon, label, active, onClick }) => (
       fontSize: 12, fontWeight: active ? 700 : 500,
       transition: 'all 0.15s ease',
       userSelect: 'none',
-      '&:hover': { color: active ? D.orange : '#cbd5e1', bgcolor: 'rgba(255,255,255,0.04)' },
+      '&:hover': { color: active ? D.orange : D.textPrimary, bgcolor: 'rgba(255,255,255,0.04)' },
     }}
   >
     <Icon sx={{ fontSize: 14 }} />
@@ -148,43 +177,43 @@ const ModeButton = ({ icon: Icon, label, active, onClick }) => (
 const ContextPanel = ({
   datasets, masterDataset, targetColumn, preprocessDataset,
   modelRun, validationReport, registryEntry, qualityScore, onClose,
-  stepStatuses = {}, activeStep = 'data', panelWidth = D.contextW,
+  stepStatuses = {}, activeStep = 'data', panelWidth = D.contextW, latestChange = null,
 }) => (
   <Box sx={{
-    width: panelWidth, borderLeft: '1px solid #e2e8f0',
-    bgcolor: '#fafbfc', display: 'flex', flexDirection: 'column',
+    width: panelWidth, borderLeft: `1px solid ${D.border}`,
+    bgcolor: D.panelAlt, display: 'flex', flexDirection: 'column',
     overflowY: 'auto', flexShrink: 0,
   }}>
-    <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0' }}>
-      <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: 1, color: '#64748b', fontSize: 10 }}>
+    <Box sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${D.border}` }}>
+      <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: 1, color: D.textSoft, fontSize: 10 }}>
         Pipeline Status
       </Typography>
       <IconButton size="small" onClick={onClose} sx={{ p: 0.5 }}>
-        <Close sx={{ fontSize: 14, color: '#94a3b8' }} />
+        <Close sx={{ fontSize: 14, color: D.textSoft }} />
       </IconButton>
     </Box>
 
     <Box sx={{ p: 2 }}>
-      <Typography variant="caption" fontWeight={700} sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
+      <Typography variant="caption" fontWeight={700} sx={{ color: D.textSoft, textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
         Uploaded Datasets ({datasets.length})
       </Typography>
       <Stack spacing={0.75} mt={0.75} mb={2}>
         {datasets.length === 0 ? (
           <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>No files uploaded yet</Typography>
         ) : datasets.map((d) => (
-          <Box key={d.dataset_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 0.75, bgcolor: '#fff', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
+          <Box key={d.dataset_id} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 1.5, py: 0.75, bgcolor: D.panel, borderRadius: 0, border: `1px solid ${D.border}` }}>
             <Box>
-              <Typography variant="caption" fontWeight={600} sx={{ color: '#1e293b', display: 'block', lineHeight: 1.2 }}>{d.dataset_type}</Typography>
-              <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: 10 }}>{fmt(d.row_count)} rows</Typography>
+              <Typography variant="caption" fontWeight={600} sx={{ color: D.textBody, display: 'block', lineHeight: 1.2 }}>{d.dataset_type}</Typography>
+              <Typography variant="caption" sx={{ color: D.textSoft, fontSize: 10 }}>{fmt(d.row_count)} rows</Typography>
             </Box>
-            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#22c55e', flexShrink: 0 }} />
+            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: D.done, flexShrink: 0 }} />
           </Box>
         ))}
       </Stack>
 
       <Divider sx={{ my: 1.5 }} />
 
-      <Typography variant="caption" fontWeight={700} sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
+      <Typography variant="caption" fontWeight={700} sx={{ color: D.textSoft, textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
         Pipeline Artefacts
       </Typography>
       <Stack spacing={0.75} mt={0.75}>
@@ -196,18 +225,18 @@ const ContextPanel = ({
           { label: 'Validation',      val: validationReport ? 'Done' : null,        hint: validationReport  ? `Threshold ${Number(validationReport.optimal_threshold ?? 0.5).toFixed(2)}`         : 'Not run',        step: 'Step 7' },
           { label: 'Registry',        val: registryEntry ? 'Registered' : null,     hint: registryEntry     ? String(registryEntry.stage || 'candidate').toUpperCase()                            : 'Not registered', step: 'Step 8' },
         ].map(({ label, val, hint, step }) => (
-          <Box key={label} sx={{ px: 1.5, py: 0.75, bgcolor: '#fff', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
+          <Box key={label} sx={{ px: 1.5, py: 0.75, bgcolor: D.panel, borderRadius: 0, border: `1px solid ${D.border}` }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="caption" sx={{ color: '#94a3b8', fontSize: 10 }}>{label}</Typography>
-              <Typography variant="caption" sx={{ color: '#cbd5e1', fontSize: 9 }}>{step}</Typography>
+              <Typography variant="caption" sx={{ color: D.textSoft, fontSize: 10 }}>{label}</Typography>
+              <Typography variant="caption" sx={{ color: D.textSoft, opacity: 0.7, fontSize: 9 }}>{step}</Typography>
             </Stack>
-            <Typography variant="caption" fontWeight={600} sx={{ color: val ? '#1e293b' : '#cbd5e1' }}>{hint}</Typography>
+            <Typography variant="caption" fontWeight={600} sx={{ color: val ? D.textBody : D.textSoft }}>{hint}</Typography>
           </Box>
         ))}
       </Stack>
 
       <Divider sx={{ my: 1.5 }} />
-      <Typography variant="caption" fontWeight={700} sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
+      <Typography variant="caption" fontWeight={700} sx={{ color: D.textSoft, textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
         Step Completion
       </Typography>
       <Stack spacing={0.7} mt={0.75}>
@@ -215,45 +244,60 @@ const ContextPanel = ({
           const status    = stepStatuses?.[step.id] || 'active';
           const isDone    = status === 'done';
           const isLocked  = status === 'locked';
+          const isStale   = status === 'stale';
           const isCurrent = activeStep === step.id;
           return (
             <Box key={step.id} sx={{
-              px: 1.25, py: 0.75, borderRadius: 1.2,
-              border: `1px solid ${isDone ? '#86efac' : isLocked ? '#e2e8f0' : '#cbd5e1'}`,
-              bgcolor: isDone ? '#f0fdf4' : isCurrent ? '#fff7ed' : '#ffffff',
+              px: 1.25, py: 0.75, borderRadius: 0,
+              border: `1px solid ${isDone ? T.successBorder : isStale ? T.warningBorder : isLocked ? D.border : T.borderStrong}`,
+              bgcolor: isDone ? D.doneBg : isStale ? D.panelMuted : isCurrent ? T.panelAlt : D.panel,
             }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.25 }}>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: '#334155' }}>{step.label}</Typography>
+                <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: D.textBody }}>{step.label}</Typography>
                 <Chip size="small"
-                  label={isDone ? 'Done' : isLocked ? 'Blocked' : isCurrent ? 'Current' : 'Pending'}
+                  label={isDone ? 'Done' : isStale ? 'Stale' : isLocked ? 'Blocked' : isCurrent ? 'Current' : 'Pending'}
                   sx={{
                     height: 16, fontSize: 9, fontWeight: 700,
-                    bgcolor: isDone ? '#dcfce7' : isLocked ? '#f1f5f9' : isCurrent ? '#ffedd5' : '#f8fafc',
-                    color:   isDone ? '#166534' : isLocked ? '#64748b' : isCurrent ? '#b45309' : '#475569',
+                    bgcolor: D.panel,
+                    color:   isDone ? D.done : isStale ? D.warning : isLocked ? D.textSoft : isCurrent ? D.orange : D.textSoft,
+                    border: `1px solid ${isDone ? T.successBorder : isStale ? T.warningBorder : isLocked ? D.border : T.borderStrong}`,
+                    borderRadius: 0,
                   }}
                 />
               </Stack>
-              <Typography sx={{ fontSize: 9.5, color: '#94a3b8', lineHeight: 1.25 }}>{step.desc}</Typography>
+              <Typography sx={{ fontSize: 9.5, color: D.textSoft, lineHeight: 1.25 }}>{step.desc}</Typography>
             </Box>
           );
         })}
       </Stack>
 
+      {latestChange?.message && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Typography variant="caption" fontWeight={700} sx={{ color: D.textSoft, textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
+            Change Impact
+          </Typography>
+          <Alert severity="warning" sx={{ mt: 0.75, py: 0.5, borderRadius: 0 }}>
+            {latestChange.message}
+          </Alert>
+        </>
+      )}
+
       {qualityScore && (
         <>
           <Divider sx={{ my: 1.5 }} />
-          <Typography variant="caption" fontWeight={700} sx={{ color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
+          <Typography variant="caption" fontWeight={700} sx={{ color: D.textSoft, textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 9 }}>
             Data Quality
           </Typography>
-          <Box sx={{ mt: 0.75, px: 1.5, py: 1, bgcolor: '#fff', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
+          <Box sx={{ mt: 0.75, px: 1.5, py: 1, bgcolor: D.panel, borderRadius: 0, border: `1px solid ${D.border}` }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.5}>
               <Typography variant="caption" color="text.secondary">Score</Typography>
-              <Typography variant="caption" fontWeight={700} sx={{ color: qualityScore.score >= 80 ? '#16a34a' : '#d97706' }}>
+              <Typography variant="caption" fontWeight={700} sx={{ color: qualityScore.score >= 80 ? D.done : D.warning }}>
                 {(qualityScore.score || 0).toFixed(0)}/100
               </Typography>
             </Stack>
             <LinearProgress variant="determinate" value={qualityScore.score || 0}
-              sx={{ borderRadius: 4, height: 5, bgcolor: '#e2e8f0', '& .MuiLinearProgress-bar': { bgcolor: qualityScore.score >= 80 ? '#22c55e' : '#f59e0b' } }}
+              sx={{ borderRadius: 0, height: 5, bgcolor: D.border, '& .MuiLinearProgress-bar': { bgcolor: qualityScore.score >= 80 ? D.done : D.warning, borderRadius: 0 } }}
             />
           </Box>
         </>
@@ -276,6 +320,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
 
   // ── Mode: 'auto' | 'expert' ───────────────────────────────────────────────
   const [mode,            setMode]            = useState(saved.mode || 'expert');
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const modeSwitchTimerRef = useRef(null);
+  const journeySaveTimerRef = useRef(null);
 
   const [activeStep,      setActiveStep]      = useState(saved.activeStep || 'data');
   const [persona,         setPersona]         = useState(saved.persona || 'business');
@@ -292,6 +339,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const [savedPipelines,  setSavedPipelines]  = useState([]);
   const [activePipelineId,   setActivePipelineId]   = useState(savedPipelineSession.pipeline_id || null);
   const [activePipelineName, setActivePipelineName] = useState(savedPipelineSession.name || '');
+  const [activePipelineMeta, setActivePipelineMeta] = useState(null);
   const [createPipelineDialogOpen, setCreatePipelineDialogOpen] = useState(false);
   const [newPipelineName,  setNewPipelineName]  = useState('');
   const [creatingPipeline, setCreatingPipeline] = useState(false);
@@ -353,6 +401,33 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   useEffect(() => { lsWrite({ railCollapsed }); },   [railCollapsed]);
   useEffect(() => { lsWrite({ targetColumn }); },    [targetColumn]);
   useEffect(() => { lsWrite({ reportRunId }); },     [reportRunId]);
+  useEffect(() => () => {
+    if (modeSwitchTimerRef.current) {
+      clearTimeout(modeSwitchTimerRef.current);
+    }
+    if (journeySaveTimerRef.current) {
+      clearTimeout(journeySaveTimerRef.current);
+    }
+  }, []);
+
+  const handleModeChange = useCallback((nextMode) => {
+    if (!nextMode || nextMode === mode) return;
+    if (modeSwitchTimerRef.current) {
+      clearTimeout(modeSwitchTimerRef.current);
+      modeSwitchTimerRef.current = null;
+    }
+    if (nextMode === 'auto') {
+      setWorkspaceLoading(true);
+      modeSwitchTimerRef.current = setTimeout(() => {
+        setWorkspaceLoading(false);
+        modeSwitchTimerRef.current = null;
+      }, 900);
+    } else {
+      setWorkspaceLoading(false);
+    }
+    setMode(nextMode);
+  }, [mode]);
+
   useEffect(() => {
     if (!activePipelineId && !activePipelineName) return;
     writePipelineSession({ pipeline_id: activePipelineId, name: activePipelineName });
@@ -407,12 +482,29 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       const res  = await mlopsApi.pipelineList();
       const rows = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
       setSavedPipelines(rows);
+      if (activePipelineId) {
+        const active = rows.find((row) => Number(row?.pipeline_id) === Number(activePipelineId)) || null;
+        if (active) setActivePipelineMeta(active);
+      }
       return rows;
     } catch {
       setSavedPipelines([]);
       return [];
     }
-  }, []);
+  }, [activePipelineId]);
+
+  useEffect(() => {
+    if (!activePipelineMeta?.pipeline_id) return;
+    setSavedPipelines((prev) => {
+      const rows = Array.isArray(prev) ? [...prev] : [];
+      const idx = rows.findIndex((row) => Number(row?.pipeline_id) === Number(activePipelineMeta.pipeline_id));
+      if (idx >= 0) {
+        rows[idx] = { ...rows[idx], ...activePipelineMeta };
+        return rows;
+      }
+      return [activePipelineMeta, ...rows];
+    });
+  }, [activePipelineMeta]);
 
   const activatePipeline = useCallback((pipeline) => {
     if (!pipeline) return;
@@ -420,6 +512,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     const pname = String(pipeline.name || '').trim();
     setActivePipelineId(pid);
     setActivePipelineName(pname);
+    setActivePipelineMeta(pipeline || null);
     writePipelineSession({ pipeline_id: pid, name: pname });
     if (pname) setExperimentName(pname);
   }, []);
@@ -427,6 +520,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const clearActivePipeline = useCallback(() => {
     setActivePipelineId(null);
     setActivePipelineName('');
+    setActivePipelineMeta(null);
     clearPipelineSession();
   }, []);
 
@@ -492,13 +586,30 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   }, [masterDataset, targetColumn]);
 
   // ── Derived state ──────────────────────────────────────────────────────────
+  const staleSteps = useMemo(
+    () => Array.isArray(activePipelineMeta?.stale_steps) ? activePipelineMeta.stale_steps : [],
+    [activePipelineMeta],
+  );
+  const staleStepSet = useMemo(
+    () => new Set((staleSteps || []).map((step) => String(step))),
+    [staleSteps],
+  );
+  const latestDependencyChange = activePipelineMeta?.latest_change || null;
+  const staleMessageForStep = useCallback((stepId) => {
+    const direct = activePipelineMeta?.stale_details?.[stepId]?.message;
+    if (direct) return direct;
+    if (latestDependencyChange?.message) return latestDependencyChange.message;
+    return 'This stage is outdated because an upstream step changed. Rerun the dependent stages before continuing.';
+  }, [activePipelineMeta, latestDependencyChange]);
+
   const stepCtx = useMemo(() => ({
     datasets, masterDataset, targetColumn, edaDone,
-    preprocessDataset, modelRun, validationReport, registryEntry,
-  }), [datasets, masterDataset, targetColumn, edaDone, preprocessDataset, modelRun, validationReport, registryEntry]);
+    preprocessDataset, modelRun, validationReport, registryEntry, staleSteps,
+  }), [datasets, masterDataset, targetColumn, edaDone, preprocessDataset, modelRun, validationReport, registryEntry, staleSteps]);
 
   const flowSteps      = useMemo(() => STEPS.filter((s) => s.id !== 'pipelines'), []);
   const currentIdx     = STEPS.findIndex((s) => s.id === activeStep);
+  const currentStepMeta = currentIdx >= 0 ? STEPS[currentIdx] : null;
   const nextStep       = useMemo(() => {
     if (activeStep === 'pipelines') return null;
     const idx = flowSteps.findIndex((s) => s.id === activeStep);
@@ -506,6 +617,22 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   }, [activeStep, flowSteps]);
   const nextLocked     = nextStep ? stepStatus(nextStep.id, stepCtx) === 'locked' : true;
   const progressSteps  = flowSteps;
+  const progressStepIndexMap = useMemo(
+    () => Object.fromEntries(progressSteps.map((step, idx) => [step.id, idx])),
+    [progressSteps],
+  );
+  const firstStaleStep = useMemo(
+    () => progressSteps.find((step) => staleStepSet.has(step.id)) || null,
+    [progressSteps, staleStepSet],
+  );
+  const firstStaleStepIndex = firstStaleStep ? progressStepIndexMap[firstStaleStep.id] : -1;
+  const resolveStepNavigation = useCallback((requestedStepId) => {
+    const requested = String(requestedStepId || '').trim();
+    if (!requested || requested === 'pipelines' || !firstStaleStep) return requested;
+    const requestedIndex = progressStepIndexMap[requested];
+    if (requestedIndex == null || requestedIndex < firstStaleStepIndex) return requested;
+    return firstStaleStep.id;
+  }, [firstStaleStep, firstStaleStepIndex, progressStepIndexMap]);
   const doneCount      = useMemo(() => progressSteps.filter((s) => stepStatus(s.id, stepCtx) === 'done').length, [progressSteps, stepCtx]);
   const progressPct    = Math.round((doneCount / Math.max(progressSteps.length, 1)) * 100);
   const currentFlowIdx = useMemo(() => progressSteps.findIndex((s) => s.id === activeStep), [progressSteps, activeStep]);
@@ -517,7 +644,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const contextPanelWidth = viewportWidth >= 1880 ? D.contextW : 260;
 
   const unfinishedPipelines = useMemo(
-    () => (savedPipelines || []).filter((p) => String(p?.status || 'saved').toLowerCase() !== 'complete'),
+    () => (savedPipelines || []).filter((p) => String(p?.run_status || p?.status || 'saved').toLowerCase() !== 'complete'),
     [savedPipelines],
   );
 
@@ -528,6 +655,112 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     }
     return unfinishedPipelines[0] || null;
   }, [activePipelineId, savedPipelines, unfinishedPipelines]);
+
+  const workbenchJourneyState = useMemo(() => ({
+    current_step: activeStep,
+    current_step_label: STEPS.find((step) => step.id === activeStep)?.label || activeStep,
+    completion_pct: progressPct,
+    completed_steps: doneCount,
+    total_steps: progressSteps.length,
+    run_status: progressPct >= 100 ? 'complete' : doneCount > 0 ? 'in_progress' : 'draft',
+    persona,
+    mode,
+  }), [activeStep, doneCount, mode, persona, progressPct, progressSteps.length]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0) return undefined;
+    if (journeySaveTimerRef.current) clearTimeout(journeySaveTimerRef.current);
+    journeySaveTimerRef.current = setTimeout(() => {
+      mlopsApi.pipelineSaveScreenState(pipelineId, {
+        screen: 'workbench_journey',
+        state: workbenchJourneyState,
+      })
+        .then((res) => {
+          const payload = res?.data || res;
+          if (payload?.pipeline_id) setActivePipelineMeta(payload);
+        })
+        .catch(() => {});
+    }, 700);
+    return () => {
+      if (journeySaveTimerRef.current) clearTimeout(journeySaveTimerRef.current);
+    };
+  }, [activePipelineId, workbenchJourneyState]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0 || !activeModelRun?.job_id) return;
+    mlopsApi.pipelineSaveScreenState(pipelineId, {
+      screen: 'model',
+      state: {
+        job_id: activeModelRun.job_id,
+        algorithm: activeModelRun.algorithm || activeModelRun.algorithm_id || '',
+        dataset_id: Number(preprocessDataset?.dataset_id || masterDataset?.dataset_id || 0) || null,
+        threshold: activeModelRun.threshold ?? null,
+      },
+    })
+      .then((res) => {
+        const payload = res?.data || res;
+        if (payload?.pipeline_id) setActivePipelineMeta(payload);
+      })
+      .catch(() => {});
+  }, [activePipelineId, activeModelRun, preprocessDataset?.dataset_id, masterDataset?.dataset_id]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0 || !validationReport) return;
+    mlopsApi.pipelineSaveScreenState(pipelineId, {
+      screen: 'validation',
+      state: {
+        job_id: activeModelRun?.job_id || modelRun?.job_id || '',
+        optimal_threshold: validationReport?.optimal_threshold ?? null,
+        report_id: validationReport?.report_id || validationReport?.validation_id || '',
+      },
+    })
+      .then((res) => {
+        const payload = res?.data || res;
+        if (payload?.pipeline_id) setActivePipelineMeta(payload);
+      })
+      .catch(() => {});
+  }, [activePipelineId, validationReport, activeModelRun?.job_id, modelRun?.job_id]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0) return;
+    mlopsApi.pipelineSaveScreenState(pipelineId, {
+      screen: 'eda',
+      state: {
+        completed: Boolean(edaDone),
+        status: edaDone ? 'completed' : 'in_progress',
+        target_column: targetColumn || '',
+        viewed_step: activeStep === 'eda',
+      },
+    })
+      .then((res) => {
+        const payload = res?.data || res;
+        if (payload?.pipeline_id) setActivePipelineMeta(payload);
+      })
+      .catch(() => {});
+  }, [activePipelineId, edaDone, targetColumn, activeStep]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0 || !registryEntry) return;
+    mlopsApi.pipelineSaveScreenState(pipelineId, {
+      screen: 'registry',
+      state: {
+        job_id: activeModelRun?.job_id || modelRun?.job_id || '',
+        stage: registryEntry?.stage || 'candidate',
+        threshold: registryEntry?.threshold ?? validationReport?.optimal_threshold ?? null,
+        deployment_id: registryEntry?.deployment_id || '',
+      },
+    })
+      .then((res) => {
+        const payload = res?.data || res;
+        if (payload?.pipeline_id) setActivePipelineMeta(payload);
+      })
+      .catch(() => {});
+  }, [activePipelineId, registryEntry, activeModelRun?.job_id, modelRun?.job_id, validationReport?.optimal_threshold]);
 
   const guardMessage = useMemo(() => {
     if (!SHOW_STEP_GUARDS) return null;
@@ -555,7 +788,122 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     }
   }, [activeStep, datasets, masterDataset, targetColumn, preprocessDataset, modelRun, registryEntry]);
 
+  const staleBannerMessage = useMemo(() => {
+    const activeDetail = activePipelineMeta?.stale_details?.[activeStep];
+    if (activeDetail?.message) return activeDetail.message;
+    if (latestDependencyChange?.message) return latestDependencyChange.message;
+    return null;
+  }, [activePipelineMeta, activeStep, latestDependencyChange]);
+  const businessStaleCard = useMemo(() => {
+    if (persona !== 'business' || !staleStepSet.has(activeStep)) return null;
+
+    const activeMeta = STEPS.find((step) => step.id === activeStep) || null;
+    const activeDetail = activePipelineMeta?.stale_details?.[activeStep] || {};
+    const sourceStepId = String(activeDetail?.source_step || latestDependencyChange?.source_step || '').trim();
+    const sourceMeta = STEPS.find((step) => step.id === sourceStepId) || null;
+    const firstRequiredStep = firstStaleStep || activeMeta;
+    const isPrimaryRerunStage = !firstRequiredStep || firstRequiredStep.id === activeStep;
+
+    const currentLabel = activeMeta?.biz || activeMeta?.label || activeStep;
+    const sourceLabel = sourceMeta?.biz || sourceMeta?.label || activeDetail?.source_label || 'an upstream step';
+    const firstRequiredLabel = firstRequiredStep?.biz || firstRequiredStep?.label || currentLabel;
+    const changedAt = formatDependencyStamp(activeDetail?.changed_at || latestDependencyChange?.changed_at);
+
+    const whatChanged = changedAt
+      ? `${sourceLabel} was updated on ${changedAt}. The evidence on this page now reflects an older run state.`
+      : `${sourceLabel} was updated after this page was completed, so the results shown here no longer align with the latest run inputs.`;
+
+    const whyRerun = isPrimaryRerunStage
+      ? `${currentLabel} depends on the earlier ${sourceLabel}. Because that upstream logic changed, this page needs to be refreshed before you rely on the current output or continue to downstream stages.`
+      : `${currentLabel} sits downstream of ${firstRequiredLabel}. Until ${firstRequiredLabel} is rerun, this page remains out of date and should not be used for business decisions.`;
+
+    const nextAction = isPrimaryRerunStage
+      ? `Review the updated inputs on this page, then rerun ${currentLabel} before moving forward.`
+      : `Return to ${firstRequiredLabel}, rerun that stage first, and then come back here once the upstream output is current again.`;
+
+    return {
+      currentStepLabel: currentLabel,
+      whatChanged,
+      whyRerun,
+      nextAction,
+      actionLabel: isPrimaryRerunStage ? 'Rerun this step' : `Go to ${firstRequiredLabel}`,
+      targetStepId: isPrimaryRerunStage ? activeStep : firstRequiredStep?.id || activeStep,
+    };
+  }, [
+    activePipelineMeta,
+    activeStep,
+    firstStaleStep,
+    latestDependencyChange,
+    persona,
+    staleStepSet,
+  ]);
+  const autoBuildStaleCard = useMemo(() => {
+    if (!firstStaleStep) return null;
+
+    const firstDetail = activePipelineMeta?.stale_details?.[firstStaleStep.id] || {};
+    const sourceStepId = String(firstDetail?.source_step || latestDependencyChange?.source_step || '').trim();
+    const sourceMeta = STEPS.find((step) => step.id === sourceStepId) || null;
+    const sourceLabel = sourceMeta?.biz || sourceMeta?.label || firstDetail?.source_label || 'an upstream step';
+    const currentLabel = firstStaleStep.biz || firstStaleStep.label;
+    const changedAt = formatDependencyStamp(firstDetail?.changed_at || latestDependencyChange?.changed_at);
+
+    const whatChanged = changedAt
+      ? `${sourceLabel} was updated on ${changedAt}. The business summary in this workspace no longer reflects the latest governed run state.`
+      : `${sourceLabel} changed after the last saved run state, so the business summary shown here is no longer current.`;
+
+    return {
+      currentStepLabel: currentLabel,
+      whatChanged,
+      whyRerun: `${currentLabel} is the first affected governed stage. Until it is rerun, business summaries and downstream controls remain out of date.`,
+      nextAction: `Open ${currentLabel} in the governed workbench, refresh it there, and then return to the business workspace once the run is current again.`,
+      actionLabel: `Open ${currentLabel}`,
+      targetStepId: firstStaleStep.id,
+    };
+  }, [activePipelineMeta, firstStaleStep, latestDependencyChange]);
+  const primaryCta = useMemo(() => {
+    if (firstStaleStep) {
+      return {
+        label: 'Rerun required',
+        detail: persona === 'business' ? firstStaleStep.biz : firstStaleStep.label,
+        target: firstStaleStep.id,
+        stale: true,
+      };
+    }
+    if (nextStep && !nextLocked) {
+      return {
+        label: 'Continue',
+        detail: persona === 'business' ? nextStep.biz : nextStep.label,
+        target: nextStep.id,
+        stale: false,
+      };
+    }
+    return null;
+  }, [firstStaleStep, nextLocked, nextStep, persona]);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleBusinessStaleAction = useCallback(() => {
+    if (!businessStaleCard) return;
+
+    const targetStep = resolveStepNavigation(businessStaleCard.targetStepId) || businessStaleCard.targetStepId;
+    if (targetStep && targetStep !== activeStep) {
+      setActiveStep(targetStep);
+      return;
+    }
+
+    const canvas = document.getElementById('fcc-workbench-main-canvas');
+    if (canvas) {
+      canvas.scrollTo({ top: 320, behavior: 'smooth' });
+    }
+  }, [activeStep, businessStaleCard, resolveStepNavigation]);
+  const handleAutoBuildStaleAction = useCallback(() => {
+    if (!autoBuildStaleCard) return;
+    setMode('expert');
+    const targetStep = resolveStepNavigation(autoBuildStaleCard.targetStepId) || autoBuildStaleCard.targetStepId;
+    if (targetStep) {
+      setActiveStep(targetStep);
+    }
+  }, [autoBuildStaleCard, resolveStepNavigation]);
+
   const handleBuildMaster = useCallback(async ({ name } = {}) => {
     if (!datasets.length) return;
     setBuilding(true);
@@ -605,9 +953,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
 
   const handleConfirmCreatePipeline = useCallback(async () => {
     const trimmed = String(newPipelineName || '').trim();
-    if (!trimmed) { setNewPipelineError('Pipeline name is required.'); return; }
+    if (!trimmed) { setNewPipelineError('Run name is required.'); return; }
     const duplicateName = (savedPipelines || []).some((p) => String(p?.name || '').trim().toLowerCase() === trimmed.toLowerCase());
-    if (duplicateName) { setNewPipelineError('Pipeline name already exists. Use a different name to create a fresh pipeline.'); return; }
+    if (duplicateName) { setNewPipelineError('Run name already exists. Use a different name to create a fresh run.'); return; }
     setCreatingPipeline(true);
     setNewPipelineError('');
     try {
@@ -626,7 +974,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       setNewPipelineName('');
       setPipelineLauncherOpen(false);
     } catch (e) {
-      setNewPipelineError(e?.response?.data?.error || e?.message || 'Failed to create pipeline.');
+      setNewPipelineError(e?.response?.data?.error || e?.message || 'Failed to create run.');
     } finally {
       setCreatingPipeline(false);
     }
@@ -646,6 +994,8 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       const dataState       = getScreenState(full?.steps, 'data_upload')  || {};
       const masterState     = getScreenState(full?.steps, 'master')       || {};
       const preprocessState = getScreenState(full?.steps, 'preprocess')   || {};
+      const edaState        = getScreenState(full?.steps, 'eda')          || {};
+      const journeyState    = getScreenState(full?.steps, 'workbench_journey') || {};
 
       const pipelineDatasetIds = new Set(
         (Array.isArray(full?.dataset_ids) ? full.dataset_ids : [])
@@ -682,21 +1032,28 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       const targetState    = getScreenState(full?.steps, 'target');
       const restoredTarget = String(targetState?.currentTargetColumn || targetState?.selectedTargetColumn || '').trim();
       if (restoredTarget) setTargetColumn(restoredTarget);
+      setEdaDone(Boolean(edaState?.completed || edaState?.done || edaState?.status === 'completed'));
       if (Array.isArray(preprocessState?.steps)) {
         setPreprocessSteps(normalizePreprocessSteps(preprocessState.steps));
       }
 
+      const requestedStep = String(journeyState?.current_step || '').trim().toLowerCase();
+      const normalizedStep = requestedStep === 'data_upload' ? 'data' : requestedStep;
+      const resumeStaleStep = flowSteps.find((step) => (full?.stale_steps || []).includes(step.id))?.id || '';
       const completion     = derivePipelineStepCompletion(full || {});
       const pipelineStatus = String(full?.status || '').toLowerCase();
-      if (['complete', 'completed', 'done'].includes(pipelineStatus)) setActiveStep('pipelines');
+      if (resumeStaleStep) setActiveStep(resumeStaleStep);
+      else if (normalizedStep && STEPS.some((step) => step.id === normalizedStep)) setActiveStep(normalizedStep);
+      else if (['complete', 'completed', 'done'].includes(pipelineStatus)) setActiveStep('pipelines');
       else if (completion.preprocess)   setActiveStep('preprocess');
+      else if (completion.eda)          setActiveStep('eda');
       else if (completion.target)       setActiveStep('target');
       else if (completion.master)       setActiveStep('master');
       else                              setActiveStep('data');
 
       setPipelineLauncherOpen(false);
     } catch (e) { console.error('Failed to resume pipeline', e); }
-  }, [activatePipeline, clearLocalWorkbenchState, loadDatasets]);
+  }, [activatePipeline, clearLocalWorkbenchState, flowSteps, loadDatasets]);
 
   const handleReset = useCallback(() => {
     if (resetting) return;
@@ -759,6 +1116,11 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
 
   const handleRegistered = useCallback((entry) => { setRegistryEntry(entry); }, []);
 
+  const handleEdaComplete = useCallback(() => {
+    setEdaDone(true);
+    setActiveStep('preprocess');
+  }, []);
+
   const handleDeploy = useCallback((deployResult) => {
     if (deployResult?.deployment_id) {
       setRegistryEntry((prev) => ({ ...prev, deployment_id: deployResult.deployment_id, threshold: deployResult.threshold ?? prev?.threshold }));
@@ -775,7 +1137,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ px: collapsed ? 1 : 2.5, pt: 1.6, pb: 1.2, display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between' }}>
         {!collapsed && (
-          <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+          <Typography sx={{ fontSize: 9, fontWeight: 700, color: D.textMuted, textTransform: 'uppercase', letterSpacing: 1.5 }}>
             ML Pipeline
           </Typography>
         )}
@@ -785,7 +1147,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
               size="small"
               onClick={() => setRailCollapsed((v) => !v)}
               disabled={forceRailCollapse}
-              sx={{ color: '#64748b', bgcolor: 'rgba(255,255,255,0.03)', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }}
+              sx={{ color: D.textMuted, bgcolor: 'rgba(255,255,255,0.03)', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }}
             >
               {collapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
             </IconButton>
@@ -798,13 +1160,14 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           const status = stepStatus(step.id, stepCtx);
           const isActive = activeStep === step.id;
           const isLocked = status === 'locked';
+          const isStale = status === 'stale';
           const canNavigate = ALLOW_LOCKED_NAV || !isLocked;
           const isDone = status === 'done';
           const Icon = step.icon;
           return (
             <Box key={step.id}>
               {idx > 0 && (
-                <Box sx={{ ml: collapsed ? '41px' : '36px', width: 1.5, height: 12, bgcolor: isDone ? D.done : 'rgba(255,255,255,0.05)' }} />
+                <Box sx={{ ml: collapsed ? '41px' : '36px', width: 1.5, height: 12, bgcolor: isDone ? D.done : isStale ? D.warning : 'rgba(255,255,255,0.05)' }} />
               )}
               <Tooltip title={collapsed ? (persona === 'business' ? step.biz : step.label) : ''} placement="right">
                 <Box
@@ -814,7 +1177,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   transition={{ duration: 0.16, delay: idx * 0.015 }}
                   onClick={() => {
                     if (!canNavigate) return;
-                    setActiveStep(step.id);
+                    setActiveStep(resolveStepNavigation(step.id) || step.id);
                     onStepSelect?.();
                   }}
                   sx={{
@@ -833,27 +1196,28 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   }}
                 >
                   <Box sx={{
-                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                    width: 28, height: 28, borderRadius: 0, flexShrink: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    bgcolor: isDone ? 'rgba(34,197,94,0.15)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
-                    border: `1.5px solid ${isDone ? D.done : isActive ? D.orange : isLocked ? '#1e293b' : '#334155'}`,
-                  }}>
+                    bgcolor: isDone ? 'rgba(46,125,50,0.18)' : isStale ? 'rgba(163,111,0,0.18)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
+                      border: `1.5px solid ${isDone ? D.done : isStale ? D.warning : isActive ? D.orange : isLocked ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'}`,
+                    }}>
                     {isDone ? <CheckCircle sx={{ fontSize: 14, color: D.done }} />
-                      : isLocked ? <Lock sx={{ fontSize: 11, color: '#334155' }} />
-                        : <Icon sx={{ fontSize: 13, color: isActive ? D.orange : '#64748b' }} />}
+                      : isStale ? <Refresh sx={{ fontSize: 12, color: D.warning }} />
+                      : isLocked ? <Lock sx={{ fontSize: 11, color: D.textMuted }} />
+                        : <Icon sx={{ fontSize: 13, color: isActive ? D.orange : D.textMuted }} />}
                   </Box>
                   {!collapsed && (
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography sx={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, lineHeight: 1.3, color: isLocked ? D.lockedText : isActive ? '#f0f2f5' : '#94a3b8' }}>
+                      <Typography sx={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, lineHeight: 1.3, color: isLocked ? D.lockedText : isActive ? D.textPrimary : D.textMuted }}>
                         {persona === 'business' ? step.biz : step.label}
                       </Typography>
-                      <Typography sx={{ fontSize: 10, lineHeight: 1.3, display: 'block', color: isDone ? 'rgba(34,197,94,0.8)' : isLocked ? '#334155' : '#64748b' }}>
-                        {isDone ? 'Done' : isLocked ? 'Blocked' : isActive ? 'Current' : 'Pending'}
+                      <Typography sx={{ fontSize: 10, lineHeight: 1.3, display: 'block', color: isDone ? D.done : isStale ? D.warning : isLocked ? D.lockedText : D.textMuted }}>
+                        {isDone ? 'Done' : isStale ? 'Needs rerun' : isLocked ? 'Blocked' : isActive ? 'Current' : 'Pending'}
                       </Typography>
                     </Box>
                   )}
                   {isActive && !collapsed && (
-                    <Box sx={{ position: 'absolute', right: 8, width: 5, height: 5, borderRadius: '50%', bgcolor: D.orange }} />
+                    <Box sx={{ position: 'absolute', right: 8, width: 5, height: 5, borderRadius: 0, bgcolor: D.orange }} />
                   )}
                 </Box>
               </Tooltip>
@@ -865,19 +1229,19 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       <Box sx={{ px: collapsed ? 1 : 2.5, py: 2, borderTop: `1px solid ${D.railBorder}` }}>
         {!collapsed && datasets.length > 0 && (
           <Stack spacing={0.4} sx={{ mb: 1.5 }}>
-            <Typography sx={{ fontSize: 10, color: '#334155' }}>{datasets.length} table{datasets.length !== 1 ? 's' : ''} loaded</Typography>
-            {masterDataset && <Typography sx={{ fontSize: 10, color: '#334155' }}>Master: {fmt(masterDataset.row_count)} rows</Typography>}
+            <Typography sx={{ fontSize: 10, color: D.textMuted }}>{datasets.length} table{datasets.length !== 1 ? 's' : ''} loaded</Typography>
+            {masterDataset && <Typography sx={{ fontSize: 10, color: D.textMuted }}>Master: {fmt(masterDataset.row_count)} rows</Typography>}
             {targetColumn && (
-              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: 'rgba(34,197,94,0.1)', px: 1, py: 0.25, borderRadius: 1 }}>
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: D.panel, px: 1, py: 0.25, borderRadius: 0, border: `1px solid ${T.successBorder}` }}>
                 <Flag sx={{ fontSize: 9, color: D.done }} />
                 <Typography sx={{ fontSize: 10, color: D.done, fontWeight: 600 }}>{targetColumn}</Typography>
               </Box>
             )}
             {activeModelRun && (
-              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: 'rgba(208,74,2,0.12)', px: 1, py: 0.25, borderRadius: 1 }}>
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: D.panel, px: 1, py: 0.25, borderRadius: 0, border: `1px solid ${T.accentBorder}` }}>
                 <ModelTraining sx={{ fontSize: 9, color: D.orange }} />
                 <Typography sx={{ fontSize: 10, color: D.orange, fontWeight: 600 }}>
-                  {(activeModelRun.algorithm || activeModelRun.algorithm_id || '').replace(/_/g, ' ')} · AUC{' '}
+                  {(activeModelRun.algorithm || activeModelRun.algorithm_id || '').replace(/_/g, ' ')} AUC{' '}
                   {(activeModelRun.auc ?? activeModelRun.results?.metrics?.roc_auc)?.toFixed(3) ?? '-'}
                 </Typography>
               </Box>
@@ -889,9 +1253,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           startIcon={<DeleteForever sx={{ fontSize: 14 }} />}
           onClick={handleReset} disabled={resetting}
           sx={{
-            fontSize: 10, textTransform: 'none', color: '#475569',
-            borderColor: '#1e293b',
-            '&:hover': { borderColor: '#ef4444', color: '#ef4444', bgcolor: 'rgba(239,68,68,0.06)' },
+            fontSize: 10, textTransform: 'none', color: D.textMuted,
+            borderColor: D.railBorder,
+            '&:hover': { borderColor: D.error, color: D.error, bgcolor: 'rgba(180,35,24,0.08)' },
           }}
         >
           {collapsed ? '' : (resetting ? 'Resetting...' : 'Start Fresh')}
@@ -921,13 +1285,13 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 sx={{
                   width: 24,
                   height: 24,
-                  borderRadius: '6px',
+                  borderRadius: 0,
                   color: D.textMuted,
                   border: `1px solid ${D.chromeBorder}`,
                   '&:hover': {
                     color: D.orange,
                     borderColor: D.orange,
-                    bgcolor: 'rgba(208,74,2,0.12)',
+                    bgcolor: 'rgba(255,255,255,0.03)',
                   },
                 }}
               >
@@ -942,14 +1306,14 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
               sx={{
                 width: 24,
                 height: 24,
-                borderRadius: '6px',
+                borderRadius: 0,
                 color: D.textMuted,
                 border: `1px solid ${D.chromeBorder}`,
-                '&:hover': {
-                  color: D.orange,
-                  borderColor: D.orange,
-                  bgcolor: 'rgba(208,74,2,0.12)',
-                },
+                  '&:hover': {
+                    color: D.orange,
+                    borderColor: D.orange,
+                    bgcolor: 'rgba(255,255,255,0.03)',
+                  },
               }}
             >
               <ChevronLeft sx={{ fontSize: 16 }} />
@@ -965,16 +1329,16 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
 
         {/* ── Mode toggle buttons ── */}
         <ModeButton
-          icon={AutoFixHigh}
-          label={isMobile ? 'AutoBuild' : 'AutoBuild Workbench'}
+          icon={Person}
+          label={isMobile ? 'Business' : 'Business Workspace'}
           active={mode === 'auto'}
-          onClick={() => setMode('auto')}
+          onClick={() => handleModeChange('auto')}
         />
         <ModeButton
           icon={Engineering}
-          label={isMobile ? 'Expert' : 'Expert Workbench'}
+          label={isMobile ? 'Technical' : 'Technical Workspace'}
           active={mode === 'expert'}
-          onClick={() => setMode('expert')}
+          onClick={() => handleModeChange('expert')}
         />
 
         {/* ── Expert-only controls (hidden in AutoBuild mode) ── */}
@@ -989,9 +1353,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 display: { xs: 'none', sm: 'block' },
                 '& .MuiOutlinedInput-root': {
                   height: 28, fontSize: 12,
-                  bgcolor: 'rgba(255,255,255,0.05)', color: D.textPrimary, borderRadius: '6px',
+                  bgcolor: 'rgba(255,255,255,0.03)', color: D.textPrimary, borderRadius: 0,
                   '& fieldset': { borderColor: D.chromeBorder },
-                  '&:hover fieldset': { borderColor: '#334155' },
+                  '&:hover fieldset': { borderColor: D.textMuted },
                   '&.Mui-focused fieldset': { borderColor: D.orange },
                 },
                 '& input': { py: 0, px: 1.5 },
@@ -1004,9 +1368,10 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 label={`Pipeline: ${activePipelineName}`}
                 sx={{
                   ml: 1, height: 24, fontSize: 10.5,
-                  color: '#fdba74',
-                  bgcolor: 'rgba(208,74,2,0.18)',
-                  border: '1px solid rgba(208,74,2,0.45)',
+                  color: D.orange,
+                  bgcolor: 'transparent',
+                  border: `1px solid ${T.accentBorder}`,
+                  borderRadius: 0,
                   flexShrink: 0,
                   display: { xs: 'none', lg: 'inline-flex' },
                 }}
@@ -1016,7 +1381,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1, maxWidth: 300, mx: 2, display: { xs: 'none', lg: 'flex' } }}>
               <LinearProgress
                 variant="determinate" value={progressPct}
-                sx={{ flex: 1, height: 4, borderRadius: 4, bgcolor: 'rgba(255,255,255,0.08)', '& .MuiLinearProgress-bar': { bgcolor: D.orange, borderRadius: 4 } }}
+                sx={{ flex: 1, height: 4, borderRadius: 0, bgcolor: 'rgba(255,255,255,0.08)', '& .MuiLinearProgress-bar': { bgcolor: D.orange, borderRadius: 0 } }}
               />
               <Typography sx={{ fontSize: 10, color: D.textMuted, flexShrink: 0 }}>{doneCount}/{progressSteps.length}</Typography>
             </Stack>
@@ -1029,35 +1394,35 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 display: { xs: 'none', md: 'inline-flex' },
                 '& .MuiToggleButton-root': {
                   height: 28, px: 1.5, fontSize: 11, textTransform: 'none',
-                  color: D.textMuted, border: `1px solid ${D.chromeBorder}`,
-                  '&.Mui-selected': { bgcolor: 'rgba(208,74,2,0.2)', color: D.orange, borderColor: D.orange },
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' },
+                  color: D.textMuted, border: `1px solid ${D.chromeBorder}`, borderRadius: 0,
+                  '&.Mui-selected': { bgcolor: 'rgba(255,255,255,0.03)', color: D.orange, borderColor: D.orange },
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.03)' },
                 },
               }}
             >
-              <ToggleButton value="business"><Person sx={{ fontSize: 13, mr: 0.5 }} /> Business</ToggleButton>
-              <ToggleButton value="technical"><Settings sx={{ fontSize: 13, mr: 0.5 }} /> Technical</ToggleButton>
+              <ToggleButton value="business"><Person sx={{ fontSize: 13, mr: 0.5 }} /> Plain Language</ToggleButton>
+              <ToggleButton value="technical"><Settings sx={{ fontSize: 13, mr: 0.5 }} /> Technical Detail</ToggleButton>
             </ToggleButtonGroup>
 
             <Divider orientation="vertical" flexItem sx={{ borderColor: D.chromeBorder, mx: 1, display: { xs: 'none', md: 'block' } }} />
 
             <Tooltip title="Reload data from server">
-              <IconButton size="small" onClick={() => loadDatasets({ sync: true })} sx={{ color: D.textMuted, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.06)' } }}>
+              <IconButton size="small" onClick={() => loadDatasets({ sync: true })} sx={{ color: D.textMuted, borderRadius: 0, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.03)' } }}>
                 <Refresh sx={{ fontSize: 16 }} />
               </IconButton>
             </Tooltip>
             <Tooltip title="Save Snapshot">
-              <IconButton size="small" onClick={handleSnapshot} sx={{ color: D.textMuted, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.06)' } }}>
+              <IconButton size="small" onClick={handleSnapshot} sx={{ color: D.textMuted, borderRadius: 0, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.03)' } }}>
                 <SaveAlt sx={{ fontSize: 16 }} />
               </IconButton>
             </Tooltip>
             <Tooltip title="Run Quality Check">
-              <IconButton size="small" onClick={handleQualityRun} sx={{ color: D.textMuted, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.06)' } }}>
+              <IconButton size="small" onClick={handleQualityRun} sx={{ color: D.textMuted, borderRadius: 0, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.03)' } }}>
                 <PlayArrow sx={{ fontSize: 16 }} />
               </IconButton>
             </Tooltip>
             <Tooltip title="Pipeline Launcher">
-              <IconButton size="small" onClick={() => setPipelineLauncherOpen(true)} sx={{ color: D.textMuted, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.06)' } }}>
+              <IconButton size="small" onClick={() => setPipelineLauncherOpen(true)} sx={{ color: D.textMuted, borderRadius: 0, '&:hover': { color: D.textPrimary, bgcolor: 'rgba(255,255,255,0.03)' } }}>
                 <AccountTree sx={{ fontSize: 16 }} />
               </IconButton>
             </Tooltip>
@@ -1067,7 +1432,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 sx={{
                   color: showContextPanel ? D.orange : D.textMuted,
                   '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
-                  '&.Mui-disabled': { color: '#475569' },
+                  '&.Mui-disabled': { color: D.textSoft },
                 }}>
                 <ViewSidebar sx={{ fontSize: 16 }} />
               </IconButton>
@@ -1082,8 +1447,48 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
       {/* ══ CONTENT AREA ════════════════════════════════════════════════════ */}
 
       <AnimatePresence mode="wait" initial={false}>
+        {workspaceLoading && mode === 'auto' && (
+          <Box
+            key="business-workspace-loading"
+            component={motion.div}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            sx={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: { xs: 2, md: 3 },
+            }}
+          >
+            <Paper
+              variant="outlined"
+              sx={{
+                width: 'min(560px, 100%)',
+                p: { xs: 3, md: 4 },
+                borderRadius: 0,
+                borderColor: D.border,
+                textAlign: 'center',
+                bgcolor: D.panelAlt,
+              }}
+            >
+              <Stack spacing={1.5} alignItems="center">
+                <CircularProgress size={28} sx={{ color: D.orange }} />
+                <Typography sx={{ fontSize: 18, fontWeight: 800, color: D.textBody }}>
+                  Loading Business Workspace
+                </Typography>
+                <Typography sx={{ fontSize: 12.5, color: D.textSoft, maxWidth: 420 }}>
+                  Preparing the guided business flow, plain-language readout, and decision-oriented assistant panels.
+                </Typography>
+              </Stack>
+            </Paper>
+          </Box>
+        )}
+
         {/* AutoBuild mode */}
-        {mode === 'auto' && (
+        {!workspaceLoading && mode === 'auto' && (
           <Box
             key="auto-mode"
             component={motion.div}
@@ -1093,7 +1498,11 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             transition={{ duration: 0.2 }}
             sx={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', p: { xs: 1, md: 2.5 } }}
           >
-            {renderAutoBuild ? renderAutoBuild() : null}
+            {renderAutoBuild ? renderAutoBuild({
+              staleCard: autoBuildStaleCard,
+              onStaleAction: handleAutoBuildStaleAction,
+              activePipelineId,
+            }) : null}
           </Box>
         )}
 
@@ -1129,7 +1538,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           >
             <Box sx={{ px: effectiveRailCollapsed ? 1 : 2.5, pt: 1.6, pb: 1.2, display: 'flex', alignItems: 'center', justifyContent: effectiveRailCollapsed ? 'center' : 'space-between' }}>
               {!effectiveRailCollapsed && (
-                <Typography sx={{ fontSize: 9, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                <Typography sx={{ fontSize: 9, fontWeight: 700, color: D.textMuted, textTransform: 'uppercase', letterSpacing: 1.5 }}>
                   ML Pipeline
                 </Typography>
               )}
@@ -1138,7 +1547,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   size="small"
                   onClick={() => setRailCollapsed((v) => !v)}
                   disabled={forceRailCollapse}
-                  sx={{ color: '#64748b', bgcolor: 'rgba(255,255,255,0.03)', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }}
+                  sx={{ color: D.textMuted, bgcolor: 'rgba(255,255,255,0.03)', '&:hover': { bgcolor: 'rgba(255,255,255,0.08)' } }}
                 >
                   {effectiveRailCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
                 </IconButton>
@@ -1150,13 +1559,14 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 const status      = stepStatus(step.id, stepCtx);
                 const isActive    = activeStep === step.id;
                 const isLocked    = status === 'locked';
+                const isStale     = status === 'stale';
                 const canNavigate = ALLOW_LOCKED_NAV || !isLocked;
                 const isDone      = status === 'done';
                 const Icon        = step.icon;
                 return (
                   <Box key={step.id}>
                     {idx > 0 && (
-                      <Box sx={{ ml: effectiveRailCollapsed ? '41px' : '36px', width: 1.5, height: 12, bgcolor: isDone ? D.done : 'rgba(255,255,255,0.05)' }} />
+                      <Box sx={{ ml: effectiveRailCollapsed ? '41px' : '36px', width: 1.5, height: 12, bgcolor: isDone ? D.done : isStale ? D.warning : 'rgba(255,255,255,0.05)' }} />
                     )}
                     <Tooltip title={effectiveRailCollapsed ? (persona === 'business' ? step.biz : step.label) : ''} placement="right">
                       <Box
@@ -1164,7 +1574,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.16, delay: idx * 0.015 }}
-                        onClick={() => canNavigate && setActiveStep(step.id)}
+                        onClick={() => canNavigate && setActiveStep(resolveStepNavigation(step.id) || step.id)}
                         sx={{
                           display: 'flex',
                           alignItems: 'center',
@@ -1181,27 +1591,28 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                         }}
                       >
                         <Box sx={{
-                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                          width: 28, height: 28, borderRadius: 0, flexShrink: 0,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          bgcolor:  isDone ? 'rgba(34,197,94,0.15)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
-                          border: `1.5px solid ${isDone ? D.done : isActive ? D.orange : isLocked ? '#1e293b' : '#334155'}`,
+                          bgcolor:  isDone ? 'rgba(46,125,50,0.18)' : isStale ? 'rgba(163,111,0,0.18)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
+                          border: `1.5px solid ${isDone ? D.done : isStale ? D.warning : isActive ? D.orange : isLocked ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'}`,
                         }}>
                           {isDone    ? <CheckCircle sx={{ fontSize: 14, color: D.done }} />
-                          : isLocked ? <Lock sx={{ fontSize: 11, color: '#334155' }} />
-                          :            <Icon sx={{ fontSize: 13, color: isActive ? D.orange : '#64748b' }} />}
+                          : isStale  ? <Refresh sx={{ fontSize: 12, color: D.warning }} />
+                          : isLocked ? <Lock sx={{ fontSize: 11, color: D.textMuted }} />
+                          :            <Icon sx={{ fontSize: 13, color: isActive ? D.orange : D.textMuted }} />}
                         </Box>
                         {!effectiveRailCollapsed && (
                           <Box sx={{ minWidth: 0 }}>
-                            <Typography sx={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, lineHeight: 1.3, color: isLocked ? D.lockedText : isActive ? '#f0f2f5' : '#94a3b8' }}>
+                            <Typography sx={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, lineHeight: 1.3, color: isLocked ? D.lockedText : isActive ? D.textPrimary : D.textMuted }}>
                               {persona === 'business' ? step.biz : step.label}
                             </Typography>
-                            <Typography sx={{ fontSize: 10, lineHeight: 1.3, display: 'block', color: isDone ? 'rgba(34,197,94,0.8)' : isLocked ? '#334155' : '#64748b' }}>
-                              {isDone ? 'Done' : isLocked ? 'Blocked' : isActive ? 'Current' : 'Pending'}
+                            <Typography sx={{ fontSize: 10, lineHeight: 1.3, display: 'block', color: isDone ? D.done : isStale ? D.warning : isLocked ? D.lockedText : D.textMuted }}>
+                              {isDone ? 'Done' : isStale ? 'Needs rerun' : isLocked ? 'Blocked' : isActive ? 'Current' : 'Pending'}
                             </Typography>
                           </Box>
                         )}
                         {isActive && !effectiveRailCollapsed && (
-                          <Box sx={{ position: 'absolute', right: 8, width: 5, height: 5, borderRadius: '50%', bgcolor: D.orange }} />
+                          <Box sx={{ position: 'absolute', right: 8, width: 5, height: 5, borderRadius: 0, bgcolor: D.orange }} />
                         )}
                       </Box>
                     </Tooltip>
@@ -1214,19 +1625,19 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             <Box sx={{ px: effectiveRailCollapsed ? 1 : 2.5, py: 2, borderTop: `1px solid ${D.railBorder}` }}>
               {!effectiveRailCollapsed && datasets.length > 0 && (
                 <Stack spacing={0.4} sx={{ mb: 1.5 }}>
-                  <Typography sx={{ fontSize: 10, color: '#334155' }}>{datasets.length} table{datasets.length !== 1 ? 's' : ''} loaded</Typography>
-                  {masterDataset && <Typography sx={{ fontSize: 10, color: '#334155' }}>Master: {fmt(masterDataset.row_count)} rows</Typography>}
+                  <Typography sx={{ fontSize: 10, color: D.textMuted }}>{datasets.length} table{datasets.length !== 1 ? 's' : ''} loaded</Typography>
+                  {masterDataset && <Typography sx={{ fontSize: 10, color: D.textMuted }}>Master: {fmt(masterDataset.row_count)} rows</Typography>}
                   {targetColumn && (
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: 'rgba(34,197,94,0.1)', px: 1, py: 0.25, borderRadius: 1 }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: D.panel, px: 1, py: 0.25, borderRadius: 0, border: `1px solid ${T.successBorder}` }}>
                       <Flag sx={{ fontSize: 9, color: D.done }} />
                       <Typography sx={{ fontSize: 10, color: D.done, fontWeight: 600 }}>{targetColumn}</Typography>
                     </Box>
                   )}
                   {activeModelRun && (
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: 'rgba(208,74,2,0.12)', px: 1, py: 0.25, borderRadius: 1 }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, bgcolor: D.panel, px: 1, py: 0.25, borderRadius: 0, border: `1px solid ${T.accentBorder}` }}>
                       <ModelTraining sx={{ fontSize: 9, color: D.orange }} />
                       <Typography sx={{ fontSize: 10, color: D.orange, fontWeight: 600 }}>
-                        {(activeModelRun.algorithm || activeModelRun.algorithm_id || '').replace(/_/g, ' ')} · AUC{' '}
+                        {(activeModelRun.algorithm || activeModelRun.algorithm_id || '').replace(/_/g, ' ')} AUC{' '}
                         {(activeModelRun.auc ?? activeModelRun.results?.metrics?.roc_auc)?.toFixed(3) ?? '-'}
                       </Typography>
                     </Box>
@@ -1238,9 +1649,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                 startIcon={<DeleteForever sx={{ fontSize: 14 }} />}
                 onClick={handleReset} disabled={resetting}
                 sx={{
-                  fontSize: 10, textTransform: 'none', color: '#475569',
-                  borderColor: '#1e293b',
-                  '&:hover': { borderColor: '#ef4444', color: '#ef4444', bgcolor: 'rgba(239,68,68,0.06)' },
+                  fontSize: 10, textTransform: 'none', color: D.textMuted,
+                  borderColor: D.railBorder,
+                  '&:hover': { borderColor: D.error, color: D.error, bgcolor: 'rgba(180,35,24,0.08)' },
                 }}
               >
                 {effectiveRailCollapsed ? '' : (resetting ? 'Resetting...' : 'Start Fresh')}
@@ -1276,32 +1687,86 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
             {!isDashboard && (
-              <Box sx={{ px: { xs: 1.5, md: 3 }, py: 1.5, bgcolor: 'white', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, flexShrink: 0, flexWrap: 'wrap' }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, overflow: 'hidden' }}>
-                  <Typography sx={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, display: { xs: 'none', sm: 'block' } }}>{experimentName}</Typography>
-                  <ChevronRight sx={{ fontSize: 12, color: '#94a3b8', display: { xs: 'none', sm: 'block' } }} />
-                  <Typography sx={{ fontSize: 10, color: D.orange, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
-                    {persona === 'business' ? STEPS[currentIdx]?.biz : STEPS[currentIdx]?.label}
+              <Box sx={{ px: { xs: 1.5, md: 3 }, py: 1.5, bgcolor: D.panel, borderBottom: `1px solid ${D.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5, flexShrink: 0, flexWrap: 'wrap' }}>
+                <Stack spacing={0.2} sx={{ minWidth: 0, overflow: 'hidden' }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0, overflow: 'hidden' }}>
+                    <Typography sx={{ fontSize: 10, color: D.textSoft, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, display: { xs: 'none', sm: 'block' } }}>
+                      {experimentName}
+                    </Typography>
+                    <ChevronRight sx={{ fontSize: 12, color: D.textSoft, display: { xs: 'none', sm: 'block' } }} />
+                    <Typography sx={{ fontSize: 10, color: D.orange, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      {persona === 'business' ? currentStepMeta?.biz : currentStepMeta?.label}
+                    </Typography>
+                  </Stack>
+                  <Typography sx={{ fontSize: { xs: 20, md: 24 }, fontWeight: 800, color: D.textBody, lineHeight: 1.1 }}>
+                    {persona === 'business' ? currentStepMeta?.biz : currentStepMeta?.label}
                   </Typography>
-                  <Typography sx={{ fontSize: 10, color: '#94a3b8', display: { xs: 'none', md: 'block' } }}>
-                    {currentFlowIdx >= 0 ? `Step ${currentFlowIdx + 1} of ${progressSteps.length}` : 'Pipeline Hub'}
+                  <Typography sx={{ fontSize: 12, color: D.textSoft, maxWidth: 760, lineHeight: 1.5 }}>
+                    {currentStepMeta?.desc || 'Continue the current workbench stage.'}
                   </Typography>
                 </Stack>
 
-                {nextStep && !nextLocked && (
-                  <Button
-                    size="small" variant="contained" endIcon={<ChevronRight />}
-                    onClick={() => setActiveStep(nextStep.id)}
-                    sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, height: 28, fontSize: 11, textTransform: 'none', borderRadius: '6px', boxShadow: 'none' }}
-                  >
-                    Continue: {persona === 'business' ? nextStep.biz : nextStep.label}
-                  </Button>
-                )}
+                <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {activePipelineId ? (
+                    <>
+                      <Chip
+                        size="small"
+                        label={toRunRef(activePipelineId)}
+                        sx={{
+                          height: 22,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          bgcolor: D.panel,
+                          color: D.orange,
+                          border: `1px solid ${T.accentBorder}`,
+                          borderRadius: 0,
+                        }}
+                      />
+                      <Chip
+                        size="small"
+                        label={`${progressPct}% complete`}
+                        sx={{
+                          height: 22,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          bgcolor: D.panelAlt,
+                          color: D.textBody,
+                          border: `1px solid ${D.border}`,
+                          borderRadius: 0,
+                        }}
+                      />
+                    </>
+                  ) : null}
+
+                  {primaryCta && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={primaryCta.stale ? <Refresh sx={{ fontSize: 14 }} /> : undefined}
+                      endIcon={primaryCta.stale ? undefined : <ChevronRight />}
+                      onClick={() => setActiveStep(resolveStepNavigation(primaryCta.target) || primaryCta.target)}
+                      sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, height: 28, fontSize: 11, textTransform: 'none', borderRadius: 0, boxShadow: 'none' }}
+                    >
+                      {primaryCta.label}: {primaryCta.detail}
+                    </Button>
+                  )}
+                </Stack>
               </Box>
             )}
 
-            <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? { xs: 0.5, md: 1 } : { xs: 1, md: 2 } }}>
-              {guardMessage && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{guardMessage}</Alert>}
+            <Box id="fcc-workbench-main-canvas" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? { xs: 0.5, md: 1 } : { xs: 1, md: 2 } }}>
+              {businessStaleCard ? (
+                <BusinessStaleStepCard
+                  currentStepLabel={businessStaleCard.currentStepLabel}
+                  whatChanged={businessStaleCard.whatChanged}
+                  whyRerun={businessStaleCard.whyRerun}
+                  nextAction={businessStaleCard.nextAction}
+                  actionLabel={businessStaleCard.actionLabel}
+                  onAction={handleBusinessStaleAction}
+                />
+              ) : null}
+              {!businessStaleCard && staleBannerMessage && <Alert severity="warning" sx={{ mb: 2, borderRadius: 0 }}>{staleBannerMessage}</Alert>}
+              {guardMessage && <Alert severity="warning" sx={{ mb: 2, borderRadius: 0 }}>{guardMessage}</Alert>}
               <AnimatePresence mode="wait" initial={false}>
                 <Box
                   key={activeStep}
@@ -1331,15 +1796,16 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   )}
                   {activeStep === 'target' && (
                     <TargetVariableScreen persona={persona} masterDataset={masterDataset} targetColumn={targetColumn}
+                      onStepAdvance={(nextStep = 'eda') => setActiveStep(nextStep)}
                       onTargetChange={handleTargetChange} activePipelineId={activePipelineId} activePipelineName={activePipelineName} onPipelineActivated={activatePipeline}
                     />
                   )}
                   {activeStep === 'eda' && (
-                    <EDAScreen persona={persona} masterDataset={masterDataset} datasets={datasets} targetColumn={targetColumn} edaDone={edaDone} onEdaDone={() => setEdaDone(true)} />
+                    <EDAScreen persona={persona} masterDataset={masterDataset} datasets={datasets} targetColumn={targetColumn} edaDone={edaDone} onEdaDone={handleEdaComplete} />
                   )}
                   {activeStep === 'preprocess' && (
                     <PreprocessingWorkbench
-                      persona={persona} masterDataset={masterDataset} preprocessedDataset={preprocessDataset}
+                      persona={persona} datasets={datasets} masterDataset={masterDataset} preprocessedDataset={preprocessDataset}
                       targetColumn={targetColumn} suggestions={preprocessPlan} steps={preprocessSteps}
                       onStepsChange={handlePreprocessStepsChange} onPreview={handlePreprocessPreview} onRun={handlePreprocessRun}
                       preview={preprocessPreview} onMasterBuild={handleBuildMaster}
@@ -1357,17 +1823,23 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                       activeModelRun={activeModelRun}
                       onActiveRunChange={(run) => adoptModelRun(run, { resetDownstream: true })}
                       onValidationComplete={setValidationReport}
+                      actionsDisabled={staleStepSet.has('validation')}
+                      actionsMessage={staleMessageForStep('validation')}
                     />
                   )}
                   {activeStep === 'registry' && (
                     <ModelRegistryScreen jobId={activeModelRun?.job_id || modelRun?.job_id}
                       activeModelRun={activeModelRun} validationReport={validationReport} onRegistered={handleRegistered}
+                      actionsDisabled={staleStepSet.has('registry')}
+                      actionsMessage={staleMessageForStep('registry')}
                     />
                   )}
                   {activeStep === 'ready' && (
                     <ModelReadyScreen persona={persona} uploadedDatasets={datasets} masterDataset={masterDataset}
                       targetColumn={targetColumn} preprocessedDataset={preprocessDataset}
                       activeModelRun={activeModelRun} onDeploy={handleDeploy} onViewReport={handleOpenReport}
+                      actionsDisabled={staleStepSet.has('ready')}
+                      actionsMessage={staleMessageForStep('ready')}
                     />
                   )}
                   {activeStep === 'reports' && (
@@ -1376,6 +1848,8 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
                   {activeStep === 'dashboard' && (
                     <DeploymentDashboard persona={persona} activeModelRun={activeModelRun}
                       validationReport={validationReport} registryEntry={registryEntry} onBack={() => setActiveStep('ready')}
+                      actionsDisabled={staleStepSet.has('dashboard')}
+                      actionsMessage={staleMessageForStep('dashboard')}
                     />
                   )}
                 </Box>
@@ -1390,7 +1864,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
               preprocessDataset={preprocessDataset} modelRun={modelRun} validationReport={validationReport}
               registryEntry={registryEntry} qualityScore={qualityScore}
               stepStatuses={Object.fromEntries(STEPS.map((s) => [s.id, stepStatus(s.id, stepCtx)]))}
-              activeStep={activeStep} panelWidth={contextPanelWidth} onClose={() => setShowContext(false)}
+              activeStep={activeStep} panelWidth={contextPanelWidth} latestChange={latestDependencyChange} onClose={() => setShowContext(false)}
             />
           )}
         </Box>
@@ -1401,13 +1875,13 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
         <DialogTitle sx={{ fontWeight: 700 }}>Reset Pipeline State</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={1.25}>
-            <Typography sx={{ fontSize: 13, color: '#475569' }}>
+            <Typography sx={{ fontSize: 13, color: D.textSoft }}>
               Start fresh for this environment?
             </Typography>
             <Alert severity="warning" sx={{ py: 0.5 }}>
               This clears pipeline progress, selected datasets, and local workbench state.
             </Alert>
-            <Typography sx={{ fontSize: 12, color: '#64748b' }}>
+            <Typography sx={{ fontSize: 12, color: D.textSoft }}>
               Raw uploaded files are kept on disk.
             </Typography>
           </Stack>
@@ -1434,13 +1908,19 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
 
       {/* ── Pipeline Launcher Dialog ─────────────────────────────────────────── */}
       <Dialog open={pipelineLauncherOpen} onClose={() => setPipelineLauncherOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Continue Workbench Pipeline</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>Continue FCC Run</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={1.25}>
-            <Typography sx={{ fontSize: 13, color: '#475569' }}>Choose how you want to start this session.</Typography>
+            <Typography sx={{ fontSize: 13, color: D.textSoft }}>Choose an existing run to resume or create a new run for this workbench session.</Typography>
             {defaultResumePipeline
-              ? <Alert severity="info"  sx={{ py: 0.5 }}>Unfinished pipeline found: <strong>{defaultResumePipeline.name}</strong></Alert>
-              : <Alert severity="success" sx={{ py: 0.5 }}>No unfinished pipeline found. Start a new one or view all pipelines in Pipeline Hub.</Alert>
+              ? (
+                <Alert severity={String(defaultResumePipeline?.run_status || '').toLowerCase() === 'stale' ? 'warning' : 'info'} sx={{ py: 0.5 }}>
+                  {String(defaultResumePipeline?.run_status || '').toLowerCase() === 'stale' ? 'Run needs rerun:' : 'Unfinished run found:'} <strong>{defaultResumePipeline.name}</strong>
+                  {defaultResumePipeline.current_step_label ? ` - ${defaultResumePipeline.current_step_label}` : ''}
+                  {defaultResumePipeline.latest_change?.message ? ` - ${defaultResumePipeline.latest_change.message}` : ''}
+                </Alert>
+              )
+              : <Alert severity="success" sx={{ py: 0.5 }}>No unfinished run found. Start a new run or review past runs in Run Center.</Alert>
             }
           </Stack>
         </DialogContent>
@@ -1450,28 +1930,28 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
             onClick={() => defaultResumePipeline && resumePipeline(defaultResumePipeline)}
             sx={{ textTransform: 'none', bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover } }}
           >
-            Resume Unfinished
+            Resume Run
           </Button>
           <Button variant="outlined" startIcon={<Add sx={{ fontSize: 15 }} />}
             onClick={handleStartNewPipeline} sx={{ textTransform: 'none' }}
           >
-            Build New Pipeline
+            Start New Run
           </Button>
           <Button variant="text" onClick={() => { setPipelineLauncherOpen(false); setActiveStep('pipelines'); }} sx={{ textTransform: 'none' }}>
-            View All Pipelines
+            View Run Center
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* ── Create Pipeline Dialog ───────────────────────────────────────────── */}
       <Dialog open={createPipelineDialogOpen} onClose={() => !creatingPipeline && setCreatePipelineDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Name New Pipeline</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>Name New Run</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={1.2}>
-            <Typography sx={{ fontSize: 12, color: '#64748b' }}>
-              Give this pipeline a unique name. A new pipeline always starts with a clean workspace.
+            <Typography sx={{ fontSize: 12, color: D.textSoft }}>
+              Give this FCC run a unique name. A new run always starts with a clean workspace.
             </Typography>
-            <TextField size="small" autoFocus label="Pipeline name"
+            <TextField size="small" autoFocus label="Run name"
               value={newPipelineName} onChange={(e) => setNewPipelineName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleConfirmCreatePipeline(); } }}
             />
@@ -1485,7 +1965,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           <Button variant="contained" onClick={handleConfirmCreatePipeline} disabled={creatingPipeline}
             sx={{ textTransform: 'none', bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover } }}
           >
-            {creatingPipeline ? 'Creating...' : 'Create Pipeline'}
+            {creatingPipeline ? 'Creating...' : 'Create Run'}
           </Button>
         </DialogActions>
       </Dialog>

@@ -104,6 +104,7 @@ class ServiceContainer:
         self.ai_builder = None
         self.data_cleaning = None
         self.typology_detector = None
+        self.llm_provider = None
         self.ollama_wrapper = None
         self.case_pack_generator = None
         self.doc_rag_system = None
@@ -147,7 +148,8 @@ class ServiceContainer:
             self._register_lazy_modules()
 
             # Proxies (do not load yet)
-            self.ollama_wrapper = ModuleProxy(REGISTRY, "ollama")
+            self.llm_provider = ModuleProxy(REGISTRY, "ollama")
+            self.ollama_wrapper = self.llm_provider
             self.doc_rag_system = ModuleProxy(REGISTRY, "docs_rag")
             self.rag_system = ModuleProxy(REGISTRY, "rag")
             self.graph_builder = ModuleProxy(REGISTRY, "graph")
@@ -163,13 +165,13 @@ class ServiceContainer:
 
     def _register_lazy_modules(self):
         """Declare all heavy modules as lazy loaders."""
-        # Ollama (AI)
+        # LLM provider (Ollama or local GPT4All)
         def _load_ollama():
             from modules.ai import load_ollama
             return load_ollama()
         REGISTRY.register("ollama", _load_ollama, feature_flag_env="ENABLE_AI")
 
-        # Documentation RAG (depends on Ollama, optional FAISS)
+        # Documentation RAG (depends on the active LLM provider, optional FAISS)
         def _load_docs_rag():
             ollama = REGISTRY.get("ollama")
             from modules.rag import load_docs_rag
@@ -192,8 +194,13 @@ class ServiceContainer:
                 vector_store_path = os.path.join(root, "investigation", "vector_store")
             except Exception:
                 pass
+            llm_provider = None
+            try:
+                llm_provider = REGISTRY.get("ollama")
+            except Exception:
+                llm_provider = None
             from modules.rag import load_vector_rag
-            return load_vector_rag(db, vector_store_path)
+            return load_vector_rag(db, vector_store_path, llm_provider=llm_provider)
         REGISTRY.register("rag", _load_rag, feature_flag_env="ENABLE_RAG")
 
         # Graph builder
@@ -230,6 +237,8 @@ class ServiceContainer:
             raise ValueError("Environment ID required")
 
         paths = [
+            f"env/{tenant_id}/{env_id}/investigation/investigation.db",
+            f"backend/env/{tenant_id}/{env_id}/investigation/investigation.db",
             f"data/environments/{env_id}/database.db",
             f"data/environments/{env_id}/investigation.db",
             f"data/{tenant_id}/{env_id}/database.db",

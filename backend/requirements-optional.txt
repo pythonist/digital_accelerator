@@ -6,6 +6,7 @@ scipy==1.17.0
 imblearn==0.0
 joblib==1.5.2
 networkx==3.1
+gpt4all==2.8.2
 cx_Oracle==8.3.0
 psycopg2_binary==2.9.11
 pymssql==2.3.11

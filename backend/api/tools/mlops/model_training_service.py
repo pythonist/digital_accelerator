@@ -1311,6 +1311,33 @@ def _build_threshold_table(
     return rows
 
 
+def _closest_threshold_row(
+    rows: Optional[List[Dict[str, Any]]],
+    threshold: Optional[float],
+) -> Dict[str, Any]:
+    if not isinstance(rows, list) or not rows:
+        return {}
+    try:
+        target = float(0.5 if threshold is None else threshold)
+    except Exception:
+        target = 0.5
+
+    best_row: Optional[Dict[str, Any]] = None
+    best_delta: Optional[float] = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            row_threshold = float(row.get("threshold"))
+        except Exception:
+            continue
+        delta = abs(row_threshold - target)
+        if best_delta is None or delta < best_delta:
+            best_row = row
+            best_delta = delta
+    return dict(best_row or {})
+
+
 def _curve_preview_points(points: List[Dict[str, Any]], limit: int = 80) -> List[Dict[str, Any]]:
     rows = list(points or [])
     if len(rows) <= limit:
@@ -5313,17 +5340,42 @@ class ModelTrainingService:
                 metrics = json.loads(r[3] or "{}")
             except Exception:
                 metrics = {}
+            selected_threshold = float(r[4]) if r[4] is not None else None
+            threshold_target = selected_threshold if selected_threshold is not None else metrics.get("optimal_threshold")
+            threshold_row = _closest_threshold_row(metrics.get("threshold_table"), threshold_target)
+            if threshold_row:
+                metrics = {
+                    **metrics,
+                    "optimal_threshold": threshold_target,
+                    "suppression_rate_pct": threshold_row.get("suppression_rate_pct", threshold_row.get("suppression_rate")),
+                    "event_loss_pct": threshold_row.get("event_loss_pct"),
+                    "precision": threshold_row.get("precision", metrics.get("precision")),
+                    "recall": threshold_row.get("recall", metrics.get("recall")),
+                    "f1": threshold_row.get("f1", metrics.get("f1")),
+                    "accuracy": threshold_row.get("accuracy", metrics.get("accuracy")),
+                    "specificity": threshold_row.get("specificity", metrics.get("specificity")),
+                    "balanced_accuracy": threshold_row.get("balanced_accuracy", metrics.get("balanced_accuracy")),
+                }
             out.append({
                 "job_id":             r[0],
                 "algorithm":          r[1],
                 "target_column":      r[2],
                 "metrics":            metrics,
-                "selected_threshold": float(r[4]) if r[4] is not None else None,
+                "selected_threshold": selected_threshold,
                 "trained_at":         r[5].isoformat() if hasattr(r[5], "isoformat") else r[5],
                 "registry_stage":     r[6],
                 "grain":              r[7] or "alert",
                 "hml_high_threshold": float(r[8]) if r[8] is not None else 0.65,
                 "hml_low_threshold":  float(r[9]) if r[9] is not None else 0.35,
+                "optimal_threshold":  metrics.get("optimal_threshold"),
+                "suppression_rate_pct": metrics.get("suppression_rate_pct"),
+                "event_loss_pct":     metrics.get("event_loss_pct"),
+                "precision":          metrics.get("precision"),
+                "recall":             metrics.get("recall"),
+                "f1":                 metrics.get("f1"),
+                "specificity":        metrics.get("specificity"),
+                "accuracy":           metrics.get("accuracy"),
+                "balanced_accuracy":  metrics.get("balanced_accuracy"),
             })
         return out
 

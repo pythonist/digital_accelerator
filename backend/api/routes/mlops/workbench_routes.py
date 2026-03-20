@@ -64,6 +64,241 @@ def _get_env_ids():
     return tenant_id, env_id
 
 
+_BUSINESS_GOAL_LABELS = {
+    "catch_most": "Catch as many real cases as possible",
+    "balanced": "Balance detection with analyst workload",
+    "minimize_false_alarms": "Reduce false alarms first",
+}
+
+
+def _stringify_business_signal(signal) -> str:
+    if isinstance(signal, str):
+        return signal.strip()
+    if isinstance(signal, dict):
+        title = str(
+            signal.get("title")
+            or signal.get("label")
+            or signal.get("name")
+            or ""
+        ).strip()
+        detail = str(
+            signal.get("detail")
+            or signal.get("summary")
+            or signal.get("value")
+            or signal.get("message")
+            or ""
+        ).strip()
+        if title and detail:
+            return f"{title}: {detail}"
+        return title or detail
+    return str(signal or "").strip()
+
+
+def _extract_llm_json(raw_text: str):
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        text = match.group(0)
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _build_business_brief_payload(profile_rows, target_column: str, goal: str) -> dict:
+    dataset_cards = []
+    total_rows = 0
+    total_entities = 0
+    coverage_values = []
+    freshness_values = []
+    flag_rates = []
+    standout_signals = []
+
+    for row in profile_rows:
+        dataset = row["dataset"]
+        profile = row["profile"] or {}
+        row_count = int(profile.get("total_rows") or dataset.get("row_count") or 0)
+        quality_score = profile.get("quality_score")
+        coverage_pct = profile.get("coverage_pct")
+        freshness_days = profile.get("data_freshness_days")
+        unique_entities = int(profile.get("unique_entity_count") or 0)
+        flag_rate = profile.get("flag_rate")
+        signals = [
+            text
+            for text in (
+                _stringify_business_signal(signal)
+                for signal in (profile.get("business_signals") or [])
+            )
+            if text
+        ]
+
+        total_rows += row_count
+        total_entities += unique_entities
+        if coverage_pct is not None:
+            coverage_values.append(float(coverage_pct))
+        if freshness_days is not None:
+            freshness_values.append(int(freshness_days))
+        if flag_rate is not None:
+            flag_rates.append(float(flag_rate))
+        standout_signals.extend(signals[:3])
+
+        dataset_cards.append(
+            {
+                "dataset_id": int(dataset.get("dataset_id") or 0),
+                "dataset_type": str(dataset.get("dataset_type") or "dataset"),
+                "rows": row_count,
+                "quality_score": float(quality_score) if quality_score is not None else None,
+                "business_narrative": str(profile.get("business_narrative") or "No summary available."),
+                "coverage_pct": float(coverage_pct) if coverage_pct is not None else None,
+                "data_freshness_days": int(freshness_days) if freshness_days is not None else None,
+                "unique_entity_count": unique_entities or None,
+                "flag_rate": float(flag_rate) if flag_rate is not None else None,
+                "signals": signals[:4],
+            }
+        )
+
+    unique_signals = []
+    seen_signals = set()
+    for signal in standout_signals:
+        normalized = signal.lower()
+        if normalized in seen_signals:
+            continue
+        seen_signals.add(normalized)
+        unique_signals.append(signal)
+        if len(unique_signals) >= 4:
+            break
+
+    avg_coverage = round(sum(coverage_values) / len(coverage_values), 2) if coverage_values else None
+    freshest_data_days = min(freshness_values) if freshness_values else None
+    avg_flag_rate = round(sum(flag_rates) / len(flag_rates), 4) if flag_rates else None
+    goal_label = _BUSINESS_GOAL_LABELS.get(goal, _BUSINESS_GOAL_LABELS["balanced"])
+
+    summary_bits = [
+        f"{len(dataset_cards)} data source{'s' if len(dataset_cards) != 1 else ''}",
+        f"{total_rows:,} total rows" if total_rows else "",
+        f"{total_entities:,} tracked entities" if total_entities else "",
+        f"about {avg_flag_rate * 100:.1f}% currently flagged" if avg_flag_rate is not None else "",
+    ]
+    summary_bits = [bit for bit in summary_bits if bit]
+    executive_summary = (
+        "You selected "
+        + ", ".join(summary_bits)
+        + f". The current operating priority is to {goal_label.lower()}."
+    )
+    if target_column:
+        executive_summary += f" The chosen outcome column is {target_column}."
+    if freshest_data_days is not None:
+        executive_summary += f" The freshest sampled data is {freshest_data_days} days old."
+
+    recommended_actions = []
+    if not target_column:
+        recommended_actions.append("Confirm which business outcome column represents success before starting the build.")
+    if avg_coverage is not None and avg_coverage < 80:
+        recommended_actions.append("Review key coverage before trusting the automated build because sparse IDs weaken joins.")
+    if len(dataset_cards) < 2:
+        recommended_actions.append("Add more supporting data sources if you want a fuller picture than a single table can provide.")
+    if goal == "catch_most":
+        recommended_actions.append("Prepare the investigation team for a higher review queue because this priority favors coverage.")
+    elif goal == "minimize_false_alarms":
+        recommended_actions.append("Validate missed-case tolerance with compliance stakeholders because this priority favors efficiency.")
+    else:
+        recommended_actions.append("Start with the balanced operating mode if you want a credible first pass for business review.")
+    recommended_actions = recommended_actions[:4]
+
+    questions_to_answer = [
+        "Which business outcome matters most: finding more real cases or reducing analyst workload?",
+        "Is the selected outcome column trusted by operations and compliance teams?",
+        "Are there any important data sources still missing from this build?",
+    ]
+
+    return {
+        "llm_available": False,
+        "brief_source": "deterministic",
+        "goal": goal,
+        "goal_label": goal_label,
+        "target_column": target_column or "",
+        "executive_summary": executive_summary,
+        "what_stands_out": unique_signals or ["No major structural risk signals were detected in the selected sample."],
+        "recommended_actions": recommended_actions,
+        "questions_to_answer": questions_to_answer,
+        "combined_snapshot": {
+            "dataset_count": len(dataset_cards),
+            "total_rows": total_rows,
+            "total_entities": total_entities or None,
+            "avg_coverage_pct": avg_coverage,
+            "avg_flag_rate": avg_flag_rate,
+            "freshest_data_days": freshest_data_days,
+        },
+        "datasets": dataset_cards,
+    }
+
+
+def _maybe_upgrade_brief_with_llm(brief_payload: dict) -> dict:
+    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    if not wrapper:
+        return brief_payload
+    try:
+        if not wrapper.check_connection():
+            return brief_payload
+    except Exception:
+        return brief_payload
+
+    prompt_payload = {
+        "goal_label": brief_payload.get("goal_label"),
+        "target_column": brief_payload.get("target_column"),
+        "combined_snapshot": brief_payload.get("combined_snapshot"),
+        "datasets": [
+            {
+                "dataset_type": row.get("dataset_type"),
+                "rows": row.get("rows"),
+                "quality_score": row.get("quality_score"),
+                "business_narrative": row.get("business_narrative"),
+                "signals": row.get("signals"),
+            }
+            for row in (brief_payload.get("datasets") or [])
+        ],
+        "what_stands_out": brief_payload.get("what_stands_out") or [],
+    }
+    system_prompt = (
+        "You translate FCC and AML workbench facts into plain business language. "
+        "Use short sentences. Do not use em dashes. Do not invent facts. "
+        "Return valid JSON with keys executive_summary, what_stands_out, "
+        "recommended_actions, questions_to_answer. Each list should contain 2 to 4 short strings."
+    )
+    response = wrapper.generate(
+        prompt=json.dumps(prompt_payload, default=str),
+        system_prompt=system_prompt,
+        temperature=0.2,
+        max_tokens=400,
+    )
+    if not response or not response.get("success"):
+        return brief_payload
+
+    parsed = _extract_llm_json(response.get("response", ""))
+    if not isinstance(parsed, dict):
+        return brief_payload
+
+    upgraded = dict(brief_payload)
+    upgraded["llm_available"] = True
+    upgraded["brief_source"] = "ai"
+    upgraded["ai_model"] = response.get("model")
+
+    summary = str(parsed.get("executive_summary") or "").strip()
+    if summary:
+        upgraded["executive_summary"] = summary
+
+    for key in ("what_stands_out", "recommended_actions", "questions_to_answer"):
+        values = parsed.get(key)
+        if isinstance(values, list):
+            cleaned = [str(item).strip() for item in values if str(item).strip()]
+            if cleaned:
+                upgraded[key] = cleaned[:4]
+
+    return upgraded
+
+
 def _safe_dataset_type(raw: str) -> str:
     """Validate and normalise a dataset type string."""
     t = str(raw or "").strip().lower()
@@ -439,6 +674,52 @@ def mlops_metadata_profile():
             return jsonify({"success": False, "error": "Dataset not found.", "error_code": "NOT_FOUND"}), 404
         result = mlops_svc.profile_metadata(dataset, sample)
         return jsonify({"success": True, "data": result}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/business/brief", methods=["POST"])
+def mlops_business_brief():
+    """POST /api/mlops/business/brief"""
+    try:
+        body = request.get_json(silent=True) or {}
+        dataset_ids = body.get("dataset_ids") or []
+        sample_rows = max(500, min(int(body.get("sample_rows") or 4000), 15000))
+        target_column = str(body.get("target_column") or "").strip()
+        goal = str(body.get("goal") or "balanced").strip().lower() or "balanced"
+
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+
+        profile_rows = []
+        for raw_dataset_id in dataset_ids:
+            try:
+                dataset_id = int(raw_dataset_id)
+            except Exception:
+                continue
+            dataset = mlops_svc.get_dataset(tenant_id, env_id, dataset_id)
+            if not dataset:
+                continue
+            profile_rows.append(
+                {
+                    "dataset": dataset,
+                    "profile": mlops_svc.profile_metadata(dataset, sample_rows),
+                }
+            )
+
+        if not profile_rows:
+            return jsonify({
+                "success": False,
+                "error": "At least one valid dataset is required.",
+                "error_code": "VALIDATION_ERROR",
+            }), 400
+
+        brief = _build_business_brief_payload(profile_rows, target_column, goal)
+        brief = _maybe_upgrade_brief_with_llm(brief)
+        return jsonify({"success": True, "data": brief}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
@@ -1050,6 +1331,42 @@ def mlops_pipeline_get(pipeline_id):
         env_root  = _resolve_env_path(env_id, tenant_id)
         mlops_svc = _get_mlops_service(env_root)
         result    = mlops_svc.load_pipeline(tenant_id, env_id, pipeline_id)
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/screen-state", methods=["POST"])
+def mlops_pipeline_screen_state(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/screen-state
+
+    Lightweight state save for one workbench screen. Used for autosave and
+    exact resume without creating a full new pipeline version on each UI move.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        screen = str(body.get("screen") or "").strip()
+        state = body.get("state") or {}
+        if not screen:
+            return jsonify({
+                "success": False,
+                "error": "screen is required",
+                "error_code": "VALIDATION_ERROR",
+            }), 400
+        if not isinstance(state, dict):
+            return jsonify({
+                "success": False,
+                "error": "state must be an object",
+                "error_code": "VALIDATION_ERROR",
+            }), 400
+
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.save_pipeline_screen_state(tenant_id, env_id, int(pipeline_id), screen, state)
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404

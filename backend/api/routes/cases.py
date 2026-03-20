@@ -92,11 +92,15 @@ def set_case_scope():
             cursor.execute("SELECT DISTINCT case_id FROM cases")
             case_ids = [str(r[0]) for r in cursor.fetchall()]
         
+        stored_scope_value = scope_value
+        if isinstance(scope_value, (list, dict)):
+            stored_scope_value = json.dumps(scope_value)
+
         # Store scope
         cursor.execute("""
             INSERT OR REPLACE INTO active_case_scope (id, scope_type, scope_value, case_ids, run_id, updated_at)
             VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (scope_type, scope_value, json.dumps(case_ids), run_id))
+        """, (scope_type, stored_scope_value, json.dumps(case_ids), run_id))
         
         conn.commit()
         
@@ -144,6 +148,11 @@ def get_case_scope():
             })
         
         scope_type, scope_value, case_ids_json, run_id = row
+        if isinstance(scope_value, str) and scope_value.strip().startswith(('[', '{')):
+            try:
+                scope_value = json.loads(scope_value)
+            except Exception:
+                pass
         case_ids = json.loads(case_ids_json) if case_ids_json else []
         
         return jsonify({

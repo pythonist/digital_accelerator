@@ -13,10 +13,22 @@ export const safeNumber = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Num
 
 export const normalizeLabel = (run) => run?.label || run?.algorithm_display || run?.algorithm || run?.job_id?.slice?.(0, 8) || 'Model';
 
+const extractCurve = (model, curveKey) => {
+  const candidates = [
+    model?.[curveKey],
+    model?.metrics?.[curveKey],
+    model?.results?.[curveKey],
+    model?.results?.metrics?.[curveKey],
+  ];
+  return candidates.find((value) => Array.isArray(value) && value.length) || [];
+};
+
 export const buildCurveGrid = (models, curveKey, xKey, yKey, step = 0.02) => {
   const grid = Array.from({ length: Math.floor(1 / step) + 1 }, (_, i) => Number((i * step).toFixed(2)));
   const series = models.map((m) => {
-    const raw = (m?.[curveKey] || []).map((p) => ({ x: Number(p[xKey] ?? 0), y: Number(p[yKey] ?? 0) }))
+    const raw = extractCurve(m, curveKey)
+      .map((p) => ({ x: Number(p?.[xKey]), y: Number(p?.[yKey]) }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
       .sort((a, b) => a.x - b.x);
     return { id: m.job_id, label: normalizeLabel(m), points: raw };
   });

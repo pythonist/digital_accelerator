@@ -48,12 +48,17 @@ def resolve_env_root(env_id: str, tenant_id: str, *, create_if_missing: bool = T
 
     candidates = _dedupe_paths(
         [
+            Path(f"env/{tenant_id_s}/{env_id_s}"),
+            Path(f"backend/env/{tenant_id_s}/{env_id_s}"),
             Path(f"data/environments/{env_id_s}"),
             Path(f"data/{tenant_id_s}/{env_id_s}"),
+            backend_root / "env" / tenant_id_s / env_id_s,
             Path(f"backend/data/environments/{env_id_s}"),
             Path(f"backend/data/{tenant_id_s}/{env_id_s}"),
+            project_root / "env" / tenant_id_s / env_id_s,
             backend_root / "data" / "environments" / env_id_s,
             backend_root / "data" / tenant_id_s / env_id_s,
+            workspace_root / "env" / tenant_id_s / env_id_s,
             project_root / "data" / "environments" / env_id_s,
             project_root / "data" / tenant_id_s / env_id_s,
             workspace_root / "data" / "environments" / env_id_s,

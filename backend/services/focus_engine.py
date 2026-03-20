@@ -60,7 +60,7 @@ class FocusEngine:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_focus_run ON focus_results(run_id, is_included, bucket)")
             conn.commit()
         except Exception as e:
-            print(f"⚠️ Focus Engine Schema Error: {e}")
+            print(f"[WARN] Focus Engine Schema Error: {e}")
         finally:
             self.db_manager.close_connection(conn)
 
@@ -94,7 +94,7 @@ class FocusEngine:
 
         conn = self.db_manager.connect()
         try:
-            print(f"🔄 Focus Engine: Starting Run {run_id} with Config: {json.dumps(config)}")
+            print(f"[INFO] Focus Engine: Starting Run {run_id} with Config: {json.dumps(config)}")
             
             # --- Step 1: Data Fetching ---
             try:

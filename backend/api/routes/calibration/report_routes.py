@@ -119,8 +119,7 @@ def generate_ai_explanation(run_id):
         
         print(f"🤖 Generating AI explanation for section: {section}")
         
-        # Get Ollama wrapper
-        ollama = services.ollama_wrapper if hasattr(services, 'ollama_wrapper') else None
+        ollama = getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
         
         if not ollama or not ollama.check_connection():
             return jsonify({
@@ -187,25 +186,27 @@ def check_ai_status(run_id):
     GET /api/v2/calibration/report/{run_id}/ai-status
     """
     try:
-        ollama = services.ollama_wrapper if hasattr(services, 'ollama_wrapper') else None
+        llm_service = getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
         
-        if ollama:
-            is_connected = ollama.check_connection()
-            models = ollama.list_models() if is_connected else []
+        if llm_service:
+            is_connected = llm_service.check_connection()
+            models = llm_service.list_models()
             
             return jsonify({
                 'available': is_connected,
                 'connected': is_connected,
+                'provider': getattr(llm_service, 'provider_name', 'ollama'),
                 'models': models,
-                'default_model': ollama.default_model if is_connected else None
+                'default_model': llm_service.default_model if is_connected else None
             })
         else:
             return jsonify({
                 'available': False,
                 'connected': False,
+                'provider': None,
                 'models': [],
                 'default_model': None,
-                'message': 'Ollama wrapper not initialized'
+                'message': 'AI provider not initialized'
             })
     
     except Exception as e:

@@ -44,14 +44,14 @@ import {
   TrendingUp, TrendingDown, Balance, Rule, Hub,
   ManageSearch, QueryStats, DataObject, VisibilityOff,
   Psychology, Assessment, NotificationsActive, CompareArrows,
-  AccessTime, WarningAmber, Public,
+  AccessTime, WarningAmber, Public, Article,
 } from '@mui/icons-material';
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart,
   Legend, Line, LineChart, ReferenceLine, ResponsiveContainer,
   Scatter, ScatterChart, Tooltip as RTooltip, XAxis, YAxis,
   PieChart, Pie, RadarChart, Radar, PolarGrid, PolarAngleAxis,
-  Treemap,
+  Treemap, Brush,
 } from 'recharts';
 import mlopsApi from '../services/mlopsApi';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
@@ -310,14 +310,22 @@ const targetLexicon = (targetColumn, persona = 'analyst') => {
     }
     if (isFinalLabel) {
       return {
-        negative: `${targetName} = 0`,
-        positive: `${targetName} = 1`,
-        negativeShort: 'Label 0',
-        positiveShort: 'Label 1',
-        negativeMetric: 'Label 0 Count',
-        positiveMetric: 'Label 1 Count',
+        negative: 'Likely False Positive (0)',
+        positive: 'Likely Actionable Alert (1)',
+        negativeShort: 'Likely False Positive',
+        positiveShort: 'Likely Actionable Alert',
+        negativeMetric: 'Likely False Positive Count',
+        positiveMetric: 'Likely Actionable Alert Count',
       };
     }
+    return {
+      negative: 'Lower-Priority Outcome (0)',
+      positive: 'Higher-Priority Outcome (1)',
+      negativeShort: 'Lower-Priority Outcome',
+      positiveShort: 'Higher-Priority Outcome',
+      negativeMetric: 'Lower-Priority Count',
+      positiveMetric: 'Higher-Priority Count',
+    };
   }
 
   return {
@@ -331,7 +339,7 @@ const targetLexicon = (targetColumn, persona = 'analyst') => {
 };
 
 const classNameFromSeries = (seriesKey, lexicon) =>
-  seriesKey === 'fp_count' || seriesKey === 'FP' || seriesKey === 'cumFP'
+  seriesKey === 'fp_count' || seriesKey === 'FP' || seriesKey === 'cumFP' || seriesKey === 'fp_share_pct'
     ? lexicon.negativeShort
     : lexicon.positiveShort;
 
@@ -406,8 +414,9 @@ const ErrBox = ({ msg, onRetry }) => (
 
 const Card = ({ children, sx={}, highlight, danger: isDanger }) => (
   <Paper variant="outlined" sx={{
-    p:2, borderRadius:2, bgcolor: D.cardBg,
-    borderColor: highlight ? D.orange : isDanger ? '#fca5a5' : D.border,
+    p:{ xs:1.5, md:1.75 }, borderRadius:1.25, bgcolor: D.cardBg,
+    borderColor: highlight ? '#f3c6af' : isDanger ? '#fca5a5' : D.border,
+    boxShadow:'none',
     ...sx,
   }}>
     {children}
@@ -445,17 +454,17 @@ const StatCell = ({ label, value, sub, warn, ok, danger: isDanger }) => (
 // Business insight panel - shown per chart in business mode
 const InsightPanel = ({ what, why, action, severity='info' }) => {
   const colors = {
-    info:    { bg: D.infoLight,   border: '#bfdbfe', icon: D.info,   Icon: Lightbulb },
-    warning: { bg: D.warnLight,   border: '#fde68a', icon: D.warn,   Icon: Warning },
-    success: { bg: D.okLight,     border: D.okBorder,icon: D.ok,     Icon: CheckCircle },
-    danger:  { bg: D.dangerLight, border: '#fecdd3', icon: D.danger, Icon: GppBad },
+    info:    { border: '#bfdbfe', icon: D.info,   Icon: Lightbulb },
+    warning: { border: '#fde68a', icon: D.warn,   Icon: Warning },
+    success: { border: D.okBorder,icon: D.ok,     Icon: CheckCircle },
+    danger:  { border: '#fecdd3', icon: D.danger, Icon: GppBad },
   };
   const c = colors[severity] || colors.info;
   return (
-    <Box sx={{ p:1.5, borderRadius:1.5, bgcolor:c.bg, border:`1px solid ${c.border}`, mt:1.5 }}>
+    <Box sx={{ mt:1.15, pt:1.1, borderTop:`1px solid ${D.borderLight}` }}>
       <Stack direction="row" spacing={1} alignItems="flex-start">
         <c.Icon sx={{ fontSize:15, color:c.icon, mt:0.1, flexShrink:0 }} />
-        <Box>
+        <Box sx={{ borderLeft:`2px solid ${c.border}`, pl:1 }}>
           {what && <Typography sx={{ fontSize:11, fontWeight:700, color:D.textPri, mb:0.25 }}>{what}</Typography>}
           {why  && <Typography sx={{ fontSize:11, color:D.textSec, lineHeight:1.5 }}>{why}</Typography>}
           {action && (
@@ -469,17 +478,123 @@ const InsightPanel = ({ what, why, action, severity='info' }) => {
   );
 };
 
-const DrilldownFrame = ({ title, persona, explain, children }) => {
+const buildLocalChartAnalysis = ({ title, explain, analysisPayload }) => {
+  const payload = analysisPayload || {};
+  const deterministic = payload?.deterministic_insight || {};
+  const facts = compactFacts(payload?.facts || [explain].filter(Boolean), 8);
+  const focus = String(payload?.chart_focus || title || 'this analysis').trim();
+  const sections = {
+    what_this_says: String(
+      deterministic.what
+      || explain
+      || `This view summarises the current pattern in ${focus.toLowerCase()}.`
+    ).trim(),
+    why_it_matters: String(
+      deterministic.why
+      || `This matters because it shows whether ${focus.toLowerCase()} is concentrated, stable, separated, or weak before you move into modelling.`
+    ).trim(),
+    how_it_helps_model_building: String(
+      deterministic.how_it_helps_model_building
+      || `Use this view to decide whether ${focus.toLowerCase()} should be kept as a feature, transformed, deprioritised, or reviewed with business stakeholders.`
+    ).trim(),
+    recommended_action: String(
+      deterministic.action
+      || deterministic.recommended_action
+      || 'Use this chart with target response, quality checks, and leakage checks before changing the model design.'
+    ).trim(),
+    watch_out: String(
+      payload?.watch_out
+      || deterministic.watch_out
+      || 'Treat this as one piece of evidence. Confirm the pattern against support, missingness, and other EDA views before acting.'
+    ).trim(),
+  };
+  return {
+    analysis_source: 'deterministic',
+    llm_available: false,
+    chart_title: title,
+    facts,
+    sections,
+  };
+};
+
+const DrilldownFrame = ({ title, persona, explain, analysisPayload, children }) => {
   const [open, setOpen] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisNotice, setAnalysisNotice] = useState('');
+  const [loadedKey, setLoadedKey] = useState('');
+  const localAnalysis = useMemo(
+    () => buildLocalChartAnalysis({ title, explain, analysisPayload }),
+    [title, explain, analysisPayload],
+  );
+  const requestKey = useMemo(
+    () => (analysisPayload ? JSON.stringify(analysisPayload) : ''),
+    [analysisPayload],
+  );
+
+  const loadAnalysis = useCallback(async ({ force = false } = {}) => {
+    if (!analysisPayload?.dataset_id) {
+      setAnalysis(localAnalysis);
+      return;
+    }
+    if (!force && loadedKey === requestKey && analysis) return;
+    setAnalysisLoading(true);
+    setAnalysisNotice('');
+    try {
+      const res = await mlopsApi.edaChartExplain(analysisPayload);
+      const data = res?.data || res;
+      setAnalysis(data || localAnalysis);
+      setLoadedKey(requestKey);
+    } catch (error) {
+      setAnalysis(localAnalysis);
+      setLoadedKey(requestKey);
+      const message = String(error?.message || '').toLowerCase();
+      if (message.includes('method not allowed') || message.includes('not found')) {
+        setAnalysisNotice('Using local chart facts. Restart the backend to enable the new EDA explanation route.');
+      } else if (message.includes('no response')) {
+        setAnalysisNotice('Using local chart facts because the AI explanation service is not reachable right now.');
+      } else {
+        setAnalysisNotice('Using local chart facts because the AI explanation service is unavailable.');
+      }
+    } finally {
+      setAnalysisLoading(false);
+    }
+  }, [analysis, analysisPayload, loadedKey, requestKey, localAnalysis]);
+
+  useEffect(() => {
+    if (!open || !analysisPayload?.dataset_id || !requestKey) return;
+    if (loadedKey === requestKey) return;
+    loadAnalysis();
+  }, [analysisPayload, loadAnalysis, loadedKey, open, requestKey]);
+
+  const sections = analysis?.sections || {};
+  const factLines = compactFacts(analysis?.facts || analysisPayload?.facts || [], 8);
+  const analysisSourceLabel = analysis?.analysis_source === 'ai' ? 'AI explanation' : 'Grounded explanation';
+  const analysisSourceNote = analysis?.analysis_source === 'ai'
+    ? 'Uses live chart facts and the configured local LLM provider.'
+    : 'Built directly from the chart facts because AI is unavailable or not configured.';
+  const sectionMeta = [
+    ['what_this_says', 'What this says'],
+    ['why_it_matters', 'Why this matters'],
+    ['how_it_helps_model_building', 'How this helps model building'],
+    ['recommended_action', 'Recommended action'],
+    ['watch_out', 'Watch out'],
+  ];
 
   return (
     <>
       <Box>
         <Stack direction="row" justifyContent="flex-end" sx={{ mb:0.25 }}>
-          <Tooltip title="Expand chart">
-            <IconButton size="small" onClick={()=>setOpen(true)} aria-label={`Expand ${title}`}>
-              <ZoomIn sx={{ fontSize:14, color:D.textSec }} />
-            </IconButton>
+          <Tooltip title={analysisPayload ? 'Open chart insights' : 'Open chart analysis'}>
+            <Button
+              size="small"
+              variant="text"
+              onClick={()=>setOpen(true)}
+              startIcon={<Insights sx={{ fontSize:15 }} />}
+              sx={{ textTransform:'none', fontSize:11, color:D.textSec, px:0.75, minWidth:0 }}
+            >
+              Insights
+            </Button>
           </Tooltip>
         </Stack>
         <Box
@@ -499,8 +614,22 @@ const DrilldownFrame = ({ title, persona, explain, children }) => {
         )}
       </Box>
 
-      <Dialog fullScreen open={open} onClose={()=>setOpen(false)}>
-        <DialogTitle sx={{ borderBottom:`1px solid ${D.border}` }}>
+      <Dialog
+        open={open}
+        onClose={()=>setOpen(false)}
+        fullWidth
+        maxWidth="xl"
+        PaperProps={{
+          sx: {
+            width: 'min(1480px, calc(100vw - 48px))',
+            maxWidth: '1480px',
+            height: 'min(88vh, 980px)',
+            maxHeight: '88vh',
+            borderRadius: 1.25,
+          },
+        }}
+      >
+        <DialogTitle sx={{ borderBottom:`1px solid ${D.border}`, pr: 1.25 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between">
             <Box>
               <Typography sx={{ fontWeight:800, fontSize:18, color:D.textPri }}>{title}</Typography>
@@ -508,26 +637,385 @@ const DrilldownFrame = ({ title, persona, explain, children }) => {
                 <Typography sx={{ fontSize:12, color:D.textSec, mt:0.25 }}>{explain}</Typography>
               )}
             </Box>
-            <Button onClick={()=>setOpen(false)} variant="outlined" size="small" sx={{ textTransform:'none' }}>
-              Close
-            </Button>
+            <IconButton onClick={()=>setOpen(false)} size="small" sx={{ border:`1px solid ${D.border}`, borderRadius:1 }}>
+              <Close sx={{ fontSize:16, color:D.textSec }} />
+            </IconButton>
           </Stack>
         </DialogTitle>
-        <DialogContent sx={{ p:2.5 }}>
-          {persona==='business' && explain && (
-            <Alert severity="info" sx={{ mb:1.5 }}>
-              What are we looking at? {explain}
-            </Alert>
-          )}
+        <DialogContent sx={{ p:2.25, overflowY:'auto', overflowX:'hidden' }}>
           <Box sx={{
-            '& .recharts-responsive-container': { minHeight:'56vh !important' },
+            display:'grid',
+            gridTemplateColumns: analysisPayload
+              ? { xs:'1fr', xl:'minmax(0,1.45fr) minmax(320px,0.95fr)' }
+              : '1fr',
+            gap:2,
+            alignItems:'start',
           }}>
-            {children}
+            <Box sx={{ minWidth:0 }}>
+              {persona==='business' && explain && (
+                <Alert severity="info" sx={{ mb:1.5, borderRadius:1.25 }}>
+                  What are we looking at? {explain}
+                </Alert>
+              )}
+              <Box sx={{
+                p:{ xs:1, md:1.5 },
+                border:`1px solid ${D.border}`,
+                borderRadius:1.25,
+                bgcolor:'#fff',
+                '& .recharts-responsive-container': { minHeight:'52vh !important' },
+              }}>
+                {children}
+              </Box>
+            </Box>
+
+            {analysisPayload && (
+              <Paper variant="outlined" sx={{ borderRadius:1.25, p:0, minWidth:0, overflow:'hidden' }}>
+                <Box sx={{ px:1.5, py:1.35, borderBottom:`1px solid ${D.border}`, bgcolor:'#fcfcfd' }}>
+                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                    <Box>
+                      <Typography sx={{ fontSize:12, fontWeight:700, color:D.textPri }}>
+                        Model-building interpretation
+                      </Typography>
+                      <Typography sx={{ fontSize:11, color:D.textSec, mt:0.25 }}>
+                        {analysisSourceNote}
+                      </Typography>
+                    </Box>
+                    <Button
+                      size="small"
+                      variant="text"
+                      onClick={() => loadAnalysis({ force: true })}
+                      disabled={analysisLoading}
+                      startIcon={analysisLoading ? <CircularProgress size={12} sx={{ color:D.orange }} /> : <Refresh sx={{ fontSize:14 }} />}
+                      sx={{ textTransform:'none', fontSize:11, color:D.orange, minWidth:0 }}
+                    >
+                      Refresh
+                    </Button>
+                  </Stack>
+                  <Stack direction="row" spacing={0.75} sx={{ mt:1, flexWrap:'wrap' }}>
+                    <Chip size="small" label={analysisSourceLabel} sx={{ fontSize:10, height:22, bgcolor:D.orangeLight, color:D.orange }} />
+                    {analysis?.provider && (
+                      <Chip size="small" label={`Provider: ${analysis.provider}`} sx={{ fontSize:10, height:22 }} />
+                    )}
+                    {analysis?.model && (
+                      <Chip size="small" label={`Model: ${analysis.model}`} sx={{ fontSize:10, height:22 }} />
+                    )}
+                  </Stack>
+                </Box>
+
+                <Box sx={{ px:1.5, py:1.35 }}>
+                  {analysisNotice && (
+                    <Alert severity="info" sx={{ mb:1.25, borderRadius:1.25 }}>
+                      {analysisNotice}
+                    </Alert>
+                  )}
+                  {analysisLoading && !analysis && (
+                    <Spinner label="Building chart explanation..." />
+                  )}
+                  {!analysisLoading && (
+                    <Stack spacing={1.25}>
+                      {sectionMeta.map(([key, label]) => (
+                        sections?.[key] ? (
+                          <Box key={key} sx={{ pb:1.1, borderBottom: key === 'watch_out' ? 'none' : `1px solid ${D.borderLight}` }}>
+                            <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.45 }}>
+                              {label}
+                            </Typography>
+                            <Typography sx={{ fontSize:12, color:D.textPri, lineHeight:1.65 }}>
+                              {sections[key]}
+                            </Typography>
+                          </Box>
+                        ) : null
+                      ))}
+                      {factLines.length > 0 && (
+                        <Box>
+                          <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.5 }}>
+                            Grounding facts
+                          </Typography>
+                          <Stack spacing={0.6}>
+                            {factLines.map((fact, index) => (
+                              <Typography key={`${fact}-${index}`} sx={{ fontSize:11, color:D.textSec, lineHeight:1.55 }}>
+                                {fact}
+                              </Typography>
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
+                    </Stack>
+                  )}
+                </Box>
+              </Paper>
+            )}
           </Box>
         </DialogContent>
       </Dialog>
     </>
   );
+};
+
+const average = (values = []) => {
+  const valid = values.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+  if (!valid.length) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+};
+
+const weightedMeanFromBins = (bins = [], key = 'count') => {
+  const total = bins.reduce((sum, row) => sum + (Number(row?.[key]) || 0), 0);
+  if (!total) return null;
+  const weighted = bins.reduce(
+    (sum, row) => sum + ((Number(row?.bin_start) || 0) * (Number(row?.[key]) || 0)),
+    0,
+  );
+  return weighted / total;
+};
+
+const overlapFromBins = (bins = []) => {
+  const totalNegative = bins.reduce((sum, row) => sum + (Number(row?.fp_count) || 0), 0) || 1;
+  const totalPositive = bins.reduce((sum, row) => sum + (Number(row?.tp_count) || 0), 0) || 1;
+  const overlap = bins.reduce((sum, row) => {
+    const negativeShare = (Number(row?.fp_count) || 0) / totalNegative;
+    const positiveShare = (Number(row?.tp_count) || 0) / totalPositive;
+    return sum + Math.min(negativeShare, positiveShare);
+  }, 0);
+  return Math.max(0, Math.min(1, overlap));
+};
+
+const buildTargetBreakdownInsight = (classData = [], lexicon) => {
+  const rows = [...asArray(classData)].sort((a, b) => (Number(b?.count) || 0) - (Number(a?.count) || 0));
+  if (!rows.length) return null;
+  const total = rows.reduce((sum, row) => sum + (Number(row?.count) || 0), 0) || 1;
+  const top = rows[0];
+  const second = rows[1];
+  const topShare = (Number(top?.count) || 0) / total;
+  const secondShare = (Number(second?.count) || 0) / total;
+  return {
+    what: `${fmtPct(topShare * 100)} of records currently fall into ${top?.label || lexicon?.negativeShort || 'the largest class'}.`,
+    why: second
+      ? `The gap between ${top.label} and ${second.label} is ${fmtPct((topShare - secondShare) * 100)}. Larger gaps usually mean stronger class imbalance and more pressure on threshold selection.`
+      : `This view currently shows one dominant class segment across ${fmt(total)} records.`,
+    action: top?.bucket === 'negative'
+      ? `Keep class weighting on, and size suppression targets around the ${top?.label || lexicon?.negativeShort} population rather than the whole book.`
+      : `Confirm the positive class is curated correctly and check that there are enough examples before training.`,
+    severity: topShare >= 0.8 ? 'warning' : topShare >= 0.65 ? 'info' : 'success',
+  };
+};
+
+const buildRiskHistogramInsight = (riskHistData = [], lexicon) => {
+  const bins = asArray(riskHistData);
+  if (!bins.length) return null;
+  const negativeMean = weightedMeanFromBins(bins, 'fp_count');
+  const positiveMean = weightedMeanFromBins(bins, 'tp_count');
+  const overlap = overlapFromBins(bins);
+  const scoreGap = (positiveMean != null && negativeMean != null) ? (positiveMean - negativeMean) : null;
+  const gapText = scoreGap == null ? 'n/a' : fmtF(scoreGap, 1);
+  return {
+    what: scoreGap != null && scoreGap > 0
+      ? `${lexicon?.positiveShort || 'Positive alerts'} score about ${gapText} points higher on average than ${lexicon?.negativeShort || 'negative alerts'}.`
+      : `${lexicon?.negativeShort || 'Negative alerts'} and ${lexicon?.positiveShort || 'positive alerts'} are still heavily overlapping on score.`,
+    why: `Estimated distribution overlap is ${fmtPct(overlap * 100)}. Lower overlap means the existing risk score already separates the two classes better.`,
+    action: overlap > 0.65
+      ? 'Treat rule score as one feature, not the decision rule by itself. The model needs additional behavioral signals here.'
+      : 'Keep risk score in the feature set and use it as a major explanation factor, because it is already separating the classes reasonably well.',
+    severity: overlap < 0.35 ? 'success' : overlap < 0.6 ? 'info' : 'warning',
+  };
+};
+
+const buildRuleVolumeInsight = (ruleData = [], ruleColIsProfile = false) => {
+  const rows = [...asArray(ruleData)].sort((a, b) => (Number(b?.count) || 0) - (Number(a?.count) || 0));
+  if (!rows.length) return null;
+  const total = rows.reduce((sum, row) => sum + (Number(row?.count) || 0), 0) || 1;
+  const top = rows[0];
+  const topShare = (Number(top?.count) || 0) / total;
+  const topThreeShare = rows.slice(0, 3).reduce((sum, row) => sum + (Number(row?.count) || 0), 0) / total;
+  return {
+    what: `${top?.label || 'Top segment'} contributes ${fmtPct(topShare * 100)} of the displayed ${ruleColIsProfile ? 'profile' : 'rule'} volume.`,
+    why: `The top three ${ruleColIsProfile ? 'profiles' : 'rules'} together represent ${fmtPct(topThreeShare * 100)} of alerts in this chart, so the concentration is meaningful.`,
+    action: topShare > 0.35
+      ? `Start review with the highest-volume ${ruleColIsProfile ? 'profiles' : 'rules'} first. They will move the suppression needle fastest.`
+      : `Use this chart with STR conversion or precision to rank which ${ruleColIsProfile ? 'profiles' : 'rules'} are worth redesigning first.`,
+    severity: topShare > 0.45 ? 'warning' : 'info',
+  };
+};
+
+const buildRiskTierInsight = (ratingData = []) => {
+  const rows = asArray(ratingData).filter((row) => Number.isFinite(Number(row?.tp_rate)));
+  if (!rows.length) return null;
+  const sorted = [...rows].sort((a, b) => Number(a?.label) - Number(b?.label));
+  const highest = [...rows].sort((a, b) => (Number(b?.tp_rate) || 0) - (Number(a?.tp_rate) || 0))[0];
+  const lowest = [...rows].sort((a, b) => (Number(a?.tp_rate) || 0) - (Number(b?.tp_rate) || 0))[0];
+  const trend = (Number(sorted.at(-1)?.tp_rate) || 0) - (Number(sorted[0]?.tp_rate) || 0);
+  const spread = (Number(highest?.tp_rate) || 0) - (Number(lowest?.tp_rate) || 0);
+  return {
+    what: spread >= 8
+      ? `Customer risk tier ${highest?.label || '-'} has the highest positive rate at ${fmtPct(highest?.tp_rate)}.`
+      : 'Customer risk tiers are fairly flat in this sample.',
+    why: `Across the visible tiers, the positive rate ranges from ${fmtPct(lowest?.tp_rate)} to ${fmtPct(highest?.tp_rate)}. End-to-end spread is ${fmtPct(spread)}.`,
+    action: trend > 5
+      ? 'Keep customer risk tier as a supporting model feature, but do not use it alone to suppress or escalate alerts.'
+      : 'Treat customer risk tier as weak evidence on its own. The live transaction patterns matter more than the onboarding band here.',
+    severity: spread < 5 ? 'warning' : trend > 5 ? 'success' : 'info',
+  };
+};
+
+const buildAccountTypeInsight = (acctData = []) => {
+  const rows = asArray(acctData).filter((row) => Number.isFinite(Number(row?.tp_rate)));
+  if (!rows.length) return null;
+  const top = rows[0];
+  const bottom = rows[rows.length - 1];
+  const spread = (Number(top?.tp_rate) || 0) - (Number(bottom?.tp_rate) || 0);
+  return {
+    what: `${top?.label || 'The top account type'} has the highest positive rate at ${fmtPct(top?.tp_rate)}.`,
+    why: `The spread between the highest and lowest displayed account types is ${fmtPct(spread)}. Larger spreads mean account type is materially influencing alert quality.`,
+    action: spread > 12
+      ? 'Keep account type in the model and use it in business explanation, because the differences are large enough to matter.'
+      : 'Use account type as context, but expect the model to rely more on behavior and transaction history than on type alone.',
+    severity: spread > 15 ? 'success' : spread > 8 ? 'info' : 'warning',
+  };
+};
+
+const buildComplianceFlagInsight = (flagData = null) => {
+  if (!flagData) return null;
+  const comparisons = (flagData.flagNames || []).map((name, index) => {
+    const flagged = Number(flagData.flagged?.[index]?.value);
+    const unflagged = Number(flagData.unflagged?.[index]?.value);
+    return {
+      name,
+      flagged,
+      unflagged,
+      gap: (Number.isFinite(flagged) ? flagged : 0) - (Number.isFinite(unflagged) ? unflagged : 0),
+    };
+  });
+  const best = [...comparisons].sort((a, b) => b.gap - a.gap)[0];
+  const avgFlagged = average(comparisons.map((row) => row.flagged));
+  const avgUnflagged = average(comparisons.map((row) => row.unflagged));
+  const avgGap = (avgFlagged != null && avgUnflagged != null) ? (avgFlagged - avgUnflagged) : null;
+  return {
+    what: best?.gap > 0
+      ? `${best.name} raises the positive rate by ${fmtPct(best.gap)} compared with the unflagged group.`
+      : 'The available compliance flags are not separating the classes very much in this sample.',
+    why: avgGap == null
+      ? 'Flag comparison data is incomplete for at least one compliance signal.'
+      : `Across the displayed flags, flagged populations average ${fmtPct(avgFlagged)} versus ${fmtPct(avgUnflagged)} for unflagged populations.`,
+    action: best?.gap > 6
+      ? 'Use these flags as strong supporting features, but still avoid letting them act as automatic escalation rules by themselves.'
+      : 'Review whether the rule engine is overusing these flags, because the observed gap is small.',
+    severity: (best?.gap || 0) > 10 ? 'success' : (best?.gap || 0) > 4 ? 'info' : 'warning',
+  };
+};
+
+const compactFacts = (facts = [], maxItems = 6) => asArray(facts)
+  .map((fact) => String(fact || '').trim())
+  .filter(Boolean)
+  .slice(0, maxItems);
+
+const buildChartExplanationPayload = ({
+  ds,
+  chartKey,
+  chartTitle,
+  chartFocus,
+  targetColumn,
+  lexicon,
+  deterministicInsight,
+  facts,
+  watchOut,
+  analysisScope = 'chart',
+}) => ({
+  dataset_id: ds?.dataset_id,
+  chart_key: chartKey,
+  chart_title: chartTitle,
+  chart_focus: chartFocus,
+  analysis_scope: analysisScope,
+  target_column: targetColumn || '',
+  business_labels: {
+    negative: lexicon?.negativeShort || '',
+    positive: lexicon?.positiveShort || '',
+    target_display: lexicon?.positiveShort || targetColumn || 'Predicted outcome',
+  },
+  deterministic_insight: deterministicInsight || null,
+  facts: compactFacts(facts),
+  watch_out: watchOut || '',
+});
+
+const buildTargetBreakdownFacts = (classData = [], lexicon) => {
+  const rows = asArray(classData);
+  if (!rows.length) return [];
+  const total = rows.reduce((sum, row) => sum + (Number(row?.count) || 0), 0) || 1;
+  const top = [...rows].sort((a, b) => (Number(b?.count) || 0) - (Number(a?.count) || 0))[0];
+  return compactFacts([
+    `${fmt(total)} records are currently split between ${lexicon?.negativeShort || 'class 0'} and ${lexicon?.positiveShort || 'class 1'}.`,
+    rows.map((row) => `${row.label}: ${fmt(row.count)} records (${fmtPct((Number(row?.pct) || 0) * 100)})`).join(' | '),
+    top ? `${top.label} is the largest segment in this target view.` : '',
+  ]);
+};
+
+const buildRiskHistogramFacts = (riskHistData = [], lexicon) => {
+  const bins = asArray(riskHistData);
+  if (!bins.length) return [];
+  const negativeMean = weightedMeanFromBins(bins, 'fp_count');
+  const positiveMean = weightedMeanFromBins(bins, 'tp_count');
+  const overlap = overlapFromBins(bins);
+  const separation = (positiveMean != null && negativeMean != null) ? positiveMean - negativeMean : null;
+  return compactFacts([
+    `Average score is ${fmtF(negativeMean, 1)} for ${lexicon?.negativeShort || 'class 0'} and ${fmtF(positiveMean, 1)} for ${lexicon?.positiveShort || 'class 1'}.`,
+    `Estimated overlap between the two score distributions is ${fmtPct(overlap * 100)}.`,
+    separation != null ? `The score gap between the two groups is ${fmtF(separation, 1)} points.` : '',
+  ]);
+};
+
+const buildRuleVolumeFacts = (ruleData = [], ruleColIsProfile = false) => {
+  const rows = [...asArray(ruleData)].sort((a, b) => (Number(b?.count) || 0) - (Number(a?.count) || 0));
+  if (!rows.length) return [];
+  const total = rows.reduce((sum, row) => sum + (Number(row?.count) || 0), 0) || 1;
+  const topThree = rows.slice(0, 3);
+  const topThreeShare = topThree.reduce((sum, row) => sum + (Number(row?.count) || 0), 0) / total;
+  return compactFacts([
+    `This view covers ${fmt(total)} alerts across the highest-volume ${ruleColIsProfile ? 'risk profiles' : 'rules'}.`,
+    `${rows[0]?.label || 'Top segment'} contributes ${fmt(rows[0]?.count)} alerts (${fmtPct(((Number(rows[0]?.count) || 0) / total) * 100)}).`,
+    `The top three ${ruleColIsProfile ? 'profiles' : 'rules'} contribute ${fmtPct(topThreeShare * 100)} of the visible alert volume.`,
+  ]);
+};
+
+const buildRiskTierFacts = (ratingData = []) => {
+  const rows = asArray(ratingData).filter((row) => Number.isFinite(Number(row?.tp_rate)));
+  if (!rows.length) return [];
+  const highest = [...rows].sort((a, b) => (Number(b?.tp_rate) || 0) - (Number(a?.tp_rate) || 0))[0];
+  const lowest = [...rows].sort((a, b) => (Number(a?.tp_rate) || 0) - (Number(b?.tp_rate) || 0))[0];
+  return compactFacts([
+    `Visible customer risk tiers range from ${lowest?.label || '-'} to ${highest?.label || '-'}.`,
+    `The lowest observed positive rate is ${fmtPct(lowest?.tp_rate)} and the highest is ${fmtPct(highest?.tp_rate)}.`,
+    highest ? `Tier ${highest.label} currently has the highest positive rate in this sample.` : '',
+  ]);
+};
+
+const buildAccountTypeFacts = (acctData = [], lexicon) => {
+  const rows = asArray(acctData).filter((row) => Number.isFinite(Number(row?.tp_rate)));
+  if (!rows.length) return [];
+  const top = rows[0];
+  const bottom = rows[rows.length - 1];
+  return compactFacts([
+    `${rows.length} account types are displayed for ${lexicon?.positiveShort || 'the positive outcome'} rate comparison.`,
+    `${top?.label || 'Top account type'} has the highest rate at ${fmtPct(top?.tp_rate)} with ${fmt(top?.count)} records.`,
+    bottom ? `${bottom.label} is the lowest displayed group at ${fmtPct(bottom.tp_rate)}.` : '',
+  ]);
+};
+
+const buildComplianceFacts = (flagData = null, lexicon) => {
+  if (!flagData) return [];
+  const comparisons = (flagData.flagNames || []).map((name, index) => {
+    const flagged = Number(flagData.flagged?.[index]?.value);
+    const unflagged = Number(flagData.unflagged?.[index]?.value);
+    return {
+      name,
+      flagged,
+      unflagged,
+      gap: (Number.isFinite(flagged) ? flagged : 0) - (Number.isFinite(unflagged) ? unflagged : 0),
+    };
+  }).filter((row) => Number.isFinite(row.flagged) || Number.isFinite(row.unflagged));
+  if (!comparisons.length) return [];
+  const best = [...comparisons].sort((a, b) => b.gap - a.gap)[0];
+  return compactFacts([
+    `${comparisons.length} compliance flag groups are compared against ${lexicon?.positiveShort || 'the positive outcome'} rate.`,
+    `${best?.name || 'Top flag'} shows the largest uplift: ${fmtPct(best?.flagged)} flagged versus ${fmtPct(best?.unflagged)} unflagged.`,
+    `Flag gap for ${best?.name || 'the top signal'} is ${fmtPct(best?.gap)}.`,
+  ]);
 };
 
 const MatrixHeatmap = ({ data }) => {
@@ -690,6 +1178,7 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
   }), [colNames, localTarget]);
 
   const effectiveTarget = localTarget || detectedCols.target || '';
+  const currentLexicon = targetLexicon(effectiveTarget, viewMode);
 
   useEffect(() => {
     if (!localTarget && detectedCols.target) {
@@ -721,22 +1210,22 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
   const activeTab = TABS.find(t=>t.id===tab);
 
   return (
-    <Box sx={{ display:'flex', flexDirection:'column', height:'100%', gap:0 }}>
+    <Box sx={{ display:'flex', flexDirection:'column', minHeight:'100%', gap:0, overflow:'visible' }}>
 
       {/* Mixed-case warning */}
       <Collapse in={!compactHeader}>
-      <Alert severity="info" sx={{ mb:1.25, borderRadius:2, bgcolor:'#fffbeb', border:'1px solid #fde68a', flexShrink:0 }}
-        icon={<Warning sx={{ color:'#d97706' }} />}
+      <Alert severity="info" sx={{ mb:1.1, borderRadius:1.25, bgcolor:'#fff', border:`1px solid ${D.border}`, flexShrink:0 }}
+        icon={<Warning sx={{ color:D.warn }} />}
         action={(
-          <Button size="small" onClick={()=>setShowQualityNote(s=>!s)} sx={{ textTransform:'none', color:'#92400e' }}>
+          <Button size="small" onClick={()=>setShowQualityNote(s=>!s)} sx={{ textTransform:'none', color:D.textSec }}>
             {showQualityNote ? 'Hide details' : 'What is this?'}
           </Button>
         )}>
-        <Typography variant="body2" fontWeight={600} sx={{ color:'#92400e', mb:0.25 }}>
+        <Typography variant="body2" fontWeight={600} sx={{ color:D.textPri, mb:0.25 }}>
           Data quality note: mixed-case text values detected
         </Typography>
         <Collapse in={showQualityNote}>
-          <Typography variant="body2" sx={{ color:'#78350f', fontSize:12 }}>
+          <Typography variant="body2" sx={{ color:D.textSec, fontSize:12 }}>
             Mixed casing in raw text fields is normalized during preprocessing. No manual action is required here.
           </Typography>
         </Collapse>
@@ -744,8 +1233,8 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
       </Collapse>
 
       {/* Control bar */}
-      <Paper variant="outlined" sx={{ px:2, py:1, borderRadius:2, mb:1.0, flexShrink:0,
-        display:'flex', alignItems:'center', gap:2, flexWrap:'wrap' }}>
+      <Paper variant="outlined" sx={{ px:1.5, py:1, borderRadius:1.25, mb:1.0, flexShrink:0,
+        display:'flex', alignItems:'center', gap:1.5, flexWrap:'wrap', bgcolor:'#fff', boxShadow:'none' }}>
 
         {/* Dataset badge */}
         <Box sx={{ display:'flex', alignItems:'center', gap:1.5,
@@ -780,8 +1269,10 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
         {effectiveTarget && (
           <Chip
             size="small"
-            label={`Using target: ${effectiveTarget} (0 vs 1)`}
-            sx={{ height:24, fontSize:11, bgcolor:'#eff6ff', color:'#1d4ed8', border:'1px solid #bfdbfe' }}
+            label={viewMode==='business'
+              ? `Optimising for ${currentLexicon.positiveShort}`
+              : `Using target: ${effectiveTarget} (0 vs 1)`}
+            sx={{ height:24, fontSize:11, bgcolor:'#f8fafc', color:D.textPri, border:`1px solid ${D.border}` }}
           />
         )}
 
@@ -797,15 +1288,15 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
         </ToggleButtonGroup>
 
         {/* Stats */}
-        <Stack direction="row" spacing={2.5} sx={{ ml:'auto' }}>
+        <Stack direction="row" spacing={2.5} sx={{ ml:{ md:'auto' }, flexWrap:'wrap', rowGap:0.75 }}>
           {[
             { k:'Rows',    v:fmt(masterDs.row_count) },
             { k:'Columns', v:fmt(colNames.length) },
-            { k:'Target',  v:effectiveTarget||'not set' },
+            { k:'Target',  v:viewMode==='business' && effectiveTarget ? currentLexicon.positiveShort : (effectiveTarget || 'not set') },
           ].map(({k,v})=>(
             <Box key={k} sx={{ textAlign:'right' }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontSize:10, display:'block' }}>{k}</Typography>
-              <Typography sx={{ fontWeight:700, fontSize:13, fontFamily:k==='Target'?'monospace':'inherit',
+              <Typography sx={{ fontWeight:700, fontSize:13, fontFamily:k==='Target' && viewMode!=='business'?'monospace':'inherit',
                 color:k==='Target'&&!effectiveTarget?'#94a3b8':'inherit' }}>{v}</Typography>
             </Box>
           ))}
@@ -818,7 +1309,7 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
           onClick={() => onEdaDone?.()}
           sx={{ textTransform: 'none', fontSize: 11, whiteSpace: 'nowrap' }}
         >
-          {edaDone ? 'EDA Complete' : 'Mark EDA Complete'}
+          {edaDone ? 'EDA Complete' : 'Complete EDA and Continue'}
         </Button>
         <Button
           size="small"
@@ -832,17 +1323,28 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
 
       {/* Business mode: show summary banner */}
       {viewMode==='business' && !compactHeader && (
-        <Box sx={{ mb:1.25, p:1.5, borderRadius:2, bgcolor:D.orangeLight, border:`1px solid #fdd8c4`, flexShrink:0 }}>
+        <Box sx={{ mb:1.15, p:1.35, borderRadius:1.25, bgcolor:'#fff', border:`1px solid ${D.border}`, borderLeft:`3px solid ${D.orange}`, flexShrink:0 }}>
           <Stack direction="row" spacing={1} alignItems="center">
             <Business sx={{ color:D.orange, fontSize:18 }} />
             <Box>
-              <Typography sx={{ fontWeight:700, fontSize:13, color:D.orange }}>Business View Active</Typography>
-              <Typography sx={{ fontSize:12, color:'#7c2d12' }}>
+              <Typography sx={{ fontWeight:700, fontSize:13, color:D.textPri }}>Business View Active</Typography>
+              <Typography sx={{ fontSize:12, color:D.textSec }}>
                 Each chart includes a plain-English explanation of what it means and what you should do.
                 Switch to Analyst Mode for full technical detail.
               </Typography>
             </Box>
           </Stack>
+        </Box>
+      )}
+
+      {!compactHeader && (
+        <Box sx={{ mb:1.15, p:1.2, borderRadius:1.25, bgcolor:'#fff', border:`1px solid ${D.border}`, flexShrink:0 }}>
+          <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.7, textTransform:'uppercase', color:D.textSec, mb:0.35 }}>
+            How EDA insights are generated
+          </Typography>
+          <Typography sx={{ fontSize:11.5, color:D.textSec, lineHeight:1.65 }}>
+            Every insight starts from live chart facts, profile statistics, and target-response values from the current dataset. If a local LLM provider is configured, the app rewrites those grounded facts into clearer business language. If no provider is available, the screen still shows deterministic explanations built directly from the numbers.
+          </Typography>
         </Box>
       )}
 
@@ -881,18 +1383,18 @@ const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetCol
 
       {/* Tab description */}
       {activeTab && !compactHeader && (
-        <Paper variant="outlined" sx={{ p:1.25, mb:1.5, borderRadius:2, bgcolor:'#f8fafc', flexShrink:0 }}>
+        <Box sx={{ p:0, mb:1.15, flexShrink:0, borderBottom:`1px solid ${D.border}`, pb:1 }}>
           <Typography sx={{ fontWeight:700, fontSize:12, color:D.textPri }}>
             {viewMode==='business' ? activeTab.biz : activeTab.label}
           </Typography>
           <Typography sx={{ fontSize:11, color:D.textSec, mt:0.25 }}>
             {viewMode==='business' ? activeTab.bizDesc : activeTab.desc}
           </Typography>
-        </Paper>
+        </Box>
       )}
 
       {/* Tab content */}
-      <Box sx={{ flex:1, minHeight:0, overflow:'auto' }}>
+      <Box sx={{ flex:1, minHeight:0, overflow:'visible', pb:2 }}>
         {tab==='dashboard'  && <DashboardTab {...tabProps} />}
         {tab==='imbalance'  && <AlertImbalanceTab {...tabProps} />}
         {tab==='riskscore'  && <RiskScoreTab {...tabProps} />}
@@ -1003,6 +1505,78 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
     });
     return { unflagged:un, flagged:fl, flagNames:flags.map(f=>f.label) };
   })();
+  const classInsight = buildTargetBreakdownInsight(classData, lexicon);
+  const riskInsight = buildRiskHistogramInsight(riskHistData, lexicon);
+  const ruleInsight = buildRuleVolumeInsight(ruleData, ruleColIsProfile);
+  const ratingInsight = buildRiskTierInsight(ratingData);
+  const accountInsight = buildAccountTypeInsight(acctData);
+  const complianceInsight = buildComplianceFlagInsight(flagData);
+  const classExplainPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'prediction_target_breakdown',
+    chartTitle: 'Prediction target breakdown',
+    chartFocus: 'how records split between likely false positives and likely actionable alerts',
+    targetColumn,
+    lexicon,
+    deterministicInsight: classInsight,
+    facts: buildTargetBreakdownFacts(classData, lexicon),
+    watchOut: 'If one class dominates the dataset, threshold setting and class weighting matter more than raw accuracy.',
+  });
+  const riskExplainPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'risk_score_class_split',
+    chartTitle: 'Risk score class split',
+    chartFocus: 'how well the existing risk score separates the two outcome groups',
+    targetColumn,
+    lexicon,
+    deterministicInsight: riskInsight,
+    facts: buildRiskHistogramFacts(riskHistData, lexicon),
+    watchOut: 'Heavy overlap means the current rule score alone will not separate noise from genuine alerts.',
+  });
+  const ruleExplainPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'alerts_by_rule_profile',
+    chartTitle: ruleColIsProfile ? 'Alerts by rule risk profile' : 'Alerts by rule',
+    chartFocus: 'which rule groups create the largest alert volume',
+    targetColumn,
+    lexicon,
+    deterministicInsight: ruleInsight,
+    facts: buildRuleVolumeFacts(ruleData, ruleColIsProfile),
+    watchOut: 'High alert volume alone does not prove a rule is weak. Pair this with conversion or precision before suppressing.',
+  });
+  const riskTierExplainPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'customer_risk_tier',
+    chartTitle: 'Customer risk tier vs outcome rate',
+    chartFocus: 'how onboarding risk tier relates to the modeled alert outcome',
+    targetColumn,
+    lexicon,
+    deterministicInsight: ratingInsight,
+    facts: buildRiskTierFacts(ratingData),
+    watchOut: 'Customer risk tier is often useful context, but it should not replace live transaction behavior.',
+  });
+  const accountExplainPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'account_type_outcome_rate',
+    chartTitle: 'Account type vs outcome rate',
+    chartFocus: 'how account categories differ in their rate of actionable alerts',
+    targetColumn,
+    lexicon,
+    deterministicInsight: accountInsight,
+    facts: buildAccountTypeFacts(acctData, lexicon),
+    watchOut: 'Large gaps by account type can help the model, but do not use type alone as a suppression rule.',
+  });
+  const complianceExplainPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'compliance_flag_outcome_rate',
+    chartTitle: 'Compliance flags vs outcome rate',
+    chartFocus: 'how PEP, sanctions, and adverse media flags change the modeled alert outcome',
+    targetColumn,
+    lexicon,
+    deterministicInsight: complianceInsight,
+    facts: buildComplianceFacts(flagData, lexicon),
+    watchOut: 'Flags can be strong signals, but over-relying on them can hide useful behavioral evidence.',
+  });
 
   const ratingGradient = (label) => {
     const n=Number(label); if(isNaN(n)) return D.info;
@@ -1062,7 +1636,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
 
       {/* AML Dashboard Grid - 2x3 matching notebook output */}
       {targetColumn&&(
-        <Box sx={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:2 }}>
+        <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', lg:'repeat(2,minmax(0,1fr))', xl:'repeat(3,minmax(0,1fr))' }, gap:1.75 }}>
 
           {/* P1 - Target class distribution */}
           <Card>
@@ -1072,9 +1646,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
             {classData.length>0 ? (
               <>
                 <DrilldownFrame
-                  title={`Class distribution for ${targetColumn}`}
+                  title={persona==='business' ? 'Prediction target breakdown' : `Class distribution for ${targetColumn}`}
                   persona={persona}
-                  explain={`This chart shows how records split across ${targetColumn}. It tells you whether class 0 or class 1 dominates the dataset.`}
+                  analysisPayload={classExplainPayload}
+                  explain={persona==='business'
+                    ? `This chart shows how records split between ${lexicon.negativeShort} and ${lexicon.positiveShort}.`
+                    : `This chart shows how records split across ${targetColumn}. It tells you whether class 0 or class 1 dominates the dataset.`}
                 >
                   <Box>
                     <ResponsiveContainer width="100%" height={185}>
@@ -1102,12 +1679,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                     </Stack>
                   </Box>
                 </DrilldownFrame>
-                {persona==='business'&&(
+                {persona==='business' && classInsight && (
                   <InsightPanel
-                    what={`Class imbalance for ${targetColumn}`}
-                    why={`${fmtPct(classData[0]?.pct*100)} of records are in ${lexicon.negativeShort}. The model and threshold strategy must account for this imbalance.`}
-                    action="This imbalance is normal for AML. The model handles it using class weighting."
-                    severity={classData[0]?.pct>0.8?'warning':'info'}
+                    what={classInsight.what}
+                    why={classInsight.why}
+                    action={classInsight.action}
+                    severity={classInsight.severity}
                   />
                 )}
               </>
@@ -1128,8 +1705,9 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
             {riskHistData ? (
               <>
                 <DrilldownFrame
-                  title={`${detectedCols.riskScore || 'risk_score'} by ${targetColumn}`}
+                  title={persona==='business' ? 'Risk score class split' : `${detectedCols.riskScore || 'risk_score'} by ${targetColumn}`}
                   persona={persona}
+                  analysisPayload={riskExplainPayload}
                   explain={`This compares risk-score distributions for ${lexicon.negativeShort} and ${lexicon.positiveShort}. More separation means better discrimination.`}
                 >
                   <ResponsiveContainer width="100%" height={185}>
@@ -1145,12 +1723,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                     </ComposedChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
-                {persona==='business'&&(
+                {persona==='business' && riskInsight && (
                   <InsightPanel
-                    what="Risk scores for real alerts cluster higher than false alarms"
-                    why="If the two distributions overlap heavily, the rule risk score alone cannot separate them - the ML model adds value."
-                    action="Check how much the distributions overlap. High overlap means the model must work harder."
-                    severity="info"
+                    what={riskInsight.what}
+                    why={riskInsight.why}
+                    action={riskInsight.action}
+                    severity={riskInsight.severity}
                   />
                 )}
               </>
@@ -1171,8 +1749,9 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
             {ruleData.length>0 ? (
               <>
                 <DrilldownFrame
-                  title={`${detectedCols.rule || 'rule'} volume breakdown`}
+                  title={ruleColIsProfile ? 'Alerts by rule risk profile' : 'Alerts by rule volume'}
                   persona={persona}
+                  analysisPayload={ruleExplainPayload}
                   explain="This chart ranks top rule groups by alert volume so you can target high-impact suppression opportunities first."
                 >
                   <ResponsiveContainer width="100%" height={185}>
@@ -1187,16 +1766,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                     </BarChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
-                {persona==='business'&&(
+                {persona==='business' && ruleInsight && (
                   <InsightPanel
-                    what={ruleColIsProfile ? "Some risk profiles generate far more alerts than others" : "Some rules generate far more alerts than others"}
-                    why={ruleColIsProfile
-                      ? "Profiles with high alert volume but low true-positive rate are strong suppression candidates."
-                      : "High-volume rules are the biggest opportunity - if they also have low true-positive rates, they are the best candidates for ML suppression."}
-                    action={ruleColIsProfile
-                      ? "Use the Rule Intelligence tab to prioritize profiles with high volume and low STR conversion."
-                      : "Cross-reference with the Rule Intelligence tab to find which high-volume rules have low STR conversion."}
-                    severity="info"
+                    what={ruleInsight.what}
+                    why={ruleInsight.why}
+                    action={ruleInsight.action}
+                    severity={ruleInsight.severity}
                   />
                 )}
               </>
@@ -1217,9 +1792,10 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
             {ratingData.length>0 ? (
               <>
                 <DrilldownFrame
-                  title="Customer risk tier vs target rate"
+                  title={persona==='business' ? 'Customer risk tier vs outcome rate' : 'Customer risk tier vs target rate'}
                   persona={persona}
-                  explain={`This shows how ${targetColumn} positive rate changes across customer risk ratings.`}
+                  analysisPayload={riskTierExplainPayload}
+                  explain={`This shows how ${lexicon.positiveShort} rate changes across customer risk ratings.`}
                 >
                   <ResponsiveContainer width="100%" height={185}>
                     <BarChart data={ratingData} margin={{ top:8,right:8,bottom:18,left:-10 }}>
@@ -1233,12 +1809,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                     </BarChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
-                {persona==='business'&&(
+                {persona==='business' && ratingInsight && (
                   <InsightPanel
-                    what="Higher-risk customers do not always produce more genuine alerts"
-                    why="Risk ratings are set during onboarding and may not accurately predict alert outcome. The ML model learns the actual relationship."
-                    action="If high-risk customers show similar STR rates to low-risk ones, risk rating alone is not a reliable filter."
-                    severity="warning"
+                    what={ratingInsight.what}
+                    why={ratingInsight.why}
+                    action={ratingInsight.action}
+                    severity={ratingInsight.severity}
                   />
                 )}
               </>
@@ -1257,9 +1833,10 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
             {acctData.length>0 ? (
               <>
                 <DrilldownFrame
-                  title="Account type vs target rate"
+                  title={persona==='business' ? 'Account type vs outcome rate' : 'Account type vs target rate'}
                   persona={persona}
-                  explain={`This compares ${targetColumn} positive rate by account type.`}
+                  analysisPayload={accountExplainPayload}
+                  explain={`This compares ${lexicon.positiveShort} rate by account type.`}
                 >
                   <ResponsiveContainer width="100%" height={185}>
                     <BarChart data={acctData} layout="vertical" margin={{ top:4,right:16,bottom:4,left:70 }}>
@@ -1271,12 +1848,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                     </BarChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
-                {persona==='business'&&(
+                {persona==='business' && accountInsight && (
                   <InsightPanel
-                    what="Shell and trust accounts consistently generate real alerts"
-                    why="Certain account types are structurally higher risk. The ML model captures this pattern to improve precision."
-                    action="Account type should be a key feature in the model. Confirm it is included in preprocessing."
-                    severity="warning"
+                    what={accountInsight.what}
+                    why={accountInsight.why}
+                    action={accountInsight.action}
+                    severity={accountInsight.severity}
                   />
                 )}
               </>
@@ -1300,9 +1877,10 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
               return (
                 <>
                   <DrilldownFrame
-                    title="Compliance flags vs target rate"
+                    title={persona==='business' ? 'Compliance flags vs outcome rate' : 'Compliance flags vs target rate'}
                     persona={persona}
-                    explain={`This compares ${targetColumn} positive rate for flagged versus non-flagged populations.`}
+                    analysisPayload={complianceExplainPayload}
+                    explain={`This compares ${lexicon.positiveShort} rate for flagged versus non-flagged populations.`}
                   >
                     <ResponsiveContainer width="100%" height={185}>
                       <BarChart data={barData} margin={{ top:8,right:8,bottom:18,left:-10 }}>
@@ -1317,12 +1895,12 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                       </BarChart>
                     </ResponsiveContainer>
                   </DrilldownFrame>
-                  {persona==='business'&&(
+                  {persona==='business' && complianceInsight && (
                     <InsightPanel
-                      what="PEP and sanction flags increase genuine alert probability"
-                      why="Compliance-flagged customers are not always laundering money, but they do skew toward higher risk. The gap between flagged and unflagged is your signal strength."
-                      action="If the gap is small, these flags may be over-relied upon in the rule engine."
-                      severity="info"
+                      what={complianceInsight.what}
+                      why={complianceInsight.why}
+                      action={complianceInsight.action}
+                      severity={complianceInsight.severity}
                     />
                   )}
                 </>
@@ -1430,7 +2008,7 @@ const AlertImbalanceTab = ({ ds, persona, targetColumn, detectedCols }) => {
             </Typography>
             <Typography sx={{ fontSize:12, color:D.textSec, mt:0.5 }}>
               {persona==='business'
-                ? `Understanding the ${targetColumn} split (class 0 vs class 1) - foundation for suppression strategy`
+                ? `Understanding the ${targetColumn} split between lower-value and higher-value outcomes - foundation for suppression strategy`
                 : 'Class balance analysis, imbalance ratio, suppression opportunity sizing, and label quality assessment'}
             </Typography>
           </Box>
@@ -1573,7 +2151,7 @@ const AlertImbalanceTab = ({ ds, persona, targetColumn, detectedCols }) => {
           {persona==='technical'&&(
             <Card>
               <SectionLabel>Imbalance diagnostics</SectionLabel>
-              <Box sx={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:1.5 }}>
+              <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', md:'repeat(2,minmax(0,1fr))', xl:'repeat(3,minmax(0,1fr))' }, gap:1.5 }}>
                 {[
                   { k:'Majority class', v:`${lexicon.negativeShort} (${fmtPct(fpRate*100)})` },
                   { k:'Minority class', v:`${lexicon.positiveShort} (${fmtPct(tpRate*100)})` },
@@ -2439,31 +3017,67 @@ const BehaviouralPatternsTab = ({ ds, persona, targetColumn, detectedCols, colTy
       <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', lg:'1fr 1fr' }, gap:2 }}>
         {chartItems.map((item) => {
           const Icon = item.icon;
+          const distributionData = buildSegmentDistributionData(item.data);
+          const distributionPayload = buildChartExplanationPayload({
+            ds,
+            chartKey: `behaviour_${item.col}`,
+            chartTitle: persona === 'business' ? item.businessTitle : item.analystTitle,
+            chartFocus: item.col,
+            targetColumn,
+            lexicon,
+            deterministicInsight: {
+              what: item.meaning,
+              why: 'Behavioural distributions help you see whether the signal separates low-value alerts from more actionable ones.',
+              action: 'Focus on variables where the two class distributions diverge consistently across the range.',
+            },
+            facts: compactFacts([
+              `${distributionData.length} bins are shown for ${item.col}.`,
+              distributionData[0] ? `The first visible bin starts at ${fmtBin(distributionData[0].bin_start, item.scale)}.` : '',
+              `${lexicon.negativeShort} and ${lexicon.positiveShort} are shown as separate distributions.`,
+            ]),
+            watchOut: 'A distribution can look strong in one sample and weaken later. Recheck the signal after preprocessing and validation.',
+          });
           return (
             <Card key={item.key}>
               <SectionLabel icon={Icon}>
                 {persona === 'business' ? item.businessTitle : item.analystTitle}
               </SectionLabel>
-              <ResponsiveContainer width="100%" height={220}>
-                <ComposedChart data={item.data} margin={{ top:8,right:8,bottom:18,left:-5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
-                  <XAxis dataKey="bin_start" tick={{ fontSize:9 }} tickFormatter={(v) => fmtBin(v, item.scale)} />
-                  <YAxis tick={{ fontSize:10 }} />
-                  <RTooltip formatter={(v, k) => [fmt(v), classNameFromSeries(k, lexicon)]} />
-                  <Legend
-                    iconSize={9}
-                    wrapperStyle={{ fontSize:10 }}
-                    formatter={(v)=>classNameFromSeries(v, lexicon)}
-                  />
-                  <Bar dataKey="fp_count" fill={D.chartFP} opacity={0.6} radius={[2,2,0,0]} />
-                  <Bar dataKey="tp_count" fill={D.chartTP} opacity={0.7} radius={[2,2,0,0]} />
-                </ComposedChart>
-              </ResponsiveContainer>
+              <DrilldownFrame
+                title={persona === 'business' ? item.businessTitle : item.analystTitle}
+                persona={persona}
+                analysisPayload={distributionPayload}
+                explain={item.meaning}
+              >
+                <ResponsiveContainer width="100%" height={250}>
+                  <ComposedChart data={distributionData} margin={{ top:8,right:12,bottom:18,left:-5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                    <XAxis dataKey="bin_start" tick={{ fontSize:9 }} tickFormatter={(v) => fmtBin(v, item.scale)} />
+                    <YAxis yAxisId="count" tick={{ fontSize:10 }} />
+                    <YAxis yAxisId="share" orientation="right" tick={{ fontSize:9 }} tickFormatter={(v) => `${fmtF(v, 0)}%`} />
+                    <RTooltip
+                      formatter={(value, key) => {
+                        if (key === 'fp_share_pct' || key === 'tp_share_pct') return [`${fmtF(value, 1)}%`, classNameFromSeries(key, lexicon)];
+                        return [fmt(value), classNameFromSeries(key, lexicon)];
+                      }}
+                    />
+                    <Legend
+                      iconSize={9}
+                      wrapperStyle={{ fontSize:10 }}
+                      formatter={(v)=>classNameFromSeries(v, lexicon)}
+                    />
+                    <Bar yAxisId="count" dataKey="fp_count" fill={D.chartFP} opacity={0.5} radius={[2,2,0,0]} />
+                    <Bar yAxisId="count" dataKey="tp_count" fill={D.chartTP} opacity={0.65} radius={[2,2,0,0]} />
+                    <Line yAxisId="share" type="monotone" dataKey="fp_share_pct" stroke={D.chartFP} strokeWidth={2} dot={false} />
+                    <Line yAxisId="share" type="monotone" dataKey="tp_share_pct" stroke={D.chartTP} strokeWidth={2.2} dot={false} />
+                    <Brush dataKey="bin_start" height={18} travellerWidth={10} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </DrilldownFrame>
               <Typography sx={{ mt: 1, fontSize: 11, color: D.textSec }}>
                 {item.meaning}
               </Typography>
               <Typography sx={{ mt: 0.5, fontSize: 10.5, color: D.textMute }}>
-                X-axis: binned values for <strong>{item.col}</strong>. Y-axis: record count split by class 0 and class 1.
+                X-axis: binned values for <strong>{item.col}</strong>. Left Y-axis: record count. Right Y-axis: class-share curve.
               </Typography>
             </Card>
           );
@@ -2639,6 +3253,67 @@ const histToDensity = (bins) => {
   return bins.map(b=>({ x:Number(b.bin_start), density:(b.count||0)/total, count:b.count||0 }));
 };
 
+const inferSemanticType = (columnName = '', profile = {}) => {
+  const name = normToken(columnName);
+  if (isIdCol(columnName) || profile?.is_id) return 'Identifier / key';
+  if (/date|time|timestamp/.test(name)) return 'Date / time';
+  if (/amount|balance|turnover|volume|income|amt|value/.test(name)) return 'Financial amount';
+  if (/score|risk|rating|prob|likelihood/.test(name)) return 'Risk score / ordinal signal';
+  if (/country|city|state|region|geo|nationality/.test(name)) return 'Location / geography';
+  if (/name|type|segment|category|occupation|status|rule/.test(name)) return 'Business category';
+  if (/pep|sanction|flag|hit|binary|is_/.test(name)) return 'Binary control / flag';
+  if (isNum(profile?.dtype || '')) return 'Numeric measure';
+  return 'Categorical attribute';
+};
+
+const inferTreatmentGuidance = ({ columnName = '', profile = {}, isNumeric = false, isIdLike = false, skew = null, missingRate = 0 }) => {
+  if (isIdLike) {
+    return {
+      title: 'Keep for traceability only',
+      note: 'Use this field for joins, lineage, and record traceability. Exclude it from model learning.',
+    };
+  }
+  if (missingRate >= 0.5) {
+    return {
+      title: 'Review for drop or fallback source',
+      note: 'Very high missingness reduces reliability. Consider dropping the field or sourcing a stronger replacement.',
+    };
+  }
+  if (isNumeric && Math.abs(Number(skew || 0)) >= 1.5) {
+    return {
+      title: 'Transform before modelling',
+      note: 'This numeric field is strongly skewed. Use clipping or log-style transformation during preprocessing.',
+    };
+  }
+  if (isNumeric) {
+    return {
+      title: 'Keep with scaling review',
+      note: 'Numeric fields usually stay in the model, but check spread, outliers, and target response before finalising.',
+    };
+  }
+  if (/status|type|segment|category|occupation|country|nationality|rule/.test(normToken(columnName))) {
+    return {
+      title: 'Keep as grouped category',
+      note: 'Categorical fields are useful when the event rate differs by group. Consider grouping rare levels before encoding.',
+    };
+  }
+  return {
+    title: 'Check usefulness with target response',
+    note: 'Use the target-response and category concentration views to confirm that this field adds useful signal.',
+  };
+};
+
+const buildSegmentDistributionData = (rows = []) => {
+  const cleanRows = asArray(rows);
+  const totalFp = cleanRows.reduce((sum, row) => sum + (Number(row?.fp_count) || 0), 0) || 1;
+  const totalTp = cleanRows.reduce((sum, row) => sum + (Number(row?.tp_count) || 0), 0) || 1;
+  return cleanRows.map((row) => ({
+    ...row,
+    fp_share_pct: ((Number(row?.fp_count) || 0) / totalFp) * 100,
+    tp_share_pct: ((Number(row?.tp_count) || 0) / totalTp) * 100,
+  }));
+};
+
 const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) => {
   const allCols   = (colNames && colNames.length ? colNames : normalizeDatasetColumns(ds?.columns)) || [];
   const isIdLike  = (c) => isIdCol(c);
@@ -2800,6 +3475,150 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
     return { ...stats, pct };
   }, [isNumeric, prof]);
 
+  const missingRate = Number(prof?.null_pct ?? prof?.missing_pct ?? 0);
+  const semanticType = useMemo(
+    () => inferSemanticType(selCol, prof),
+    [selCol, prof],
+  );
+  const treatmentGuidance = useMemo(
+    () => inferTreatmentGuidance({
+      columnName: selCol,
+      profile: prof,
+      isNumeric,
+      isIdLike: isIdLikeCol,
+      skew: prof?.skewness ?? prof?.skew,
+      missingRate,
+    }),
+    [selCol, prof, isNumeric, isIdLikeCol, missingRate],
+  );
+  const columnWarnings = useMemo(() => compactFacts([
+    isIdLikeCol ? 'This looks like an identifier and should stay out of model features.' : '',
+    missingRate >= 0.5 ? 'More than half of the rows are missing for this field.' : '',
+    !isIdLikeCol && missingRate >= 0.2 && missingRate < 0.5 ? 'Missingness is material and should be handled explicitly in preprocessing.' : '',
+    isNumeric && Math.abs(Number(prof?.skewness ?? prof?.skew ?? 0)) >= 1.5 ? 'The distribution is strongly skewed and may need transformation.' : '',
+    !isNumeric && Number(prof?.distinct_count ?? prof?.unique_count ?? 0) > 100 ? 'This categorical field is high-cardinality and may need grouping or frequency encoding.' : '',
+  ], 5), [isIdLikeCol, missingRate, isNumeric, prof]);
+
+  const columnFacts = useMemo(() => compactFacts([
+    `${selCol} is currently typed as ${prof?.dtype || 'object'} and treated as ${prof?.role || 'categorical'}.`,
+    `Missing rate is ${fmtPct((Number(prof?.null_pct ?? prof?.missing_pct ?? 0)) * 100)} across ${fmt(prof?.total_count)} rows.`,
+    `Distinct values: ${fmt(prof?.distinct_count ?? prof?.unique_count)}.`,
+    isNumeric && prof?.mean != null ? `Mean is ${fmtF(prof.mean, 3)}, median is ${fmtF(prof.median, 3)}, and spread extends from ${fmtF(prof.min, 3)} to ${fmtF(prof.max, 3)}.` : '',
+    !isNumeric && catData[0] ? `Most common visible value is ${catData[0].label} with ${fmt(catData[0].count)} rows.` : '',
+  ]), [selCol, prof, isNumeric, catData]);
+
+  const columnOverviewInsight = useMemo(() => ({
+    what: isNumeric
+      ? `${selCol} is a numeric signal with ${fmt(prof?.distinct_count ?? prof?.unique_count)} distinct values.`
+      : `${selCol} is a categorical field with ${fmt(prof?.distinct_count ?? prof?.unique_count)} distinct values.`,
+    why: isIdLikeCol
+      ? 'This is an identifier field, so it is useful for joins and traceability but not for model learning.'
+      : isNumeric
+        ? 'This helps you judge whether the distribution is stable, skewed, sparse, or likely to need transformation.'
+        : 'This helps you see whether a few categories dominate the field or whether the values are too fragmented to be useful.',
+    action: isIdLikeCol
+      ? 'Keep this field for mapping and audit only. Do not use it as a predictive feature.'
+      : isNumeric
+        ? 'Check the target-response view and density shape before deciding whether to keep or transform this feature.'
+        : 'Use the target-response view to see whether category-level event rates are informative enough for modelling.',
+  }), [selCol, prof, isNumeric, isIdLikeCol]);
+
+  const columnOverviewPayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'column_overview',
+    chartTitle: `${selCol} column overview`,
+    chartFocus: `the quality and modelling relevance of ${selCol}`,
+    targetColumn,
+    lexicon: targetLexicon(targetColumn, persona),
+    deterministicInsight: columnOverviewInsight,
+    facts: columnFacts,
+    watchOut: isIdLikeCol
+      ? 'Identifier fields should stay available for tracing records, but they should not be fed into the model.'
+      : 'A clean distribution alone does not make a feature useful. Confirm target response and leakage risk before keeping it.',
+  }), [ds, selCol, targetColumn, persona, columnOverviewInsight, columnFacts, isIdLikeCol]);
+
+  const targetBreakdownPayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'column_target_response',
+    chartTitle: `${selCol} vs target response`,
+    chartFocus: `how ${selCol} changes the rate of ${targetLexicon(targetColumn, persona).positiveShort}`,
+    targetColumn,
+    lexicon: targetLexicon(targetColumn, persona),
+    deterministicInsight: {
+      what: isNumeric
+        ? `${selCol} is split into bins so you can see how event rate changes across the value range.`
+        : `${selCol} is compared by category so you can see which values are associated with higher event rates.`,
+      why: 'This is one of the fastest ways to decide whether a field contains useful signal for suppression or escalation decisions.',
+      action: 'Prioritise fields that show meaningful rate differences with enough record support.',
+    },
+    facts: compactFacts([
+      `${targetBreakdownData.length} ${isNumeric ? 'bins' : 'categories'} are visible in the target-response view.`,
+      isNumeric && targetBreakdownData[0] ? `Highest displayed event rate is ${fmtF(Math.max(...targetBreakdownData.map((row) => Number(row.tp_rate_pct || 0))), 2)}%.` : '',
+      !isNumeric && targetBreakdownData[0] ? `${targetBreakdownData[0].label} shows ${fmtF(targetBreakdownData[0].tp_rate_pct, 2)}% event rate across ${fmt(targetBreakdownData[0].count)} rows.` : '',
+    ]),
+    watchOut: 'Do not overreact to bins or categories with low support. Always read event rate together with row count.',
+  }), [ds, selCol, targetColumn, persona, isNumeric, targetBreakdownData]);
+
+  const histogramPayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'column_histogram',
+    chartTitle: `${selCol} histogram`,
+    chartFocus: `the spread of ${selCol}`,
+    targetColumn,
+    lexicon: targetLexicon(targetColumn, persona),
+    deterministicInsight: {
+      what: `${selCol} is grouped into histogram bins to show where most rows are concentrated.`,
+      why: 'This helps detect skew, sparse tails, zero-inflation, and feature ranges that may distort modelling.',
+      action: 'Use this shape with the density and target-response views before deciding on scaling or transformation.',
+    },
+    facts: compactFacts([
+      `${histData.length} bins are visible in the histogram.`,
+      histData.length ? `Largest visible bin contains ${fmt(Math.max(...histData.map((row) => Number(row.count || 0))))} rows.` : '',
+      prof?.mean != null ? `Mean is ${fmtF(prof.mean, 3)} and median is ${fmtF(prof.median, 3)}.` : '',
+    ]),
+    watchOut: 'A visually smooth histogram can still hide target imbalance or leakage. Use the other analysis views too.',
+  }), [ds, selCol, targetColumn, persona, histData, prof]);
+
+  const densityPayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'column_density',
+    chartTitle: `${selCol} density`,
+    chartFocus: `where ${selCol} values cluster`,
+    targetColumn,
+    lexicon: targetLexicon(targetColumn, persona),
+    deterministicInsight: {
+      what: 'The density curve highlights where values are most concentrated across the selected column.',
+      why: 'Density is easier to read than raw counts when you want to compare the center, tails, and concentration of a numeric feature.',
+      action: 'If the curve is sharply skewed or compressed near zero, consider transformation or clipping during preprocessing.',
+    },
+    facts: compactFacts([
+      prof?.mean != null ? `Mean is marked at ${fmtF(prof.mean, 3)}.` : '',
+      prof?.median != null ? `Median is marked at ${fmtF(prof.median, 3)}.` : '',
+      prof?.skew != null ? `Observed skew is ${fmtF(prof.skew, 2)}.` : '',
+    ]),
+    watchOut: 'Density is shape only. Use the histogram or target-response view when support counts matter.',
+  }), [ds, selCol, targetColumn, persona, prof]);
+
+  const categoryPayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'column_categories',
+    chartTitle: `${selCol} top categories`,
+    chartFocus: `which categories dominate ${selCol}`,
+    targetColumn,
+    lexicon: targetLexicon(targetColumn, persona),
+    deterministicInsight: {
+      what: 'This chart ranks the most common categories in the selected field by row volume.',
+      why: 'It helps you see whether the field is clean and concentrated enough to be model-ready or too fragmented to be useful.',
+      action: 'Use the category distribution together with event rate to decide whether to group rare levels or keep the field as-is.',
+    },
+    facts: compactFacts([
+      `${catData.length} categories are shown.`,
+      catData[0] ? `${catData[0].label} is the most common visible value with ${fmt(catData[0].count)} rows.` : '',
+      catData[1] ? `${catData[1].label} is the next largest visible value with ${fmt(catData[1].count)} rows.` : '',
+    ]),
+    watchOut: 'High-cardinality fields can look informative by frequency but still be weak model features if their event rates are flat.',
+  }), [ds, selCol, targetColumn, persona, catData]);
+
   if (!sortedCols.length) {
     return <Alert severity="info">No columns available for analysis in the current dataset.</Alert>;
   }
@@ -2928,6 +3747,7 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                   <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mt:0.5 }}>
                     <Chip label={prof.dtype||'object'} size="small" sx={{ fontFamily:'monospace', fontSize:10, bgcolor:'#f1f5f9' }} />
                     <Chip label={prof.role||'categorical'} size="small" sx={{ fontSize:10, bgcolor:'#eef2ff', color:'#4338ca' }} />
+                    <Chip label={semanticType} size="small" sx={{ fontSize:10, bgcolor:'#f8fafc', color:D.textPri }} />
                     {isBinary&&<Chip label="binary" size="small" sx={{ fontSize:10, bgcolor:'#dcfce7', color:'#166534' }} />}
                     {(isIdLikeCol || prof.is_id)&&<Chip label="ID / key" size="small" sx={{ fontSize:10, bgcolor:'#f1f5f9', color:D.textMute }} />}
                     {persona==='technical'&&prof.skew!=null&&Math.abs(prof.skew)>1&&(
@@ -2949,6 +3769,43 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                   ))}
                 </Box>
               </Stack>
+              <InsightPanel
+                what={columnOverviewInsight.what}
+                why={columnOverviewInsight.why}
+                action={columnOverviewInsight.action}
+                severity={isIdLikeCol ? 'warning' : 'info'}
+              />
+              <Box sx={{ mt: 1.1, display:'grid', gridTemplateColumns:{ xs:'1fr', lg:'1.05fr 0.95fr' }, gap:1.25 }}>
+                <Box sx={{ p:1.15, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+                  <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.4 }}>
+                    Recommended treatment
+                  </Typography>
+                  <Typography sx={{ fontSize:12.5, fontWeight:700, color:D.textPri }}>
+                    {treatmentGuidance.title}
+                  </Typography>
+                  <Typography sx={{ fontSize:11.5, color:D.textSec, lineHeight:1.6, mt:0.45 }}>
+                    {treatmentGuidance.note}
+                  </Typography>
+                </Box>
+                <Box sx={{ p:1.15, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+                  <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.4 }}>
+                    Warnings to review
+                  </Typography>
+                  {columnWarnings.length ? (
+                    <Stack spacing={0.55}>
+                      {columnWarnings.map((warning, index) => (
+                        <Typography key={`${warning}-${index}`} sx={{ fontSize:11.5, color:D.textSec, lineHeight:1.5 }}>
+                          {warning}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Typography sx={{ fontSize:11.5, color:D.textSec, lineHeight:1.5 }}>
+                      No immediate warnings. Confirm target response and business meaning before keeping the field.
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
             </Card>
 
             {targetBreakdownData.length > 0 && (
@@ -2956,8 +3813,16 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                 <SectionLabel icon={Flag}>
                   {persona==='business' ? `How ${selCol} behaves against the target` : `Target response by ${selCol}`}
                 </SectionLabel>
+                <DrilldownFrame
+                  title={persona==='business' ? `${selCol} vs predicted outcome` : `Target response by ${selCol}`}
+                  persona={persona}
+                  analysisPayload={targetBreakdownPayload}
+                  explain={isNumeric
+                    ? `This chart shows how event rate changes across the value range of ${selCol}.`
+                    : `This chart shows which categories of ${selCol} are associated with higher event rates.`}
+                >
                 {isNumeric ? (
-                  <>
+                  <Box>
                     <ResponsiveContainer width="100%" height={260}>
                       <ComposedChart data={targetBreakdownData} margin={{ top:8, right:12, bottom:18, left:-5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
@@ -2978,9 +3843,9 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                     <Typography sx={{ mt:1, fontSize:10.5, color:D.textMute }}>
                       X-axis: equal-frequency bins of <strong>{selCol}</strong>. Left Y-axis: event rate for <strong>{targetColumn}</strong>. Right Y-axis: row count in each bin.
                     </Typography>
-                  </>
+                  </Box>
                 ) : (
-                  <>
+                  <Box>
                     <ResponsiveContainer width="100%" height={Math.min(360, targetBreakdownData.length * 26 + 70)}>
                       <BarChart data={targetBreakdownData} layout="vertical" margin={{ top:8, right:18, bottom:8, left:110 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
@@ -2993,8 +3858,9 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                     <Typography sx={{ mt:1, fontSize:10.5, color:D.textMute }}>
                       X-axis: event rate for <strong>{targetColumn}</strong>. Y-axis: top values of <strong>{selCol}</strong> ranked by support and target lift.
                     </Typography>
-                  </>
+                  </Box>
                 )}
+                </DrilldownFrame>
               </Card>
             )}
 
@@ -3047,15 +3913,22 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
             {isNumeric&&(chartMode==='histogram'||chartMode==='both')&&histData.length>0&&(
               <Card>
                 <SectionLabel>{persona==='business'?'How values are spread':'Histogram'}</SectionLabel>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={histData} margin={{ top:5,right:10,bottom:25,left:-5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
-                    <XAxis dataKey="label" tick={{ fontSize:9 }} angle={-30} textAnchor="end" interval={Math.ceil(histData.length/12)} />
-                    <YAxis tick={{ fontSize:10 }} />
-                    <RTooltip formatter={v=>[fmt(v),'Count']} />
-                    <Bar dataKey="count" fill={D.orange} radius={[2,2,0,0]} opacity={0.85} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <DrilldownFrame
+                  title={persona==='business' ? `${selCol} value spread` : `${selCol} histogram`}
+                  persona={persona}
+                  analysisPayload={histogramPayload}
+                  explain={`This histogram shows where most values of ${selCol} are concentrated.`}
+                >
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={histData} margin={{ top:5,right:10,bottom:25,left:-5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                      <XAxis dataKey="label" tick={{ fontSize:9 }} angle={-30} textAnchor="end" interval={Math.ceil(histData.length/12)} />
+                      <YAxis tick={{ fontSize:10 }} />
+                      <RTooltip formatter={v=>[fmt(v),'Count']} />
+                      <Bar dataKey="count" fill={D.orange} radius={[2,2,0,0]} opacity={0.85} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </DrilldownFrame>
               </Card>
             )}
 
@@ -3063,23 +3936,30 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
             {isNumeric&&(chartMode==='density'||chartMode==='both')&&histData.length>0&&(
               <Card>
                 <SectionLabel>{persona==='business'?'Value concentration':'Density curve'}</SectionLabel>
-                <ResponsiveContainer width="100%" height={200}>
-                  <AreaChart data={histToDensity(prof.histogram)} margin={{ top:5,right:10,bottom:25,left:-5 }}>
-                    <defs>
-                      <linearGradient id="densGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor={D.orange} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={D.orange} stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
-                    <XAxis dataKey="x" tick={{ fontSize:9 }} tickFormatter={v=>fmtF(v,1)} />
-                    <YAxis tick={{ fontSize:10 }} />
-                    <RTooltip formatter={v=>[v.toFixed(4),'Density']} />
-                    <Area dataKey="density" stroke={D.orange} strokeWidth={2} fill="url(#densGrad)" />
-                    {prof.mean!=null&&<ReferenceLine x={prof.mean} stroke="#374151" strokeDasharray="4 2" label={{ value:'mean',fontSize:9,fill:'#374151' }} />}
-                    {prof.median!=null&&<ReferenceLine x={prof.median} stroke={D.info} strokeDasharray="4 2" label={{ value:'median',fontSize:9,fill:D.info }} />}
-                  </AreaChart>
-                </ResponsiveContainer>
+                <DrilldownFrame
+                  title={persona==='business' ? `${selCol} concentration curve` : `${selCol} density curve`}
+                  persona={persona}
+                  analysisPayload={densityPayload}
+                  explain={`This density curve highlights where ${selCol} values cluster and where the tails begin.`}
+                >
+                  <ResponsiveContainer width="100%" height={200}>
+                    <AreaChart data={histToDensity(prof.histogram)} margin={{ top:5,right:10,bottom:25,left:-5 }}>
+                      <defs>
+                        <linearGradient id="densGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%"  stopColor={D.orange} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={D.orange} stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                      <XAxis dataKey="x" tick={{ fontSize:9 }} tickFormatter={v=>fmtF(v,1)} />
+                      <YAxis tick={{ fontSize:10 }} />
+                      <RTooltip formatter={v=>[v.toFixed(4),'Density']} />
+                      <Area dataKey="density" stroke={D.orange} strokeWidth={2} fill="url(#densGrad)" />
+                      {prof.mean!=null&&<ReferenceLine x={prof.mean} stroke="#374151" strokeDasharray="4 2" label={{ value:'mean',fontSize:9,fill:'#374151' }} />}
+                      {prof.median!=null&&<ReferenceLine x={prof.median} stroke={D.info} strokeDasharray="4 2" label={{ value:'median',fontSize:9,fill:D.info }} />}
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </DrilldownFrame>
               </Card>
             )}
 
@@ -3119,21 +3999,28 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
             {!isNumeric&&catData.length>0&&(
               <Card>
                 <SectionLabel>{persona==='business'?'Most common values':'Value frequency (top 20)'}</SectionLabel>
-                <ResponsiveContainer width="100%" height={Math.min(320, catData.length*22+60)}>
-                  <BarChart data={catData} layout="vertical" margin={{ top:4,right:60,bottom:4,left:110 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
-                    <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={fmt} />
-                    <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={105} />
-                    <RTooltip formatter={(value, name, item) => {
-                      if (name === 'pct') return [`${fmtF(value, 2)}%`, 'Share'];
-                      return [fmt(value), `Count (${fmtF(item?.payload?.pct, 2)}%)`];
-                    }} />
-                    <Bar dataKey="count" fill={D.orange} radius={[0,3,3,0]}
-                      label={{ position:'right', fontSize:9, formatter:v=>fmt(v) }}>
-                      {catData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <DrilldownFrame
+                  title={persona==='business' ? `${selCol} category concentration` : `${selCol} top categories`}
+                  persona={persona}
+                  analysisPayload={categoryPayload}
+                  explain={`This chart ranks the most common categories in ${selCol}.`}
+                >
+                  <ResponsiveContainer width="100%" height={Math.min(320, catData.length*22+60)}>
+                    <BarChart data={catData} layout="vertical" margin={{ top:4,right:60,bottom:4,left:110 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                      <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={fmt} />
+                      <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={105} />
+                      <RTooltip formatter={(value, name, item) => {
+                        if (name === 'pct') return [`${fmtF(value, 2)}%`, 'Share'];
+                        return [fmt(value), `Count (${fmtF(item?.payload?.pct, 2)}%)`];
+                      }} />
+                      <Bar dataKey="count" fill={D.orange} radius={[0,3,3,0]}
+                        label={{ position:'right', fontSize:9, formatter:v=>fmt(v) }}>
+                        {catData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </DrilldownFrame>
                 <Typography sx={{ mt:1, fontSize:10.5, color:D.textMute }}>
                   Y-axis: top values of <strong>{selCol}</strong>. X-axis: supporting row count. Use the target-response panel above to see which categories carry the highest event rate.
                 </Typography>
@@ -3193,6 +4080,57 @@ const QualityTab = ({ ds, persona, targetColumn }) => {
   const exactDupCount = Number(data.duplicates?.exact_duplicates ?? data.duplicates?.duplicate_count ?? 0);
   const nonIdDupCount = Number(data.duplicates?.non_id_duplicates ?? 0);
   const completeRowsPct = missing?.total_rows ? (Number(missing.rows_complete || 0) / Number(missing.total_rows || 1)) * 100 : null;
+  const lexicon = targetLexicon(targetColumn, persona);
+  const qualityDecision = qScore >= 80 ? 'Ready for preprocessing' : qScore >= 60 ? 'Proceed with cleanup plan' : 'Hold and fix quality risks';
+  const missingChartData = missingCols.map((row) => ({
+    column: short(row.column, 26),
+    full_column: row.column,
+    pct_missing: Number(row.pct_missing || 0),
+    missing_rows: Number(row.missing_count || row.null_count || 0),
+  }));
+  const outlierChartData = outlierCols.map((row) => ({
+    column: short(row.column, 24),
+    full_column: row.column,
+    outlier_pct: Number(row.consensus_pct || 0),
+    outlier_rows: Number(row.consensus_outliers || 0),
+  }));
+  const missingPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'quality_missingness',
+    chartTitle: 'Missingness by column',
+    chartFocus: 'where data completeness is weakest',
+    targetColumn,
+    lexicon,
+    deterministicInsight: {
+      what: 'This chart ranks the columns with the highest missingness so you can see where the dataset is incomplete.',
+      why: 'Missingness affects model reliability, business interpretation, and how much cleanup is required before training.',
+      action: 'Prioritise columns with the highest missingness for imputation, fallback sourcing, or removal.',
+    },
+    facts: compactFacts([
+      `${missingChartData.length} columns with missing values are shown.`,
+      missingChartData[0] ? `${missingChartData[0].full_column} has ${fmtF(missingChartData[0].pct_missing, 1)}% missing values.` : '',
+      missingChartData[1] ? `${missingChartData[1].full_column} is the next most incomplete column at ${fmtF(missingChartData[1].pct_missing, 1)}%.` : '',
+    ]),
+    watchOut: 'Do not judge a column on missingness alone. Some sparse fields can still be strong if their presence is informative.',
+  });
+  const outlierPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'quality_outliers',
+    chartTitle: 'Outlier concentration by column',
+    chartFocus: 'which columns contain the most extreme values',
+    targetColumn,
+    lexicon,
+    deterministicInsight: {
+      what: 'This chart highlights where extreme values are concentrated across numeric fields.',
+      why: 'Outliers can distort scaling, inflate thresholds, and create unstable model behaviour if not handled consistently.',
+      action: 'Review fields with the heaviest outlier concentration for clipping, winsorising, or robust scaling.',
+    },
+    facts: compactFacts([
+      `${outlierChartData.length} numeric columns with outliers are shown.`,
+      outlierChartData[0] ? `${outlierChartData[0].full_column} has ${fmt(outlierChartData[0].outlier_rows)} outlier rows (${fmtF(outlierChartData[0].outlier_pct, 1)}%).` : '',
+    ]),
+    watchOut: 'Extreme values are not always bad data. Some are genuine AML signals and should be retained with careful transformation.',
+  });
 
   return (
     <Stack spacing={2.5}>
@@ -3233,6 +4171,43 @@ const QualityTab = ({ ds, persona, targetColumn }) => {
         <StatCell label="Outlier Rows %" value={fmtPct(Number(data.outliers?.outlier_row_pct ?? 0))} warn={Number(data.outliers?.outlier_row_pct ?? 0) > 3} />
         <StatCell label="Rows Complete" value={completeRowsPct == null ? '-' : fmtPct(completeRowsPct)} ok={completeRowsPct != null && completeRowsPct >= 95} warn={completeRowsPct != null && completeRowsPct < 90} />
       </Box>
+
+      <Card>
+        <SectionLabel icon={Article}>
+          {persona === 'business' ? 'EDA quality report' : 'Quality readiness report'}
+        </SectionLabel>
+        <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', md:'repeat(3,minmax(0,1fr))' }, gap:1.25 }}>
+          <Box sx={{ p:1.2, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+            <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.7 }}>Decision</Typography>
+            <Typography sx={{ fontSize:14, fontWeight:700, color:D.textPri, mt:0.35 }}>{qualityDecision}</Typography>
+            <Typography sx={{ fontSize:11, color:D.textSec, lineHeight:1.6, mt:0.45 }}>
+              This is the quality checkpoint before you move into cleaning, encoding, and feature preparation.
+            </Typography>
+          </Box>
+          <Box sx={{ p:1.2, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+            <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.7 }}>Biggest issue</Typography>
+            <Typography sx={{ fontSize:14, fontWeight:700, color:D.textPri, mt:0.35 }}>
+              {missingChartData[0]?.full_column || outlierChartData[0]?.full_column || 'No major issue flagged'}
+            </Typography>
+            <Typography sx={{ fontSize:11, color:D.textSec, lineHeight:1.6, mt:0.45 }}>
+              {missingChartData[0]
+                ? `Highest missingness is ${fmtF(missingChartData[0].pct_missing, 1)}% and should be resolved in preprocessing.`
+                : outlierChartData[0]
+                  ? `Highest outlier concentration is ${fmtF(outlierChartData[0].outlier_pct, 1)}%.`
+                  : 'No dominant missingness or outlier concentration was detected.'}
+            </Typography>
+          </Box>
+          <Box sx={{ p:1.2, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+            <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.7 }}>Next step</Typography>
+            <Typography sx={{ fontSize:14, fontWeight:700, color:D.textPri, mt:0.35 }}>
+              Move to Clean & Transform
+            </Typography>
+            <Typography sx={{ fontSize:11, color:D.textSec, lineHeight:1.6, mt:0.45 }}>
+              Use the preprocessing stage to impute gaps, handle outliers, remove duplicates, and prepare model-ready features.
+            </Typography>
+          </Box>
+        </Box>
+      </Card>
 
       {persona==='business'&&(
         <InsightPanel
@@ -3297,20 +4272,30 @@ const QualityTab = ({ ds, persona, targetColumn }) => {
           <SectionLabel icon={Warning}>
             {persona==='business' ? 'Columns with missing data' : 'Missing value analysis by column'}
           </SectionLabel>
-          <Stack spacing={0.75}>
-            {missingCols.map((row)=>(
-              <Stack key={row.column} direction="row" alignItems="center" spacing={1.5}>
-                <Typography sx={{ fontFamily:'monospace', fontSize:11, width:200, flexShrink:0 }} noWrap>{row.column}</Typography>
-                <LinearProgress variant="determinate" value={Math.min(100, Number(row.pct_missing || 0))}
-                  sx={{ flex:1, height:8, borderRadius:4, bgcolor:'#f1f5f9',
-                    '& .MuiLinearProgress-bar':{ bgcolor:Number(row.pct_missing || 0)>30?D.danger:Number(row.pct_missing || 0)>10?D.warn:D.info } }} />
-                <Typography sx={{ fontSize:11, minWidth:40, textAlign:'right',
-                  color:Number(row.pct_missing || 0)>30?D.danger:Number(row.pct_missing || 0)>10?D.warn:D.textSec, fontWeight:Number(row.pct_missing || 0)>10?700:400 }}>
-                  {fmtPct(Number(row.pct_missing || 0))}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
+          <DrilldownFrame
+            title={persona === 'business' ? 'Missingness by column' : 'Missing value analysis by column'}
+            persona={persona}
+            analysisPayload={missingPayload}
+            explain="This view shows where data completeness is weakest so you can plan imputation, removal, or fallback sourcing."
+          >
+            <ResponsiveContainer width="100%" height={Math.min(420, missingChartData.length * 28 + 60)}>
+              <BarChart data={missingChartData} layout="vertical" margin={{ top:4, right:18, bottom:4, left:160 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={(v) => `${fmtF(v, 0)}%`} domain={[0, 100]} />
+                <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={150} />
+                <RTooltip formatter={(value, name, item) => [`${fmtF(value, 1)}%`, `${item?.payload?.full_column || 'Column'} missing`]} />
+                <Bar dataKey="pct_missing" radius={[0, 3, 3, 0]}>
+                  {missingChartData.map((row, index) => (
+                    <Cell
+                      key={`${row.full_column}-${index}`}
+                      fill={row.pct_missing > 30 ? D.danger : row.pct_missing > 10 ? D.warn : D.info}
+                    />
+                  ))}
+                </Bar>
+                <Brush dataKey="column" height={18} travellerWidth={10} />
+              </BarChart>
+            </ResponsiveContainer>
+          </DrilldownFrame>
           {persona==='business'&&(
             <InsightPanel
               what={`${missingCols.filter((row)=>Number(row.pct_missing || 0)>20).length} columns have more than 20% missing data`}
@@ -3328,15 +4313,23 @@ const QualityTab = ({ ds, persona, targetColumn }) => {
           <SectionLabel icon={ErrorOutline}>
             {persona==='business' ? 'Columns with extreme values' : 'Outlier detection by column (IQR method)'}
           </SectionLabel>
-          <Box sx={{ display:'flex', flexWrap:'wrap', gap:1 }}>
-            {outlierCols.map((item)=>(
-              <Box key={item.column} sx={{ px:1.5, py:0.75, borderRadius:1.5, bgcolor:D.warnLight,
-                border:`1px solid #fde68a` }}>
-                <Typography sx={{ fontFamily:'monospace', fontSize:10, fontWeight:600 }}>{item.column}</Typography>
-                <Typography sx={{ fontSize:10, color:D.warn }}>{fmt(item.consensus_outliers)} outliers ({fmtPct(Number(item.consensus_pct || 0))})</Typography>
-              </Box>
-            ))}
-          </Box>
+          <DrilldownFrame
+            title={persona === 'business' ? 'Outlier concentration by column' : 'Outlier detection by column'}
+            persona={persona}
+            analysisPayload={outlierPayload}
+            explain="This view shows which numeric columns contain the heaviest concentration of extreme values."
+          >
+            <ResponsiveContainer width="100%" height={Math.min(380, outlierChartData.length * 26 + 50)}>
+              <BarChart data={outlierChartData} layout="vertical" margin={{ top:4, right:18, bottom:4, left:150 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={(v) => `${fmtF(v, 0)}%`} />
+                <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={140} />
+                <RTooltip formatter={(value, name, item) => [`${fmtF(value, 1)}%`, `${item?.payload?.full_column || 'Column'} outlier rate`]} />
+                <Bar dataKey="outlier_pct" fill={D.warn} radius={[0, 3, 3, 0]} />
+                <Brush dataKey="column" height={18} travellerWidth={10} />
+              </BarChart>
+            </ResponsiveContainer>
+          </DrilldownFrame>
           {persona==='technical'&&(
             <Typography variant="caption" color="text.secondary" sx={{ fontSize:10, mt:1, display:'block' }}>
               IQR method: values below Q1-1.5xIQR or above Q3+1.5xIQR flagged as outliers
@@ -3410,6 +4403,49 @@ const CorrelationTab = ({ ds, persona, targetColumn, colNames }) => {
         col:c, value:lkp[`${c}||${targetColumn}`]??lkp[`${targetColumn}||${c}`]??null,
       })).filter(p=>p.value!=null).sort((a,b)=>Math.abs(b.value)-Math.abs(a.value)).slice(0,12)
     : [];
+  const corrLexicon = targetLexicon(targetColumn, persona);
+  const targetPairChartData = targetPairs.map((item) => ({
+    column: item.col,
+    score: Number(item.value || 0),
+    abs_score: Math.abs(Number(item.value || 0)),
+  }));
+  const targetCorrelationPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'correlation_target_pairs',
+    chartTitle: `${method} correlation with target`,
+    chartFocus: `which columns move most strongly with ${corrLexicon.positiveShort}`,
+    targetColumn,
+    lexicon: corrLexicon,
+    deterministicInsight: {
+      what: 'This view ranks the columns most associated with the target so you can see which signals are strongest.',
+      why: 'Strong target relationships can indicate useful predictive power, but very high values can also signal leakage or redundant logic.',
+      action: 'Review the strongest relationships first and confirm that they are available before prediction time.',
+    },
+    facts: compactFacts([
+      `${targetPairChartData.length} target-linked columns are shown.`,
+      targetPairChartData[0] ? `${targetPairChartData[0].column} has ${fmtF(targetPairChartData[0].score, 3)} ${method} correlation with the target.` : '',
+      targetPairChartData[1] ? `${targetPairChartData[1].column} is the next strongest visible relationship at ${fmtF(targetPairChartData[1].score, 3)}.` : '',
+    ]),
+    watchOut: 'Correlation is direction plus strength, not causality. Confirm the field is business-valid and not duplicated elsewhere.',
+  });
+  const heatmapPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'correlation_heatmap',
+    chartTitle: `${method} feature relationship heatmap`,
+    chartFocus: 'how features move together as a group',
+    targetColumn,
+    lexicon: corrLexicon,
+    deterministicInsight: {
+      what: 'The heatmap shows which features move together and which ones provide independent information.',
+      why: 'Highly correlated feature clusters often indicate redundant signals, unstable coefficients, or leakage chains.',
+      action: 'Use this view to spot redundant groups and simplify the final feature set before training.',
+    },
+    facts: compactFacts([
+      `${cols.length} columns are included in the heatmap.`,
+      targetPairChartData[0] ? `${targetPairChartData[0].column} is currently the strongest visible target-linked signal.` : '',
+    ]),
+    watchOut: 'A correlation map does not tell you which field is better. Use target-response and business meaning before dropping anything.',
+  });
 
   return (
     <Stack spacing={2.5}>
@@ -3445,25 +4481,27 @@ const CorrelationTab = ({ ds, persona, targetColumn, colNames }) => {
           <SectionLabel icon={Flag}>
             {persona==='business' ? `Top features correlated with ${targetColumn}` : `${method} correlation with target: ${targetColumn}`}
           </SectionLabel>
-          <Stack spacing={0.75}>
-            {targetPairs.map(({col,value})=>(
-              <Stack key={col} direction="row" alignItems="center" spacing={1.5}>
-                <Typography sx={{ fontFamily:'monospace', fontSize:11, width:220, flexShrink:0 }} noWrap>{col}</Typography>
-                <Box sx={{ flex:1, height:10, borderRadius:5, bgcolor:'#f1f5f9', overflow:'hidden' }}>
-                  <Box sx={{ height:'100%', borderRadius:5,
-                    width:`${Math.abs(value)*100}%`,
-                    bgcolor:value>0?D.chartTP:D.chartFP,
-                    float:value<0?'right':'left',
-                  }} />
-                </Box>
-                <Typography sx={{ fontSize:11, minWidth:45, textAlign:'right', fontFamily:'monospace',
-                  color:Math.abs(value)>0.5?D.danger:Math.abs(value)>0.3?D.warn:D.textSec,
-                  fontWeight:Math.abs(value)>0.5?700:400 }}>
-                  {fmtF(value,3)}
-                </Typography>
-              </Stack>
-            ))}
-          </Stack>
+          <DrilldownFrame
+            title={persona==='business' ? 'Top target-linked columns' : `${method} correlation with target`}
+            persona={persona}
+            analysisPayload={targetCorrelationPayload}
+            explain="This view ranks the columns that move most strongly with the current prediction target."
+          >
+            <ResponsiveContainer width="100%" height={Math.min(420, targetPairChartData.length * 28 + 60)}>
+              <BarChart data={targetPairChartData} layout="vertical" margin={{ top:4, right:18, bottom:4, left:190 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                <XAxis type="number" tick={{ fontSize:9 }} domain={[-1, 1]} />
+                <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={180} />
+                <RTooltip formatter={(value) => [fmtF(value, 3), `${method} correlation`]} />
+                <Bar dataKey="score" radius={[0, 3, 3, 0]}>
+                  {targetPairChartData.map((row, index) => (
+                    <Cell key={`${row.column}-${index}`} fill={row.score >= 0 ? D.chartTP : D.chartFP} />
+                  ))}
+                </Bar>
+                <ReferenceLine x={0} stroke={D.textMute} strokeDasharray="4 3" />
+              </BarChart>
+            </ResponsiveContainer>
+          </DrilldownFrame>
           {persona==='business'&&(
             <InsightPanel
               what="Columns with high correlation to the target are most predictive"
@@ -3481,6 +4519,12 @@ const CorrelationTab = ({ ds, persona, targetColumn, colNames }) => {
           <SectionLabel icon={BubbleChart}>
             {persona==='business' ? 'Feature relationship map' : `${method} correlation heatmap (${cols.length} features)`}
           </SectionLabel>
+          <DrilldownFrame
+            title={persona==='business' ? 'Feature relationship map' : `${method} correlation heatmap`}
+            persona={persona}
+            analysisPayload={heatmapPayload}
+            explain="This map shows which columns move together, which helps you spot redundancy and potential leakage chains."
+          >
           <Box sx={{ overflowX:'auto' }}>
             {/* Column headers */}
             <Box sx={{ display:'flex', ml:`${HM_CELL+4}px` }}>
@@ -3532,6 +4576,7 @@ const CorrelationTab = ({ ds, persona, targetColumn, colNames }) => {
               </Box>
             ))}
           </Stack>
+          </DrilldownFrame>
         </Card>
       )}
 
@@ -3600,6 +4645,26 @@ const DriversTab = ({ ds, persona, targetColumn, colTypes, colNames, onTargetCha
       .sort((a, b) => b.iv - a.iv)
       .slice(0, 20)
   ), [data]);
+  const driverLexicon = targetLexicon(targetColumn, persona);
+  const driverChartPayload = buildChartExplanationPayload({
+    ds,
+    chartKey: 'feature_target_importance',
+    chartTitle: 'Top predictive columns',
+    chartFocus: `which columns best separate ${driverLexicon.positiveShort} from the rest`,
+    targetColumn,
+    lexicon: driverLexicon,
+    deterministicInsight: {
+      what: 'This ranking shows which features currently carry the strongest predictive signal against the selected outcome.',
+      why: 'It helps you see which variables are worth protecting in preprocessing and which ones are currently driving model behaviour.',
+      action: 'Use the strongest features to validate business logic, while screening them for leakage or instability before training.',
+    },
+    facts: compactFacts([
+      `${features.length} top-ranked features are shown.`,
+      features[0] ? `${features[0].column} is currently the strongest visible feature using ${features[0].metric_label}.` : '',
+      features[1] ? `${features[1].column} is the next strongest visible feature.` : '',
+    ]),
+    watchOut: 'Ranking strength is not enough on its own. A strong feature can still be unstable, biased, or unavailable at prediction time.',
+  });
 
   return (
     <Stack spacing={2.5}>
@@ -3650,19 +4715,35 @@ const DriversTab = ({ ds, persona, targetColumn, colTypes, colNames, onTargetCha
             <SectionLabel icon={Flag}>
               {persona==='business' ? 'Top 20 most predictive columns' : 'Feature importance / IV ranking (ID columns excluded)'}
             </SectionLabel>
-            <ResponsiveContainer width="100%" height={Math.min(450, features.length*22+50)}>
-              <BarChart data={features} layout="vertical"
-                margin={{ top:4,right:80,bottom:4,left:160 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
-                <XAxis type="number" tick={{ fontSize:9 }} />
-                <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={155} />
-                <RTooltip formatter={(v,_,p)=>[fmtF(v,4),p.payload.metric_label||'Importance']} />
-                <Bar dataKey="score" radius={[0,3,3,0]}
-                  label={{ position:'right', fontSize:9, formatter:v=>fmtF(v,3) }}>
-                  {features.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <DrilldownFrame
+              title={persona==='business' ? 'Top predictive columns' : 'Feature importance and signal ranking'}
+              persona={persona}
+              analysisPayload={driverChartPayload}
+              explain="This chart ranks the columns most strongly associated with the selected target, based on statistical signal rather than GenAI."
+            >
+              <ResponsiveContainer width="100%" height={Math.min(450, features.length*22+50)}>
+                <BarChart data={features} layout="vertical"
+                  margin={{ top:4,right:80,bottom:4,left:160 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                  <XAxis type="number" tick={{ fontSize:9 }} />
+                  <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={155} />
+                  <RTooltip formatter={(v,_,p)=>[fmtF(v,4),p.payload.metric_label||'Importance']} />
+                  <Bar dataKey="score" radius={[0,3,3,0]}
+                    label={{ position:'right', fontSize:9, formatter:v=>fmtF(v,3) }}>
+                    {features.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
+                  </Bar>
+                  <Brush dataKey="column" height={18} travellerWidth={10} />
+                </BarChart>
+              </ResponsiveContainer>
+            </DrilldownFrame>
+            <Box sx={{ mt:1.15, p:1.15, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+              <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.45 }}>
+                How to read this
+              </Typography>
+              <Typography sx={{ fontSize:11.5, color:D.textSec, lineHeight:1.65 }}>
+                This ranking is statistics-driven. It is not a GenAI judgement and it is not the final trained model. It simply measures which columns look most informative for the current target so the team can decide what to keep, transform, or review.
+              </Typography>
+            </Box>
           </Card>
 
           {/* Leakage flags */}
@@ -3813,7 +4894,7 @@ const AdvancedEDATab = ({ ds, persona, targetColumn, colNames, detectedCols }) =
             ? 'Are the same transactions triggering multiple alerts? Duplicate alerts inflate analyst workload artificially.'
             : 'Checking for duplicate alerts across rule engine: same transaction_id, account_id, and risk_score appearing in multiple alerts'}
         </Typography>
-        <Box sx={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:1.5 }}>
+        <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', md:'repeat(2,minmax(0,1fr))', xl:'repeat(3,minmax(0,1fr))' }, gap:1.5 }}>
           <Box sx={{ p:1.5, bgcolor:'#f8fafc', borderRadius:1.5, border:`1px solid ${D.border}`, textAlign:'center' }}>
             <ManageSearch sx={{ fontSize:24, color:D.textSec, mb:0.5 }} />
             <Typography sx={{ fontSize:11, color:D.textSec }}>Run deduplication analysis from the Data Quality tab</Typography>
@@ -3931,8 +5012,18 @@ const InsightsTab = ({ ds, persona, targetColumn }) => {
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const res = await mlopsApi.insights({ dataset_id:ds.dataset_id, target_column:targetColumn||'', sample_rows:15000 });
-      setData(res?.data||res);
+      const [insightsRes, qualityRes, driversRes] = await Promise.allSettled([
+        mlopsApi.insights({ dataset_id:ds.dataset_id, target_column:targetColumn||'', sample_rows:15000 }),
+        mlopsApi.qualityScore({ dataset_id:ds.dataset_id, target_column:targetColumn||'', sample_rows:15000 }),
+        targetColumn
+          ? mlopsApi.featureTarget({ dataset_id:ds.dataset_id, target_column:targetColumn, sample_rows:12000 })
+          : Promise.resolve({ data: null }),
+      ]);
+      setData({
+        insights: insightsRes.status === 'fulfilled' ? (insightsRes.value?.data || insightsRes.value || {}) : {},
+        quality: qualityRes.status === 'fulfilled' ? (qualityRes.value?.data || qualityRes.value || {}) : {},
+        drivers: driversRes.status === 'fulfilled' ? (driversRes.value?.data || driversRes.value || {}) : {},
+      });
     } catch(e) { setErr(e?.message||'Insights failed'); }
     finally { setLoading(false); }
   }, [ds.dataset_id, targetColumn]);
@@ -3945,6 +5036,31 @@ const InsightsTab = ({ ds, persona, targetColumn }) => {
     info:     { bg:D.infoLight,   color:D.info,   border:'#bfdbfe', Icon:Lightbulb, label:'Info'     },
     success:  { bg:D.okLight,     color:D.ok,     border:D.okBorder,Icon:CheckCircle,label:'Good'    },
   };
+
+  const insightData = data?.insights || {};
+  const qualityData = data?.quality || {};
+  const driverData = data?.drivers || {};
+  const groupedInsights = Object.entries(
+    (insightData.insights||[]).reduce((acc,i)=>{ acc[i.category]=acc[i.category]||[]; acc[i.category].push(i); return acc; },{})
+  );
+  const qScore = Number(qualityData?.overall_score ?? qualityData?.score ?? 0);
+  const topDriver = asArray(driverData?.features)
+    .filter((item) => !isIdCol(item?.column))
+    .sort((a, b) => Math.abs(Number(b?.information_gain ?? b?.importance ?? b?.iv ?? 0)) - Math.abs(Number(a?.information_gain ?? a?.importance ?? a?.iv ?? 0)))[0];
+  const warningsCount = Number(insightData?.n_warnings || insightData?.n_warning || 0);
+  const criticalCount = Number(insightData?.n_criticals || insightData?.n_critical || 0);
+  const goodCount = Number(insightData?.n_success || insightData?.n_successes || 0);
+  const reportDecision = criticalCount > 0
+    ? 'Hold before modelling'
+    : warningsCount > 0 || qScore < 75
+      ? 'Proceed with controlled cleanup'
+      : 'Ready to move to preprocessing';
+  const reportRows = [
+    ['Quality readiness', qScore ? `${Math.round(qScore)}/100` : '-', qScore >= 80 ? 'Strong enough to proceed with normal cleanup.' : 'Review missingness, duplicates, and outliers before trusting model results.'],
+    ['Critical findings', fmt(criticalCount), criticalCount > 0 ? 'Critical issues should be resolved before model building.' : 'No critical blockers were raised by the current automated checks.'],
+    ['Warnings', fmt(warningsCount), warningsCount > 0 ? 'Warnings can usually be handled in preprocessing if the business impact is understood.' : 'No material warning cluster is currently visible.'],
+    ['Top driver', topDriver?.column || 'Not available', topDriver ? 'This is the strongest current signal against the selected target.' : 'Set a target and run feature analysis to identify the top signals.'],
+  ];
 
   return (
     <Stack spacing={2.5}>
@@ -3971,31 +5087,89 @@ const InsightsTab = ({ ds, persona, targetColumn }) => {
 
       {data&&(
         <Stack spacing={2}>
+          <Card highlight>
+            <SectionLabel icon={Article}>EDA handoff report</SectionLabel>
+            <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', md:'repeat(3,minmax(0,1fr))' }, gap:1.25 }}>
+              <Box sx={{ p:1.25, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+                <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.7 }}>Decision</Typography>
+                <Typography sx={{ fontSize:14, fontWeight:700, color:D.textPri, mt:0.3 }}>{reportDecision}</Typography>
+                <Typography sx={{ fontSize:11, color:D.textSec, mt:0.55 }}>
+                  Use this as the checkpoint before moving into cleaning and feature preparation.
+                </Typography>
+              </Box>
+              <Box sx={{ p:1.25, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+                <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.7 }}>Data readiness</Typography>
+                <Typography sx={{ fontSize:14, fontWeight:700, color:D.textPri, mt:0.3 }}>
+                  Quality score {qScore ? Math.round(qScore) : '-'}
+                </Typography>
+                <Typography sx={{ fontSize:11, color:D.textSec, mt:0.55 }}>
+                  {qScore >= 80 ? 'Data quality is strong enough to move forward with routine cleanup.' : 'Data quality issues should be reviewed before trusting model results.'}
+                </Typography>
+              </Box>
+              <Box sx={{ p:1.25, border:`1px solid ${D.border}`, borderRadius:1.25, bgcolor:'#fff' }}>
+                <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.7 }}>Top modelling signal</Typography>
+                <Typography sx={{ fontSize:14, fontWeight:700, color:D.textPri, mt:0.3 }}>
+                  {topDriver?.column || 'Not available'}
+                </Typography>
+                <Typography sx={{ fontSize:11, color:D.textSec, mt:0.55 }}>
+                  {topDriver ? 'One of the strongest currently observed features from the target-response analysis.' : 'Set a target and run feature analysis to identify the strongest drivers.'}
+                </Typography>
+              </Box>
+            </Box>
+          </Card>
+
+          <Card>
+            <SectionLabel icon={Assessment}>Report checkpoints</SectionLabel>
+            <Box sx={{ overflowX:'auto' }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <thead>
+                  <tr style={{ borderBottom:`1px solid ${D.border}` }}>
+                    {['Checkpoint', 'Current status', 'Interpretation'].map((header) => (
+                      <th key={header} style={{ textAlign:'left', padding:'7px 10px', color:D.textSec, fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:0.5 }}>
+                        {header}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportRows.map(([label, value, interpretation]) => (
+                    <tr key={label} style={{ borderBottom:`1px solid ${D.borderLight}` }}>
+                      <td style={{ padding:'8px 10px', fontWeight:700, color:D.textPri }}>{label}</td>
+                      <td style={{ padding:'8px 10px', fontFamily:'monospace', color:D.textPri }}>{value}</td>
+                      <td style={{ padding:'8px 10px', color:D.textSec, lineHeight:1.6 }}>{interpretation}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Box>
+          </Card>
+
           {/* Summary badges */}
           <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-            {Object.entries(typeCfg).map(([t,cfg])=>{
-              const count = data[`n_${t}s`]||data[`n_${t}`]||0;
-              if (!count) return null;
+            {[
+              { label:'Critical', value:criticalCount },
+              { label:'Warnings', value:warningsCount },
+              { label:'Good signals', value:goodCount },
+            ].map(({ label, value }) => {
+              if (!value) return null;
               return (
-                <Box key={t} sx={{ px:2, py:1, borderRadius:1.5, bgcolor:cfg.bg, border:`1px solid ${cfg.border}` }}>
-                  <Typography sx={{ fontSize:18, fontWeight:800, color:cfg.color, lineHeight:1 }}>{count}</Typography>
-                  <Typography sx={{ fontSize:10, color:cfg.color, textTransform:'uppercase', letterSpacing:0.8 }}>{cfg.label}</Typography>
+                <Box key={label} sx={{ px:1.5, py:0.9, borderRadius:999, bgcolor:'#fff', border:`1px solid ${D.border}` }}>
+                  <Typography sx={{ fontSize:16, fontWeight:800, color:D.textPri, lineHeight:1 }}>{value}</Typography>
+                  <Typography sx={{ fontSize:10, color:D.textSec, textTransform:'uppercase', letterSpacing:0.8 }}>{label}</Typography>
                 </Box>
               );
             })}
           </Stack>
 
           {/* Grouped by category */}
-          {Object.entries(
-            (data.insights||[]).reduce((acc,i)=>{ acc[i.category]=acc[i.category]||[]; acc[i.category].push(i); return acc; },{})
-          ).map(([cat,items])=>(
+          {groupedInsights.map(([cat,items])=>(
             <Card key={cat}>
               <SectionLabel>{cat}</SectionLabel>
               <Stack spacing={1}>
                 {items.map((insight,i)=>{
                   const cfg = typeCfg[insight.type]||typeCfg.info;
                   return (
-                    <Box key={i} sx={{ p:1.5, borderRadius:1, border:`1px solid ${cfg.border}`, bgcolor:cfg.bg, display:'flex', gap:1.5 }}>
+                    <Box key={i} sx={{ p:1.25, borderRadius:1, border:`1px solid ${D.border}`, bgcolor:'#fff', display:'flex', gap:1.25 }}>
                       <cfg.Icon sx={{ fontSize:16, color:cfg.color, flexShrink:0, mt:0.1 }} />
                       <Box sx={{ flex:1 }}>
                         <Typography sx={{ fontSize:12, color:D.textPri, lineHeight:1.5 }}>{insight.message}</Typography>
@@ -4017,28 +5191,27 @@ const InsightsTab = ({ ds, persona, targetColumn }) => {
             </Card>
           ))}
 
-          {data.insights?.length===0&&(
+          {insightData.insights?.length===0&&(
             <Alert severity="success">No issues detected. Dataset looks clean and ready for preprocessing.</Alert>
           )}
 
           {/* Business mode: next steps */}
           {persona==='business'&&(
-            <Card highlight>
+            <Card>
               <SectionLabel icon={CheckCircle}>Recommended Next Steps</SectionLabel>
-              <Stack spacing={1}>
+              <Stack spacing={0}>
                 {[
                   'Review any critical or warning issues above with your data engineering team',
                   'Ensure the target column is set correctly before proceeding',
                   'Note the top 5 most predictive features for inclusion in the model',
                   'Confirm that no leakage columns are present',
-                  'Proceed to Step 5 (Clean & Transform) to fix data quality issues automatically',
+                  'Proceed to Clean & Transform to fix data quality issues and prepare model-ready features',
                 ].map((step,i)=>(
-                  <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
-                    <Box sx={{ width:20, height:20, borderRadius:'50%', bgcolor:D.orangeLight,
-                      border:`1.5px solid ${D.orange}`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, mt:0.1 }}>
-                      <Typography sx={{ fontSize:10, fontWeight:700, color:D.orange }}>{i+1}</Typography>
-                    </Box>
-                    <Typography sx={{ fontSize:12, color:D.textSec, lineHeight:1.5 }}>{step}</Typography>
+                  <Stack key={i} direction="row" spacing={1.25} alignItems="flex-start" sx={{ py:1.05, borderTop: i === 0 ? 'none' : `1px solid ${D.borderLight}` }}>
+                    <Typography sx={{ fontSize:10, fontWeight:700, color:D.orange, minWidth:20, textAlign:'center', pt:0.15 }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </Typography>
+                    <Typography sx={{ fontSize:12, color:D.textSec, lineHeight:1.6 }}>{step}</Typography>
                   </Stack>
                 ))}
               </Stack>
@@ -4065,6 +5238,7 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
   const isNumericCol = (c) => isNum((colTypes||{})[c]||'');
   const xIsNum = isNumericCol(xCol);
   const yIsNum = isNumericCol(yCol);
+  const explorerLexicon = targetLexicon(targetColumn, persona);
 
   const toggleCol = (col, list, setList, max=8) => {
     setList(prev=>prev.includes(col)?prev.filter(c=>c!==col):prev.length<max?[...prev,col]:prev);
@@ -4098,6 +5272,69 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
     finally { setLoadingBiv(false); }
   };
 
+  const bivariatePayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'interactive_bivariate',
+    chartTitle: `${xCol || 'X'} vs ${yCol || 'Y'}`,
+    chartFocus: `the relationship between ${xCol || 'x'} and ${yCol || 'y'}`,
+    targetColumn,
+    lexicon: explorerLexicon,
+    deterministicInsight: {
+      what: xIsNum && yIsNum
+        ? `This scatter view shows how ${xCol} and ${yCol} move together across the sampled records.`
+        : `This matrix shows how categories of ${xCol} and ${yCol} combine across the sampled records.`,
+      why: 'Relationship views help you spot redundant features, natural segments, and combinations that may drive alert outcomes.',
+      action: xIsNum && yIsNum
+        ? 'Look for clear slopes, clusters, or empty bands that could indicate useful separation or redundancy.'
+        : 'Look for dense intersections and category combinations that deserve dedicated target-response checks.',
+    },
+    facts: compactFacts([
+      xCol && yCol ? `Selected columns are ${xCol} and ${yCol}.` : '',
+      bivData?.mode === 'scatter' ? `${fmt(asArray(bivData?.points).length)} sampled points are shown.` : '',
+      bivData?.mode === 'matrix' ? `${fmt(asArray(bivData?.matrix).length)} matrix cells are available for the selected category pair.` : '',
+    ]),
+    watchOut: 'Pairwise relationships can be visually interesting but still weak for modelling. Validate them against target response and support.',
+  }), [ds, xCol, yCol, targetColumn, explorerLexicon, xIsNum, yIsNum, bivData]);
+
+  const pairplotPayload = useMemo(() => buildChartExplanationPayload({
+    ds,
+    chartKey: 'interactive_pairplot',
+    chartTitle: 'Scatter matrix',
+    chartFocus: 'how the selected columns move together as a group',
+    targetColumn,
+    lexicon: explorerLexicon,
+    deterministicInsight: {
+      what: 'The scatter matrix compares every selected column against every other selected column in one view.',
+      why: 'It helps you spot collinearity, duplicate signal, nonlinear patterns, and columns that have no usable variance.',
+      action: 'Use this matrix to decide which columns are redundant, which need transformation, and which are good candidates for the final feature set.',
+    },
+    facts: compactFacts([
+      `${selCols.length} columns are currently selected for the scatter matrix.`,
+      pairData?.pairs ? `${fmt(pairData.pairs.length)} mini-charts were generated in the current matrix.` : '',
+      selCols.length ? `Selected columns: ${selCols.join(', ')}.` : '',
+    ]),
+    watchOut: 'Scatter matrices are exploratory. Use feature-target analysis and leakage checks before making final feature decisions.',
+  }), [ds, targetColumn, explorerLexicon, selCols, pairData]);
+  const scatterPreviewRows = useMemo(
+    () => asArray(bivData?.points).slice(0, 12).map((row, index) => ({
+      id: index + 1,
+      x: row?.x,
+      y: row?.y,
+    })),
+    [bivData],
+  );
+  const matrixPreviewRows = useMemo(
+    () => asArray(bivData?.matrix)
+      .map((row) => ({
+        x: row?.x,
+        y: row?.y,
+        value: Number(row?.value || 0),
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 12),
+    [bivData],
+  );
+
   return (
     <Stack spacing={2.5}>
       <Card highlight>
@@ -4118,6 +5355,14 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
           Pairplot needs at least 2 columns. If a chart looks empty, try different columns or reduce highly-sparse/ID fields.
         </Typography>
       </Alert>
+
+      <Card>
+        <SectionLabel icon={Insights}>What this tab helps you answer</SectionLabel>
+        <Typography sx={{ fontSize:12, color:D.textSec, lineHeight:1.7 }}>
+          Use Interactive Explorer when you want to inspect relationships between columns, not just each column alone. It helps answer:
+          are two features telling the same story, do categories combine into high-risk pockets, and do selected variables form clean clusters worth keeping in the model?
+        </Typography>
+      </Card>
 
       {/* Bivariate custom analysis */}
       <Card>
@@ -4143,21 +5388,99 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
 
         {bivData?.mode==='scatter' && (
           <Box sx={{ mt:2 }}>
-            <ResponsiveContainer width="100%" height={250}>
-              <ScatterChart margin={{ top:8,right:16,bottom:18,left:-5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
-                <XAxis dataKey="x" name={xCol} tick={{ fontSize:9 }} />
-                <YAxis dataKey="y" name={yCol} tick={{ fontSize:9 }} />
-                <RTooltip cursor={{ strokeDasharray:'3 3' }} />
-                <Scatter data={bivData.points||[]} fill={D.orange} opacity={0.55} r={3} />
-              </ScatterChart>
-            </ResponsiveContainer>
+            <DrilldownFrame
+              title={`${xCol} vs ${yCol}`}
+              persona={persona}
+              analysisPayload={bivariatePayload}
+              explain={`This scatter view shows how ${xCol} and ${yCol} move together in the sampled records.`}
+            >
+              <ResponsiveContainer width="100%" height={250}>
+                <ScatterChart margin={{ top:8,right:16,bottom:18,left:-5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={D.borderLight} />
+                  <XAxis dataKey="x" name={xCol} tick={{ fontSize:9 }} />
+                  <YAxis dataKey="y" name={yCol} tick={{ fontSize:9 }} />
+                  <RTooltip cursor={{ strokeDasharray:'3 3' }} />
+                  <Scatter data={bivData.points||[]} fill={D.orange} opacity={0.55} r={3} />
+                </ScatterChart>
+              </ResponsiveContainer>
+            </DrilldownFrame>
+            {scatterPreviewRows.length > 0 && (
+              <Box sx={{ mt:1.1, p:1.1, border:`1px solid ${D.border}`, borderRadius:1.2, bgcolor:'#fff' }}>
+                <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.45 }}>
+                  Sample row slice
+                </Typography>
+                <Typography sx={{ fontSize:11.2, color:D.textSec, mb:0.8 }}>
+                  These are sampled records from the current scatter view so you can inspect the raw value pairs behind the pattern.
+                </Typography>
+                <Box sx={{ overflowX:'auto' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                    <thead>
+                      <tr style={{ borderBottom:`1px solid ${D.border}` }}>
+                        {[ '#', xCol, yCol ].map((header) => (
+                          <th key={header} style={{ textAlign:'left', padding:'6px 8px', color:D.textSec, fontSize:10, fontWeight:700 }}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scatterPreviewRows.map((row) => (
+                        <tr key={`${row.id}-${row.x}-${row.y}`} style={{ borderBottom:`1px solid ${D.borderLight}` }}>
+                          <td style={{ padding:'6px 8px', color:D.textSec }}>{row.id}</td>
+                          <td style={{ padding:'6px 8px', fontFamily:'monospace' }}>{fmtF(row.x, 3)}</td>
+                          <td style={{ padding:'6px 8px', fontFamily:'monospace' }}>{fmtF(row.y, 3)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Box>
+              </Box>
+            )}
           </Box>
         )}
 
         {bivData?.mode==='matrix' && (
           <Box sx={{ mt:2, overflow:'auto' }}>
-            <MatrixHeatmap data={bivData} />
+            <DrilldownFrame
+              title={`${xCol} by ${yCol}`}
+              persona={persona}
+              analysisPayload={bivariatePayload}
+              explain={`This matrix shows which combinations of ${xCol} and ${yCol} occur most often.`}
+            >
+              <MatrixHeatmap data={bivData} />
+            </DrilldownFrame>
+            {matrixPreviewRows.length > 0 && (
+              <Box sx={{ mt:1.1, p:1.1, border:`1px solid ${D.border}`, borderRadius:1.2, bgcolor:'#fff' }}>
+                <Typography sx={{ fontSize:10, fontWeight:700, letterSpacing:0.6, textTransform:'uppercase', color:D.textSec, mb:0.45 }}>
+                  Top combinations
+                </Typography>
+                <Typography sx={{ fontSize:11.2, color:D.textSec, mb:0.8 }}>
+                  These are the densest category intersections in the current matrix so you can see which combinations dominate.
+                </Typography>
+                <Box sx={{ overflowX:'auto' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                    <thead>
+                      <tr style={{ borderBottom:`1px solid ${D.border}` }}>
+                        {[xCol, yCol, 'Rows'].map((header) => (
+                          <th key={header} style={{ textAlign:'left', padding:'6px 8px', color:D.textSec, fontSize:10, fontWeight:700 }}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matrixPreviewRows.map((row, index) => (
+                        <tr key={`${row.x}-${row.y}-${index}`} style={{ borderBottom:`1px solid ${D.borderLight}` }}>
+                          <td style={{ padding:'6px 8px', fontFamily:'monospace' }}>{row.x}</td>
+                          <td style={{ padding:'6px 8px', fontFamily:'monospace' }}>{row.y}</td>
+                          <td style={{ padding:'6px 8px', color:D.textSec }}>{fmt(row.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Box>
+              </Box>
+            )}
           </Box>
         )}
 
@@ -4205,33 +5528,40 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
         {loadingPair&&<Spinner label="Generating scatter matrix..." />}
 
         {pairData&&(
-          <Box sx={{ display:'flex', flexWrap:'wrap', gap:1 }}>
-            {(pairData.pairs||[]).map((pair,idx)=>(
-              <Box key={idx} sx={{ width:160, height:135, border:`1px solid ${D.border}`, borderRadius:1, overflow:'hidden', bgcolor:'#fafbfc' }}>
-                <Typography variant="caption" sx={{ display:'block', textAlign:'center', fontSize:9, fontFamily:'monospace', color:D.textSec, py:0.25, bgcolor:'#f8fafc', borderBottom:`1px solid ${D.border}` }}>
-                  {pair.x===pair.y?pair.x:`${short(pair.x,8)} x ${short(pair.y,8)}`}
-                </Typography>
-                {pair.type==='hist' ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={pair.bins} margin={{ top:2,right:2,bottom:2,left:-20 }}>
-                      <Bar dataKey="count" fill={D.orange} radius={[1,1,0,0]} />
-                      <XAxis dataKey="bin_start" tick={{ fontSize:7 }} tickFormatter={v=>fmtF(v,0)} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart margin={{ top:4,right:4,bottom:4,left:-18 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey={pair.x} tick={{ fontSize:7 }} />
-                      <YAxis dataKey={pair.y} tick={{ fontSize:7 }} />
-                      <RTooltip cursor={{ strokeDasharray:'3 3' }} />
-                      <Scatter data={pair.points||[]} fill={D.orange} opacity={0.45} r={2} />
-                    </ScatterChart>
-                  </ResponsiveContainer>
-                )}
-              </Box>
-            ))}
-          </Box>
+          <DrilldownFrame
+            title="Scatter matrix"
+            persona={persona}
+            analysisPayload={pairplotPayload}
+            explain="This matrix compares every selected column against every other selected column in one place."
+          >
+            <Box sx={{ display:'flex', flexWrap:'wrap', gap:1 }}>
+              {(pairData.pairs||[]).map((pair,idx)=>(
+                <Box key={idx} sx={{ width:160, height:135, border:`1px solid ${D.border}`, borderRadius:1, overflow:'hidden', bgcolor:'#fafbfc' }}>
+                  <Typography variant="caption" sx={{ display:'block', textAlign:'center', fontSize:9, fontFamily:'monospace', color:D.textSec, py:0.25, bgcolor:'#f8fafc', borderBottom:`1px solid ${D.border}` }}>
+                    {pair.x===pair.y?pair.x:`${short(pair.x,8)} x ${short(pair.y,8)}`}
+                  </Typography>
+                  {pair.type==='hist' ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={pair.bins} margin={{ top:2,right:2,bottom:2,left:-20 }}>
+                        <Bar dataKey="count" fill={D.orange} radius={[1,1,0,0]} />
+                        <XAxis dataKey="bin_start" tick={{ fontSize:7 }} tickFormatter={v=>fmtF(v,0)} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart margin={{ top:4,right:4,bottom:4,left:-18 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey={pair.x} tick={{ fontSize:7 }} />
+                        <YAxis dataKey={pair.y} tick={{ fontSize:7 }} />
+                        <RTooltip cursor={{ strokeDasharray:'3 3' }} />
+                        <Scatter data={pair.points||[]} fill={D.orange} opacity={0.45} r={2} />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  )}
+                </Box>
+              ))}
+            </Box>
+          </DrilldownFrame>
         )}
       </Card>
     </Stack>

@@ -11,11 +11,15 @@ const StepShell = ({
   canNext,
   nextLabel = 'Continue',
   hideNext = false,
+  headerActions = null,
 }) => (
   <div style={{ ...cardStyle, padding: 8, display: 'grid', gap: 6, gridTemplateRows: 'auto 1fr auto', minHeight: '100%' }}>
-    <div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{title}</div>
-      <div style={{ fontSize: 12.5, color: T.muted, marginTop: 4 }}>{purpose}</div>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      <div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{title}</div>
+        <div style={{ fontSize: 12.5, color: T.muted, marginTop: 4 }}>{purpose}</div>
+      </div>
+      {headerActions ? <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{headerActions}</div> : null}
     </div>
 
     <div style={{ minHeight: 0 }}>{children}</div>

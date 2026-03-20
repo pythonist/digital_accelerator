@@ -19,7 +19,7 @@ def load_docs_rag(ollama):
     return sys_inst
 
 
-def load_vector_rag(investigation_db, vector_store_path=None):
+def load_vector_rag(investigation_db, vector_store_path=None, llm_provider=None):
     try:
         from llm.vector_rag import VectorRAGSystem
     except Exception as e:
@@ -28,7 +28,11 @@ def load_vector_rag(investigation_db, vector_store_path=None):
         return None
     if not investigation_db:
         raise RuntimeError("Investigation DB required for vector RAG")
-    rag = VectorRAGSystem(investigation_db, vector_store_path=vector_store_path)
+    rag = VectorRAGSystem(
+        investigation_db,
+        vector_store_path=vector_store_path,
+        llm_provider=llm_provider,
+    )
     try:
         rag.load_index()
     except Exception:

@@ -1,9 +1,9 @@
-﻿/**
- * TargetVariableScreen.jsx — Target Variable Workbench
+/**
+ * TargetVariableScreen.jsx - Target Variable Workbench
  *
  * Fixes in this version:
- *  1. Encoding bug — replaced all â€" / â€˜ / â€™ / âœ" mojibake with proper Unicode
- *  2. distinct_count now always shows (was showing "—" due to missing column_types fallback)
+ *  1. Encoding bug - replaced all â€" / â€˜ / â€™ / âœ" mojibake with proper Unicode
+ *  2. distinct_count now always shows (was showing "-" due to missing column_types fallback)
  *  3. Converted to full workbench style with 3 tabs: Select, Define Rules, Preview
  *  4. STR strategy now clearly explains how str.csv links to the master dataset
  *  5. Shows preprocessing steps that will be applied to the chosen target column
@@ -29,24 +29,28 @@ import {
 import mlopsApi from '../services/mlopsApi';
 import ScreenPipelineRail from './ScreenPipelineRail';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
+import { FCC_THEME as T } from '../theme/fccWorkbenchTheme';
 
 // ── Design tokens (match workbench) ──────────────────────────────────────────
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
 
 const D = {
-  orange:     '#D04A02',
-  orangeLight:'#fff1ec',
-  border:     '#e2e8f0',
-  text:       '#1e293b',
-  muted:      '#64748b',
-  green:      '#16a34a',
-  greenBg:    '#f0fdf4',
-  red:        '#dc2626',
-  redBg:      '#fef2f2',
-  amber:      '#d97706',
-  amberBg:    '#fffbeb',
-  blue:       '#1d4ed8',
-  blueBg:     '#eff6ff',
+  orange:      T.accent,
+  orangeLight: T.accentSoft,
+  border:      T.border,
+  text:        T.text,
+  muted:       T.textMuted,
+  green:       T.success,
+  greenBg:     T.successBg,
+  red:         T.error,
+  redBg:       T.errorBg,
+  amber:       T.warning,
+  amberBg:     T.panelMuted,
+  blue:        T.info,
+  blueBg:      T.infoBg,
+  infoBorder:  T.infoBorder,
+  panel:       T.panel,
+  panelAlt:    T.panelAlt,
 };
 
 const fmt     = (n) => (n == null ? '-' : Number(n).toLocaleString());
@@ -205,7 +209,7 @@ const ColumnDetail = ({ colName, detail, loading }) => {
   return (
     <Stack spacing={1.5}>
       {/* Stats row */}
-      <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 2 }}>
+      <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 1, bgcolor: '#fff' }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 1 }}>
           <Box>
             <Typography sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 13 }}>{colName}</Typography>
@@ -261,7 +265,7 @@ const ColumnDetail = ({ colName, detail, loading }) => {
                 ]} />
                 <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                   {distribution.map((_, i) => (
-                    <Cell key={i} fill={i === 0 ? D.orange : i === 1 ? '#3b82f6' : '#94a3b8'} />
+                    <Cell key={i} fill={i === 0 ? D.orange : '#98A2B3'} />
                   ))}
                 </Bar>
               </BarChart>
@@ -272,7 +276,7 @@ const ColumnDetail = ({ colName, detail, loading }) => {
 
       {/* Preprocessing steps */}
       {preprocessSteps.length > 0 && (
-        <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 2 }}>
+        <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 1, bgcolor: '#fff' }}>
           <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 1 }}>
             <Rule sx={{ fontSize: 16, color: D.orange }} />
             <Typography sx={{ fontWeight: 700, fontSize: 12.5 }}>
@@ -283,7 +287,7 @@ const ColumnDetail = ({ colName, detail, loading }) => {
             {preprocessSteps.map((step, i) => (
               <Box key={i} sx={{
                 display: 'flex', alignItems: 'flex-start', gap: 1,
-                p: 1, borderRadius: 1.5, bgcolor:
+                p: 1, borderRadius: 1, bgcolor:
                   step.severity === 'warning' ? D.amberBg :
                   step.severity === 'success' ? D.greenBg : '#f8fafc',
               }}>
@@ -303,7 +307,7 @@ const ColumnDetail = ({ colName, detail, loading }) => {
 
 // ── STR Data Explanation ──────────────────────────────────────────────────────
 const STRExplanation = () => (
-  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: D.blueBg, borderColor: '#93c5fd' }}>
+  <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, bgcolor: D.blueBg, borderColor: D.infoBorder || '#d7dee6' }}>
     <Stack direction="row" spacing={1} alignItems="flex-start">
       <Info sx={{ color: D.blue, mt: 0.2, fontSize: 18 }} />
       <Box>
@@ -345,6 +349,7 @@ const TargetVariableScreen = ({
   masterDataset,
   targetColumn,
   onTargetChange,
+  onStepAdvance,
   activePipelineId = null,
   activePipelineName = '',
   onPipelineActivated,
@@ -478,6 +483,27 @@ const TargetVariableScreen = ({
     }],
   }), []);
 
+  const syncResolvedTargetState = useCallback(async (nextTarget, nextStrategy = strategy) => {
+    if (!activePipelineId) return;
+    const nextState = {
+      strategy: nextStrategy,
+      selectedTargetColumn: selected || String(nextTarget || '').trim(),
+      activeTab: tab,
+      currentTargetColumn: String(nextTarget || '').trim(),
+      masterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
+    };
+    try {
+      const res = await mlopsApi.pipelineSaveScreenState(activePipelineId, {
+        screen: 'target',
+        state: nextState,
+      });
+      const payload = res?.data || res;
+      if (payload?.pipeline_id) onPipelineActivated?.(payload);
+    } catch (e) {
+      console.error('Failed to sync target step state', e);
+    }
+  }, [activePipelineId, masterDataset?.dataset_id, onPipelineActivated, selected, strategy, tab]);
+
   const confirmTarget = useCallback(async () => {
     if (!masterDataset?.dataset_id) return;
     setSaving(true);
@@ -486,6 +512,8 @@ const TargetVariableScreen = ({
       if (strategy === 'none') {
         onTargetChange?.('');
         setMessage({ type: 'info', text: 'Proceeding without target column (unsupervised mode).' });
+        await syncResolvedTargetState('', strategy);
+        onStepAdvance?.('eda');
         return;
       }
 
@@ -507,6 +535,8 @@ const TargetVariableScreen = ({
             type: 'success',
             text: data?.message || `STR target generated. Use "${col}" as your target column.`,
           });
+          await syncResolvedTargetState(col, strategy);
+          onStepAdvance?.('eda');
         }
         return;
       }
@@ -532,15 +562,17 @@ const TargetVariableScreen = ({
       } else {
         onTargetChange?.(resolved, { resetDownstream: false });
         setMessage({ type: 'success', text: `Target column "${resolved}" confirmed and saved.` });
+        await syncResolvedTargetState(resolved, strategy);
+        onStepAdvance?.('eda');
       }
     } catch (e) {
       setMessage({ type: 'error', text: e?.response?.data?.error || e?.message || 'Failed to confirm target.' });
     } finally {
       setSaving(false);
     }
-  }, [masterDataset, strategy, selected, onTargetChange, targetColumn]);
+  }, [masterDataset, strategy, selected, onTargetChange, onStepAdvance, syncResolvedTargetState, targetColumn]);
 
-  const applyPendingTarget = useCallback((resetDownstream) => {
+  const applyPendingTarget = useCallback(async (resetDownstream) => {
     if (!pendingTarget?.column) return;
     onTargetChange?.(pendingTarget.column, { resetDownstream });
     setMessage({
@@ -550,8 +582,10 @@ const TargetVariableScreen = ({
         : (pendingTarget.text || `Target column "${pendingTarget.column}" confirmed and saved.`),
     });
     setConfirmChangeOpen(false);
+    await syncResolvedTargetState(pendingTarget.column, strategy);
+    onStepAdvance?.('eda');
     setPendingTarget(null);
-  }, [onTargetChange, pendingTarget]);
+  }, [onTargetChange, onStepAdvance, pendingTarget, strategy, syncResolvedTargetState]);
 
   if (!masterDataset) {
     return (
@@ -578,7 +612,7 @@ const TargetVariableScreen = ({
 
   return (
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-      <Dialog open={confirmChangeOpen} onClose={() => setConfirmChangeOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={confirmChangeOpen} onClose={() => setConfirmChangeOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 1.25 } }}>
         <DialogTitle sx={{ fontSize: 16, fontWeight: 700 }}>Reset downstream steps?</DialogTitle>
         <DialogContent dividers>
           <Typography sx={{ fontSize: 13, color: D.muted }}>
@@ -587,10 +621,10 @@ const TargetVariableScreen = ({
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 2, py: 1.25 }}>
-          <Button onClick={() => applyPendingTarget(false)} variant="outlined" sx={{ textTransform: 'none' }}>
+          <Button onClick={() => applyPendingTarget(false)} variant="outlined" sx={{ textTransform: 'none', borderRadius: 1 }}>
             Keep downstream
           </Button>
-          <Button onClick={() => applyPendingTarget(true)} variant="contained" sx={{ textTransform: 'none', bgcolor: D.orange, '&:hover': { bgcolor: '#b63f00' } }}>
+          <Button onClick={() => applyPendingTarget(true)} variant="contained" sx={{ textTransform: 'none', bgcolor: D.orange, '&:hover': { bgcolor: '#b63f00' }, borderRadius: 1 }}>
             Reset downstream
           </Button>
         </DialogActions>
@@ -612,7 +646,7 @@ const TargetVariableScreen = ({
 
       <Stack spacing={2} sx={{ flex: 1, minWidth: 0 }}>
       {/* Header */}
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 1.25, bgcolor: D.panel }}>
         <Stack direction="row" spacing={1.5} alignItems="flex-start">
           <Flag sx={{ color: D.orange, mt: 0.2 }} />
           <Box>
@@ -629,19 +663,22 @@ const TargetVariableScreen = ({
                 icon={<CheckCircle sx={{ fontSize: 14 }} />}
                 label={`Current target: ${targetColumn}`}
                 size="small"
-                sx={{ mt: 1, bgcolor: D.greenBg, color: D.green, fontWeight: 700, fontSize: 11 }}
+                variant="outlined"
+                sx={{ mt: 1, bgcolor: '#fff', color: D.green, fontWeight: 700, fontSize: 11, borderColor: D.green }}
               />
             )}
             <Stack direction="row" spacing={0.75} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
               <Chip
                 size="small"
                 label="1 = True Positive -> Escalate"
-                sx={{ fontSize: 10, bgcolor: D.redBg, color: D.red, fontWeight: 700 }}
+                variant="outlined"
+                sx={{ fontSize: 10, bgcolor: '#fff', color: D.red, fontWeight: 700, borderColor: D.redBg }}
               />
               <Chip
                 size="small"
                 label="0 = False Positive -> Suppress"
-                sx={{ fontSize: 10, bgcolor: D.greenBg, color: D.green, fontWeight: 700 }}
+                variant="outlined"
+                sx={{ fontSize: 10, bgcolor: '#fff', color: D.green, fontWeight: 700, borderColor: D.greenBg }}
               />
             </Stack>
             {selectionSummary && (
@@ -662,9 +699,9 @@ const TargetVariableScreen = ({
       </Paper>
 
       {/* Strategy tabs */}
-      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+      <Paper variant="outlined" sx={{ borderRadius: 1.25, overflow: 'hidden', bgcolor: D.panel }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)}
-          sx={{ borderBottom: `1px solid ${D.border}`, bgcolor: '#f8fafc',
+          sx={{ borderBottom: `1px solid ${D.border}`, bgcolor: D.panelAlt,
             '& .MuiTab-root': { textTransform: 'none', fontSize: 12.5, fontWeight: 600, minHeight: 42 },
             '& .Mui-selected': { color: D.orange },
             '& .MuiTabs-indicator': { bgcolor: D.orange },
@@ -742,7 +779,7 @@ const TargetVariableScreen = ({
             <Stack spacing={2}>
               <STRExplanation />
 
-              <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 2 }}>
+              <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 1, bgcolor: '#fff' }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1 }}>
                   Choose a generation strategy
                 </Typography>
@@ -772,9 +809,9 @@ const TargetVariableScreen = ({
                       variant="outlined"
                       onClick={() => setStrategy(opt.value)}
                       sx={{
-                        p: 1.5, borderRadius: 1.5, cursor: 'pointer',
+                        p: 1.5, borderRadius: 1, cursor: 'pointer',
                         borderColor: strategy === opt.value ? D.orange : D.border,
-                        bgcolor: strategy === opt.value ? D.orangeLight : '#fff',
+                        bgcolor: strategy === opt.value ? D.panelAlt : '#fff',
                         '&:hover': { borderColor: D.orange },
                       }}
                     >
@@ -788,8 +825,9 @@ const TargetVariableScreen = ({
                           <Stack direction="row" spacing={0.75} alignItems="center">
                             <Typography sx={{ fontWeight: 700, fontSize: 12.5 }}>{opt.label}</Typography>
                             {opt.recommended && (
-                              <Chip label="Recommended" size="small"
-                                sx={{ fontSize: 9, height: 16, bgcolor: D.greenBg, color: D.green }} />
+                          <Chip label="Recommended" size="small"
+                                variant="outlined"
+                                sx={{ fontSize: 9, height: 16, bgcolor: '#fff', color: D.green, borderColor: D.greenBg }} />
                             )}
                           </Stack>
                           <Typography sx={{ fontSize: 11, color: D.muted }}>{opt.desc}</Typography>
@@ -851,7 +889,7 @@ const TargetVariableScreen = ({
 
               {/* Show detected ID columns */}
               {masterDataset?.columns && (
-                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
                   <Typography sx={{ fontWeight: 700, fontSize: 12, mb: 0.75 }}>
                     Detected ID columns in your master dataset
                   </Typography>
@@ -879,7 +917,7 @@ const TargetVariableScreen = ({
       </Paper>
 
       {/* ── Confirm footer ── */}
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafafa' }}>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 1.25, bgcolor: D.panel }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
           <Box>
             <Typography sx={{ fontWeight: 700, fontSize: 13, color: D.text }}>
@@ -904,10 +942,10 @@ const TargetVariableScreen = ({
               : <ChevronRight />}
             sx={{
               bgcolor: D.orange, '&:hover': { bgcolor: '#b03e02' },
-              textTransform: 'none', fontWeight: 700,
+              textTransform: 'none', fontWeight: 700, borderRadius: 1,
             }}
           >
-            Confirm Target
+            Confirm Target and Continue
           </Button>
         </Stack>
 

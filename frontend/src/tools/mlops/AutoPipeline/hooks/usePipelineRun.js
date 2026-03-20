@@ -69,6 +69,13 @@ const usePipelineRun = () => {
     }
   }, [stopPolling]);
 
+  const startPollingFor = useCallback((id) => {
+    stopPolling();
+    setPolling(true);
+    void fetchStatus(id);
+    pollRef.current = setInterval(() => fetchStatus(id), POLL_INTERVAL_MS);
+  }, [fetchStatus, stopPolling]);
+
   const startRun = useCallback(async (config) => {
     setError(null);
     setRun(null);
@@ -85,17 +92,36 @@ const usePipelineRun = () => {
         status: 'running',
         steps: Array.isArray(prev?.steps) ? prev.steps : [],
       }));
-      setPolling(true);
-      // Kick off first fetch immediately
-      await fetchStatus(id);
-      // Then poll
-      pollRef.current = setInterval(() => fetchStatus(id), POLL_INTERVAL_MS);
+      startPollingFor(id);
       return id;
     } catch (e) {
       setError(e?.response?.data?.error || e?.message || 'Failed to start pipeline');
       return null;
     }
-  }, [fetchStatus]);
+  }, [startPollingFor]);
+
+  const resumeRun = useCallback(async (id) => {
+    if (!id) return null;
+    setError(null);
+    statusFailureCountRef.current = 0;
+    try {
+      const res = await autoPilotApi.status(id);
+      const data = res?.data?.data ?? res?.data ?? res;
+      const resolvedId = data?.run_id || id;
+      if (!resolvedId) throw new Error('Run not found');
+      setRunId(resolvedId);
+      setRun(data || null);
+      if (TERMINAL_STATUSES.has(String(data?.status || '').toLowerCase())) {
+        stopPolling();
+      } else {
+        startPollingFor(resolvedId);
+      }
+      return data || null;
+    } catch (e) {
+      setError(e?.response?.data?.error || e?.message || 'Failed to resume pipeline run');
+      return null;
+    }
+  }, [startPollingFor, stopPolling]);
 
   // Cleanup on unmount
   useEffect(() => () => stopPolling(), [stopPolling]);
@@ -122,7 +148,7 @@ const usePipelineRun = () => {
     }
   }, [runId, stopPolling]);
 
-  return { runId, run, polling, error, startRun, reset, cancelRun };
+  return { runId, run, polling, error, startRun, resumeRun, reset, cancelRun };
 };
 
 export default usePipelineRun;

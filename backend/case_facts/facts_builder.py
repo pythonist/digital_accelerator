@@ -63,7 +63,7 @@ async def build_case_facts(
         # B. Determine "Anchor Date" (The 'Now' for this specific case)
         # If data is from 2023, we want metrics relative to 2023, not 2026.
         anchor_date = _get_case_anchor_date(case_id, cursor, txn_info)
-        print(f"⚓ Anchor Date for {case_id}: {anchor_date}")
+        print(f"Anchor Date for {case_id}: {anchor_date}")
 
         # C. Fetch Case Metadata
         case_meta = _fetch_case_metadata(case_id, cursor, anchor_date)
@@ -178,7 +178,7 @@ def _get_case_anchor_date(case_id, cursor, txn_info):
         if res and res[0]:
             return _parse_date(res[0])
     except Exception as e:
-        print(f"⚠️ Error finding anchor date: {e}")
+        print(f"Warning: Error finding anchor date: {e}")
     
     return datetime.now()
 

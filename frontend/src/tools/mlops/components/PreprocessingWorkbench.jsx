@@ -1,5 +1,5 @@
 /**
- * PreprocessingWorkbench.jsx  —  Full Production Preprocessing & Feature Engineering Workbench
+ * PreprocessingWorkbench.jsx  -  Full Production Preprocessing & Feature Engineering Workbench
  *
  * Props (match MLOpsWorkbench.jsx usage exactly):
  *   suggestions       []       auto-plan chips from preprocessPlan API
@@ -9,6 +9,7 @@
  *   onRun             fn       trigger preprocessRun
  *   preview           {}       preview result from parent
  *   onMasterBuild     fn       trigger master build
+ *   datasets          []       uploaded source datasets (for lineage and source-table context)
  *   masterDataset     {}       master_dataset object (passed from MLOpsWorkbench)
  *   preprocessedDataset {}     preprocessed dataset object (after Run)
  *   targetColumn      string   target col from Step 3
@@ -43,17 +44,18 @@
  *   - Success / error states use MUI icons throughout
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Checkbox, Chip, CircularProgress, Divider,
   Dialog, DialogContent, DialogTitle,
   FormControl, IconButton, InputLabel, MenuItem, Paper,
-  Select, Slider, Stack, Tab, Tabs, TextField, Tooltip, Typography,
+  Select, Slider, Stack, Tab, Tabs, TextField, ToggleButton,
+  ToggleButtonGroup, Tooltip, Typography,
 } from '@mui/material';
 import {
   Add,
   AutoFixHigh,
-  Build,           // wrench — cleaning / imputation
+  Build,           // wrench - cleaning / imputation
   CheckCircle,
   Close,
   Code,            // polynomial / text
@@ -83,9 +85,27 @@ import {
   TableChart,      // preview
   Today,           // datetime
   TrendingUp,      // polynomial / velocity
+  Insights,
+  InfoOutlined,
   Warning,
   WorkspacePremium, // AML templates badge
 } from '@mui/icons-material';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Scatter,
+  ScatterChart,
+  Tooltip as RTooltip,
+  XAxis,
+  YAxis,
+  ZAxis,
+} from 'recharts';
 import mlopsApi from '../services/mlopsApi';
 import PreprocessingBeforeAfter from './PreprocessingBeforeAfter';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
@@ -103,32 +123,32 @@ import {
 const T = {
   orange:       '#D04A02',
   orangeHov:    '#b03e02',
-  orangeLight:  '#fef2ee',
+  orangeLight:  '#f8f6f3',
   border:       '#e2e8f0',
-  surface:      '#f8fafc',
+  surface:      '#f7f8f9',
   textPri:      '#0f172a',
   textSec:      '#64748b',
   textDim:      '#94a3b8',
   done:         '#22c55e',
-  doneBg:       '#f0fdf4',
-  doneBorder:   '#86efac',
+  doneBg:       '#f7faf7',
+  doneBorder:   '#cfe2d2',
   warn:         '#f59e0b',
-  warnBg:       '#fffbeb',
-  warnBorder:   '#fde68a',
+  warnBg:       '#faf7f2',
+  warnBorder:   '#e7d8bf',
   danger:       '#ef4444',
-  dangerBg:     '#fff1f2',
-  dangerBorder: '#fecdd3',
-  infoBg:       '#eff6ff',
-  infoBorder:   '#bae6fd',
-  bgClean:      '#dbeafe',
-  bgEncode:     '#dcfce7',
-  bgScale:      '#ede9fe',
-  bgFeat:       '#fff7ed',
+  dangerBg:     '#faf4f4',
+  dangerBorder: '#e8d3d6',
+  infoBg:       '#f5f7f9',
+  infoBorder:   '#d9e1ea',
+  bgClean:      '#f7f8f9',
+  bgEncode:     '#f7f8f9',
+  bgScale:      '#f7f8f9',
+  bgFeat:       '#f7f8f9',
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-const fmt  = n  => n == null ? '—' : Number(n).toLocaleString();
-const fmtF = (v, d = 3) => v == null ? '—' : Number(v).toFixed(d);
+const fmt  = n  => n == null ? '-' : Number(n).toLocaleString();
+const fmtF = (v, d = 3) => v == null ? '-' : Number(v).toFixed(d);
 const clip = (s, n = 20) => String(s || '').length > n ? String(s).slice(0, n - 1) + '…' : String(s || '');
 const isNumDtype = t => /int|float|double|decimal|numeric|real|number/.test((t || '').toLowerCase());
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
@@ -171,6 +191,502 @@ const FEATURE_SELECTION_TECHNIQUES = [
 const FEATURE_SELECTION_TECHNIQUE_MAP = Object.fromEntries(
   FEATURE_SELECTION_TECHNIQUES.map((tech) => [tech.id, tech])
 );
+
+const PREPROCESS_TAB_GUIDES = {
+  0: {
+    title: 'Clean and Transform',
+    subtitle: 'Review quality issues and choose deterministic preprocessing actions before model training.',
+    note: 'This stage is rules-based and statistics-driven. It prepares data for modelling using sklearn-style transformations. No generative AI is making feature or cleaning decisions here.',
+  },
+  1: {
+    title: 'Preprocessing Builder',
+    subtitle: 'Assemble reusable transformation steps, inspect affected columns, and shape a governed preprocessing pipeline.',
+    note: 'Builder actions create deterministic pipeline steps such as imputation, encoding, scaling, and feature rules.',
+  },
+  2: {
+    title: 'AML Feature Engineering',
+    subtitle: 'Add domain-specific behavioural signals that help separate low-value alerts from more actionable ones.',
+    note: 'These are engineered features derived from data logic and AML heuristics, not from a generative model.',
+  },
+  3: {
+    title: 'Feature Selection Guidance',
+    subtitle: 'Review which columns look most useful, redundant, unstable, or risky before model training.',
+    note: 'The scores on this screen come from statistical tests and ranking methods. They are not GenAI judgements and they are not the final trained model.',
+  },
+  4: {
+    title: 'Preview the Pipeline Output',
+    subtitle: 'Inspect schema changes, before-versus-after samples, and the expected impact of the current preprocessing plan.',
+    note: 'Use this screen to confirm that the planned deterministic transformations are changing the data the way you expect.',
+  },
+  5: {
+    title: 'Run the Preprocessing Pipeline',
+    subtitle: 'Execute the approved transformation plan on the full dataset and save the model-ready output.',
+    note: 'Running this stage applies the deterministic preprocessing graph to the full dataset and persists the output for model training.',
+  },
+};
+
+const AML_TEMPLATE_EXPLAINERS = {
+  'Cash Intensity Ratio': {
+    summary: 'Measures how cash-heavy the activity is relative to the overall transaction footprint.',
+    calculation: 'cash_txn_count divided by txn_count, with the ratio interpreted as the share of activity driven by cash behaviour.',
+    why: 'Cash-heavy patterns often align with structuring, cash placement, or other monitoring scenarios where false positives and genuine risk behave differently.',
+  },
+  'Velocity Ratio': {
+    summary: 'Measures how extreme the largest transaction is compared with the account or customer average.',
+    calculation: 'max_txn_amount divided by avg_txn_amount.',
+    why: 'A very high ratio can reveal sudden spikes that do not fit the normal pattern for the customer or account.',
+  },
+  'Balance-to-TXN Ratio': {
+    summary: 'Compares available balance with normal transaction size.',
+    calculation: 'CURRENT_BALANCE divided by avg_txn_amount.',
+    why: 'This helps flag unusual balance context, such as high-value movement on low-balance profiles or vice versa.',
+  },
+  'PEP × Risk Score': {
+    summary: 'Combines PEP status with customer risk level into one stronger interaction signal.',
+    calculation: 'PEP_FLAG multiplied by CUSTOMER_RISK_RATING.',
+    why: 'A single control can be weak on its own, but the interaction often captures higher-risk cases more clearly.',
+  },
+  'Offshore × Risk': {
+    summary: 'Combines offshore activity with general risk score.',
+    calculation: 'offshore_txn_count multiplied by RISK_SCORE.',
+    why: 'This helps highlight customers whose offshore exposure is material only when paired with other risk indicators.',
+  },
+  'TXN Amount² (Polynomial)': {
+    summary: 'Captures nonlinear threshold behaviour in transaction amount.',
+    calculation: 'Creates a second-order term from TXN_AMOUNT so the model can learn curved relationships instead of only straight-line effects.',
+    why: 'Some thresholds matter more at higher values, and a polynomial term helps the model capture that pattern.',
+  },
+  'Mean TXN by Account Type': {
+    summary: 'Creates a peer-style benchmark by account type.',
+    calculation: 'Average TXN_AMOUNT grouped by ACCOUNT_TYPE.',
+    why: 'It helps compare each record against the normal amount level for that account category.',
+  },
+  'Std TXN by Customer Risk': {
+    summary: 'Measures transaction volatility within customer risk bands.',
+    calculation: 'Standard deviation of TXN_AMOUNT grouped by CUSTOMER_RISK_RATING.',
+    why: 'Higher volatility in certain bands may indicate more unstable or suspicious behaviour patterns.',
+  },
+  'Extract Alert Date Parts': {
+    summary: 'Breaks a date into reusable calendar signals.',
+    calculation: 'Extracts year, month, day of week, and hour from ALERT_DATE.',
+    why: 'Time-based patterns such as weekend or off-hours activity often matter for AML scenarios.',
+  },
+  'Narrative Text Features': {
+    summary: 'Converts free text into simple deterministic text statistics.',
+    calculation: 'Creates length, word count, and digit-presence features from NARRATIVE.',
+    why: 'These features can help surface structured hints without introducing a full text model.',
+  },
+  'Frequency Encode Account Type': {
+    summary: 'Encodes how common each account type is in the current dataset.',
+    calculation: 'Replaces ACCOUNT_TYPE with its frequency count.',
+    why: 'This is useful when raw categories are too many or too sparse for direct modelling.',
+  },
+  'Frequency Encode Country': {
+    summary: 'Encodes how common each country value is in the current dataset.',
+    calculation: 'Replaces COUNTRY_OF_ORIGIN with its frequency count.',
+    why: 'This helps convert a wide categorical field into a stable numeric signal.',
+  },
+};
+
+const FEATURE_SELECTION_EXPLAINERS = {
+  information_gain: {
+    plain: 'Measures how much knowing this column reduces uncertainty about the outcome.',
+    why: 'Useful as a default ranking because it captures both numeric and categorical signal without assuming straight-line behaviour.',
+    business: 'A higher score means the column does a better job separating likely false positives from more actionable alerts.',
+  },
+  information_value: {
+    plain: 'Measures how strongly a column separates the two classes using scorecard-style bins.',
+    why: 'Common in risk and AML scorecards because it is intuitive and stable for ranked features.',
+    business: 'A higher IV usually means the feature is strong enough to include in a governed decisioning model.',
+  },
+  chi_square: {
+    plain: 'Checks whether category differences are meaningfully linked to the target.',
+    why: 'Best for categorical variables such as account type, country, or status.',
+    business: 'Use it to confirm that business categories are not flat and actually behave differently against the target.',
+  },
+  pearson_abs: {
+    plain: 'Measures straight-line relationship strength between a numeric feature and the target.',
+    why: 'Fast way to screen numeric signals, especially when you expect roughly linear separation.',
+    business: 'Good for checking whether higher or lower values consistently align with real alerts.',
+  },
+  spearman_abs: {
+    plain: 'Measures whether the target tends to rise or fall consistently as the feature rank changes.',
+    why: 'Useful when the relationship is monotonic but not perfectly linear.',
+    business: 'Helpful when “more” of something generally means more risk, even if the effect is not smooth.',
+  },
+  ks_statistic: {
+    plain: 'Measures how far apart the two class distributions are.',
+    why: 'Strong for checking whether a single numeric feature separates the classes cleanly.',
+    business: 'A larger KS means the feature does a better job keeping low-value alerts and actionable alerts apart.',
+  },
+};
+
+const FEATURE_DECISION_STYLES = {
+  keep: {
+    label: 'Keep',
+    color: '#166534',
+    border: '#86efac',
+    bg: '#f0fdf4',
+  },
+  review: {
+    label: 'Review',
+    color: '#9a3412',
+    border: '#fdba74',
+    bg: '#fff7ed',
+  },
+  drop: {
+    label: 'Exclude',
+    color: '#991b1b',
+    border: '#fecaca',
+    bg: '#fef2f2',
+  },
+};
+
+const clamp01 = (value) => Math.max(0, Math.min(1, Number(value) || 0));
+const humanizeFeatureName = (value = '') => String(value || '')
+  .replace(/_/g, ' ')
+  .replace(/\btxn\b/gi, 'Transaction')
+  .replace(/\bstr\b/gi, 'STR')
+  .replace(/\bsar\b/gi, 'SAR')
+  .replace(/\bpep\b/gi, 'PEP')
+  .replace(/\bkyc\b/gi, 'KYC')
+  .replace(/\bid\b/gi, 'ID')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .replace(/\b\w/g, (m) => m.toUpperCase());
+
+const featureRoleLabel = (role = '') => {
+  const value = String(role || '').toLowerCase();
+  if (value === 'numeric' || value === 'binary') return 'Numeric signal';
+  if (value === 'categorical') return 'Category signal';
+  if (value === 'text') return 'Text-derived signal';
+  return 'General field';
+};
+
+const inferFeatureBusinessMeaning = (column = '', role = '') => {
+  const key = String(column || '').toLowerCase();
+  if (key.includes('cash')) return 'Captures how cash-driven the customer or account behaviour appears.';
+  if (key.includes('amount') || key.includes('amt')) return 'Describes transaction value patterns and unusual movement size.';
+  if (key.includes('risk')) return 'Represents an upstream risk indicator or band already used in monitoring.';
+  if (key.includes('country') || key.includes('geo') || key.includes('jurisdiction')) return 'Describes geographic exposure that may influence AML relevance.';
+  if (key.includes('account')) return 'Represents account-type, account-behaviour, or account-relationship context.';
+  if (key.includes('customer') || key.includes('party') || key.includes('counterparty')) return 'Represents customer or relationship context that may affect alert quality.';
+  if (key.includes('date') || key.includes('time') || key.includes('hour') || key.includes('day')) return 'Represents timing behaviour such as recency, weekday, or time-of-day patterns.';
+  if (key.includes('flag') || key.includes('hit') || key.includes('pep') || key.includes('sanction')) return 'Represents a rule, screening, or control flag that may shift alert priority.';
+  if (key.includes('ratio') || key.includes('share') || key.includes('pct')) return 'Summarises a relative behaviour pattern instead of a raw count.';
+  if (key.includes('count') || key.includes('freq') || key.includes('volume')) return 'Measures how often a behaviour occurs in the observed period.';
+  if (key.includes('score')) return 'Represents a scored risk or prioritisation signal from upstream logic.';
+  if (String(role || '').toLowerCase() === 'categorical') return 'Describes a business segment or operating category that may behave differently across alerts.';
+  if (String(role || '').toLowerCase() === 'numeric') return 'Measures the size, frequency, or intensity of behaviour that may help separate alert outcomes.';
+  return 'Provides operational context that may or may not help distinguish low-value and actionable alerts.';
+};
+
+const featureInterpretabilityLabel = (role = '', distinctCount = 0) => {
+  const value = String(role || '').toLowerCase();
+  if (value === 'categorical' && Number(distinctCount || 0) <= 20) return 'High';
+  if (value === 'numeric') return 'Medium';
+  if (value === 'text') return 'Low';
+  return 'Medium';
+};
+
+const featureQualityLabel = (missingPct = 0, unstable = false) => {
+  const missing = Number(missingPct || 0);
+  if (missing >= 0.6) return 'Poor';
+  if (missing >= 0.25 || unstable) return 'Warning';
+  return 'Good';
+};
+
+const LIKELY_ID_REGEX = /(^id$|_id$|^id_|alert_id|transaction_id|txn_id|account_id|customer_id|case_id|investigator_id|mapping_id|ucic|reference_id)/i;
+const DATE_TIME_REGEX = /(date|time|timestamp|filed|opened|closed|created|updated|hour|month|year)/i;
+
+const humanizeTableName = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return 'Unknown source';
+  return raw
+    .replace(/_/g, ' ')
+    .replace(/\btxn\b/gi, 'transaction')
+    .replace(/\bstr\b/gi, 'STR')
+    .replace(/\bsar\b/gi, 'SAR')
+    .replace(/\bpep\b/gi, 'PEP')
+    .replace(/\bkyc\b/gi, 'KYC')
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+};
+
+const isLikelyIdColumn = (name = '') => LIKELY_ID_REGEX.test(String(name || '').trim());
+
+const inferBuilderSemanticType = (name = '', dtype = '', stats = null) => {
+  const lower = String(name || '').toLowerCase();
+  const dataType = String(dtype || '').toLowerCase();
+  if (isLikelyIdColumn(lower)) return 'Identifier';
+  if (DATE_TIME_REGEX.test(lower) || /date|time/.test(dataType)) return 'Date / time';
+  if (/flag|hit|pep|sanction|watchlist|is_/.test(lower)) return 'Risk / control flag';
+  if (/country|state|city|geo|jurisdiction/.test(lower)) return 'Geography';
+  if (/account|product|segment|type|channel|rule/.test(lower)) return 'Business category';
+  if (/amount|balance|score|count|ratio|volume|value|limit|age/.test(lower)) return 'Numeric behaviour';
+  if (/description|narrative|remarks|comment/.test(lower)) return 'Narrative text';
+  if ((stats?.numeric_parse_ratio || 0) >= 0.85 || isNumDtype(dtype)) return 'Numeric behaviour';
+  return 'General attribute';
+};
+
+const parseBuilderPairs = (pairsRaw = '') => String(pairsRaw || '')
+  .split(',')
+  .map((pair) => {
+    const [a, b] = String(pair || '').split(':').map((item) => item.trim());
+    return { a, b };
+  })
+  .filter((pair) => pair.a && pair.b);
+
+const buildColumnCatalog = ({
+  availableCols = [],
+  colTypes = {},
+  datasets = [],
+  masterDataset = null,
+  targetColumn = '',
+  statsMap = {},
+}) => {
+  const uploadedDatasets = Array.isArray(datasets) ? datasets : [];
+  const targetKey = String(targetColumn || '').trim().toLowerCase();
+  return availableCols.map((name) => {
+    const stats = statsMap?.[name] || {};
+    const sourceTables = uploadedDatasets
+      .filter((dataset) => Array.isArray(dataset?.columns) && dataset.columns.includes(name))
+      .map((dataset) => String(dataset.dataset_type || '').trim())
+      .filter(Boolean);
+    const isTarget = targetKey && String(name || '').trim().toLowerCase() === targetKey;
+    const isId = isLikelyIdColumn(name);
+    const isDerived = sourceTables.length === 0 && !isTarget;
+    const tags = [];
+    if (sourceTables.length > 0) tags.push('Source Table');
+    if (sourceTables.length > 1) tags.push('Joined Table');
+    if (sourceTables.length === 0) tags.push('Master Table');
+    if (isDerived) tags.push('Derived Column');
+    if (isTarget) tags.push('Target Column');
+    if (isId) tags.push('ID Column');
+
+    const sampleValues = Array.isArray(stats?.sample_values) && stats.sample_values.length
+      ? stats.sample_values.slice(0, 4)
+      : Array.isArray(stats?.top_categories)
+      ? stats.top_categories.slice(0, 4).map((item) => String(item?.value ?? '').trim()).filter(Boolean)
+      : [];
+
+    const primaryTable = sourceTables[0] || masterDataset?.dataset_type || 'master_dataset';
+    return {
+      name,
+      dtype: String(colTypes?.[name] || stats?.dtype || 'unknown'),
+      table: primaryTable,
+      tables: sourceTables.length ? sourceTables : [primaryTable],
+      tableLabel: sourceTables.length > 1
+        ? `${humanizeTableName(primaryTable)} +${sourceTables.length - 1}`
+        : humanizeTableName(primaryTable),
+      semanticType: inferBuilderSemanticType(name, colTypes?.[name] || stats?.dtype || '', stats),
+      missingPct: Number(stats?.missing_pct || 0),
+      distinctCount: Number(stats?.distinct_count || 0),
+      sampleValues,
+      businessMeaning: inferFeatureBusinessMeaning(name, inferBuilderSemanticType(name, colTypes?.[name] || stats?.dtype || '', stats)),
+      tags,
+      isTarget,
+      isId,
+      isDerived,
+      description: sampleValues.length
+        ? sampleValues.join(', ')
+        : 'No sampled values are available yet.',
+    };
+  });
+};
+
+const BUILDER_OPERATION_GUIDES = {
+  imputation: {
+    title: 'Fill missing values',
+    what: 'Replace blank cells using a deterministic fill strategy such as mean, median, mode, or a fixed value.',
+    when: 'Use when the field is important enough to keep, but missing values would block training or distort scoring.',
+    output: 'Updates the selected column in place. No new column is created.',
+  },
+  drop_duplicates: {
+    title: 'Remove duplicate rows',
+    what: 'Drops repeated records that should represent the same business event.',
+    when: 'Use when duplicate rows inflate volume, counts, or downstream event rates.',
+    output: 'Reduces row count in the working dataset.',
+  },
+  encoding_label: {
+    title: 'Convert categories to numeric labels',
+    what: 'Turns each category into a numeric code so the modelling pipeline can consume it.',
+    when: 'Use for low-to-medium-cardinality categories when ordered meaning is not important.',
+    output: 'Updates the selected column in place.',
+  },
+  encoding_onehot: {
+    title: 'Create one column per category',
+    what: 'Expands each category into separate yes-or-no indicator columns.',
+    when: 'Use when the category set is small and you want the model to treat each value independently.',
+    output: 'Creates multiple indicator columns from the selected input field.',
+  },
+  encoding_ordinal: {
+    title: 'Apply ordered category encoding',
+    what: 'Maps categories to an explicit business order such as low, medium, high.',
+    when: 'Use when the business meaning has a true ranking that should be preserved numerically.',
+    output: 'Updates the selected column in place.',
+  },
+  encoding_frequency: {
+    title: 'Replace category with frequency',
+    what: 'Substitutes each category with how often it appears in the current dataset.',
+    when: 'Use when categories are too many or too sparse for direct one-hot encoding.',
+    output: 'Creates a frequency-based numeric version of the selected category.',
+  },
+  scaling_standard: {
+    title: 'Standardise numeric scale',
+    what: 'Centers numeric fields and rescales them so large-value columns do not dominate.',
+    when: 'Use when numeric columns are on very different scales and the model is scale-sensitive.',
+    output: 'Updates the selected numeric columns in place.',
+  },
+  scaling_minmax: {
+    title: 'Compress values into a 0 to 1 range',
+    what: 'Moves numeric values into a common bounded scale.',
+    when: 'Use when the model or downstream comparison benefits from fixed numeric bounds.',
+    output: 'Updates the selected numeric columns in place.',
+  },
+  scaling_robust: {
+    title: 'Scale while reducing outlier influence',
+    what: 'Rescales fields using robust statistics instead of raw mean and variance.',
+    when: 'Use when large outliers are expected and should not dominate the transformation.',
+    output: 'Updates the selected numeric columns in place.',
+  },
+  normalize_l2: {
+    title: 'Normalise row magnitude',
+    what: 'Rescales values so each record has comparable overall vector size.',
+    when: 'Use when distance-based methods or comparisons should focus on pattern, not raw magnitude.',
+    output: 'Updates the selected numeric columns in place.',
+  },
+  feature_ratio: {
+    title: 'Create a ratio feature',
+    what: 'Divides one field by another to express relative behaviour instead of raw counts or amounts.',
+    when: 'Use when a proportion is more meaningful than either input column alone.',
+    output: 'Creates a new derived column for each A:B pair.',
+  },
+  feature_interaction: {
+    title: 'Create an interaction feature',
+    what: 'Combines two fields multiplicatively to capture joint behaviour.',
+    when: 'Use when the combination of two signals matters more than either one on its own.',
+    output: 'Creates a new derived column for each selected pair.',
+  },
+  feature_polynomial: {
+    title: 'Create nonlinear numeric terms',
+    what: 'Adds squared or higher-order versions of a numeric feature.',
+    when: 'Use when the business effect accelerates or bends instead of changing in a straight line.',
+    output: 'Creates one or more power-based derived columns.',
+  },
+  feature_aggregation: {
+    title: 'Summarise a value within a group',
+    what: 'Calculates metrics like mean, sum, count, or standard deviation inside a selected business grouping.',
+    when: 'Use when the record should be compared against its peer group, such as account type or risk band.',
+    output: 'Creates a new grouped summary column such as avg transaction amount by account type.',
+  },
+  datetime_extract: {
+    title: 'Break a timestamp into reusable parts',
+    what: 'Extracts year, month, day-of-week, or hour from a date field.',
+    when: 'Use when timing patterns may explain alert quality or operational behaviour.',
+    output: 'Creates several new date-part columns.',
+  },
+  text_features: {
+    title: 'Create simple text-derived features',
+    what: 'Generates deterministic text statistics such as length, word count, or digit presence.',
+    when: 'Use when you want basic narrative structure without introducing a text model.',
+    output: 'Creates multiple derived columns from the selected text field.',
+  },
+};
+
+const describeBuilderOutput = ({ type, cols = [], cfg = {} }) => {
+  if (type === 'drop_duplicates') {
+    return { input: 'Current working dataset', transform: 'Duplicate removal rule', output: 'Cleaner row set with duplicates removed' };
+  }
+  if (type === 'feature_ratio') {
+    const pairs = parseBuilderPairs(cfg.pairsRaw);
+    return {
+      input: pairs.length ? pairs.map((pair) => `${pair.a} and ${pair.b}`).join(', ') : 'Choose two related columns',
+      transform: 'Ratio logic',
+      output: pairs.length ? pairs.map((pair) => `${pair.a}_div_${pair.b}`).join(', ') : 'A_div_B derived field',
+    };
+  }
+  if (type === 'feature_interaction') {
+    const pairs = parseBuilderPairs(cfg.pairsRaw);
+    return {
+      input: pairs.length ? pairs.map((pair) => `${pair.a} and ${pair.b}`).join(', ') : 'Choose two complementary signals',
+      transform: 'Interaction logic',
+      output: pairs.length ? pairs.map((pair) => `${pair.a}_x_${pair.b}`).join(', ') : 'A_x_B derived field',
+    };
+  }
+  if (type === 'feature_aggregation') {
+    return {
+      input: cfg.groupTarget && cfg.groupBy ? `${cfg.groupTarget} grouped by ${cfg.groupBy}` : 'Select a grouping field and numeric target',
+      transform: `${cfg.agg || 'mean'} aggregation`,
+      output: cfg.groupTarget && cfg.groupBy ? `${cfg.groupTarget}_${cfg.agg || 'mean'}_by_${cfg.groupBy}` : 'grouped_summary_feature',
+    };
+  }
+  if (type === 'feature_polynomial') {
+    return {
+      input: cols.length ? cols.join(', ') : 'Select one or more numeric columns',
+      transform: `Polynomial expansion (degree ${cfg.degree || 2})`,
+      output: cols.length ? cols.map((col) => `${col}_pow2`).join(', ') : 'col_pow2',
+    };
+  }
+  if (type === 'datetime_extract') {
+    return {
+      input: cols.length ? cols.join(', ') : 'Select a date column',
+      transform: 'Date part extraction',
+      output: cols.length ? cols.map((col) => `${col}_year, ${col}_month, ${col}_dayofweek`).join(' | ') : 'date_part_columns',
+    };
+  }
+  if (type === 'text_features') {
+    return {
+      input: cols.length ? cols.join(', ') : 'Select a text column',
+      transform: 'Deterministic text statistics',
+      output: cols.length ? cols.map((col) => `${col}_length, ${col}_word_count`).join(' | ') : 'text_feature_columns',
+    };
+  }
+  if (type.startsWith('encoding_')) {
+    return {
+      input: cols.length ? cols.join(', ') : 'Select one or more categorical columns',
+      transform: stepMeta(type).label,
+      output: type === 'encoding_onehot' ? 'Multiple indicator columns' : 'Encoded column values',
+    };
+  }
+  return {
+    input: cols.length ? cols.join(', ') : 'Select one or more columns',
+    transform: stepMeta(type).label,
+    output: 'Updated model-ready fields',
+  };
+};
+
+const validateBuilderStep = ({ type, cols = [], cfg = {}, targetColumn = '' }) => {
+  const warnings = [];
+  const errors = [];
+  const pairs = parseBuilderPairs(cfg.pairsRaw);
+  const selected = [...cols];
+  if (cfg.groupBy) selected.push(cfg.groupBy);
+  if (cfg.groupTarget) selected.push(cfg.groupTarget);
+  pairs.forEach((pair) => {
+    selected.push(pair.a, pair.b);
+    if (pair.a === pair.b) {
+      errors.push(`Pair ${pair.a}:${pair.b} repeats the same column. Choose two different fields.`);
+    }
+  });
+
+  if (targetColumn && selected.some((name) => String(name || '').trim().toLowerCase() === String(targetColumn).trim().toLowerCase())) {
+    warnings.push('The target column is part of this transformation. That is usually unsafe for model inputs and can create leakage.');
+  }
+
+  if (type === 'feature_aggregation' && isLikelyIdColumn(cfg.groupTarget)) {
+    errors.push('Do not aggregate an ID-like column. IDs should identify records, not be averaged or summed.');
+  }
+
+  if (['scaling_standard', 'scaling_minmax', 'scaling_robust', 'normalize_l2', 'feature_polynomial'].includes(type) && cols.some(isLikelyIdColumn)) {
+    warnings.push('One or more selected columns look like identifiers. Scaling or polynomial transforms on IDs usually add noise instead of signal.');
+  }
+
+  if (['feature_ratio', 'feature_interaction'].includes(type) && pairs.some((pair) => isLikelyIdColumn(pair.a) || isLikelyIdColumn(pair.b))) {
+    warnings.push('A selected pair contains an ID-like field. Interaction and ratio features should usually use behavioural values, not identifiers.');
+  }
+
+  return { warnings, errors };
+};
 
 // ─── Step taxonomy ────────────────────────────────────────────────────────────
 // icon: MUI component reference (not emoji)
@@ -216,7 +732,7 @@ const Spinner = ({ label }) => (
 
 const Card = ({ children, sx = {}, accent }) => (
   <Paper variant="outlined" sx={{
-    p: 2, borderRadius: 2,
+    p: 2, borderRadius: 0,
     borderColor: accent === 'orange' ? T.orange : accent === 'green' ? T.doneBorder
                : accent === 'red'    ? T.dangerBorder : T.border,
     bgcolor: 'white', ...sx,
@@ -236,7 +752,7 @@ const SLabel = ({ children, sx = {} }) => (
 
 const OBtn = ({ children, onClick, disabled, icon, variant = 'contained', size = 'small', sx = {} }) => (
   <Button size={size} variant={variant} startIcon={icon} onClick={onClick} disabled={canDisable(disabled)} sx={{
-    textTransform: 'none', fontWeight: 600, borderRadius: '8px', boxShadow: 'none',
+    textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none',
     ...(variant === 'contained'
       ? { bgcolor: T.orange, color: 'white',
           '&:hover': { bgcolor: T.orangeHov },
@@ -302,8 +818,10 @@ const PipelineSidebar = ({
   onMove,
   onClear,
   onLoad,
+  onLoadState,
   masterDataset,
   preprocessedDataset,
+  activeTab = 0,
   activePipelineId = null,
   activePipelineName = '',
   onPipelineActivated,
@@ -313,12 +831,23 @@ const PipelineSidebar = ({
   const [pipelines,  setPipelines]  = useState([]);
   const [loadOpen,   setLoadOpen]   = useState(false);
   const [loadErr,    setLoadErr]    = useState('');
+  const hydratedPipelineRef = useRef('');
+  const autosaveTimerRef = useRef(null);
+  const hydratingRef = useRef(false);
+  const skipAutosaveRef = useRef(false);
 
   useEffect(() => {
     if (activePipelineName) {
       setSaveName(activePipelineName);
     }
   }, [activePipelineName]);
+
+  const preprocessScreenState = useMemo(() => ({
+    steps,
+    activeTab,
+    masterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
+    preprocessedDatasetId: Number(preprocessedDataset?.dataset_id || 0) || null,
+  }), [activeTab, masterDataset?.dataset_id, preprocessedDataset?.dataset_id, steps]);
 
   const buildPreprocessPayload = useCallback((nameValue) => ({
     name: nameValue,
@@ -328,13 +857,13 @@ const PipelineSidebar = ({
     steps: [{
       type: 'screen_state',
       screen: 'preprocess',
-      state: {
-        steps,
-        masterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
-        preprocessedDatasetId: Number(preprocessedDataset?.dataset_id || 0) || null,
-      },
+      state: preprocessScreenState,
     }],
-  }), [masterDataset?.dataset_id, preprocessedDataset?.dataset_id, steps]);
+  }), [masterDataset?.dataset_id, preprocessScreenState, steps]);
+
+  useEffect(() => () => {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+  }, []);
 
   const save = async () => {
     if (!saveName.trim() || !steps.length || !masterDataset?.dataset_id) return;
@@ -362,10 +891,22 @@ const PipelineSidebar = ({
 
       const savedRes = await mlopsApi.pipelineSave(payload);
       const saved = savedRes?.data || savedRes;
-      onPipelineActivated?.({
-        pipeline_id: Number(saved?.pipeline_id || 0),
-        name: trimmed,
-      });
+      const savedId = Number(saved?.pipeline_id || 0);
+      if (savedId > 0) {
+        try {
+          const fullRes = await mlopsApi.pipelineGet(savedId);
+          const full = fullRes?.data || fullRes;
+          onPipelineActivated?.(full?.pipeline_id ? full : {
+            pipeline_id: savedId,
+            name: trimmed,
+          });
+        } catch {
+          onPipelineActivated?.({
+            pipeline_id: savedId,
+            name: trimmed,
+          });
+        }
+      }
       setSaveOk(true); setTimeout(() => setSaveOk(false), 2200);
     } catch (e) { console.error(e); }
   };
@@ -393,13 +934,78 @@ const PipelineSidebar = ({
     return [];
   }, []);
 
+  const extractLoadedState = useCallback((pipeline) => {
+    const fromScreen = getScreenState(pipeline?.steps, 'preprocess') || {};
+    const loadedSteps = extractLoadedSteps(pipeline);
+    const nextActiveTab = Number.isInteger(fromScreen?.activeTab) ? fromScreen.activeTab : null;
+    return {
+      steps: loadedSteps,
+      activeTab: nextActiveTab,
+    };
+  }, [extractLoadedSteps]);
+
+  useEffect(() => {
+    const pipelineId = activePipelineId != null && activePipelineId !== '' ? String(activePipelineId) : '';
+    if (!pipelineId || hydratedPipelineRef.current === pipelineId) return;
+
+    let alive = true;
+    hydratingRef.current = true;
+    (async () => {
+      try {
+        const fullRes = await mlopsApi.pipelineGet(pipelineId);
+        const full = fullRes?.data || fullRes;
+        const loaded = extractLoadedState(full);
+        if (!alive) return;
+        skipAutosaveRef.current = true;
+        onLoadState?.(loaded);
+        hydratedPipelineRef.current = pipelineId;
+      } catch (e) {
+        if (!alive) return;
+        setLoadErr(e?.message || 'Failed to restore preprocessing state');
+      } finally {
+        if (alive) hydratingRef.current = false;
+      }
+    })();
+
+    return () => {
+      alive = false;
+      hydratingRef.current = false;
+    };
+  }, [activePipelineId, extractLoadedState, onLoadState]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0) return undefined;
+    if (hydratingRef.current) return undefined;
+    if (skipAutosaveRef.current) {
+      skipAutosaveRef.current = false;
+      return undefined;
+    }
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      mlopsApi.pipelineSaveScreenState(pipelineId, {
+        screen: 'preprocess',
+        state: preprocessScreenState,
+      })
+        .then((res) => {
+          const payload = res?.data || res;
+          if (payload?.pipeline_id) onPipelineActivated?.(payload);
+        })
+        .catch(() => {});
+    }, 900);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [activePipelineId, onPipelineActivated, preprocessScreenState]);
+
   const handleLoadPipeline = useCallback(async (pipelineId) => {
     try {
       const fullRes = await mlopsApi.pipelineGet(pipelineId);
       const full = fullRes?.data || fullRes;
-      const loadedSteps = extractLoadedSteps(full);
-      onLoad(loadedSteps || []);
-      onPipelineActivated?.({
+      const loaded = extractLoadedState(full);
+      onLoadState?.(loaded);
+      onLoad?.(loaded?.steps || []);
+      onPipelineActivated?.(full?.pipeline_id ? full : {
         pipeline_id: Number(full?.pipeline_id || pipelineId),
         name: String(full?.name || ''),
       });
@@ -408,7 +1014,7 @@ const PipelineSidebar = ({
     } catch (e) {
       setLoadErr(e?.message || 'Failed to load pipeline');
     }
-  }, [extractLoadedSteps, onLoad, onPipelineActivated]);
+  }, [extractLoadedState, onLoad, onLoadState, onPipelineActivated]);
 
   const counts = useMemo(() => {
     const c = { clean: 0, encode: 0, scale: 0, feat: 0, select: 0 };
@@ -538,15 +1144,23 @@ const PipelineSidebar = ({
 // ═══════════════════════════════════════════════════════════════════════════════
 // STEP FORM
 // ═══════════════════════════════════════════════════════════════════════════════
-const StepForm = ({ availableCols = [], colTypes = {}, onAdd, targetColumn = '', initialCat = 'clean' }) => {
-  const [cat,  setCat]  = useState(initialCat);
+const StepForm = ({
+  availableCols = [],
+  colTypes = {},
+  onAdd,
+  targetColumn = '',
+  initialCat = 'clean',
+  columnCatalog = [],
+  onFocusColumn,
+}) => {
+  const [cat, setCat] = useState(initialCat);
   const [type, setType] = useState(() => {
     if (initialCat === 'scale') return 'scaling_standard';
-    if (initialCat === 'feat')  return 'feature_ratio';
+    if (initialCat === 'feat') return 'feature_ratio';
     return 'imputation';
   });
   const [cols, setCols] = useState([]);
-  const [cfg,  setCfg]  = useState({
+  const [cfg, setCfg] = useState({
     strategy: 'median', constVal: 'unknown',
     degree: '2', pairsRaw: '',
     groupBy: '', groupTarget: '', agg: 'mean',
@@ -554,44 +1168,65 @@ const StepForm = ({ availableCols = [], colTypes = {}, onAdd, targetColumn = '',
   });
 
   const typesForCat = cat === 'scale' ? SCALE_TYPES : cat === 'feat' ? FEAT_ENG_TYPES : CLEAN_ENCODE_TYPES;
-  const numCols     = availableCols.filter(c => isNumDtype(colTypes[c] || ''));
-
-  const set = k => v => setCfg(p => ({ ...p, [k]: v }));
-
-  const needsCols = !['drop_duplicates','feature_ratio','feature_interaction','feature_aggregation'].includes(type);
-  const colsOk    = !needsCols || cols.length > 0;
-  const pairsOk   = (cfg.pairsRaw || '').includes(':');
-  const aggOk     = cfg.groupBy && cfg.groupTarget;
+  const numCols = availableCols.filter((c) => isNumDtype(colTypes[c] || ''));
+  const set = (key) => (value) => setCfg((prev) => ({ ...prev, [key]: value }));
+  const needsCols = !['drop_duplicates', 'feature_ratio', 'feature_interaction', 'feature_aggregation'].includes(type);
+  const pairs = useMemo(() => parseBuilderPairs(cfg.pairsRaw), [cfg.pairsRaw]);
+  const colsOk = !needsCols || cols.length > 0;
+  const pairsOk = pairs.length > 0;
+  const aggOk = cfg.groupBy && cfg.groupTarget;
+  const validation = useMemo(
+    () => validateBuilderStep({ type, cols, cfg, targetColumn }),
+    [cfg, cols, targetColumn, type],
+  );
   const canAdd = (() => {
-    if (['feature_ratio','feature_interaction'].includes(type)) return pairsOk;
+    if (validation.errors.length > 0) return false;
+    if (['feature_ratio', 'feature_interaction'].includes(type)) return pairsOk;
     if (type === 'feature_aggregation') return aggOk;
     return colsOk;
   })();
+
+  const columnMap = useMemo(() => {
+    const map = new Map();
+    (columnCatalog || []).forEach((item) => map.set(item.name, item));
+    return map;
+  }, [columnCatalog]);
+
+  const selectedColumnCards = useMemo(
+    () => cols.map((name) => columnMap.get(name)).filter(Boolean),
+    [cols, columnMap],
+  );
+  const guide = BUILDER_OPERATION_GUIDES[type] || {
+    title: stepMeta(type).label,
+    what: 'Apply a deterministic preprocessing or feature-building rule.',
+    when: 'Use when this logic improves downstream model readiness.',
+    output: 'Creates or updates model-ready fields.',
+  };
+  const flow = useMemo(
+    () => describeBuilderOutput({ type, cols, cfg }),
+    [cfg, cols, type],
+  );
 
   const buildPayload = () => {
     const base = { type, columns: cols };
     switch (type) {
       case 'imputation':
         return {
-          ...base, strategy: cfg.strategy,
+          ...base,
+          strategy: cfg.strategy,
           value: cfg.strategy === 'constant' ? cfg.constVal : null,
           k: cfg.strategy === 'knn' ? 5 : undefined,
           iterations: cfg.strategy === 'mice' ? 3 : undefined,
         };
       case 'feature_polynomial':
-        return { ...base, degree: parseInt(cfg.degree) || 2 };
+        return { ...base, degree: parseInt(cfg.degree, 10) || 2 };
       case 'feature_ratio':
       case 'feature_interaction':
-        return {
-          ...base, columns: [],
-          pairs: cfg.pairsRaw.split(',').map(p => {
-            const [a, b] = p.split(':').map(s => s.trim()); return { a, b };
-          }).filter(p => p.a && p.b),
-        };
+        return { ...base, columns: [], pairs };
       case 'feature_aggregation':
         return { type, columns: [], group_by: cfg.groupBy, target: cfg.groupTarget, agg: cfg.agg };
       case 'encoding_ordinal':
-        return { ...base, order: cfg.ordinalOrder.split(',').map(s => s.trim()).filter(Boolean) };
+        return { ...base, order: cfg.ordinalOrder.split(',').map((item) => item.trim()).filter(Boolean) };
       default:
         return base;
     }
@@ -601,194 +1236,331 @@ const StepForm = ({ availableCols = [], colTypes = {}, onAdd, targetColumn = '',
     if (!canAdd) return;
     onAdd(buildPayload());
     setCols([]);
+    if (type === 'feature_ratio' || type === 'feature_interaction') setCfg((prev) => ({ ...prev, pairsRaw: '' }));
   };
 
-  // Category tab buttons with icons
+  const focusColumn = (name) => {
+    if (name && typeof onFocusColumn === 'function') onFocusColumn(name);
+  };
+
   const CAT_TABS = [
-    { id: 'clean', Icon: Build,       label: 'Clean & Encode' },
+    { id: 'clean', Icon: Build, label: 'Clean & Encode' },
     { id: 'scale', Icon: LinearScale, label: 'Scaling' },
-    { id: 'feat',  Icon: TrendingUp,  label: 'Feature Eng.' },
+    { id: 'feat', Icon: TrendingUp, label: 'Feature Engineering' },
   ];
 
   return (
-    <Card sx={{ bgcolor: T.surface }}>
-      {/* Category tabs */}
-      <Stack direction="row" spacing={0.5} sx={{ mb: 2, flexWrap: 'wrap', gap: 0.5 }}>
-        {CAT_TABS.map(c => {
-          const CatIcon = c.Icon;
-          return (
-            <Button key={c.id} size="small"
-              variant={cat === c.id ? 'contained' : 'outlined'}
-              startIcon={<CatIcon sx={{ fontSize: 14 }} />}
-              onClick={() => {
-                setCat(c.id);
-                setType(c.id === 'scale' ? 'scaling_standard' : c.id === 'feat' ? 'feature_ratio' : 'imputation');
-                setCols([]);
-              }}
-              sx={{
-                textTransform: 'none', fontSize: 12, px: 1.5, py: 0.6, borderRadius: '8px', boxShadow: 'none',
-                ...(cat === c.id
-                  ? { bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHov } }
-                  : { borderColor: T.border, color: T.textSec, '&:hover': { borderColor: T.orange, color: T.orange } }),
-              }}>
-              {c.label}
-            </Button>
-          );
-        })}
+    <Card sx={{ bgcolor: 'white' }}>
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 1.5 }}>
+        <Box>
+          <Typography sx={{ fontWeight: 800, fontSize: 18, color: T.textPri }}>Build a transformation</Typography>
+          <Typography sx={{ fontSize: 12, color: T.textSec, mt: 0.4, maxWidth: 780, lineHeight: 1.7 }}>
+            Create derived fields, encodings, aggregations, scaling rules, and reusable preprocessing logic before model training.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
+          <Chip label={`Operation: ${guide.title}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.accentBorder}`, color: T.orange, borderRadius: 0 }} />
+          {targetColumn && (
+            <Chip label={`Target in scope: ${targetColumn}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.infoBorder}`, color: T.textPri, borderRadius: 0 }} />
+          )}
+          <OBtn icon={<Add sx={{ fontSize: 14 }} />} onClick={handleAdd} disabled={!canAdd}>
+            Add to pipeline
+          </OBtn>
+        </Stack>
       </Stack>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 1.75, mb: 2 }}>
-        {/* Step type */}
+      <Alert severity="info" icon={<InfoOutlined />} sx={{ mb: 1.5, borderRadius: 0, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+        <Typography sx={{ fontSize: 12, color: T.textPri, lineHeight: 1.65 }}>
+          This builder is rule-based and statistical. It does not use predictive modelling or generative AI unless that is explicitly enabled somewhere else in the workflow.
+        </Typography>
+      </Alert>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '220px minmax(0, 1fr)' }, gap: 1.75, mb: 1.6 }}>
         <Box>
-          <SLabel>Step type</SLabel>
-          <Select size="small" fullWidth value={type}
-            onChange={e => { setType(e.target.value); setCols([]); }} sx={{ fontSize: 12.5 }}>
-            {typesForCat.map(t => {
-              const m = stepMeta(t);
-              const TIcon = m.Icon;
+          <SLabel>Transformation family</SLabel>
+          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+            {CAT_TABS.map((item) => {
+              const CatIcon = item.Icon;
+              const isActive = cat === item.id;
               return (
-                <MenuItem key={t} value={t}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <TIcon sx={{ fontSize: 16, color: T.textSec, flexShrink: 0 }} />
-                    <Typography sx={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.2 }}>{m.label}</Typography>
-                  </Stack>
-                </MenuItem>
+                <Button
+                  key={item.id}
+                  size="small"
+                  variant={isActive ? 'contained' : 'outlined'}
+                  startIcon={<CatIcon sx={{ fontSize: 14 }} />}
+                  onClick={() => {
+                    setCat(item.id);
+                    setType(item.id === 'scale' ? 'scaling_standard' : item.id === 'feat' ? 'feature_ratio' : 'imputation');
+                    setCols([]);
+                  }}
+                  sx={{
+                    textTransform: 'none',
+                    fontSize: 12,
+                    px: 1.5,
+                    py: 0.6,
+                    borderRadius: 0,
+                    boxShadow: 'none',
+                    ...(isActive
+                      ? { bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHov } }
+                      : { borderColor: T.border, color: T.textSec, bgcolor: 'white', '&:hover': { borderColor: T.orange, color: T.orange, bgcolor: 'white' } }),
+                  }}
+                >
+                  {item.label}
+                </Button>
               );
             })}
-          </Select>
+          </Stack>
         </Box>
 
-        {/* Column picker */}
-        {needsCols && (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0, 1fr)' }, gap: 1.25 }}>
           <Box>
-            <SLabel>Columns</SLabel>
-            <Select size="small" fullWidth multiple value={cols}
-              onChange={e => setCols(e.target.value)}
-              renderValue={sel => (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.4 }}>
-                  {sel.map(v => (
-                    <Chip key={v} label={clip(v, 16)} size="small"
-                      sx={{ fontFamily: 'monospace', fontSize: 9, height: 18 }} />
-                  ))}
-                </Box>
-              )}
-              sx={{ fontSize: 12, maxHeight: 200 }}>
-              {availableCols.map(c => (
-                <MenuItem key={c} value={c}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Typography sx={{ fontFamily: 'monospace', fontSize: 12 }}>{c}</Typography>
-                    <Chip label={isNumDtype(colTypes[c] || '') ? 'num' : 'cat'} size="small"
-                      sx={{ height: 14, fontSize: 9,
-                           bgcolor: isNumDtype(colTypes[c] || '') ? '#dbeafe' : '#dcfce7' }} />
-                  </Stack>
-                </MenuItem>
-              ))}
+            <SLabel>Transformation type</SLabel>
+            <Select
+              size="small"
+              fullWidth
+              value={type}
+              onChange={(e) => {
+                setType(e.target.value);
+                setCols([]);
+              }}
+              sx={{ fontSize: 12.5, bgcolor: 'white' }}
+            >
+              {typesForCat.map((item) => {
+                const meta = stepMeta(item);
+                const MetaIcon = meta.Icon;
+                return (
+                  <MenuItem key={item} value={item}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <MetaIcon sx={{ fontSize: 16, color: T.textSec, flexShrink: 0 }} />
+                      <Typography sx={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.2 }}>{meta.label}</Typography>
+                    </Stack>
+                  </MenuItem>
+                );
+              })}
             </Select>
           </Box>
-        )}
+          <Box sx={{ p: 1.1, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+            <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPri }}>{guide.title}</Typography>
+            <Typography sx={{ fontSize: 11.25, color: T.textSec, mt: 0.5, lineHeight: 1.6 }}>
+              {guide.what}
+            </Typography>
+            <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.55 }}>
+              <strong>When to use:</strong> {guide.when}
+            </Typography>
+            <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.35 }}>
+              <strong>Output:</strong> {guide.output}
+            </Typography>
+          </Box>
+        </Box>
       </Box>
 
-      {/* Step-specific config */}
-      <Box sx={{ mb: 2 }}>
+      {needsCols && (
+        <Box sx={{ mb: 1.6 }}>
+          <SLabel>Columns in scope</SLabel>
+          <Select
+            size="small"
+            fullWidth
+            multiple
+            value={cols}
+            onChange={(e) => setCols(e.target.value)}
+            renderValue={(selected) => (
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {selected.map((value) => {
+                  const meta = columnMap.get(value);
+                  return (
+                    <Chip
+                      key={value}
+                      label={clip(value, 18)}
+                      size="small"
+                      onClick={(evt) => {
+                        evt.stopPropagation();
+                        focusColumn(value);
+                      }}
+                      sx={{ fontFamily: 'monospace', fontSize: 9, height: 20, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }}
+                    />
+                  );
+                })}
+              </Box>
+            )}
+            sx={{ fontSize: 12, bgcolor: 'white' }}
+          >
+            {(columnCatalog.length ? columnCatalog : availableCols.map((name) => ({ name, tableLabel: humanizeTableName('master_dataset'), semanticType: inferBuilderSemanticType(name, colTypes?.[name] || '') }))).map((item) => (
+              <MenuItem key={item.name} value={item.name}>
+                <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography sx={{ fontFamily: 'monospace', fontSize: 12 }}>{item.name}</Typography>
+                    <Typography sx={{ fontSize: 10, color: T.textSec }}>{item.tableLabel}</Typography>
+                  </Box>
+                  <Chip label={item.semanticType} size="small" sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                </Stack>
+              </MenuItem>
+            ))}
+          </Select>
+        </Box>
+      )}
+
+      <Box sx={{ mb: 1.6 }}>
         {type === 'imputation' && (
           <Stack direction="row" spacing={1.5} flexWrap="wrap" gap={1} alignItems="flex-start">
             <FormControl size="small" sx={{ minWidth: 160 }}>
               <InputLabel sx={{ fontSize: 12 }}>Strategy</InputLabel>
-              <Select label="Strategy" value={cfg.strategy}
-                onChange={e => set('strategy')(e.target.value)} sx={{ fontSize: 12 }}>
-                {IMPUTATION_STRATS.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+              <Select label="Strategy" value={cfg.strategy} onChange={(e) => set('strategy')(e.target.value)} sx={{ fontSize: 12, bgcolor: 'white' }}>
+                {IMPUTATION_STRATS.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
               </Select>
             </FormControl>
             {cfg.strategy === 'constant' && (
-              <TextField size="small" label="Fill value" value={cfg.constVal}
-                onChange={e => set('constVal')(e.target.value)} sx={{ width: 140 }} />
+              <TextField size="small" label="Fill value" value={cfg.constVal} onChange={(e) => set('constVal')(e.target.value)} sx={{ width: 140 }} />
             )}
-            {['knn','mice'].includes(cfg.strategy) && (
-              <Alert severity="info" sx={{ py: 0.4, fontSize: 10.5, flex: 1, alignSelf: 'center' }}>
-                {cfg.strategy === 'knn' ? 'k = 5, max 1 500 sample rows' : 'MICE — 3 iterations'}
+            {['knn', 'mice'].includes(cfg.strategy) && (
+              <Alert severity="info" sx={{ py: 0.4, fontSize: 10.5, flex: 1, alignSelf: 'center', borderRadius: 0 }}>
+                {cfg.strategy === 'knn' ? 'Uses a nearest-neighbour approximation on sampled rows.' : 'Uses iterative chained estimation for missing values.'}
               </Alert>
             )}
           </Stack>
         )}
 
         {type === 'feature_polynomial' && (
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <TextField size="small" label="Degree" type="number" value={cfg.degree}
-              onChange={e => set('degree')(e.target.value)} sx={{ width: 110 }}
-              inputProps={{ min: 2, max: 5 }} />
+          <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
+            <TextField
+              size="small"
+              label="Degree"
+              type="number"
+              value={cfg.degree}
+              onChange={(e) => set('degree')(e.target.value)}
+              sx={{ width: 110 }}
+              inputProps={{ min: 2, max: 5 }}
+            />
             <Typography variant="caption" color="text.secondary">
-              Creates col_pow2…col_pow{cfg.degree || 2} for each selected column
+              Creates additional power-based terms such as <code>{cols[0] || 'column'}_pow2</code>.
             </Typography>
           </Stack>
         )}
 
-        {['feature_ratio','feature_interaction'].includes(type) && (
+        {['feature_ratio', 'feature_interaction'].includes(type) && (
           <Box>
-            <SLabel>Column pairs (A:B, C:D)</SLabel>
-            <TextField size="small" fullWidth value={cfg.pairsRaw}
-              onChange={e => set('pairsRaw')(e.target.value)}
+            <SLabel>Column pairs (A:B)</SLabel>
+            <TextField
+              size="small"
+              fullWidth
+              value={cfg.pairsRaw}
+              onChange={(e) => set('pairsRaw')(e.target.value)}
               placeholder="cash_txn_count:txn_count, txn_amount:avg_balance"
-              sx={{ '& input': { fontFamily: 'monospace', fontSize: 12 } }} />
+              sx={{ '& input': { fontFamily: 'monospace', fontSize: 12 } }}
+            />
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, mt: 0.5, display: 'block' }}>
-              {type === 'feature_ratio' ? 'Creates: A_div_B' : 'Creates: A_x_B'} for each pair
+              Enter reusable business pairs. Click any selected column chip above to inspect it in the explorer.
             </Typography>
           </Box>
         )}
 
         {type === 'feature_aggregation' && (
           <Stack direction="row" spacing={1.25} flexWrap="wrap" gap={1} alignItems="flex-start">
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel sx={{ fontSize: 12 }}>Group by</InputLabel>
-              <Select label="Group by" value={cfg.groupBy}
-                onChange={e => set('groupBy')(e.target.value)} sx={{ fontSize: 12 }}>
-                {availableCols.map(c => <MenuItem key={c} value={c}><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c}</span></MenuItem>)}
+            <FormControl size="small" sx={{ minWidth: 170 }}>
+              <InputLabel sx={{ fontSize: 12 }}>Grouping column</InputLabel>
+              <Select label="Grouping column" value={cfg.groupBy} onChange={(e) => set('groupBy')(e.target.value)} sx={{ fontSize: 12, bgcolor: 'white' }}>
+                {availableCols.map((column) => <MenuItem key={column} value={column}><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{column}</span></MenuItem>)}
               </Select>
             </FormControl>
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel sx={{ fontSize: 12 }}>Numeric target</InputLabel>
-              <Select label="Numeric target" value={cfg.groupTarget}
-                onChange={e => set('groupTarget')(e.target.value)} sx={{ fontSize: 12 }}>
-                {numCols.map(c => <MenuItem key={c} value={c}><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{c}</span></MenuItem>)}
+            <FormControl size="small" sx={{ minWidth: 170 }}>
+              <InputLabel sx={{ fontSize: 12 }}>Value to summarise</InputLabel>
+              <Select label="Value to summarise" value={cfg.groupTarget} onChange={(e) => set('groupTarget')(e.target.value)} sx={{ fontSize: 12, bgcolor: 'white' }}>
+                {numCols.map((column) => <MenuItem key={column} value={column}><span style={{ fontFamily: 'monospace', fontSize: 12 }}>{column}</span></MenuItem>)}
               </Select>
             </FormControl>
-            <FormControl size="small" sx={{ minWidth: 110 }}>
-              <InputLabel sx={{ fontSize: 12 }}>Aggregation</InputLabel>
-              <Select label="Aggregation" value={cfg.agg}
-                onChange={e => set('agg')(e.target.value)} sx={{ fontSize: 12 }}>
-                {AGG_OPS.map(a => <MenuItem key={a} value={a}>{a}</MenuItem>)}
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel sx={{ fontSize: 12 }}>Statistic</InputLabel>
+              <Select label="Statistic" value={cfg.agg} onChange={(e) => set('agg')(e.target.value)} sx={{ fontSize: 12, bgcolor: 'white' }}>
+                {AGG_OPS.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
               </Select>
             </FormControl>
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, alignSelf: 'center' }}>
-              → <code style={{ fontFamily: 'monospace' }}>{cfg.groupTarget || 'col'}_{cfg.agg}_by_{cfg.groupBy || 'group'}</code>
-            </Typography>
+            <Box sx={{ px: 1.1, py: 0.9, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+              <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                Grouping context
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35 }}>
+                {cfg.groupTarget && cfg.groupBy ? `${cfg.agg} of ${cfg.groupTarget} inside each ${cfg.groupBy} group` : 'Pick a grouping column and a numeric value to summarise.'}
+              </Typography>
+            </Box>
           </Stack>
         )}
 
         {type === 'encoding_ordinal' && (
-          <TextField size="small" fullWidth
-            label="Category order — low→high, comma-separated"
+          <TextField
+            size="small"
+            fullWidth
+            label="Category order, from low to high"
             value={cfg.ordinalOrder}
-            onChange={e => set('ordinalOrder')(e.target.value)}
-            placeholder="low,medium,high" />
+            onChange={(e) => set('ordinalOrder')(e.target.value)}
+            placeholder="low,medium,high"
+          />
         )}
       </Box>
 
-      <OBtn icon={<Add sx={{ fontSize: 14 }} />} onClick={handleAdd} disabled={canDisable(!canAdd)}>
-        Add to pipeline
-      </OBtn>
+      {validation.errors.map((message) => (
+        <Alert key={message} severity="error" sx={{ mb: 1, borderRadius: 0 }}>
+          {message}
+        </Alert>
+      ))}
+      {validation.warnings.map((message) => (
+        <Alert key={message} severity="warning" sx={{ mb: 1, borderRadius: 0 }}>
+          {message}
+        </Alert>
+      ))}
+
+      <Box sx={{ p: 1.2, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+        <SLabel sx={{ mb: 1 }}>Input → transformation → output</SLabel>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr auto 1fr auto 1fr' }, gap: 1, alignItems: 'stretch' }}>
+          <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+            <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Input</Typography>
+            <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35 }}>{flow.input}</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>→</Box>
+          <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+            <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Transformation</Typography>
+            <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35 }}>{flow.transform}</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>→</Box>
+          <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+            <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Output</Typography>
+            <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35, fontFamily: 'monospace' }}>{flow.output}</Typography>
+          </Box>
+        </Box>
+      </Box>
+
       {!canAdd && (
-        <Typography variant="caption" color="text.secondary" sx={{ ml: 1.5, fontSize: 10 }}>
-          {(['feature_ratio','feature_interaction'].includes(type)) ? 'Enter A:B pairs first'
-           : type === 'feature_aggregation' ? 'Set group-by and target column'
-           : 'Select at least one column'}
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, fontSize: 10.5 }}>
+          {validation.errors.length > 0
+            ? 'Resolve the blocking issue above before adding this step.'
+            : ['feature_ratio', 'feature_interaction'].includes(type)
+            ? 'Enter at least one A:B pair to create a feature.'
+            : type === 'feature_aggregation'
+            ? 'Set the grouping column and numeric value before adding the aggregation.'
+            : 'Select at least one column to continue.'}
         </Typography>
+      )}
+
+      {selectedColumnCards.length > 0 && (
+        <Box sx={{ mt: 1.2 }}>
+          <SLabel>Selected column context</SLabel>
+          <Stack direction="row" spacing={0.6} sx={{ flexWrap: 'wrap', rowGap: 0.6 }}>
+            {selectedColumnCards.map((item) => (
+              <Chip
+                key={`selected_${item.name}`}
+                label={`${item.name} • ${item.tableLabel}`}
+                size="small"
+                onClick={() => focusColumn(item.name)}
+                sx={{ height: 20, fontSize: 9, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }}
+              />
+            ))}
+          </Stack>
+        </Box>
       )}
     </Card>
   );
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TAB 1 — PLAN
+// TAB 1 - PLAN
 // ═══════════════════════════════════════════════════════════════════════════════
 const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
   const [local,   setLocal]   = useState(normalizePreprocessSuggestions(suggestions || []));
@@ -935,7 +1707,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-const BuilderTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
+const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, targetColumn }) => {
   const availableCols = masterDataset?.columns || [];
   const colTypes = masterDataset?.column_types || {};
   const [activeCol, setActiveCol] = useState('');
@@ -944,16 +1716,9 @@ const BuilderTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
   const [statsErr, setStatsErr] = useState('');
   const [previewRows, setPreviewRows] = useState([]);
   const [previewLoading, setPreviewLoading] = useState(false);
-
-  useEffect(() => {
-    if (availableCols.length === 0) {
-      setActiveCol('');
-      return;
-    }
-    if (!activeCol || !availableCols.includes(activeCol)) {
-      setActiveCol(availableCols[0]);
-    }
-  }, [activeCol, availableCols]);
+  const [searchText, setSearchText] = useState('');
+  const [tableFilter, setTableFilter] = useState('all');
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const loadStats = useCallback(async () => {
     if (!masterDataset?.dataset_id) return;
@@ -993,200 +1758,407 @@ const BuilderTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
 
   useEffect(() => { loadPreview(); }, [loadPreview]);
 
-  const activeStats = statsMap?.[activeCol] || null;
+  const columnCatalog = useMemo(
+    () => buildColumnCatalog({
+      availableCols,
+      colTypes,
+      datasets,
+      masterDataset,
+      targetColumn,
+      statsMap,
+    }),
+    [availableCols, colTypes, datasets, masterDataset, statsMap, targetColumn],
+  );
+
+  const tableOptions = useMemo(() => {
+    const options = Array.from(new Set(columnCatalog.map((item) => item.table))).filter(Boolean);
+    return options.sort((a, b) => a.localeCompare(b));
+  }, [columnCatalog]);
+
+  const filteredColumns = useMemo(() => {
+    const search = String(searchText || '').trim().toLowerCase();
+    return columnCatalog.filter((item) => {
+      const matchesTable = tableFilter === 'all' || item.table === tableFilter;
+      const matchesSearch = !search
+        || item.name.toLowerCase().includes(search)
+        || item.tableLabel.toLowerCase().includes(search)
+        || item.semanticType.toLowerCase().includes(search);
+      return matchesTable && matchesSearch;
+    });
+  }, [columnCatalog, searchText, tableFilter]);
+
+  useEffect(() => {
+    if (filteredColumns.length === 0) {
+      setActiveCol('');
+      return;
+    }
+    if (!activeCol || !filteredColumns.some((item) => item.name === activeCol)) {
+      setActiveCol(filteredColumns[0].name);
+    }
+  }, [activeCol, filteredColumns]);
+
+  const groupedColumns = useMemo(() => {
+    const groups = new Map();
+    filteredColumns.forEach((item) => {
+      const key = item.tableLabel || 'Other';
+      const bucket = groups.get(key) || [];
+      bucket.push(item);
+      groups.set(key, bucket);
+    });
+    return Array.from(groups.entries());
+  }, [filteredColumns]);
+
+  const activeMeta = useMemo(
+    () => columnCatalog.find((item) => item.name === activeCol) || null,
+    [activeCol, columnCatalog],
+  );
+  const activeStats = activeMeta ? statsMap?.[activeMeta.name] || null : null;
   const topCategories = Array.isArray(activeStats?.top_categories) ? activeStats.top_categories.slice(0, 6) : [];
-  const isNumericColumn = isNumDtype(colTypes?.[activeCol] || '') || Number(activeStats?.numeric_parse_ratio || 0) >= 0.85;
+  const isNumericColumn = activeMeta
+    ? isNumDtype(activeMeta.dtype || '') || Number(activeStats?.numeric_parse_ratio || 0) >= 0.85
+    : false;
 
   return (
     <Stack spacing={2.5}>
-      <Alert severity="info" icon={<Code />} sx={{ borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
-        <Typography fontWeight={700} sx={{ fontSize: 13, mb: 0.25 }}>Custom Builder Workbench</Typography>
-        <Typography variant="body2" sx={{ fontSize: 12 }}>
-          Build reusable cleaning, encoding, scaling, and feature-engineering steps with full column context.
-          {targetColumn
-            ? ` Target "${targetColumn}" is active, so you can design features here and validate them in Select.`
-            : ' A target is optional here; you can still prepare the pipeline before supervised selection.'}
-        </Typography>
-      </Alert>
+      <Card>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={1.5}>
+          <Box>
+            <Typography sx={{ fontWeight: 800, fontSize: 18, color: T.textPri }}>Feature Engineering and Custom Builder</Typography>
+            <Typography sx={{ fontSize: 12, color: T.textSec, mt: 0.45, maxWidth: 860, lineHeight: 1.7 }}>
+              Build derived fields, aggregations, encodings, scaling rules, and reusable preprocessing steps before modelling. Every new field stays traceable to the source columns and table context you used to create it.
+            </Typography>
+          </Box>
+          <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', alignSelf: 'flex-start' }}>
+            <Chip label={`Active dataset: ${humanizeTableName(masterDataset?.dataset_type || 'master_dataset')}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+            <Chip label={`${availableCols.length} columns in scope`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+            {targetColumn && (
+              <Chip label={`Target linked: ${targetColumn}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.infoBorder}`, borderRadius: 0 }} />
+            )}
+          </Stack>
+        </Stack>
+        <Alert severity="info" icon={<Code />} sx={{ mt: 1.25, borderRadius: 0, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+          This screen is rule-based and statistics-assisted. It does not use a predictive model or generative AI to create features unless a separate optional mode explicitly says so.
+        </Alert>
+      </Card>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.2fr 0.9fr' }, gap: 2 }}>
-        <Box>
-          <StepForm
-            availableCols={availableCols}
-            colTypes={colTypes}
-            onAdd={step => onStepsChange([...steps, step])}
-            targetColumn={targetColumn}
-            initialCat="clean"
-          />
-        </Box>
+      <Card sx={{ p: 1.5 }}>
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.2} justifyContent="space-between">
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ flexWrap: 'wrap', flex: 1 }}>
+            <TextField
+              size="small"
+              label="Search columns or tables"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              sx={{ minWidth: 220 }}
+            />
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <InputLabel>Filter by table</InputLabel>
+              <Select label="Filter by table" value={tableFilter} onChange={(e) => setTableFilter(String(e.target.value))}>
+                <MenuItem value="all">All source tables</MenuItem>
+                {tableOptions.map((table) => (
+                  <MenuItem key={table} value={table}>{humanizeTableName(table)}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <OBtn variant="outlined" icon={<Refresh sx={{ fontSize: 13 }} />} onClick={loadStats} disabled={statsLoading}>
+              Refresh metadata
+            </OBtn>
+            <OBtn variant="outlined" icon={<InfoOutlined sx={{ fontSize: 13 }} />} onClick={() => setDetailOpen(true)} disabled={!activeMeta}>
+              Open column details
+            </OBtn>
+          </Stack>
+          <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap' }}>
+            <Chip label={`${filteredColumns.length} visible`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+            <Chip label={`${tableOptions.length} table groups`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+          </Stack>
+        </Stack>
+      </Card>
+
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.05fr 0.95fr' }, gap: 2 }}>
+        <StepForm
+          availableCols={availableCols}
+          colTypes={colTypes}
+          onAdd={(step) => onStepsChange([...steps, step])}
+          targetColumn={targetColumn}
+          initialCat="clean"
+          columnCatalog={columnCatalog}
+          onFocusColumn={setActiveCol}
+        />
 
         <Stack spacing={2}>
           <Card>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.2 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.1 }}>
               <Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 13.5 }}>Column Explorer</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 14 }}>Column Explorer</Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10.5 }}>
-                  Inspect available fields, value patterns, and sample data before building a step.
+                  Browse the current master dataset, grouped by source table and annotated with lineage, quality, and business meaning.
                 </Typography>
               </Box>
-              <OBtn variant="outlined" icon={<Refresh sx={{ fontSize: 13 }} />} onClick={loadStats} disabled={canDisable(statsLoading)}>
-                Refresh
-              </OBtn>
+              {activeMeta && (
+                <Chip label={`${activeMeta.name}`} size="small" sx={{ fontSize: 9, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+              )}
             </Stack>
 
             {statsLoading && <Spinner label="Loading column metadata..." />}
-            {!statsLoading && statsErr && <Alert severity="error" sx={{ borderRadius: 2 }}>{statsErr}</Alert>}
-            {!statsLoading && !statsErr && (
-              <Stack spacing={1.4}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel sx={{ fontSize: 12 }}>Inspect column</InputLabel>
-                  <Select
-                    label="Inspect column"
-                    value={activeCol}
-                    onChange={(e) => setActiveCol(String(e.target.value))}
-                    sx={{ fontSize: 12 }}
-                  >
-                    {availableCols.map((col) => (
-                      <MenuItem key={col} value={col}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography sx={{ fontFamily: 'monospace', fontSize: 12 }}>{col}</Typography>
-                          <Chip
-                            label={isNumDtype(colTypes?.[col] || '') ? 'num' : 'cat'}
-                            size="small"
-                            sx={{ height: 14, fontSize: 9, bgcolor: isNumDtype(colTypes?.[col] || '') ? '#dbeafe' : '#dcfce7' }}
-                          />
-                        </Stack>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+            {!statsLoading && statsErr && <Alert severity="error" sx={{ borderRadius: 0 }}>{statsErr}</Alert>}
+            {!statsLoading && !statsErr && filteredColumns.length === 0 && (
+              <Alert severity="info" sx={{ borderRadius: 0 }}>No columns match the current search and table filter.</Alert>
+            )}
 
-                {!activeStats ? (
-                  <Alert severity="info" sx={{ borderRadius: 2 }}>Pick a column to inspect it here.</Alert>
+            {!statsLoading && !statsErr && filteredColumns.length > 0 && (
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1fr) minmax(320px, 0.95fr)' }, gap: 1.25 }}>
+                <Box sx={{ maxHeight: 520, overflowY: 'auto', border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                  {groupedColumns.map(([groupLabel, items]) => (
+                    <Box key={groupLabel} sx={{ borderBottom: `1px solid ${T.border}` }}>
+                      <Box sx={{ px: 1.1, py: 0.75, bgcolor: T.surface, borderBottom: `1px solid ${T.border}` }}>
+                        <Typography sx={{ fontSize: 10.5, color: T.textSec, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+                          {groupLabel} ({items.length})
+                        </Typography>
+                      </Box>
+                      {items.map((item) => (
+                        <Box
+                          key={`builder_col_${item.name}`}
+                          onClick={() => setActiveCol(item.name)}
+                          onDoubleClick={() => {
+                            setActiveCol(item.name);
+                            setDetailOpen(true);
+                          }}
+                          sx={{
+                            px: 1.1,
+                            py: 1,
+                            cursor: 'pointer',
+                            borderBottom: `1px solid ${T.border}`,
+                            bgcolor: activeCol === item.name ? T.surface : 'white',
+                            '&:hover': { bgcolor: T.surface },
+                          }}
+                        >
+                          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography sx={{ fontFamily: 'monospace', fontSize: 12.25, fontWeight: 700, color: T.textPri }}>
+                                {item.name}
+                              </Typography>
+                              <Typography sx={{ fontSize: 10.5, color: T.textSec, mt: 0.2 }}>
+                                {item.tableLabel} • {item.dtype} • {item.semanticType}
+                              </Typography>
+                              <Typography sx={{ fontSize: 10.5, color: T.textSec, mt: 0.35, lineHeight: 1.5 }}>
+                                {item.businessMeaning}
+                              </Typography>
+                            </Box>
+                            <Stack spacing={0.35} alignItems="flex-end" sx={{ flexShrink: 0 }}>
+                              <Typography sx={{ fontSize: 10, color: T.textSec }}>missing {pct(item.missingPct, 1)}</Typography>
+                              <Typography sx={{ fontSize: 10, color: T.textSec }}>distinct {fmt(item.distinctCount)}</Typography>
+                            </Stack>
+                          </Stack>
+                          <Stack direction="row" spacing={0.45} sx={{ flexWrap: 'wrap', rowGap: 0.45, mt: 0.8 }}>
+                            {item.tags.map((tag) => (
+                              <Tooltip key={`${item.name}_${tag}`} title={`Lineage tag: ${tag}`}>
+                                <Chip label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                              </Tooltip>
+                            ))}
+                          </Stack>
+                        </Box>
+                      ))}
+                    </Box>
+                  ))}
+                </Box>
+
+                {!activeMeta ? (
+                  <Alert severity="info" sx={{ borderRadius: 0 }}>Select a column to inspect its lineage, quality, and sample values.</Alert>
                 ) : (
-                  <>
-                    <Stack direction="row" spacing={0.6} flexWrap="wrap" sx={{ rowGap: 0.6 }}>
-                      <Chip label={`dtype: ${activeStats.dtype || colTypes?.[activeCol] || 'unknown'}`} size="small" sx={{ height: 18, fontSize: 9, fontFamily: 'monospace', bgcolor: T.surface }} />
-                      <Chip label={`missing: ${pct(activeStats.missing_pct, 1)}`} size="small" sx={{ height: 18, fontSize: 9, bgcolor: T.warnBg, color: '#b45309' }} />
-                      <Chip label={`distinct: ${fmt(activeStats.distinct_count)}`} size="small" sx={{ height: 18, fontSize: 9, bgcolor: T.infoBg, color: '#1d4ed8' }} />
-                      {activeStats.numeric_parse_ratio != null && Number(activeStats.numeric_parse_ratio) > 0 && (
-                        <Chip label={`numeric parse: ${pct(activeStats.numeric_parse_ratio, 0)}`} size="small" sx={{ height: 18, fontSize: 9, bgcolor: T.surface }} />
-                      )}
-                    </Stack>
+                  <Box sx={{ border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                    <Box sx={{ px: 1.2, py: 1, borderBottom: `1px solid ${T.border}`, bgcolor: T.surface }}>
+                      <Typography sx={{ fontSize: 14, fontWeight: 700, color: T.textPri }}>{activeMeta.name}</Typography>
+                      <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.25 }}>
+                        {activeMeta.tableLabel} • {activeMeta.dtype} • {activeMeta.semanticType}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ p: 1.2 }}>
+                      <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mb: 1 }}>
+                        {activeMeta.tags.map((tag) => (
+                          <Tooltip key={`active_${tag}`} title={`Origin or control tag: ${tag}`}>
+                            <Chip label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                          </Tooltip>
+                        ))}
+                      </Stack>
 
-                    {isNumericColumn ? (
-                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
+                      <Typography sx={{ fontSize: 11.5, color: T.textPri, lineHeight: 1.6 }}>
+                        {activeMeta.businessMeaning}
+                      </Typography>
+
+                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.8, mt: 1.2 }}>
                         {[
-                          ['Min', fmtF(activeStats.min)],
-                          ['Max', fmtF(activeStats.max)],
-                          ['Mean', fmtF(activeStats.mean)],
-                          ['Variance', fmtF(activeStats.variance, 5)],
-                          ['MAD', fmtF(activeStats.mean_abs_deviation, 5)],
-                          ['Dispersion', fmtF(activeStats.dispersion_ratio, 4)],
+                          ['Source table', activeMeta.tables.map(humanizeTableName).join(', ')],
+                          ['Missing', pct(activeMeta.missingPct, 1)],
+                          ['Distinct values', fmt(activeMeta.distinctCount)],
+                          ['Business type', activeMeta.semanticType],
                         ].map(([label, value]) => (
-                          <Box key={label} sx={{ p: 1.1, borderRadius: 1.25, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                          <Box key={label} sx={{ p: 0.9, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
                             <Typography variant="caption" sx={{ fontSize: 10, color: T.textSec }}>{label}</Typography>
-                            <Typography sx={{ fontFamily: 'monospace', fontSize: 12.5, fontWeight: 700 }}>{value}</Typography>
+                            <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.25 }}>{value}</Typography>
                           </Box>
                         ))}
                       </Box>
-                    ) : (
-                      <Box>
-                        <SLabel>Top values</SLabel>
-                        {topCategories.length === 0 ? (
-                          <Alert severity="info" sx={{ py: 0.4, fontSize: 11 }}>No category profile is available for this column yet.</Alert>
-                        ) : (
-                          <Stack spacing={0.55}>
-                            {topCategories.map((item) => (
-                              <Stack key={`${activeCol}-${item.value}`} direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 0.8, borderRadius: 1.25, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
-                                <Typography sx={{ fontFamily: 'monospace', fontSize: 11.5 }}>{clip(item.value, 22)}</Typography>
-                                <Typography variant="caption" sx={{ fontSize: 10.5, color: T.textSec }}>{fmt(item.count)}</Typography>
-                              </Stack>
+
+                      <Divider sx={{ my: 1.2 }} />
+
+                      <SLabel>Sample values</SLabel>
+                      {previewLoading ? (
+                        <Spinner label="Loading sample values..." />
+                      ) : previewRows.length === 0 ? (
+                        <Alert severity="info" sx={{ borderRadius: 0 }}>No sample rows are available for this column.</Alert>
+                      ) : (
+                        <Box sx={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                            <thead>
+                              <tr style={{ background: '#f8fafc' }}>
+                                <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, color: T.textSec, borderBottom: `1px solid ${T.border}` }}>Row</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, color: T.textSec, borderBottom: `1px solid ${T.border}` }}>{activeMeta.name}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {previewRows.map((row, idx) => (
+                                <tr key={`${activeMeta.name}_${idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                                  <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: T.textSec }}>{idx + 1}</td>
+                                  <td style={{ padding: '6px 8px', fontFamily: 'monospace' }}>{String(row?.[activeMeta.name] ?? '-')}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </Box>
+                      )}
+
+                      {isNumericColumn && activeStats ? (
+                        <>
+                          <Divider sx={{ my: 1.2 }} />
+                          <SLabel>Numeric profile</SLabel>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.8 }}>
+                            {[
+                              ['Min', fmtF(activeStats.min)],
+                              ['Max', fmtF(activeStats.max)],
+                              ['Mean', fmtF(activeStats.mean)],
+                              ['Skewness', fmtF(activeStats.skewness)],
+                              ['Variance', fmtF(activeStats.variance, 5)],
+                              ['Dispersion', fmtF(activeStats.dispersion_ratio, 4)],
+                            ].map(([label, value]) => (
+                              <Box key={label} sx={{ p: 0.9, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                                <Typography variant="caption" sx={{ fontSize: 10, color: T.textSec }}>{label}</Typography>
+                                <Typography sx={{ fontFamily: 'monospace', fontSize: 11.5, fontWeight: 700 }}>{value}</Typography>
+                              </Box>
                             ))}
-                          </Stack>
-                        )}
-                      </Box>
-                    )}
-                  </>
+                          </Box>
+                        </>
+                      ) : (
+                        <>
+                          <Divider sx={{ my: 1.2 }} />
+                          <SLabel>Top categories</SLabel>
+                          {topCategories.length === 0 ? (
+                            <Alert severity="info" sx={{ borderRadius: 0 }}>No category profile is available for this column yet.</Alert>
+                          ) : (
+                            <Stack spacing={0.55}>
+                              {topCategories.map((item) => (
+                                <Stack key={`${activeMeta.name}_${item.value}`} direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 0.8, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+                                  <Typography sx={{ fontFamily: 'monospace', fontSize: 11.5 }}>{clip(item.value, 22)}</Typography>
+                                  <Typography variant="caption" sx={{ fontSize: 10.5, color: T.textSec }}>{fmt(item.count)}</Typography>
+                                </Stack>
+                              ))}
+                            </Stack>
+                          )}
+                        </>
+                      )}
+                    </Box>
+                  </Box>
                 )}
-              </Stack>
-            )}
-          </Card>
-
-          <Card>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-              <Box>
-                <Typography sx={{ fontWeight: 700, fontSize: 13.5 }}>Sample Values</Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10.5 }}>
-                  Quick preview of live values for the selected column.
-                </Typography>
-              </Box>
-              <Chip label={activeCol ? summarizeColumns([activeCol], 1) : 'No column'} size="small" sx={{ fontSize: 9, bgcolor: T.surface }} />
-            </Stack>
-
-            {previewLoading ? (
-              <Spinner label="Loading sample values..." />
-            ) : previewRows.length === 0 ? (
-              <Alert severity="info" sx={{ borderRadius: 2 }}>No sample rows are available for this column.</Alert>
-            ) : (
-              <Box sx={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
-                  <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, color: T.textSec, borderBottom: `1px solid ${T.border}` }}>Row</th>
-                      <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, color: T.textSec, borderBottom: `1px solid ${T.border}` }}>{activeCol || 'Value'}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewRows.map((row, idx) => (
-                      <tr key={`${activeCol}-${idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: T.textSec }}>{idx + 1}</td>
-                        <td style={{ padding: '6px 8px', fontFamily: 'monospace' }}>{String(row?.[activeCol] ?? 'â€”')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </Box>
             )}
           </Card>
         </Stack>
       </Box>
+
+      <Dialog open={detailOpen && !!activeMeta} onClose={() => setDetailOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, borderBottom: `1px solid ${T.border}` }}>
+          {activeMeta?.name || 'Column details'}
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {activeMeta && (
+            <Box sx={{ p: 2, display: 'grid', gap: 1.5 }}>
+              <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7 }}>
+                {activeMeta.businessMeaning}
+              </Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
+                <Box sx={{ p: 1.1, border: `1px solid ${T.border}` }}>
+                  <Typography variant="caption" sx={{ color: T.textSec }}>Column origin</Typography>
+                  <Typography sx={{ fontSize: 12, color: T.textPri, mt: 0.3 }}>
+                    {activeMeta.tables.map(humanizeTableName).join(', ')}
+                  </Typography>
+                </Box>
+                <Box sx={{ p: 1.1, border: `1px solid ${T.border}` }}>
+                  <Typography variant="caption" sx={{ color: T.textSec }}>Lineage tags</Typography>
+                  <Stack direction="row" spacing={0.5} sx={{ mt: 0.4, flexWrap: 'wrap', rowGap: 0.5 }}>
+                    {activeMeta.tags.map((tag) => (
+                      <Chip key={`modal_${tag}`} label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                    ))}
+                  </Stack>
+                </Box>
+              </Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 1 }}>
+                {[
+                  ['Data type', activeMeta.dtype],
+                  ['Semantic type', activeMeta.semanticType],
+                  ['Missing', pct(activeMeta.missingPct, 1)],
+                  ['Distinct', fmt(activeMeta.distinctCount)],
+                ].map(([label, value]) => (
+                  <Box key={`modal_${label}`} sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+                    <Typography variant="caption" sx={{ color: T.textSec }}>{label}</Typography>
+                    <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.25 }}>{value}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Box sx={{ p: 1.1, border: `1px solid ${T.border}` }}>
+                <Typography variant="caption" sx={{ color: T.textSec }}>Sample values</Typography>
+                <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35, lineHeight: 1.7 }}>
+                  {(activeMeta.sampleValues && activeMeta.sampleValues.length ? activeMeta.sampleValues : ['No sampled values available']).join(', ')}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };
 
-// TAB 2 — ENGINEER
+// TAB 2 - ENGINEER
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// AML templates — icon is a MUI component ref, not emoji
+// AML templates - icon is a MUI component ref, not emoji
 const AML_TEMPLATES = [
   {
     label: 'Cash Intensity Ratio',    Icon: ShowChart,
-    desc:  'cash_txn_count ÷ txn_count — primary structuring signal',
+    desc:  'cash_txn_count ÷ txn_count - primary structuring signal',
     step:  { type: 'feature_ratio', columns: [], pairs: [{ a: 'cash_txn_count', b: 'txn_count' }] },
     req:   ['cash_txn_count', 'txn_count'],
   },
   {
     label: 'Velocity Ratio',          Icon: TrendingUp,
-    desc:  'max_txn_amount ÷ avg_txn_amount — detects sudden transaction spikes',
+    desc:  'max_txn_amount ÷ avg_txn_amount - detects sudden transaction spikes',
     step:  { type: 'feature_ratio', columns: [], pairs: [{ a: 'max_txn_amount', b: 'avg_txn_amount' }] },
     req:   ['max_txn_amount', 'avg_txn_amount'],
   },
   {
     label: 'Balance-to-TXN Ratio',   Icon: CompareArrows,
-    desc:  'CURRENT_BALANCE ÷ avg_txn_amount — unusual balance context',
+    desc:  'CURRENT_BALANCE ÷ avg_txn_amount - unusual balance context',
     step:  { type: 'feature_ratio', columns: [], pairs: [{ a: 'CURRENT_BALANCE', b: 'avg_txn_amount' }] },
     req:   ['CURRENT_BALANCE', 'avg_txn_amount'],
   },
   {
     label: 'PEP × Risk Score',        Icon: Warning,
-    desc:  'PEP_FLAG × CUSTOMER_RISK_RATING — multiplicative risk signal',
+    desc:  'PEP_FLAG × CUSTOMER_RISK_RATING - multiplicative risk signal',
     step:  { type: 'feature_interaction', columns: [], pairs: [{ a: 'PEP_FLAG', b: 'CUSTOMER_RISK_RATING' }] },
     req:   ['PEP_FLAG', 'CUSTOMER_RISK_RATING'],
   },
   {
     label: 'Offshore × Risk',         Icon: Link,
-    desc:  'offshore_txn_count × RISK_SCORE — combined offshore-risk signal',
+    desc:  'offshore_txn_count × RISK_SCORE - combined offshore-risk signal',
     step:  { type: 'feature_interaction', columns: [], pairs: [{ a: 'offshore_txn_count', b: 'RISK_SCORE' }] },
     req:   ['offshore_txn_count', 'RISK_SCORE'],
   },
@@ -1204,7 +2176,7 @@ const AML_TEMPLATES = [
   },
   {
     label: 'Std TXN by Customer Risk', Icon: ScatterPlot,
-    desc:  'std(TXN_AMOUNT) grouped by CUSTOMER_RISK_RATING — volatility by risk band',
+    desc:  'std(TXN_AMOUNT) grouped by CUSTOMER_RISK_RATING - volatility by risk band',
     step:  { type: 'feature_aggregation', columns: [], group_by: 'CUSTOMER_RISK_RATING', target: 'TXN_AMOUNT', agg: 'std' },
     req:   ['CUSTOMER_RISK_RATING', 'TXN_AMOUNT'],
   },
@@ -1222,7 +2194,7 @@ const AML_TEMPLATES = [
   },
   {
     label: 'Frequency Encode Account Type', Icon: Percent,
-    desc:  'Replace ACCOUNT_TYPE with its frequency count — cardinality signal',
+    desc:  'Replace ACCOUNT_TYPE with its frequency count - cardinality signal',
     step:  { type: 'encoding_frequency', columns: ['ACCOUNT_TYPE'] },
     req:   ['ACCOUNT_TYPE'],
   },
@@ -1234,23 +2206,31 @@ const AML_TEMPLATES = [
   },
 ];
 
-const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
+const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpenBuilder }) => {
   const availableCols = masterDataset?.columns || [];
   const availableCount = AML_TEMPLATES.filter(t => t.req.every(c => availableCols.includes(c))).length;
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
 
   return (
     <Stack spacing={2.5}>
-      <Alert severity="info" icon={<MemoryOutlined />} sx={{ borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
-        <Typography fontWeight={700} sx={{ mb: 0.3, fontSize: 13 }}>Feature Engineering</Typography>
-        <Typography variant="body2" sx={{ fontSize: 12 }}>
-          Transform raw columns into higher-signal representations.
-          These steps run <strong>before</strong> encoding/scaling in the pipeline.
-          New columns appear in the Preview tab immediately.
-          {targetColumn
-            ? ` Target "${targetColumn}" is set — supervised importance scoring is available in Feature Selection.`
-            : ' No target set yet — all engineering features are still available.'}
-        </Typography>
-      </Alert>
+      <Card sx={{ bgcolor: '#fff' }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={1.5}>
+          <Box>
+            <Typography sx={{ fontWeight: 800, fontSize: 18, color: T.textPri }}>AML feature engineering</Typography>
+            <Typography sx={{ fontSize: 12, color: T.textSec, mt: 0.45, maxWidth: 820, lineHeight: 1.7 }}>
+              Create reusable behavioural signals before model training. These features are built from deterministic formulas, aggregations, and encodings so the team can explain exactly how each field is calculated.
+            </Typography>
+          </Box>
+          <Chip
+            label={targetColumn ? `Target linked: ${targetColumn}` : 'Target optional at this stage'}
+            size="small"
+            sx={{ alignSelf: 'flex-start', fontSize: 10, bgcolor: T.surface, color: T.textPri }}
+          />
+        </Stack>
+        <Alert severity="info" icon={<MemoryOutlined />} sx={{ mt: 1.25, borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+          This stage is not generative AI. It uses deterministic feature rules and preprocessing logic. New columns appear in Preview immediately, and the trained model uses them later only if you keep them.
+        </Alert>
+      </Card>
 
       <Card>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
@@ -1258,17 +2238,33 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
             <Stack direction="row" spacing={1} alignItems="center">
               <WorkspacePremium sx={{ fontSize: 18, color: T.orange }} />
               <Typography sx={{ fontWeight: 700, fontSize: 14 }}>AML Domain Templates</Typography>
+              <Tooltip title="Explain how these templates are defined">
+                <IconButton size="small" onClick={() => setSelectedTemplate({ label: 'AML Domain Templates' })} sx={{ color: T.textSec }}>
+                  <InfoOutlined sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
             </Stack>
             <Typography variant="caption" color="text.secondary">
               Pre-built features for false-positive suppression
             </Typography>
           </Box>
-          <Chip
-            label={`${availableCount} / ${AML_TEMPLATES.length} available`}
-            size="small"
-            sx={{ fontSize: 10, bgcolor: T.orangeLight, color: T.orange }}
-          />
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            <Chip
+              label={`${availableCount} / ${AML_TEMPLATES.length} available`}
+              size="small"
+              sx={{ fontSize: 10, bgcolor: T.orangeLight, color: T.orange }}
+            />
+            <OBtn variant="outlined" size="small" onClick={onOpenBuilder}>
+              Build custom feature
+            </OBtn>
+          </Stack>
         </Stack>
+
+        <Box sx={{ mb: 1.4, p: 1.15, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
+          <Typography sx={{ fontSize: 11.5, color: T.textSec, lineHeight: 1.7 }}>
+            Templates are defined from AML heuristics and simple formulas such as ratios, interactions, aggregations, and date parts. Click the info icon on any template to see what it means, how it is calculated, and why it can help reduce false positives.
+          </Typography>
+        </Box>
 
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))', gap: 1.25 }}>
           {AML_TEMPLATES.map((t, i) => {
@@ -1276,6 +2272,11 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
             const canUse = t.req.every(c => availableCols.includes(c));
             const added  = steps.some(s => JSON.stringify(s) === JSON.stringify(t.step));
             const miss   = t.req.filter(c => !availableCols.includes(c));
+            const explainer = AML_TEMPLATE_EXPLAINERS[t.label] || {
+              summary: 'Reusable AML feature template.',
+              calculation: t.desc,
+              why: 'Helps create a model-ready behavioural signal from the current dataset.',
+            };
             return (
               <Box key={i} sx={{
                 p: 1.5, borderRadius: 1.5, transition: 'all 0.12s',
@@ -1289,9 +2290,17 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                     <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.4 }}>
                       <TIcon sx={{ fontSize: 16, color: added ? T.done : T.orange, flexShrink: 0 }} />
                       <Typography sx={{ fontWeight: 700, fontSize: 12.5 }}>{t.label}</Typography>
+                      <Tooltip title="Explain this template">
+                        <IconButton size="small" onClick={() => setSelectedTemplate(t)} sx={{ color: T.textSec, ml: 'auto' }}>
+                          <InfoOutlined sx={{ fontSize: 15 }} />
+                        </IconButton>
+                      </Tooltip>
                     </Stack>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>
-                      {t.desc}
+                      {explainer.summary}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block', mt: 0.35 }}>
+                      Formula: {explainer.calculation}
                     </Typography>
                     {!canUse && (
                       <Stack direction="row" spacing={0.4} flexWrap="wrap" sx={{ mt: 0.5 }}>
@@ -1316,14 +2325,62 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
       </Card>
 
       <Alert severity="info" icon={<Code />} sx={{ borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
-        Custom feature engineering now lives in the dedicated Builder tab, where you can inspect column values and metadata while designing steps. This screen stays focused on reusable AML templates.
+        Need a feature that is not listed here? Use Builder to create your own deterministic rule, aggregation, ratio, encoding, or interaction and add it to the pipeline.
       </Alert>
+
+      <Dialog open={Boolean(selectedTemplate)} onClose={() => setSelectedTemplate(null)} fullWidth maxWidth="md">
+        <DialogTitle sx={{ fontWeight: 800, fontSize: 18 }}>
+          {selectedTemplate?.label === 'AML Domain Templates' ? 'How AML templates are defined' : selectedTemplate?.label}
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedTemplate?.label === 'AML Domain Templates' ? (
+            <Stack spacing={1.25}>
+              <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7 }}>
+                These templates are deterministic AML feature patterns. They are defined from ratios, interactions, aggregation logic, and date-derived signals that are commonly useful in false-positive reduction.
+              </Typography>
+              <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7 }}>
+                They are not generated by GenAI and they are not learned by the model at this stage. The model only sees the resulting engineered columns later if you keep them in the pipeline.
+              </Typography>
+              <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7 }}>
+                If your team needs a bank-specific feature, use Builder to create it and keep the formula under explicit governance.
+              </Typography>
+            </Stack>
+          ) : (
+            <Stack spacing={1.25}>
+              <Box>
+                <Typography sx={{ fontSize: 10, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>What it means</Typography>
+                <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: T.textPri, mt: 0.25 }}>
+                  {(AML_TEMPLATE_EXPLAINERS[selectedTemplate?.label] || {}).summary || selectedTemplate?.desc}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography sx={{ fontSize: 10, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>How it is calculated</Typography>
+                <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7, mt: 0.25 }}>
+                  {(AML_TEMPLATE_EXPLAINERS[selectedTemplate?.label] || {}).calculation || selectedTemplate?.desc}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography sx={{ fontSize: 10, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>Why it helps</Typography>
+                <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7, mt: 0.25 }}>
+                  {(AML_TEMPLATE_EXPLAINERS[selectedTemplate?.label] || {}).why || 'This creates a reusable behavioural feature that can improve separation between low-value and actionable alerts.'}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography sx={{ fontSize: 10, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>Required inputs</Typography>
+                <Typography sx={{ fontSize: 12.5, color: T.textSec, lineHeight: 1.7, mt: 0.25 }}>
+                  {(selectedTemplate?.req || []).join(', ') || 'No required columns listed'}
+                </Typography>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TAB 3 — SELECT
+// TAB 3 - SELECT
 // ═══════════════════════════════════════════════════════════════════════════════
 const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
   const [data,       setData]       = useState(null);
@@ -1339,6 +2396,11 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
   const [showFilterTechniques, setShowFilterTechniques] = useState(false);
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
   const [scoreSelectionMode, setScoreSelectionMode] = useState('keep');
+  const [viewMode, setViewMode] = useState('business');
+  const [selectedFeature, setSelectedFeature] = useState('');
+  const [featureDetail, setFeatureDetail] = useState(null);
+  const [featureDetailLoading, setFeatureDetailLoading] = useState(false);
+  const [featureDetailError, setFeatureDetailError] = useState('');
 
   const load = useCallback(async () => {
     if (!masterDataset?.dataset_id) return;
@@ -1476,6 +2538,18 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
   const applyButtonLabel = activeTechniqueScope === 'score' && scoreSelectionMode === 'keep'
     ? `Apply keep selection (${selectedWorkbenchCols.length})`
     : `Apply drop selection (${applyColumns.length})`;
+  const activeTechniqueGuide = FEATURE_SELECTION_EXPLAINERS[activeTechnique?.id] || null;
+  const scoreMetricLabel = FEATURE_SELECTION_TECHNIQUE_MAP[effectiveScoreMetric]?.label || activeTechnique?.label || 'Recommended screening metric';
+  const scoreRowLookup = useMemo(
+    () => Object.fromEntries(miAll.map((row, idx) => [row.feature, { ...row, rank_position: idx + 1 }])),
+    [miAll],
+  );
+  const leakageNameRows = Array.isArray(techniqueResults?.leakage_name_scan?.rows) ? techniqueResults.leakage_name_scan.rows : [];
+  const leakageCorrRows = Array.isArray(techniqueResults?.leakage_target_corr?.rows) ? techniqueResults.leakage_target_corr.rows : [];
+  const varianceRows = Array.isArray(techniqueResults?.variance_threshold?.rows) ? techniqueResults.variance_threshold.rows : [];
+  const madRows = Array.isArray(techniqueResults?.mean_abs_deviation?.rows) ? techniqueResults.mean_abs_deviation.rows : [];
+  const dispersionRows = Array.isArray(techniqueResults?.dispersion_ratio?.rows) ? techniqueResults.dispersion_ratio.rows : [];
+  const correlationRows = Array.isArray(techniqueResults?.correlation_filter?.rows) ? techniqueResults.correlation_filter.rows : [];
 
   useEffect(() => {
     if (activeTechniqueId && techniqueLookup[activeTechniqueId]) return;
@@ -1502,8 +2576,291 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
     });
   }, [effectiveScoreMetric, scoreMetricLookup, techniqueLookup]);
 
-  const panels = [];
+  const featureProfiles = useMemo(() => {
+    const leakageByName = new Set(leakageNameRows.map((row) => String(row?.feature || '')));
+    const leakageByTarget = new Set(leakageCorrRows.map((row) => String(row?.feature || '')));
+    const lowVarianceSet = new Set(varianceRows.map((row) => String(row?.feature || '')));
+    const lowMadSet = new Set(madRows.map((row) => String(row?.feature || '')));
+    const lowDispersionSet = new Set(dispersionRows.map((row) => String(row?.feature || '')));
+    const redundancySet = new Set(correlationRows.map((row) => String(row?.feature || '')));
+    const redundancyPartners = Object.fromEntries(
+      correlationRows.map((row) => [
+        String(row?.feature || ''),
+        Array.isArray(row?.partners) ? row.partners : [],
+      ]),
+    );
+    const rankedScores = miAll.map((row) => Number(row.rank_value)).filter((value) => Number.isFinite(value));
+    const minScore = rankedScores.length ? Math.min(...rankedScores) : 0;
+    const maxScore = rankedScores.length ? Math.max(...rankedScores) : 0;
+    const denominator = maxScore - minScore;
+    const totalRows = Number(workbenchPayload?.rows_analyzed || 0);
 
+    return columnInventory
+      .filter((item) => !item?.is_id)
+      .map((item) => {
+        const feature = String(item?.name || '');
+        const scoreRow = scoreRowLookup[feature] || null;
+        const rawScore = Number(scoreRow?.rank_value);
+        const hasScore = Number.isFinite(rawScore);
+        const scoreNorm = hasScore
+          ? (denominator <= 0 ? 1 : clamp01((rawScore - minScore) / denominator))
+          : 0;
+        const rankPosition = Number(scoreRow?.rank_position || 0);
+        const isTopRank = rankPosition > 0 && rankPosition <= safeTopN;
+        const missingPct = Number(item?.missing_pct || 0);
+        const distinctCount = Number(item?.distinct_count || 0);
+        const uniqueRatio = totalRows > 0 ? clamp01(distinctCount / totalRows) : 0;
+        const hasLeakage = leakageByName.has(feature) || leakageByTarget.has(feature);
+        const hasRedundancy = redundancySet.has(feature);
+        const hasLowVariance = lowVarianceSet.has(feature) || lowMadSet.has(feature) || lowDispersionSet.has(feature);
+        const signalBand = !targetColumn
+          ? 'Awaiting target definition'
+          : !hasScore
+            ? 'No clear signal'
+            : (isTopRank || scoreNorm >= 0.68)
+              ? 'Strong signal'
+              : scoreNorm >= 0.4
+                ? 'Moderate signal'
+                : scoreNorm >= 0.18
+                  ? 'Weak signal'
+                  : 'No clear signal';
+        const qualityLabel = featureQualityLabel(missingPct, hasLowVariance);
+        let recommendation = 'review';
+        if (hasLeakage) {
+          recommendation = 'drop';
+        } else if (hasRedundancy && !isTopRank) {
+          recommendation = 'drop';
+        } else if (targetColumn && hasScore && (isTopRank || scoreNorm >= 0.68) && qualityLabel === 'Good') {
+          recommendation = 'keep';
+        } else if (!targetColumn && !hasLeakage && !hasRedundancy && qualityLabel !== 'Poor') {
+          recommendation = 'review';
+        } else if (qualityLabel === 'Poor') {
+          recommendation = 'review';
+        }
+        const businessMeaning = inferFeatureBusinessMeaning(feature, item?.role);
+        const evidence = [];
+        if (targetColumn) {
+          if (hasScore) {
+            evidence.push(`Estimated relationship strength with the target is ${signalBand.toLowerCase()} using ${scoreMetricLabel}.`);
+          } else {
+            evidence.push('No supervised score is available for this field under the current target setup.');
+          }
+        } else {
+          evidence.push('Supervised screening is not available until a target column is defined.');
+        }
+        if (isTopRank) {
+          evidence.push(`This field sits inside the current top ${safeTopN} ranking cut.`);
+        }
+        if (hasRedundancy) {
+          const partnerText = (redundancyPartners[feature] || [])
+            .slice(0, 2)
+            .map((partner) => String(partner?.feature || ''))
+            .filter(Boolean)
+            .join(', ');
+          evidence.push(partnerText
+            ? `It overlaps heavily with ${partnerText}.`
+            : 'It overlaps heavily with another high-correlation field.');
+        }
+        if (hasLeakage) {
+          evidence.push('Its name or target relationship suggests leakage risk, so it should not be trusted for model training.');
+        }
+        if (missingPct >= 0.25) {
+          evidence.push(`${pct(missingPct, 0)} of rows are missing, which weakens operational stability.`);
+        }
+        if (hasLowVariance) {
+          evidence.push('The field shows limited spread, so it may add little new information on its own.');
+        }
+        if (!evidence.length) {
+          evidence.push('This field needs manual review before it is either kept or excluded.');
+        }
+        const issueTags = [];
+        if (hasLeakage) issueTags.push('Potential leakage');
+        if (hasRedundancy) issueTags.push('Likely redundant');
+        if (hasLowVariance) issueTags.push('Low variation');
+        if (missingPct >= 0.25) issueTags.push('High missingness');
+        if (signalBand === 'Weak signal' || signalBand === 'No clear signal') issueTags.push('Weak signal');
+        return {
+          feature,
+          displayName: humanizeFeatureName(feature),
+          role: item?.role || scoreRow?.role || scoreRow?.dtype || 'unknown',
+          dtype: item?.dtype || scoreRow?.dtype || item?.role || 'unknown',
+          recommendation,
+          recommendationLabel: FEATURE_DECISION_STYLES[recommendation]?.label || 'Review',
+          signalBand,
+          hasLeakage,
+          hasRedundancy,
+          hasLowVariance,
+          weakSignal: signalBand === 'Weak signal' || signalBand === 'No clear signal',
+          qualityLabel,
+          interpretabilityLabel: featureInterpretabilityLabel(item?.role, distinctCount),
+          businessMeaning,
+          score: hasScore ? rawScore : null,
+          scoreNorm,
+          scorePct: Math.round(scoreNorm * 100),
+          rankPosition: rankPosition || null,
+          missingPct,
+          distinctCount,
+          uniqueRatio,
+          sampleValues: Array.isArray(item?.sample_values) ? item.sample_values : [],
+          topCategories: Array.isArray(item?.top_categories) ? item.top_categories : [],
+          evidence,
+          issueTags,
+        };
+      })
+      .sort((left, right) => {
+        const decisionOrder = { keep: 0, review: 1, drop: 2 };
+        const leftOrder = decisionOrder[left.recommendation] ?? 3;
+        const rightOrder = decisionOrder[right.recommendation] ?? 3;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+        if ((right.scoreNorm || 0) !== (left.scoreNorm || 0)) return (right.scoreNorm || 0) - (left.scoreNorm || 0);
+        return (left.missingPct || 0) - (right.missingPct || 0);
+      });
+  }, [
+    columnInventory,
+    correlationRows,
+    leakageCorrRows,
+    leakageNameRows,
+    madRows,
+    miAll,
+    safeTopN,
+    scoreMetricLabel,
+    scoreRowLookup,
+    targetColumn,
+    techniqueResults,
+    varianceRows,
+    dispersionRows,
+    workbenchPayload?.rows_analyzed,
+  ]);
+
+  const featureProfileLookup = useMemo(
+    () => Object.fromEntries(featureProfiles.map((profile) => [profile.feature, profile])),
+    [featureProfiles],
+  );
+  const summaryCounts = useMemo(() => ({
+    keep: featureProfiles.filter((profile) => profile.recommendation === 'keep').length,
+    review: featureProfiles.filter((profile) => profile.recommendation === 'review').length,
+    redundant: featureProfiles.filter((profile) => profile.hasRedundancy).length,
+    risk: featureProfiles.filter((profile) => profile.hasLeakage).length,
+    weak: featureProfiles.filter((profile) => profile.weakSignal).length,
+  }), [featureProfiles]);
+  const leaderboardData = useMemo(
+    () => featureProfiles
+      .filter((profile) => profile.score != null || profile.recommendation === 'drop')
+      .slice(0, 12),
+    [featureProfiles],
+  );
+  const signalBandData = useMemo(() => {
+    const order = ['Strong signal', 'Moderate signal', 'Weak signal', 'No clear signal', 'Awaiting target definition'];
+    return order
+      .map((label) => ({
+        band: label,
+        count: featureProfiles.filter((profile) => profile.signalBand === label).length,
+      }))
+      .filter((item) => item.count > 0);
+  }, [featureProfiles]);
+  const qualityRiskMatrix = useMemo(
+    () => featureProfiles.slice(0, 18).map((profile) => ({
+      feature: profile.displayName,
+      usefulness: profile.scorePct || 0,
+      qualityRisk: Math.round(((profile.missingPct || 0) + (profile.hasLowVariance ? 0.2 : 0) + (profile.hasRedundancy ? 0.1 : 0)) * 100),
+      weight: profile.rankPosition ? Math.max(20 - profile.rankPosition, 4) : 6,
+      recommendation: profile.recommendation,
+    })),
+    [featureProfiles],
+  );
+  const bucketGroups = useMemo(() => ([
+    {
+      key: 'keep',
+      title: 'Strong business signal',
+      description: 'Fields that look useful enough to keep moving forward.',
+      items: featureProfiles.filter((profile) => profile.recommendation === 'keep').slice(0, 8),
+      tone: FEATURE_DECISION_STYLES.keep,
+    },
+    {
+      key: 'review',
+      title: 'Needs review',
+      description: 'Fields with some value but a quality, coverage, or consistency caveat.',
+      items: featureProfiles.filter((profile) => profile.recommendation === 'review').slice(0, 8),
+      tone: FEATURE_DECISION_STYLES.review,
+    },
+    {
+      key: 'redundant',
+      title: 'Likely redundant',
+      description: 'Fields that overlap heavily with other columns and may not add new information.',
+      items: featureProfiles.filter((profile) => profile.hasRedundancy).slice(0, 8),
+      tone: { color: '#1d4ed8', border: '#bfdbfe', bg: '#eff6ff' },
+    },
+    {
+      key: 'risk',
+      title: 'Potential leakage or risk',
+      description: 'Fields that look post-outcome, suspiciously perfect, or unsafe to rely on.',
+      items: featureProfiles.filter((profile) => profile.hasLeakage).slice(0, 8),
+      tone: FEATURE_DECISION_STYLES.drop,
+    },
+    {
+      key: 'weak',
+      title: 'Weak or noisy',
+      description: 'Fields that show little signal or unstable behaviour in the current sample.',
+      items: featureProfiles.filter((profile) => profile.weakSignal || profile.hasLowVariance).slice(0, 8),
+      tone: { color: T.textSec, border: T.border, bg: T.surface },
+    },
+  ]), [featureProfiles]);
+  const selectedProfile = featureProfileLookup[selectedFeature] || featureProfiles[0] || null;
+  const selectedFeatureBins = Array.isArray(featureDetail?.woe_bins) ? featureDetail.woe_bins : [];
+  const selectedFeatureEvidence = useMemo(() => {
+    if (!selectedProfile) return [];
+    return [
+      { label: 'Recommendation', value: selectedProfile.recommendationLabel },
+      { label: 'Signal band', value: selectedProfile.signalBand },
+      { label: 'Missingness', value: pct(selectedProfile.missingPct, 0) },
+      { label: 'Distinct values', value: fmt(selectedProfile.distinctCount) },
+      { label: 'Interpretability', value: selectedProfile.interpretabilityLabel },
+      { label: 'Assessment style', value: 'Statistical and rule-assisted only' },
+    ];
+  }, [selectedProfile]);
+
+  useEffect(() => {
+    if (!featureProfiles.length) {
+      setSelectedFeature('');
+      return;
+    }
+    if (!selectedFeature || !featureProfileLookup[selectedFeature]) {
+      setSelectedFeature(featureProfiles[0].feature);
+    }
+  }, [featureProfileLookup, featureProfiles, selectedFeature]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!masterDataset?.dataset_id || !targetColumn || !selectedFeature) {
+      setFeatureDetail(null);
+      setFeatureDetailError('');
+      return undefined;
+    }
+    const hydrate = async () => {
+      setFeatureDetailLoading(true);
+      setFeatureDetailError('');
+      try {
+        const response = await mlopsApi.featureTarget({
+          dataset_id: masterDataset.dataset_id,
+          target_column: targetColumn,
+          columns: [selectedFeature],
+          sample_rows: 12000,
+        });
+        if (cancelled) return;
+        const payload = unwrapApiPayload(response) || {};
+        const detail = Array.isArray(payload?.features) ? payload.features[0] : null;
+        setFeatureDetail(detail || null);
+      } catch (error) {
+        if (cancelled) return;
+        setFeatureDetail(null);
+        setFeatureDetailError(error?.message || 'Feature detail could not be loaded');
+      } finally {
+        if (!cancelled) setFeatureDetailLoading(false);
+      }
+    };
+    hydrate();
+    return () => { cancelled = true; };
+  }, [masterDataset?.dataset_id, selectedFeature, targetColumn]);
 
   return (
     <Stack spacing={2}>
@@ -1512,27 +2869,379 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
         icon={targetColumn ? <CheckCircle /> : <Warning />}
         sx={{ borderRadius: 2 }}>
         <Typography fontWeight={700} sx={{ fontSize: 13, mb: 0.2 }}>
-          {targetColumn ? `Feature selection - target: ${targetColumn}` : 'Feature selection library'}
+          {targetColumn ? `Feature usefulness assessment for ${targetColumn}` : 'Feature usefulness assessment before modelling'}
         </Typography>
         <Typography variant="body2" sx={{ fontSize: 12 }}>
           {targetColumn
-            ? 'The workbench starts with the best supervised technique and keeps leakage or correlation scans hidden until you open them.'
-            : 'Score-based techniques stay front and center here. Set a target in Step 3 to unlock supervised ranking and recommendations.'}
+            ? 'This step screens columns before any model is trained and helps you decide what to keep, review, or exclude using statistical evidence.'
+            : 'Set the target in the earlier step to unlock supervised screening. Until then, this step focuses on quality, redundancy, and leakage risk.'}
         </Typography>
       </Alert>
 
-      <Stack direction="row" justifyContent="flex-end">
-        <OBtn variant="outlined" icon={<Refresh sx={{ fontSize: 13 }} />} onClick={load} disabled={canDisable(loading)}>
-          {loading ? 'Running analysis...' : 'Refresh analysis'}
-        </OBtn>
-      </Stack>
+      <Card accent="orange" sx={{ p: 0 }}>
+        <Box sx={{ p: 2.1, borderBottom: `1px solid ${T.border}` }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.5} alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <Box>
+              <Typography sx={{ fontWeight: 800, fontSize: 20, color: T.textPri }}>
+                Feature Screening and Selection
+              </Typography>
+              <Typography sx={{ fontSize: 12.5, color: T.textSec, mt: 0.45, lineHeight: 1.75, maxWidth: 920 }}>
+                Review which columns appear useful, redundant, unstable, or risky using statistical evidence before any model is trained.
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={viewMode}
+                onChange={(_, value) => value && setViewMode(value)}
+                sx={{
+                  '& .MuiToggleButton-root': {
+                    px: 1.3,
+                    py: 0.45,
+                    textTransform: 'none',
+                    fontSize: 11.5,
+                    color: T.textSec,
+                    borderColor: T.border,
+                  },
+                  '& .Mui-selected': {
+                    bgcolor: T.orangeLight,
+                    color: T.orange,
+                    borderColor: '#f3b797',
+                  },
+                }}>
+                <ToggleButton value="business">Business view</ToggleButton>
+                <ToggleButton value="technical">Technical view</ToggleButton>
+              </ToggleButtonGroup>
+              <OBtn variant="outlined" icon={<Refresh sx={{ fontSize: 13 }} />} onClick={load} disabled={canDisable(loading)}>
+                {loading ? 'Running analysis...' : 'Refresh analysis'}
+              </OBtn>
+            </Stack>
+          </Stack>
+          <Alert severity="info" icon={<InfoOutlined />} sx={{ mt: 1.35, borderRadius: 1.5, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+            <Typography sx={{ fontSize: 12.2, color: T.textPri, lineHeight: 1.7 }}>
+              This step is statistical and rule-assisted. No predictive model or generative AI is used to score columns here.
+            </Typography>
+          </Alert>
+        </Box>
 
+        <Box sx={{ p: 2.1 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 1 }}>
+            {[
+              { key: 'keep', label: 'Recommended to keep', value: summaryCounts.keep, tone: FEATURE_DECISION_STYLES.keep },
+              { key: 'review', label: 'Needs review', value: summaryCounts.review, tone: FEATURE_DECISION_STYLES.review },
+              { key: 'redundant', label: 'Likely redundant', value: summaryCounts.redundant, tone: { color: '#1d4ed8', border: '#bfdbfe', bg: '#eff6ff' } },
+              { key: 'risk', label: 'Potential leakage / risk', value: summaryCounts.risk, tone: FEATURE_DECISION_STYLES.drop },
+              { key: 'weak', label: 'Weak signal', value: summaryCounts.weak, tone: { color: T.textSec, border: T.border, bg: T.surface } },
+            ].map((item) => (
+              <Box key={item.key} sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, borderTop: `2px solid ${item.tone.color}`, bgcolor: 'white' }}>
+                <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+                  {item.label}
+                </Typography>
+                <Typography sx={{ fontSize: 26, fontWeight: 800, color: item.tone.color, lineHeight: 1.1, mt: 0.35 }}>
+                  {fmt(item.value)}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      </Card>
+
+      {!loading && !errors.workbench && (
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1.1fr) minmax(340px, 0.9fr)' }, gap: 2 }}>
+          <Card sx={{ p: 0, overflow: 'hidden' }}>
+            <Box sx={{ p: 2, borderBottom: `1px solid ${T.border}` }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 14.5, color: T.textPri }}>
+                Decision summary
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: T.textSec, mt: 0.35 }}>
+                Start with decision buckets, not formulas. This view highlights which fields look useful, risky, or noisy before modelling.
+              </Typography>
+            </Box>
+            <Box sx={{ p: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.15fr 0.85fr' }, gap: 2 }}>
+              <Box>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.8, mb: 1 }}>
+                  Feature leaderboard
+                </Typography>
+                <Box sx={{ height: 360 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={leaderboardData} layout="vertical" margin={{ top: 4, right: 18, left: 12, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#edf2f7" />
+                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} />
+                      <YAxis
+                        type="category"
+                        dataKey="displayName"
+                        width={160}
+                        tick={{ fontSize: 10.5, fill: '#334155' }}
+                      />
+                      <RTooltip
+                        formatter={(value, _, payload) => [`${value}%`, payload?.payload?.recommendationLabel || 'Recommendation']}
+                        labelFormatter={(label) => label}
+                      />
+                      <Bar dataKey="scorePct" radius={[0, 6, 6, 0]} name="Estimated usefulness">
+                        {leaderboardData.map((entry) => (
+                          <Cell
+                            key={entry.feature}
+                            fill={entry.recommendation === 'keep' ? '#22c55e' : entry.recommendation === 'drop' ? '#ef4444' : '#f59e0b'}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.9, lineHeight: 1.7 }}>
+                  Estimated relationship strength with target
+                  {targetColumn ? `, measured using ${scoreMetricLabel}` : ''}.
+                  The method stays underneath the evidence, not in front of the decision.
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.8, mb: 1 }}>
+                  Signal bands
+                </Typography>
+                <Box sx={{ height: 170 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={signalBandData} margin={{ top: 4, right: 8, left: -22, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#edf2f7" />
+                      <XAxis dataKey="band" tick={{ fontSize: 10 }} interval={0} angle={-16} textAnchor="end" height={48} />
+                      <YAxis tick={{ fontSize: 10.5, fill: '#64748b' }} />
+                      <RTooltip />
+                      <Bar dataKey="count" fill="#D04A02" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.8, mt: 1.5, mb: 1 }}>
+                  Usefulness versus quality risk
+                </Typography>
+                <Box sx={{ height: 170 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 4, right: 8, left: -6, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#edf2f7" />
+                      <XAxis type="number" dataKey="usefulness" name="Usefulness" unit="%" tick={{ fontSize: 10 }} />
+                      <YAxis type="number" dataKey="qualityRisk" name="Quality risk" unit="%" tick={{ fontSize: 10 }} />
+                      <ZAxis type="number" dataKey="weight" range={[60, 320]} />
+                      <RTooltip cursor={{ strokeDasharray: '3 3' }} />
+                      <Scatter data={qualityRiskMatrix}>
+                        {qualityRiskMatrix.map((entry) => (
+                          <Cell
+                            key={entry.feature}
+                            fill={entry.recommendation === 'keep' ? '#22c55e' : entry.recommendation === 'drop' ? '#ef4444' : '#f59e0b'}
+                          />
+                        ))}
+                      </Scatter>
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </Box>
+              </Box>
+            </Box>
+          </Card>
+
+          <Card sx={{ p: 0, overflow: 'hidden' }}>
+            <Box sx={{ p: 2, borderBottom: `1px solid ${T.border}` }}>
+              <Typography sx={{ fontWeight: 700, fontSize: 14.5, color: T.textPri }}>
+                Why this column is recommended
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: T.textSec, mt: 0.35 }}>
+                Click any field below to see the business meaning, risk notes, and statistical evidence that support the recommendation.
+              </Typography>
+            </Box>
+            <Box sx={{ p: 2 }}>
+              <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: 1.4 }}>
+                {featureProfiles.slice(0, 16).map((profile) => (
+                  <Chip
+                    key={profile.feature}
+                    label={profile.displayName}
+                    onClick={() => setSelectedFeature(profile.feature)}
+                    sx={{
+                      borderRadius: 0,
+                      bgcolor: 'white',
+                      color: selectedProfile?.feature === profile.feature ? T.orange : T.textPri,
+                      border: `1px solid ${selectedProfile?.feature === profile.feature ? T.orange : T.border}`,
+                      fontWeight: selectedProfile?.feature === profile.feature ? 700 : 500,
+                    }}
+                  />
+                ))}
+              </Stack>
+
+              {selectedProfile ? (
+                <Stack spacing={1.4}>
+                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                    <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.textPri }}>
+                      {selectedProfile.displayName}
+                    </Typography>
+                    <Chip
+                      label={selectedProfile.recommendationLabel}
+                      size="small"
+                      sx={{
+                        bgcolor: FEATURE_DECISION_STYLES[selectedProfile.recommendation]?.bg,
+                        color: FEATURE_DECISION_STYLES[selectedProfile.recommendation]?.color,
+                        border: `1px solid ${FEATURE_DECISION_STYLES[selectedProfile.recommendation]?.border}`,
+                        fontWeight: 700,
+                      }}
+                    />
+                    <Chip label={selectedProfile.signalBand} size="small" sx={{ bgcolor: T.surface, color: T.textSec }} />
+                    <Chip label={featureRoleLabel(selectedProfile.role)} size="small" sx={{ bgcolor: T.infoBg, color: '#1d4ed8' }} />
+                  </Stack>
+
+                  <Box sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                    <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+                      Business meaning
+                    </Typography>
+                    <Typography sx={{ fontSize: 12.5, color: T.textPri, lineHeight: 1.75, mt: 0.35 }}>
+                      {selectedProfile.businessMeaning}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1 }}>
+                    {selectedFeatureEvidence.map((item) => (
+                      <Box key={item.label} sx={{ p: 1.1, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                        <Typography sx={{ fontSize: 10, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+                          {item.label}
+                        </Typography>
+                        <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textPri, mt: 0.35 }}>
+                          {item.value}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+
+                  <Box sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                    <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7, mb: 0.7 }}>
+                      Why this may matter
+                    </Typography>
+                    <Stack spacing={0.65}>
+                      {selectedProfile.evidence.map((line) => (
+                        <Typography key={line} sx={{ fontSize: 12.1, color: T.textPri, lineHeight: 1.7 }}>
+                          {line}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  {featureDetailLoading && (
+                    <Typography sx={{ fontSize: 12, color: T.textSec }}>
+                      Loading detailed separation evidence...
+                    </Typography>
+                  )}
+                  {!!featureDetailError && (
+                    <Alert severity="info" sx={{ borderRadius: 1.5 }}>
+                      {featureDetailError}
+                    </Alert>
+                  )}
+
+                  {!featureDetailLoading && selectedFeatureBins.length > 0 && (
+                    <Box sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                      <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7, mb: 0.9 }}>
+                        Target separation preview
+                      </Typography>
+                      <Box sx={{ height: 240 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={selectedFeatureBins} margin={{ top: 4, right: 16, left: -12, bottom: 6 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#edf2f7" />
+                            <XAxis dataKey="bin" tick={{ fontSize: 10 }} />
+                            <YAxis yAxisId="count" tick={{ fontSize: 10 }} />
+                            <YAxis yAxisId="rate" orientation="right" domain={[0, 1]} tickFormatter={(value) => `${Math.round(value * 100)}%`} tick={{ fontSize: 10 }} />
+                            <RTooltip formatter={(value, name) => {
+                              if (name === 'Target positive rate') return [pct(value, 1), name];
+                              return [fmt(value), name];
+                            }} />
+                            <Legend />
+                            <Bar yAxisId="count" dataKey="pos" fill="#D04A02" name="Actionable / positive" radius={[4, 4, 0, 0]} />
+                            <Bar yAxisId="count" dataKey="neg" fill="#CBD5E1" name="Likely false positive / negative" radius={[4, 4, 0, 0]} />
+                            <Line yAxisId="rate" type="monotone" dataKey="tp_rate" stroke="#0f172a" strokeWidth={2} name="Target positive rate" />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </Box>
+                      <Typography sx={{ fontSize: 11.2, color: T.textSec, mt: 0.7, lineHeight: 1.7 }}>
+                        This shows how the target event rate shifts across bins of the selected field. Clear separation usually means the column is more useful for downstream modelling.
+                      </Typography>
+                    </Box>
+                  )}
+                </Stack>
+              ) : (
+                <Typography sx={{ fontSize: 12, color: T.textSec }}>
+                  No feature evidence is available yet.
+                </Typography>
+              )}
+            </Box>
+          </Card>
+        </Box>
+      )}
+
+      {!loading && !errors.workbench && (
+        <Card sx={{ p: 0, overflow: 'hidden' }}>
+          <Box sx={{ p: 2, borderBottom: `1px solid ${T.border}` }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 14.5, color: T.textPri }}>
+              Decision buckets
+            </Typography>
+            <Typography sx={{ fontSize: 11.5, color: T.textSec, mt: 0.35 }}>
+              Use these groups to understand which columns look helpful, overlapping, risky, or noisy before touching technical method details.
+            </Typography>
+          </Box>
+          <Box sx={{ p: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
+            {bucketGroups.map((group) => (
+              <Box key={group.key} sx={{ p: 1.25, borderRadius: 0, border: `1px solid ${T.border}`, borderTop: `2px solid ${group.tone.color}`, bgcolor: 'white' }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: group.tone.color }}>
+                  {group.title}
+                </Typography>
+                <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.35, lineHeight: 1.65 }}>
+                  {group.description}
+                </Typography>
+                <Stack spacing={0.65} sx={{ mt: 1 }}>
+                  {group.items.length ? group.items.map((profile) => (
+                    <Box
+                      key={`${group.key}-${profile.feature}`}
+                      onClick={() => setSelectedFeature(profile.feature)}
+                      sx={{
+                        p: 0.95,
+                        borderRadius: 0,
+                        bgcolor: 'white',
+                        border: `1px solid ${selectedProfile?.feature === profile.feature ? T.orange : T.border}`,
+                        cursor: 'pointer',
+                      }}>
+                      <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPri }}>
+                        {profile.displayName}
+                      </Typography>
+                      <Typography sx={{ fontSize: 10.6, color: T.textSec, mt: 0.25, lineHeight: 1.55 }}>
+                        {profile.evidence[0]}
+                      </Typography>
+                    </Box>
+                  )) : (
+                    <Typography sx={{ fontSize: 11, color: T.textSec }}>
+                      Nothing in this group for the current dataset.
+                    </Typography>
+                  )}
+                </Stack>
+              </Box>
+            ))}
+          </Box>
+        </Card>
+      )}
+
+      {viewMode === 'business' && (
+        <Alert severity="info" icon={<Insights />} sx={{ borderRadius: 0 }}>
+          Switch to Technical view if you want to inspect the exact statistical method, thresholds, raw scores, and grouped drop-step controls.
+        </Alert>
+      )}
+
+      {loading && <Spinner label="Running selection analysis..." />}
+
+      {!loading && errors.workbench && (
+        <Alert severity="error" icon={<Warning />} sx={{ py: 0.5, fontSize: 11 }}>
+          {errors.workbench}
+        </Alert>
+      )}
+
+      {viewMode === 'technical' && (
+        <>
       <Card>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.1 }} flexWrap="wrap" rowGap={1}>
           <Box>
-            <Typography sx={{ fontWeight: 700, fontSize: 13.5 }}>Feature Selection Library</Typography>
+            <Typography sx={{ fontWeight: 700, fontSize: 13.5 }}>Technical method library</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10.5 }}>
-              Choose one technique, inspect its ranked columns, and apply one grouped keep or drop decision from the workbench.
+              The methods below explain how the evidence is computed. Use them when you want exact scoring logic, thresholds, or grouped apply controls.
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.75} flexWrap="wrap">
@@ -1598,14 +3307,6 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
           })}
         </Box>
       </Card>
-
-      {loading && <Spinner label="Running selection analysis..." />}
-
-      {!loading && errors.workbench && (
-        <Alert severity="error" icon={<Warning />} sx={{ py: 0.5, fontSize: 11 }}>
-          {errors.workbench}
-        </Alert>
-      )}
 
       {!loading && activeTechnique && (
         <Card accent="orange">
@@ -1816,46 +3517,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
           )}
         </Card>
       )}
-
-      {!loading && panels.length > 0 && (
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 2 }}>
-          {panels.map(p => {
-            const PIcon = p.Icon;
-            return (
-              <Card key={p.id} sx={{ opacity: p.supervised && !targetColumn ? 0.7 : 1 }}>
-                <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mb: 1.5 }}>
-                  <PIcon sx={{ fontSize: 20, color: T.orange, flexShrink: 0, mt: 0.2 }} />
-                  <Box sx={{ flex: 1 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.2 }}>
-                      <Typography sx={{ fontWeight: 700, fontSize: 13.5 }}>{p.title}</Typography>
-                      {p.supervised && (
-                        <Chip label="supervised" size="small"
-                          sx={{ fontSize: 9, height: 16, bgcolor: T.orangeLight, color: T.orange }} />
-                      )}
-                      {p.badge != null && (
-                        <Chip
-                          label={p.badge === 0 ? 'None found' : `${p.badge} found`}
-                          size="small"
-                          sx={{ fontSize: 9, height: 16,
-                                bgcolor: p.badge === 0 ? T.doneBg : T.warnBg,
-                                color:   p.badge === 0 ? T.done   : T.warn }}
-                        />
-                      )}
-                      {existingDropReasons.has(p.id) && (
-                        <Chip label="Applied" size="small"
-                          sx={{ fontSize: 9, height: 16, bgcolor: T.doneBg, color: T.done }} />
-                      )}
-                    </Stack>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10.5 }}>
-                      {p.desc}
-                    </Typography>
-                  </Box>
-                </Stack>
-                {p.body()}
-              </Card>
-            );
-          })}
-        </Box>
+        </>
       )}
 
       {steps.some(s => s.type === 'drop_columns') && (
@@ -1888,7 +3550,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TAB 4 — PREVIEW
+// TAB 4 - PREVIEW
 // ═══════════════════════════════════════════════════════════════════════════════
 const PreviewTab = ({
   masterDataset,
@@ -1996,7 +3658,7 @@ const PreviewTab = ({
 
           {rows.length > 0 && (
             <Card>
-              <SLabel>Sample — {rows.length} rows × {afterCols.length} columns (first 18 shown)</SLabel>
+              <SLabel>Sample - {rows.length} rows × {afterCols.length} columns (first 18 shown)</SLabel>
               <Box sx={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
@@ -2063,7 +3725,7 @@ const PreviewTab = ({
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TAB 5 — RUN
+// TAB 5 - RUN
 // ═══════════════════════════════════════════════════════════════════════════════
 const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete }) => {
   const [outputName, setOutputName] = useState('preprocessed_dataset');
@@ -2354,7 +4016,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
     : (running || !steps.length);
 
   if (!steps.length) return (
-    <Alert severity="warning" icon={<Warning />} sx={{ borderRadius: 2 }}>
+    <Alert severity="warning" icon={<Warning />} sx={{ borderRadius: 0 }}>
       No steps added. Add cleaning, engineering, or selection steps before running.
     </Alert>
   );
@@ -2371,24 +4033,24 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
           </Typography>
         </Stack>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 1 }}>
-          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.orangeLight, border: '1px solid #fdd8c4' }}>
+          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.accentBorder}`, borderTop: `2px solid ${T.orange}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Total steps</Typography>
             <Typography sx={{ fontWeight: 800, fontSize: 24, color: T.orange, lineHeight: 1.1 }}>{fmt(traceSummary?.total_steps || steps.length)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.doneBg, border: `1px solid ${T.doneBorder}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.doneBorder}`, borderTop: `2px solid ${T.done}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Input rows</Typography>
             <Typography sx={{ fontWeight: 800, fontSize: 24, color: T.done, lineHeight: 1.1 }}>{fmt(traceSummary?.input_rows ?? masterDataset?.row_count)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.border}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Input columns</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.input_columns)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.border}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Output columns</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.output_columns)}</Typography>
             <Typography variant="caption" sx={{ color: T.textSec }}>delta {fmtDelta(traceSummary?.column_delta)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.border}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Applied steps</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.applied_steps)}</Typography>
           </Box>
@@ -2409,7 +4071,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
             gap: 1.25,
             alignItems: 'start',
           }}>
-            <Box sx={{ p: 1.25, borderRadius: 1.5, border: `1px solid ${T.border}`, bgcolor: '#f8fafc' }}>
+            <Box sx={{ p: 1.25, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 12, mb: 0.4 }}>Input Dataset</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{masterDataset?.dataset_type || 'master_dataset'}</Typography>
               <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: 10.5 }}>
@@ -2430,8 +4092,8 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                   key={stage.category}
                   sx={{
                     border: `1px solid ${laneMeta[stage.category]?.border || T.border}`,
-                    borderRadius: 1.5,
-                    bgcolor: laneMeta[stage.category]?.bg || 'white',
+                    borderRadius: 0,
+                    bgcolor: 'white',
                     p: 1,
                   }}
                 >
@@ -2454,10 +4116,10 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                   {stage.affectedColumns.length > 0 && (
                     <Stack direction="row" spacing={0.4} sx={{ flexWrap: 'wrap', rowGap: 0.4, my: 0.6 }}>
                       {stage.affectedColumns.slice(0, 4).map((col) => (
-                        <Chip key={`${stage.category}-${col}`} size="small" label={clip(col, 14)} sx={{ height: 16, fontSize: 8.5, bgcolor: T.infoBg }} />
+                        <Chip key={`${stage.category}-${col}`} size="small" label={clip(col, 14)} sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
                       ))}
                       {stage.affectedColumns.length > 4 && (
-                        <Chip size="small" label={`+${stage.affectedColumns.length - 4} more`} sx={{ height: 16, fontSize: 8.5, bgcolor: T.surface }} />
+                        <Chip size="small" label={`+${stage.affectedColumns.length - 4} more`} sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
                       )}
                     </Stack>
                   )}
@@ -2666,6 +4328,7 @@ const PreprocessingWorkbench = ({
   onRun,
   preview,
   onMasterBuild,
+  datasets       = [],
   masterDataset  = null,
   preprocessedDataset = null,
   targetColumn   = '',
@@ -2676,6 +4339,7 @@ const PreprocessingWorkbench = ({
   onPipelineActivated,
 }) => {
   const [tab, setTab] = useState(0);
+  const activeGuide = PREPROCESS_TAB_GUIDES[tab] || PREPROCESS_TAB_GUIDES[0];
 
   const removeStep = idx     => onStepsChange(steps.filter((_, i) => i !== idx));
   const moveStep   = (a, b) => {
@@ -2685,7 +4349,7 @@ const PreprocessingWorkbench = ({
   };
 
   
-  // Tab definitions — MUI icons + labels, no emoji
+  // Tab definitions - MUI icons + labels, no emoji
   const TAB_DEFS = [
     { Icon: Build,      label: 'Plan',      biz: 'Fix Issues', tip: 'Auto-detected cleaning issues and grouped recommendations' },
     { Icon: Code,       label: 'Builder',   biz: 'Builder',    tip: 'Custom preprocessing workbench with column explorer' },
@@ -2699,6 +4363,19 @@ const PreprocessingWorkbench = ({
     <Box sx={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* ── Main content ── */}
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Box sx={{ px: 2.5, pt: 2.2, pb: 1.6, borderBottom: `1px solid ${T.border}`, bgcolor: 'white', flexShrink: 0 }}>
+          <Typography sx={{ fontSize: 10, color: T.textSec, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+            How this stage works
+          </Typography>
+          <Typography sx={{ fontSize: 12.5, color: T.textSec, mt: 0.45, maxWidth: 920, lineHeight: 1.7 }}>
+            {activeGuide.subtitle}
+          </Typography>
+          <Alert severity="info" icon={<InfoOutlined />} sx={{ mt: 1.2, borderRadius: 0, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+            <Typography sx={{ fontSize: 12, color: T.textPri, lineHeight: 1.65 }}>
+              {activeGuide.note}
+            </Typography>
+          </Alert>
+        </Box>
 
         {/* Tab bar */}
         <Box sx={{ borderBottom: `1px solid ${T.border}`, bgcolor: 'white', flexShrink: 0 }}>
@@ -2710,7 +4387,7 @@ const PreprocessingWorkbench = ({
                 px: 2.5, fontWeight: 500, color: T.textSec,
               },
               '& .Mui-selected': { color: `${T.orange} !important`, fontWeight: 700 },
-              '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3, borderRadius: '3px 3px 0 0' },
+              '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3, borderRadius: 0 },
             }}>
             {TAB_DEFS.map((t, i) => {
               const TIcon = t.Icon;
@@ -2721,8 +4398,8 @@ const PreprocessingWorkbench = ({
                       <TIcon sx={{ fontSize: 15 }} />
                       <span>{persona === 'business' ? t.biz : t.label}</span>
                       {i === TAB_DEFS.length - 1 && steps.length > 0 && (
-                        <Box sx={{ px: 0.75, py: 0.1, bgcolor: tab === TAB_DEFS.length - 1 ? T.orange : T.orangeLight, borderRadius: '20px' }}>
-                          <Typography sx={{ fontSize: 9.5, color: tab === TAB_DEFS.length - 1 ? 'white' : T.orange, fontWeight: 700 }}>
+                        <Box sx={{ px: 0.75, py: 0.1, bgcolor: 'white', border: `1px solid ${tab === TAB_DEFS.length - 1 ? T.orange : T.accentBorder}`, borderRadius: 0 }}>
+                          <Typography sx={{ fontSize: 9.5, color: T.orange, fontWeight: 700 }}>
                             {steps.length}
                           </Typography>
                         </Box>
@@ -2748,6 +4425,7 @@ const PreprocessingWorkbench = ({
           {tab === 1 && (
             <BuilderTab
               masterDataset={masterDataset}
+              datasets={datasets}
               steps={steps}
               onStepsChange={onStepsChange}
               targetColumn={targetColumn}
@@ -2759,6 +4437,7 @@ const PreprocessingWorkbench = ({
               steps={steps}
               onStepsChange={onStepsChange}
               targetColumn={targetColumn}
+              onOpenBuilder={() => setTab(1)}
             />
           )}
           {tab === 3 && (
@@ -2800,8 +4479,13 @@ const PreprocessingWorkbench = ({
         onMove={moveStep}
         onClear={() => onStepsChange([])}
         onLoad={loaded => onStepsChange(loaded || [])}
+        onLoadState={(loaded) => {
+          onStepsChange(loaded?.steps || []);
+          if (Number.isInteger(loaded?.activeTab)) setTab(loaded.activeTab);
+        }}
         masterDataset={masterDataset}
         preprocessedDataset={preprocessedDataset}
+        activeTab={tab}
         activePipelineId={activePipelineId}
         activePipelineName={activePipelineName}
         onPipelineActivated={onPipelineActivated}

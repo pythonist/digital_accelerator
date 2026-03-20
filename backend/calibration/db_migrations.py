@@ -16,7 +16,7 @@ def add_core_workflow_tables(conn):
     - calibration_runs: The central state machine for the entire workflow.
     """
     cursor = conn.cursor()
-    print("🔧 [Migration] Adding Core Workflow tables...")
+    print("[Migration] Adding Core Workflow tables...")
 
     # ==================================================================
     # TABLE 0: calibration_runs (THE SPINE)
@@ -51,7 +51,7 @@ def add_core_workflow_tables(conn):
     """)
 
     conn.commit()
-    print("✅ [Migration] Core workflow tables created")
+    print("[Migration] Core workflow tables created")
 
 
 def add_step0_data_foundation_tables(conn):
@@ -60,7 +60,7 @@ def add_step0_data_foundation_tables(conn):
     Version: 3.0.0 - Data Foundation Layer
     """
     cursor = conn.cursor()
-    print("🔧 [Migration] Adding Step 0 Data Foundation tables...")
+    print("[Migration] Adding Step 0 Data Foundation tables...")
     
     # ==================================================================
     # TABLE 1: datasets
@@ -195,7 +195,7 @@ def add_step0_data_foundation_tables(conn):
     """)
     
     conn.commit()
-    print("✅ [Migration] Step 0 Data Foundation tables created")
+    print("[Migration] Step 0 Data Foundation tables created")
 
     # ==================================================================
     # TABLE 8: semantic_mappings
@@ -280,7 +280,7 @@ def add_percentile_tables(conn):
     """)
     
     conn.commit()
-    print("✅ Percentile tables created successfully")
+    print("Percentile tables created successfully")
 
 
 def add_calibration_outcomes_table(conn):
@@ -310,7 +310,7 @@ def add_calibration_outcomes_table(conn):
     """)
     
     conn.commit()
-    print("✅ calibration_outcomes table created successfully")
+    print("calibration_outcomes table created successfully")
 
 
 def add_str_table(conn):
@@ -338,7 +338,7 @@ def add_str_table(conn):
     """)
     
     conn.commit()
-    print("✅ STR table created successfully")
+    print("STR table created successfully")
 
 
 def add_aggregation_cache_table(conn):
@@ -360,7 +360,7 @@ def add_aggregation_cache_table(conn):
     """)
     
     conn.commit()
-    print("✅ aggregated_populations_cache table created successfully")
+    print("aggregated_populations_cache table created successfully")
 
 
 def run_migrations(conn):
@@ -368,7 +368,7 @@ def run_migrations(conn):
     Main migration runner
     """
     try:
-        print("🔧 Running calibration database migrations...")
+        print("Running calibration database migrations...")
         
         # 1. Core Workflow (Must be first for FKs)
         add_core_workflow_tables(conn)
@@ -382,8 +382,8 @@ def run_migrations(conn):
         add_calibration_outcomes_table(conn)
         add_str_table(conn)
         
-        print("✅ All migrations completed successfully")
+        print("All migrations completed successfully")
         
     except Exception as e:
-        print(f"❌ Migration failed: {e}")
+        print(f"Migration failed: {e}")
         raise

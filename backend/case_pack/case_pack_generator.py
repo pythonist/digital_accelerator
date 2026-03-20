@@ -216,7 +216,7 @@ class CasePackGenerator:
         return {"success": True, "nodes": list(nodes.values()), "links": links, "link_target_kind": dst_kind}
 
     def generate_case_pack(self, case_id):
-        print(f"📦 Generating Deep Dive Pack for: {case_id}")
+        print(f"Generating Deep Dive Pack for: {case_id}")
         conn = self.db_manager.connect()
         
         try:
@@ -237,7 +237,7 @@ class CasePackGenerator:
                     query = f'SELECT * FROM "{master_table}" WHERE "{case_col}" = ?'
                     df_case = pd.read_sql(query, conn, params=(case_id,))
             except Exception as e:
-                print(f"⚠️ Metadata fetch error: {e}")
+                print(f"Warning: Metadata fetch error: {e}")
 
             metadata = df_case.iloc[0].to_dict() if not df_case.empty else {"Case ID": case_id}
 
@@ -429,7 +429,7 @@ class CasePackGenerator:
                         transactions = []
 
             except Exception as e:
-                print(f"⚠️ Transaction fetch error: {e}")
+                print(f"Warning: Transaction fetch error: {e}")
 
             # 5. INTELLIGENCE GENERATION
             financial_profile = self._analyze_financials(transactions) # Pass raw txns now!
@@ -455,7 +455,7 @@ class CasePackGenerator:
             }
 
         except Exception as e:
-            print(f"❌ Generator Critical Error: {e}")
+            print(f"Generator Critical Error: {e}")
             import traceback
             traceback.print_exc()
             return {"error": str(e)}

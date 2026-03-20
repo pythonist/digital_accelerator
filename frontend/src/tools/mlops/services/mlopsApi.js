@@ -1,14 +1,14 @@
 /**
- * mlopsApi.js — AML MLOps Workbench API Client  (Enhanced v3)
+ * mlopsApi.js - AML MLOps Workbench API Client  (Enhanced v3)
  *
  * All existing endpoints preserved for full backward compatibility.
  *
  * New in v3 (Model Training Step 6):
- *   trainModel()        — now accepts grain, hml_high_threshold, hml_low_threshold
- *   hmlRescore()        — re-apply HML band thresholds without retraining
- *   modelInternals()    — tree nodes / coefficients / learning curve per job
- *   ledgerScore()       — score a batch of raw rows and write to scoring ledger
- *   listLedger()        — query scoring ledger with filters + pagination
+ *   trainModel()        - now accepts grain, hml_high_threshold, hml_low_threshold
+ *   hmlRescore()        - re-apply HML band thresholds without retraining
+ *   modelInternals()    - tree nodes / coefficients / learning curve per job
+ *   ledgerScore()       - score a batch of raw rows and write to scoring ledger
+ *   listLedger()        - query scoring ledger with filters + pagination
  */
 
 import apiClient from '@services/api';
@@ -73,7 +73,7 @@ const mlopsApi = {
 
   // ── Metadata ─────────────────────────────────────────────────────────────────
   /**
-   * Enhanced profile — returns:
+   * Enhanced profile - returns:
    *   business_narrative, flag_rate, coverage_pct,
    *   unique_entity_count, data_freshness_days, business_signals
    */
@@ -82,7 +82,7 @@ const mlopsApi = {
   },
 
   /**
-   * Enhanced schema preview — per-column:
+   * Enhanced schema preview - per-column:
    *   cardinality_ratio, temporal_gaps_detected
    * Top-level: join_key_candidates
    */
@@ -92,6 +92,9 @@ const mlopsApi = {
 
   joinGraph: async (payload) => {
     return apiClient.post('/api/mlops/metadata/join-graph', payload);
+  },
+  businessBrief: async (payload) => {
+    return apiClient.post('/api/mlops/business/brief', payload);
   },
 
   // ── EDA Advanced ─────────────────────────────────────────────────────────────
@@ -133,6 +136,30 @@ const mlopsApi = {
   },
 
   // ── Target Variable ───────────────────────────────────────────────────────────
+  edaChartExplain: async (payload) => {
+    const attempts = [
+      '/api/eda/ai-chart-explain',
+      '/api/eda/ai-chart-explain/',
+      '/api/mlops/ai-chart-explain',
+      '/api/mlops/ai-chart-explain/',
+    ];
+    let lastError = null;
+    for (let index = 0; index < attempts.length; index += 1) {
+      const path = attempts[index];
+      try {
+        return await apiClient.post(path, payload);
+      } catch (error) {
+        lastError = error;
+        const msg = String(error?.message || '').toLowerCase();
+        const retriable = msg.includes('method not allowed') || msg.includes('not found');
+        if (!retriable || index === attempts.length - 1) {
+          throw error;
+        }
+      }
+    }
+    throw lastError || new Error('EDA chart explanation failed');
+  },
+
   detectTarget: async (payload) => {
     return apiClient.post('/api/mlops/target/detect', payload);
   },
@@ -197,6 +224,11 @@ const mlopsApi = {
   /** Load one saved pipeline definition. */
   pipelineGet: async (pipelineId) => {
     return apiClient.get(`/api/mlops/pipeline/${pipelineId}`);
+  },
+
+  /** Save lightweight screen state for autosave and resume. */
+  pipelineSaveScreenState: async (pipelineId, payload) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/screen-state`, payload);
   },
 
   /** Fetch pipeline version history. */
@@ -350,7 +382,7 @@ const mlopsApi = {
    *   hml_low_threshold   float  default 0.35
    *
    * The ID column (ALERT_ID / CASE_ID) is extracted BEFORE inference and
-   * re-attached AFTER — it is NEVER passed to the model as a feature.
+   * re-attached AFTER - it is NEVER passed to the model as a feature.
    *
    * Returns:
    *   scored      array  [{ entity_id, probability, hml_decision, ... }]
@@ -532,6 +564,15 @@ const mlopsApi = {
   // ── Deployment Dashboard (Step 10) ─────────────────────────────────────────────
   scoreBatch: async (payload) => {
     return apiClient.post('/api/deployment-dashboard/score-batch', payload);
+  },
+  publishToSentinel: async (payload = {}) => {
+    return apiClient.publishFccBatch(payload);
+  },
+  listScoredBatches: async (params = {}) => {
+    return apiClient.listFccScoredBatches(params);
+  },
+  listSentinelPublishedRuns: async (params = {}) => {
+    return apiClient.listFccPublishedRuns(params);
   },
   liveSimulate: async (payload) => {
     return apiClient.post('/api/deployment-dashboard/live-simulate', payload);

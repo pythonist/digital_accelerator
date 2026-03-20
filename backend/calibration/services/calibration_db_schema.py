@@ -280,7 +280,7 @@ class CalibrationDatabaseManager:
         
         conn.commit()
         conn.close()
-        print("✅ Calibration database schema initialized")
+        print("Calibration database schema initialized")
     
     def log_action(self, run_id, user, action, details=None):
         """Log calibration actions for audit trail"""

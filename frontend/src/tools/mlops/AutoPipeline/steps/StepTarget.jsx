@@ -8,6 +8,7 @@ import {
   Box, Chip, CircularProgress, Stack, TextField, Typography,
 } from '@mui/material';
 import mlopsApi from '../../services/mlopsApi';
+import { FCC_THEME } from '../../theme/fccWorkbenchTheme';
 
 // Guess what a column is "about" from its name
 const guessColumnRole = (name) => {
@@ -83,19 +84,19 @@ const ColumnPill = ({ col, selected, onClick, sources = [], badges = [], score =
       onClick={() => onClick(col)}
       sx={{
         px: 1.5, py: 1,
-        border: `2px solid ${selected ? '#D04A02' : isStrong ? '#f59e0b' : role.recommended ? '#22c55e' : '#e2e8f0'}`,
+        border: `2px solid ${selected ? FCC_THEME.accent : isStrong ? FCC_THEME.warning : role.recommended ? FCC_THEME.success : FCC_THEME.border}`,
         borderRadius: 1.5,
-        bgcolor: selected ? '#fff1ec' : isStrong ? '#fffbeb' : role.recommended ? '#f0fdf4' : '#fff',
+        bgcolor: selected ? FCC_THEME.accentSoft : isStrong ? FCC_THEME.warningBg : role.recommended ? FCC_THEME.successBg : FCC_THEME.panel,
         cursor: 'pointer',
         transition: 'all 0.12s',
-        '&:hover': { borderColor: '#D04A02' },
+        '&:hover': { borderColor: FCC_THEME.accent },
       }}
     >
-      <Typography sx={{ fontSize: 12, fontWeight: 700, color: selected ? '#D04A02' : '#1e293b', fontFamily: 'monospace' }}>
+      <Typography sx={{ fontSize: 12, fontWeight: 700, color: selected ? FCC_THEME.accent : FCC_THEME.text, fontFamily: 'monospace' }}>
         {col}
       </Typography>
       {role.hint && (
-        <Typography sx={{ fontSize: 10, color: role.recommended ? '#16a34a' : '#94a3b8' }}>
+        <Typography sx={{ fontSize: 10, color: role.recommended ? FCC_THEME.success : FCC_THEME.textSoft }}>
           {role.hint}
         </Typography>
       )}
@@ -109,9 +110,9 @@ const ColumnPill = ({ col, selected, onClick, sources = [], badges = [], score =
               sx={{
                 height: 18,
                 fontSize: 10,
-                bgcolor: badge === 'Workbench target' ? '#fff1ec' : '#fff7ed',
-                color: badge === 'Workbench target' ? '#D04A02' : '#9a3412',
-                border: `1px solid ${badge === 'Workbench target' ? '#f2c8b5' : '#fed7aa'}`,
+                bgcolor: badge === 'Workbench target' ? FCC_THEME.accentSoft : FCC_THEME.warningBg,
+                color: badge === 'Workbench target' ? FCC_THEME.accent : FCC_THEME.warning,
+                border: `1px solid ${badge === 'Workbench target' ? FCC_THEME.accentBorder : FCC_THEME.warningBorder}`,
                 '& .MuiChip-label': { px: 0.8 },
               }}
             />
@@ -122,16 +123,16 @@ const ColumnPill = ({ col, selected, onClick, sources = [], badges = [], score =
             sx={{
               height: 18,
               fontSize: 10,
-              bgcolor: '#f8fafc',
-              color: '#334155',
-              border: '1px solid #e2e8f0',
+              bgcolor: FCC_THEME.panelAlt,
+              color: FCC_THEME.textMuted,
+              border: `1px solid ${FCC_THEME.border}`,
               '& .MuiChip-label': { px: 0.8 },
             }}
           />
         </Stack>
       )}
       {sources.length > 0 && (
-        <Typography sx={{ fontSize: 10, color: '#64748b' }}>
+        <Typography sx={{ fontSize: 10, color: FCC_THEME.textMuted }}>
           Found in: {sourceSummary(sources)}
         </Typography>
       )}
@@ -245,7 +246,7 @@ const StepTarget = ({ sourceDatasets = [], targetColumn, preferredTarget = '', o
 
   if (!sourceDatasets.length) {
     return (
-      <Typography sx={{ fontSize: 12.5, color: '#94a3b8', fontStyle: 'italic' }}>
+      <Typography sx={{ fontSize: 12.5, color: FCC_THEME.textSoft, fontStyle: 'italic' }}>
         Select at least one data source in the previous step to load target candidates.
       </Typography>
     );
@@ -253,16 +254,16 @@ const StepTarget = ({ sourceDatasets = [], targetColumn, preferredTarget = '', o
 
   return (
     <Stack spacing={1.5}>
-      <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 2, border: '1px solid #e2e8f0' }}>
-        <Typography sx={{ fontSize: 13, color: '#475569', lineHeight: 1.6 }}>
+      <Box sx={{ p: 2, bgcolor: FCC_THEME.panelAlt, borderRadius: 2, border: `1px solid ${FCC_THEME.border}` }}>
+        <Typography sx={{ fontSize: 13, color: FCC_THEME.textMuted, lineHeight: 1.6 }}>
           Pick the column that contains the <strong>answer</strong> you want the model to predict.
           For fraud detection, this is usually a column like <code>is_fraud</code> or <code>fraud_flag</code>.
         </Typography>
-        <Typography sx={{ mt: 1, fontSize: 11.5, color: '#64748b' }}>
+        <Typography sx={{ mt: 1, fontSize: 11.5, color: FCC_THEME.textMuted }}>
           Loaded from {sourceDatasets.length} selected source table{sourceDatasets.length !== 1 ? 's' : ''}.
         </Typography>
         {preferredTarget && (
-          <Typography sx={{ mt: 0.8, fontSize: 11.5, color: preferredMatch ? '#166534' : '#92400e' }}>
+          <Typography sx={{ mt: 0.8, fontSize: 11.5, color: preferredMatch ? FCC_THEME.success : FCC_THEME.warning }}>
             Workbench target: <code>{preferredTarget}</code>{' '}
             {preferredMatch ? 'found and highlighted below.' : 'not present in selected source tables.'}
           </Typography>
@@ -272,15 +273,15 @@ const StepTarget = ({ sourceDatasets = [], targetColumn, preferredTarget = '', o
       {loading ? (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CircularProgress size={16} />
-          <Typography sx={{ fontSize: 12, color: '#64748b' }}>
+          <Typography sx={{ fontSize: 12, color: FCC_THEME.textMuted }}>
             Loading columns from selected datasets...
           </Typography>
         </Box>
       ) : (
         <>
           {loadError && (
-            <Box sx={{ p: 1.2, bgcolor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 1.5 }}>
-              <Typography sx={{ fontSize: 11.5, color: '#9a3412' }}>{loadError}</Typography>
+            <Box sx={{ p: 1.2, bgcolor: FCC_THEME.warningBg, border: `1px solid ${FCC_THEME.warningBorder}`, borderRadius: 1.5 }}>
+              <Typography sx={{ fontSize: 11.5, color: FCC_THEME.warning }}>{loadError}</Typography>
             </Box>
           )}
           <TextField
@@ -301,9 +302,9 @@ const StepTarget = ({ sourceDatasets = [], targetColumn, preferredTarget = '', o
                   sx={{
                     fontFamily: 'monospace',
                     fontSize: 10.5,
-                    bgcolor: targetColumn === entry.name ? '#D04A02' : '#fff7ed',
-                    color: targetColumn === entry.name ? '#fff' : '#9a3412',
-                    border: `1px solid ${targetColumn === entry.name ? '#D04A02' : '#fed7aa'}`,
+                    bgcolor: targetColumn === entry.name ? FCC_THEME.accent : FCC_THEME.warningBg,
+                    color: targetColumn === entry.name ? FCC_THEME.panel : FCC_THEME.warning,
+                    border: `1px solid ${targetColumn === entry.name ? FCC_THEME.accent : FCC_THEME.warningBorder}`,
                   }}
                 />
               ))}
@@ -323,16 +324,16 @@ const StepTarget = ({ sourceDatasets = [], targetColumn, preferredTarget = '', o
             ))}
           </Box>
           {!filtered.length && (
-            <Typography sx={{ fontSize: 11.5, color: '#94a3b8' }}>
+            <Typography sx={{ fontSize: 11.5, color: FCC_THEME.textSoft }}>
               No matching columns found.
             </Typography>
           )}
           {targetColumn && (
-            <Box sx={{ p: 1.5, bgcolor: '#fff1ec', borderRadius: 2, border: '1.5px solid #D04A02' }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: '#D04A02' }}>
+            <Box sx={{ p: 1.5, bgcolor: FCC_THEME.accentSoft, borderRadius: 2, border: `1.5px solid ${FCC_THEME.accent}` }}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: FCC_THEME.accent }}>
                 Target selected: <code>{targetColumn}</code>
               </Typography>
-              <Typography sx={{ fontSize: 11.5, color: '#92400e' }}>
+              <Typography sx={{ fontSize: 11.5, color: FCC_THEME.accentHover }}>
                 The model will learn to predict this column.
               </Typography>
             </Box>

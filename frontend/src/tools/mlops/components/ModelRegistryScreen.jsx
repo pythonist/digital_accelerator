@@ -1,12 +1,12 @@
 /**
- * ModelRegistryScreen.jsx — Step 8: Model Registry
+ * ModelRegistryScreen.jsx - Step 8: Model Registry
  *
  * New features added:
- *   1. UploadPklPanel      — Upload external .pkl, score against test set, register
- *   2. ComparePanel        — Select 2–4 registry rows → side-by-side via compareRuns()
- *   3. ThresholdSparkline  — Mini SVG from threshold_table per row
- *   4. Archive with reason — Modal with reason dropdown before archiving
- *   5. Audit log toggle    — Collapsible stage-change history
+ *   1. UploadPklPanel      - Upload external .pkl, score against test set, register
+ *   2. ComparePanel        - Select 2–4 registry rows → side-by-side via compareRuns()
+ *   3. ThresholdSparkline  - Mini SVG from threshold_table per row
+ *   4. Archive with reason - Modal with reason dropdown before archiving
+ *   5. Audit log toggle    - Collapsible stage-change history
  *
  * Backend needs:
  *   - Existing: listModelRegistry, registerModel, updateRegistryStage, compareRuns, exportModel
@@ -70,7 +70,7 @@ const ThresholdSparkline = ({ thresholdTable, activeThreshold }) => {
   }, [thresholdTable]);
 
   if (!rows.length) {
-    return <Typography sx={{ fontSize: 9, color: T.textDim }}>—</Typography>;
+    return <Typography sx={{ fontSize: 9, color: T.textDim }}>-</Typography>;
   }
 
   const W = 72, H = 24;
@@ -182,7 +182,7 @@ const ArchiveModal = ({ open, row, onClose, onConfirm }) => {
  *
  * Until this endpoint exists, the panel shows a "coming soon" state.
  */
-const UploadPklPanel = ({ onRegistered }) => {
+const UploadPklPanel = ({ onRegistered, actionsDisabled = false, actionsMessage = '' }) => {
   const fileRef = useRef();
   const [file,       setFile]       = useState(null);
   const [modelName,  setModelName]  = useState('');
@@ -194,6 +194,7 @@ const UploadPklPanel = ({ onRegistered }) => {
   const [result,     setResult]     = useState(null);
   const [error,      setError]      = useState(null);
   const [open,       setOpen]       = useState(false);
+  const gatingMessage = actionsMessage || 'Registry actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
   const handleFile = (e) => {
     const f = e.target.files?.[0];
@@ -207,6 +208,10 @@ const UploadPklPanel = ({ onRegistered }) => {
 
   const handleUpload = async () => {
     if (!file) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -231,7 +236,7 @@ const UploadPklPanel = ({ onRegistered }) => {
 
     } catch (e) {
       if (e.message === 'ENDPOINT_NOT_YET_IMPLEMENTED') {
-        setError('Upload endpoint not yet deployed. Add POST /api/model-training/registry/upload-pkl to your backend — see code comment above for exact spec.');
+        setError('Upload endpoint not yet deployed. Add POST /api/model-training/registry/upload-pkl to your backend - see code comment above for exact spec.');
       } else {
         setError(e?.response?.data?.error || 'Upload failed');
       }
@@ -282,12 +287,13 @@ const UploadPklPanel = ({ onRegistered }) => {
             <>
               {/* File drop zone */}
               <Box
-                onClick={() => fileRef.current?.click()}
+                onClick={() => !actionsDisabled && fileRef.current?.click()}
                 sx={{
                   mb: 1.5, p: 2, border: `1.5px dashed ${file ? T.orange : T.border}`,
-                  borderRadius: 1.5, cursor: 'pointer', textAlign: 'center',
+                  borderRadius: 1.5, cursor: actionsDisabled ? 'not-allowed' : 'pointer', textAlign: 'center',
                   bgcolor: file ? '#fff1ec' : '#fafbfc', transition: 'all 0.12s',
                   '&:hover': { borderColor: T.orange, bgcolor: '#fff1ec' },
+                  opacity: actionsDisabled ? 0.72 : 1,
                 }}
               >
                 <input ref={fileRef} type="file" accept=".pkl" style={{ display: 'none' }} onChange={handleFile} />
@@ -328,7 +334,7 @@ const UploadPklPanel = ({ onRegistered }) => {
               <Button
                 variant="outlined" fullWidth
                 onClick={handleUpload}
-                disabled={!file || uploading}
+                disabled={actionsDisabled || canDisable(!file || uploading)}
                 startIcon={uploading ? <CircularProgress size={14} /> : <CloudUpload />}
                 sx={{ textTransform: 'none', fontWeight: 700, borderColor: T.orange, color: T.orange, '&:hover': { bgcolor: '#fff1ec' } }}
               >
@@ -383,7 +389,7 @@ const ComparePanel = ({ selectedRows, allRows, onClose }) => {
     <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, mb: 2, border: `1.5px solid ${T.orange}40`, bgcolor: '#fffcfa' }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
         <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#1e293b' }}>
-          Model Comparison — {selectedRows.length} models selected
+          Model Comparison - {selectedRows.length} models selected
         </Typography>
         <Button size="small" onClick={onClose} sx={{ textTransform: 'none', color: T.textMuted, fontSize: 11 }}>
           Clear selection
@@ -427,7 +433,7 @@ const ComparePanel = ({ selectedRows, allRows, onClose }) => {
                             fontFamily: mono ? T.mono : 'inherit',
                             color: isBest ? T.orange : '#1e293b',
                           }}>
-                            {val != null ? Number(val).toFixed(4) : '—'}
+                            {val != null ? Number(val).toFixed(4) : '-'}
                             {isBest && <span style={{ fontSize: 9, marginLeft: 4, color: T.orange }}>▲</span>}
                           </Typography>
                         </td>
@@ -524,8 +530,8 @@ const AuditLogPanel = () => {
                         <Chip label={row.to_stage} size="small" sx={{ height: 16, fontSize: 9, ...(() => { const c = stageColor(row.to_stage); return { bgcolor: c.bg, color: c.fg }; })() }} />
                       </Stack>
                     </td>
-                    <td style={{ padding: '6px 8px', fontSize: 11, color: T.textMuted }}>{row.changed_by || '—'}</td>
-                    <td style={{ padding: '6px 8px', fontSize: 11, color: T.textMuted }}>{row.reason || '—'}</td>
+                    <td style={{ padding: '6px 8px', fontSize: 11, color: T.textMuted }}>{row.changed_by || '-'}</td>
+                    <td style={{ padding: '6px 8px', fontSize: 11, color: T.textMuted }}>{row.reason || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -542,7 +548,14 @@ const AuditLogPanel = () => {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
-const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegistered }) => {
+const ModelRegistryScreen = ({
+  jobId,
+  activeModelRun,
+  validationReport,
+  onRegistered,
+  actionsDisabled = false,
+  actionsMessage = '',
+}) => {
   const resolvedJobId = String(jobId || validationReport?.job_id || activeModelRun?.job_id || '').trim();
   const [rows,        setRows]        = useState([]);
   const [loading,     setLoading]     = useState(false);
@@ -551,14 +564,36 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
   const [modelName,   setModelName]   = useState('');
   const [stage,       setStage]       = useState('candidate');
   const [notes,       setNotes]       = useState('');
+  const [thresholdInput, setThresholdInput] = useState('0.50');
   const [selectedIds, setSelectedIds] = useState([]); // for comparison
   const [archiveRow,  setArchiveRow]  = useState(null); // for archive modal
+  const gatingMessage = actionsMessage || 'Registry actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
-  const suggestedThreshold = useMemo(() => {
-    if (validationReport?.optimal_threshold != null) return Number(validationReport.optimal_threshold);
+  const recommendedThreshold = useMemo(() => {
+    const validationMatchesRun = String(validationReport?.job_id || '').trim() === resolvedJobId;
+    if (validationMatchesRun && validationReport?.optimal_threshold != null) return Number(validationReport.optimal_threshold);
+    if (activeModelRun?.selected_threshold != null) return Number(activeModelRun.selected_threshold);
+    if (activeModelRun?.optimal_threshold != null) return Number(activeModelRun.optimal_threshold);
     if (activeModelRun?.threshold != null) return Number(activeModelRun.threshold);
     return 0.5;
-  }, [validationReport, activeModelRun]);
+  }, [resolvedJobId, validationReport, activeModelRun]);
+
+  const selectedThreshold = useMemo(() => {
+    const parsed = Number(thresholdInput);
+    if (!Number.isFinite(parsed)) {
+      return Math.max(0, Math.min(1, Number(recommendedThreshold) || 0.5));
+    }
+    return Math.max(0, Math.min(1, parsed));
+  }, [recommendedThreshold, thresholdInput]);
+
+  const thresholdIsValid = useMemo(() => {
+    const parsed = Number(thresholdInput);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1;
+  }, [thresholdInput]);
+
+  const recommendedThresholdDisplay = useMemo(() => (
+    Number.isFinite(Number(recommendedThreshold)) ? Number(recommendedThreshold) : 0.5
+  ), [recommendedThreshold]);
 
   const loadRegistry = useCallback(async () => {
     setLoading(true);
@@ -581,8 +616,17 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
     }
   }, [modelName, activeModelRun, resolvedJobId]);
 
+  useEffect(() => {
+    const nextThreshold = Number.isFinite(Number(recommendedThreshold)) ? Number(recommendedThreshold) : 0.5;
+    setThresholdInput(Math.max(0, Math.min(1, nextThreshold)).toFixed(2));
+  }, [recommendedThreshold, resolvedJobId]);
+
   const handleRegister = async () => {
     if (!resolvedJobId) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -590,7 +634,7 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
         job_id:            resolvedJobId,
         model_name:        modelName || undefined,
         stage,
-        selected_threshold:suggestedThreshold,
+        selected_threshold:selectedThreshold,
         max_event_loss_pct:validationReport?.max_event_loss_pct,
         validation:        validationReport || {},
         notes,
@@ -605,6 +649,10 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
   };
 
   const handlePromote = async (targetJobId, nextStage) => {
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setError(null);
     try {
       await mlopsApi.updateRegistryStage(targetJobId, { stage: nextStage });
@@ -616,6 +664,11 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
 
   const handleArchiveConfirm = async (reason, archiveNotes) => {
     if (!archiveRow) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      setArchiveRow(null);
+      return;
+    }
     setArchiveRow(null);
     setError(null);
     try {
@@ -651,6 +704,7 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
           {activeModelRun?.algorithm ? ` (${String(activeModelRun.algorithm).replace(/_/g, ' ')})` : ''}.
         </Alert>
       )}
+      {actionsDisabled && <Alert severity="warning" sx={{ borderRadius: 2 }}>{gatingMessage}</Alert>}
 
       {/* Register current model */}
       <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
@@ -667,23 +721,42 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
             <MenuItem value="deployed">Deployed</MenuItem>
             <MenuItem value="archived">Archived</MenuItem>
           </Select>
-          <TextField size="small" label="Threshold" value={suggestedThreshold.toFixed(2)} disabled sx={{ width: 110 }} />
+          <TextField
+            size="small"
+            label="Threshold"
+            type="number"
+            value={thresholdInput}
+            onChange={e => setThresholdInput(e.target.value)}
+            onBlur={() => setThresholdInput(selectedThreshold.toFixed(2))}
+            error={!thresholdIsValid}
+            helperText={!thresholdIsValid ? 'Enter a value between 0.00 and 1.00' : 'Editable before registration'}
+            inputProps={{ min: 0, max: 1, step: 0.01 }}
+            sx={{ width: 170 }}
+          />
           <Button
             variant="contained"
-            disabled={canDisable(!resolvedJobId || submitting)}
+            disabled={actionsDisabled || canDisable(!resolvedJobId || submitting || !thresholdIsValid)}
             onClick={handleRegister}
             sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, textTransform: 'none', fontWeight: 700 }}
           >
             {submitting ? 'Saving…' : 'Register Model'}
           </Button>
         </Stack>
+        <Typography sx={{ fontSize: 11, color: T.textMuted, mb: 1.25 }}>
+          Recommended threshold: {recommendedThresholdDisplay.toFixed(2)}. Selected for registration: {selectedThreshold.toFixed(2)}.
+          {String(validationReport?.job_id || '').trim() === resolvedJobId ? ' from the latest validation run. You can change it before registering the model.' : ' based on the current run. You can override it before registering the model.'}
+        </Typography>
         <TextField size="small" label="Notes" value={notes} onChange={e => setNotes(e.target.value)} multiline minRows={2} sx={{ width: '100%' }} />
       </Paper>
 
       {error && <Alert severity="error" sx={{ borderRadius: 2 }}>{error}</Alert>}
 
       {/* Upload external pkl */}
-      <UploadPklPanel onRegistered={async () => { await loadRegistry(); }} />
+      <UploadPklPanel
+        onRegistered={async () => { await loadRegistry(); }}
+        actionsDisabled={actionsDisabled}
+        actionsMessage={gatingMessage}
+      />
 
       {/* Comparison panel (visible when ≥2 selected) */}
       {selectedIds.length >= 2 && (
@@ -701,7 +774,7 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
           <Stack direction="row" spacing={1} alignItems="center">
             {selectedIds.length > 0 && (
               <Chip
-                label={`${selectedIds.length} selected — click Compare`}
+                label={`${selectedIds.length} selected - click Compare`}
                 size="small"
                 sx={{ height: 20, fontSize: 10.5, bgcolor: '#fff1ec', color: T.orange, border: `1px solid ${T.orange}40` }}
               />
@@ -785,12 +858,12 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
                       sx={{ bgcolor: sc.bg, color: sc.fg, border: `1px solid ${sc.bd}`, height: 22, fontSize: 10.5, fontWeight: 700 }} />
                   </td>
 
-                  <td style={{ padding: '8px' }}>{row.algorithm || '—'}</td>
+                  <td style={{ padding: '8px' }}>{row.algorithm || '-'}</td>
                   <td style={{ padding: '8px', fontFamily: 'monospace', fontWeight: 700, color: '#1e293b' }}>
-                    {auc != null ? Number(auc).toFixed(4) : '—'}
+                    {auc != null ? Number(auc).toFixed(4) : '-'}
                   </td>
                   <td style={{ padding: '8px', fontFamily: 'monospace' }}>
-                    {row.selected_threshold != null ? Number(row.selected_threshold).toFixed(2) : '—'}
+                    {row.selected_threshold != null ? Number(row.selected_threshold).toFixed(2) : '-'}
                   </td>
 
                   {/* Threshold sparkline */}
@@ -801,21 +874,23 @@ const ModelRegistryScreen = ({ jobId, activeModelRun, validationReport, onRegist
                     />
                   </td>
 
-                  <td style={{ padding: '8px', fontSize: 11, color: T.textMuted }}>{row.updated_at || '—'}</td>
+                  <td style={{ padding: '8px', fontSize: 11, color: T.textMuted }}>{row.updated_at || '-'}</td>
 
                   <td style={{ padding: '8px' }}>
                     {!isArchived ? (
                       <Stack direction="row" spacing={0.75}>
                         <Button size="small" variant="outlined" onClick={() => handlePromote(row.job_id, 'champion')}
+                          disabled={actionsDisabled}
                           sx={{ textTransform: 'none', fontSize: 11, minWidth: 80 }}>
                           Champion
                         </Button>
                         <Button size="small" variant="outlined" onClick={() => handlePromote(row.job_id, 'challenger')}
+                          disabled={actionsDisabled}
                           sx={{ textTransform: 'none', fontSize: 11, minWidth: 80 }}>
                           Challenger
                         </Button>
                         <Tooltip title="Archive with reason">
-                          <IconButton size="small" onClick={() => setArchiveRow(row)} sx={{ color: T.textDim, '&:hover': { color: '#475569' } }}>
+                          <IconButton size="small" disabled={actionsDisabled} onClick={() => setArchiveRow(row)} sx={{ color: T.textDim, '&:hover': { color: '#475569' } }}>
                             <Archive sx={{ fontSize: 15 }} />
                           </IconButton>
                         </Tooltip>

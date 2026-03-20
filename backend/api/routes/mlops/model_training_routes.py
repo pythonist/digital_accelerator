@@ -52,7 +52,11 @@ from flask import Blueprint, jsonify, request
 from api.service_locator import services
 from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 from api.tools.mlops.path_utils import resolve_env_root
-from api.tools.mlops.model_training_service import ModelTrainingService
+from api.tools.mlops.model_training_service import (
+    ModelTrainingService,
+    _classification_preview_metrics,
+    _closest_threshold_row,
+)
 from api.tools.mlops.model_validation_service import ModelValidationService
 
 model_training_bp = Blueprint("model_training", __name__)
@@ -219,6 +223,41 @@ def _enrich_result_for_workbench(result: Dict) -> Dict:
             result[key] = m[key]
 
     return result
+
+
+def _meaningful_value(*values):
+    for value in values:
+        if value is None:
+            continue
+        if isinstance(value, str):
+            text = value.strip()
+            if not text or text == "-":
+                continue
+            return text
+        return value
+    return None
+
+
+def _curve_has_points(curve: Any, x_key: str, y_key: str) -> bool:
+    if not isinstance(curve, list) or not curve:
+        return False
+    for point in curve:
+        if not isinstance(point, dict):
+            continue
+        try:
+            float(point.get(x_key))
+            float(point.get(y_key))
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _to_float_or_default(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
 
 
 def _deploy_dir(env_root: Path) -> Path:
@@ -1132,10 +1171,127 @@ def compare_runs() -> tuple:
 
                 result = _enrich_result_for_workbench(result)
                 m = result.get("metrics", {})
+                validation = {}
+                try:
+                    validation = trainer.validation_report(str(jid), max_event_loss_pct=5.0)
+                except Exception:
+                    validation = {}
+
+                selected_threshold = _to_float_or_default(
+                    _meaningful_value(
+                        result.get("selected_threshold"),
+                        result.get("optimal_threshold"),
+                        m.get("optimal_threshold"),
+                        validation.get("optimal_threshold"),
+                    ),
+                    0.5,
+                )
+                display_threshold = _to_float_or_default(
+                    _meaningful_value(
+                        validation.get("optimal_threshold"),
+                        result.get("optimal_threshold"),
+                        m.get("optimal_threshold"),
+                        selected_threshold,
+                    ),
+                    selected_threshold,
+                )
 
                 # Slim the threshold table for comparison (keep all columns, limit rows)
-                threshold_table = result.get("threshold_table") or m.get("threshold_table") or []
+                threshold_table = validation.get("threshold_table") or result.get("threshold_table") or m.get("threshold_table") or []
+                selected_row = _closest_threshold_row(threshold_table, display_threshold)
+
+                preview = {}
+                need_preview = (
+                    not _curve_has_points(result.get("roc_curve"), "fpr", "tpr")
+                    and not _curve_has_points(m.get("roc_curve"), "fpr", "tpr")
+                ) or (
+                    not _curve_has_points(result.get("pr_curve"), "recall", "precision")
+                    and not _curve_has_points(m.get("pr_curve"), "recall", "precision")
+                ) or not threshold_table
+                if need_preview:
+                    try:
+                        y_true, y_prob = trainer._load_scores(str(jid))
+                        preview = _classification_preview_metrics(y_true, y_prob, threshold=display_threshold)
+                    except Exception:
+                        preview = {}
+
+                if not threshold_table:
+                    threshold_table = preview.get("threshold_table") or []
+                if not selected_row:
+                    selected_row = _closest_threshold_row(threshold_table, display_threshold)
                 threshold_table = threshold_table[:25]  # First 25 rows are sufficient for comparison
+
+                roc_auc = _meaningful_value(m.get("roc_auc"), preview.get("roc_auc"))
+                average_precision = _meaningful_value(
+                    m.get("average_precision"),
+                    m.get("pr_auc"),
+                    preview.get("pr_auc"),
+                )
+                precision = _meaningful_value(
+                    validation.get("precision"),
+                    selected_row.get("precision"),
+                    result.get("precision"),
+                    m.get("precision"),
+                    preview.get("precision"),
+                )
+                recall = _meaningful_value(
+                    validation.get("recall"),
+                    selected_row.get("recall"),
+                    result.get("recall"),
+                    m.get("recall"),
+                    preview.get("recall"),
+                )
+                f1 = _meaningful_value(
+                    validation.get("f1"),
+                    selected_row.get("f1"),
+                    result.get("f1"),
+                    m.get("f1"),
+                    preview.get("f1"),
+                )
+                accuracy = _meaningful_value(
+                    validation.get("accuracy"),
+                    selected_row.get("accuracy"),
+                    m.get("accuracy"),
+                    preview.get("accuracy"),
+                )
+                balanced_accuracy = _meaningful_value(
+                    validation.get("balanced_accuracy"),
+                    selected_row.get("balanced_accuracy"),
+                    m.get("balanced_accuracy"),
+                    preview.get("balanced_accuracy"),
+                )
+                specificity = _meaningful_value(
+                    validation.get("specificity"),
+                    selected_row.get("specificity"),
+                    result.get("specificity"),
+                    m.get("specificity"),
+                    preview.get("specificity"),
+                )
+                suppression_rate_pct = _meaningful_value(
+                    validation.get("suppression_rate_pct"),
+                    selected_row.get("suppression_rate_pct"),
+                    selected_row.get("suppression_rate"),
+                    result.get("suppression_rate_pct"),
+                    m.get("suppression_rate_pct"),
+                )
+                event_loss_pct = _meaningful_value(
+                    validation.get("event_loss_pct"),
+                    selected_row.get("event_loss_pct"),
+                    result.get("event_loss_pct"),
+                    m.get("event_loss_pct"),
+                )
+                gini = _meaningful_value(
+                    m.get("gini"),
+                    round((2.0 * float(roc_auc)) - 1.0, 4) if roc_auc is not None else None,
+                )
+                roc_curve = result.get("roc_curve") or m.get("roc_curve") or preview.get("roc_curve") or []
+                pr_curve = result.get("pr_curve") or m.get("pr_curve") or preview.get("pr_curve") or []
+                confusion_matrix = (
+                    validation.get("confusion_matrix")
+                    or result.get("confusion_matrix")
+                    or m.get("confusion_matrix")
+                    or preview.get("confusion_matrix")
+                )
 
                 entry = {
                     "job_id":               jid,
@@ -1147,33 +1303,37 @@ def compare_runs() -> tuple:
                     "grain":                result.get("grain", "alert"),
                     "trained_at":           result.get("trained_at"),
                     "metrics": {
-                        "roc_auc":           m.get("roc_auc"),
-                        "average_precision": m.get("average_precision"),
-                        "f1":                m.get("f1"),
-                        "precision":         m.get("precision"),
-                        "recall":            m.get("recall"),
-                        "accuracy":          m.get("accuracy"),
-                        "balanced_accuracy": m.get("balanced_accuracy"),
-                        "specificity":       m.get("specificity"),
-                        "gini":              m.get("gini"),
+                        "roc_auc":           roc_auc,
+                        "average_precision": average_precision,
+                        "f1":                f1,
+                        "precision":         precision,
+                        "recall":            recall,
+                        "accuracy":          accuracy,
+                        "balanced_accuracy": balanced_accuracy,
+                        "specificity":       specificity,
+                        "gini":              gini,
                         "cv_auc_mean":       m.get("cv_auc_mean"),
                         "cv_auc_std":        m.get("cv_auc_std"),
                         "cv_f1_mean":        m.get("cv_f1_mean"),
                         "cv_f1_std":         m.get("cv_f1_std"),
                         "brier_score":       m.get("brier_score"),
                         "log_loss":          m.get("log_loss"),
+                        "optimal_threshold": display_threshold,
+                        "suppression_rate_pct": suppression_rate_pct,
+                        "event_loss_pct":    event_loss_pct,
                     },
-                    "roc_curve":            m.get("roc_curve") or result.get("roc_curve") or [],
-                    "pr_curve":             m.get("pr_curve")  or result.get("pr_curve")  or [],
+                    "roc_curve":            roc_curve,
+                    "pr_curve":             pr_curve,
                     "feature_importance":   result.get("feature_importance", [])[:20],
-                    "confusion_matrix":     result.get("confusion_matrix") or m.get("confusion_matrix"),
-                    "optimal_threshold":    result.get("optimal_threshold") or m.get("optimal_threshold") or result.get("selected_threshold"),
-                    "suppression_rate_pct": result.get("suppression_rate_pct") or m.get("suppression_rate_pct"),
-                    "event_loss_pct":       result.get("event_loss_pct")       or m.get("event_loss_pct"),
-                    "precision":            result.get("precision")             or m.get("precision"),
-                    "recall":               result.get("recall")                or m.get("recall"),
-                    "f1":                   result.get("f1")                    or m.get("f1"),
-                    "specificity":          result.get("specificity")           or m.get("specificity"),
+                    "confusion_matrix":     confusion_matrix,
+                    "selected_threshold":   selected_threshold,
+                    "optimal_threshold":    display_threshold,
+                    "suppression_rate_pct": suppression_rate_pct,
+                    "event_loss_pct":       event_loss_pct,
+                    "precision":            precision,
+                    "recall":               recall,
+                    "f1":                   f1,
+                    "specificity":          specificity,
                     "threshold_table":      threshold_table,
                     "hml_summary":          result.get("hml_summary"),
                     "hml_high_threshold":   result.get("hml_high_threshold"),

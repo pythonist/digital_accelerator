@@ -1,7 +1,7 @@
 /**
  * PickleUploadCard.jsx
  * Upload an existing .pkl model to skip training entirely.
- * Calls autoPilotApi.uploadModel(formData) — real API, no mocks.
+ * Calls autoPilotApi.uploadModel(formData) - real API, no mocks.
  * Uses MUI icons only. Zero emojis.
  */
 import React, { useRef, useState } from "react";
@@ -10,22 +10,23 @@ import {
 } from "@mui/material";
 import { CloudUpload, CheckCircle, Inventory2 } from "@mui/icons-material";
 import autoPilotApi from "../utils/autoPilotApi";
+import { FCC_THEME } from "../../theme/fccWorkbenchTheme";
 
 const PWC = {
-  orange:      "#D04A02",
-  orangeDark:  "#A83A00",
-  orangeLight: "#FFF1EB",
-  cloud:       "#E0D8D0",
-  cream:       "#FAF8F5",
-  ink:         "#1B1B1B",
-  slate:       "#555555",
-  fog:         "#777777",
-  mist:        "#999999",
-  silver:      "#BBBBBB",
-  white:       "#FFFFFF",
-  success:     "#1A6B3A",
-  successBg:   "#EDF7F1",
-  successBd:   "#B2DFCC",
+  orange:      FCC_THEME.accent,
+  orangeDark:  FCC_THEME.accentHover,
+  orangeLight: FCC_THEME.accentSoft,
+  cloud:       FCC_THEME.border,
+  cream:       FCC_THEME.panelAlt,
+  ink:         FCC_THEME.textStrong,
+  slate:       FCC_THEME.textMuted,
+  fog:         FCC_THEME.textMuted,
+  mist:        FCC_THEME.textSoft,
+  silver:      FCC_THEME.textSoft,
+  white:       FCC_THEME.panel,
+  success:     FCC_THEME.success,
+  successBg:   FCC_THEME.successBg,
+  successBd:   FCC_THEME.successBorder,
 };
 
 const body = "'Helvetica Neue','Arial',sans-serif";
@@ -66,7 +67,7 @@ const PickleUploadCard = ({ onUploaded }) => {
       setResult(data);
       onUploaded?.(data);
     } catch (e) {
-      setError(e?.response?.data?.error || "Upload failed — ensure the file is a valid sklearn .pkl.");
+      setError(e?.response?.data?.error || "Upload failed - ensure the file is a valid sklearn .pkl.");
     } finally {
       setUploading(false);
     }
@@ -97,9 +98,11 @@ const PickleUploadCard = ({ onUploaded }) => {
             </Typography>
           </Box>
           <Typography sx={{ fontSize: 10.5, color: PWC.slate, fontFamily: body }}>
-            {result.model_meta?.type && `Type: ${result.model_meta.type}`}
-            {result.model_meta?.n_features && ` · ${result.model_meta.n_features} features`}
-            {" · Ready to deploy."}
+            {[
+              result.model_meta?.type ? `Type: ${result.model_meta.type}` : null,
+              result.model_meta?.n_features ? `${result.model_meta.n_features} features` : null,
+              "Ready to deploy.",
+            ].filter(Boolean).join(", ")}
           </Typography>
           <Button
             size="small"
@@ -130,7 +133,7 @@ const PickleUploadCard = ({ onUploaded }) => {
             </Typography>
           </Box>
 
-          {/* Fields — shown once file is selected */}
+          {/* Fields - shown once file is selected */}
           {file && (
             <Stack spacing={0.875} sx={{ mb: 1.25 }}>
               <Stack direction="row" spacing={0.75}>

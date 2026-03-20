@@ -20,11 +20,23 @@ class VectorRAGSystem:
     Includes batch operations, metrics tracking, and LLM explanations.
     """
     
-    def __init__(self, db_manager, vector_store_path: str, ollama_base_url='http://localhost:11434', embedding_model='nomic-embed-text'):
+    def __init__(
+        self,
+        db_manager,
+        vector_store_path: str,
+        ollama_base_url='http://localhost:11434',
+        embedding_model=None,
+        llm_provider=None,
+    ):
         self.db_manager = db_manager
         self.base_path = vector_store_path
         self.ollama_base_url = ollama_base_url
-        self.embedding_model = embedding_model
+        self.llm_provider = llm_provider
+        self.embedding_model = (
+            embedding_model
+            or getattr(llm_provider, "embedding_model", None)
+            or 'nomic-embed-text'
+        )
         
         self.index = None
         self.fallback_matrix = None
@@ -52,13 +64,27 @@ class VectorRAGSystem:
 
     def generate_embeddings_batch(self, texts: List[str], batch_size: int = 32) -> Optional[List[np.ndarray]]:
         """
-        Generates embeddings via Ollama Batch API with progress tracking.
-        Processes in smaller batches to avoid timeouts.
+        Generates embeddings with the active provider.
+        Falls back to Ollama HTTP batch mode for backward compatibility.
         """
         if not _NUMPY_OK:
             return None
         if not texts: 
             return []
+
+        if self.llm_provider and hasattr(self.llm_provider, 'generate_embedding'):
+            all_embeddings = []
+            total = len(texts)
+            for idx, text in enumerate(texts, start=1):
+                try:
+                    if idx == 1 or idx % 50 == 0 or idx == total:
+                        print(f"  -> Embedding {idx}/{total} with local provider...")
+                    emb = self.llm_provider.generate_embedding(text, model=self.embedding_model)
+                    if emb:
+                        all_embeddings.append(np.array(emb, dtype=np.float32))
+                except Exception as exc:
+                    print(f"    Warning: local embedding failed for item {idx}: {exc}")
+            return all_embeddings if all_embeddings else None
         
         all_embeddings = []
         total_batches = (len(texts) + batch_size - 1) // batch_size
@@ -116,6 +142,13 @@ class VectorRAGSystem:
         """Single string embedding with retry logic"""
         if not _NUMPY_OK:
             return None
+        if self.llm_provider and hasattr(self.llm_provider, 'generate_embedding'):
+            try:
+                emb = self.llm_provider.generate_embedding(text, model=self.embedding_model)
+                if emb:
+                    return np.array(emb, dtype=np.float32)
+            except Exception as exc:
+                print(f"  Warning: local embedding failed: {exc}")
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -438,11 +471,22 @@ Case 2: {summary_2}
 
 Provide a concise explanation (2-3 sentences) highlighting the key patterns, risk factors, or behaviors that make these cases similar. Focus on specific details like transaction types, amounts, risk levels, and alert patterns."""
 
-            # Call Ollama for explanation
+            if self.llm_provider and hasattr(self.llm_provider, 'generate'):
+                result = self.llm_provider.generate(
+                    prompt=prompt,
+                    model=model,
+                    temperature=0.7,
+                    max_tokens=150,
+                )
+                if result.get('success'):
+                    explanation = str(result.get('response') or '').strip()
+                    return explanation if explanation else "Unable to generate explanation."
+                return f"LLM Error: {result.get('error', 'Unknown error')}"
+
             response = requests.post(
                 f"{self.ollama_base_url}/api/generate",
                 json={
-                    'model': model,  # Dynamically use the model requested
+                    'model': model,
                     'prompt': prompt,
                     'stream': False,
                     'options': {
@@ -452,18 +496,17 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
                 },
                 timeout=30
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
                 explanation = data.get('response', '').strip()
                 return explanation if explanation else "Unable to generate explanation."
-            else:
-                try:
-                    err_json = response.json()
-                    err_msg = err_json.get('error', 'Unknown error')
-                    return f"LLM Error: {err_msg} (HTTP {response.status_code})"
-                except:
-                    return f"LLM service unavailable (HTTP {response.status_code})"
+            try:
+                err_json = response.json()
+                err_msg = err_json.get('error', 'Unknown error')
+                return f"LLM Error: {err_msg} (HTTP {response.status_code})"
+            except Exception:
+                return f"LLM service unavailable (HTTP {response.status_code})"
                 
         except requests.Timeout:
             return "Explanation generation timed out. The LLM service may be busy."

@@ -28,6 +28,7 @@ def create_app():
     from api.routes.merge import merge_bp
     from api.routes.admin import admin_bp
     from api.routes.clean import clean_bp
+    from api.routes.fcc_bridge import fcc_bridge_bp
     # NEW: Import Discovery
     from api.routes.discovery import discovery_bp 
     from api.routes.mule_detection import mule_bp
@@ -45,6 +46,7 @@ def create_app():
     app.register_blueprint(llm_bp, url_prefix='/api/v2')
     app.register_blueprint(merge_bp, url_prefix='/api/v2')
     app.register_blueprint(admin_bp, url_prefix='/api/v2')
+    app.register_blueprint(fcc_bridge_bp, url_prefix='/api/v2')
 
     app.register_blueprint(clean_bp, url_prefix='/api/v2')
     # NEW: Register Discovery with correct prefix

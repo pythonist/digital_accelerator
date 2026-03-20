@@ -13,12 +13,14 @@ import base64
 import io
 import re
 from textwrap import wrap
+from typing import Any
 
 from flask import Blueprint, jsonify, request, send_file
 
 from api.service_locator import services
 from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 from api.tools.mlops.path_utils import resolve_env_root
+from api.tools.mlops.report_pdf_generator import FCCWorkbenchReportPDFGenerator
 
 
 report_bp = Blueprint("mlops_report", __name__)
@@ -43,6 +45,48 @@ def _get_env_ids():
 def _get_service(env_root: str) -> MLOpsWorkbenchService:
     mlops_db = Path(env_root) / "mlops" / "duckdb" / "mlops.duckdb"
     return MLOpsWorkbenchService(mlops_db)
+
+
+def _resolve_report_for_pdf(
+    service: MLOpsWorkbenchService,
+    *,
+    tenant_id: str,
+    env_id: str,
+    run_id: str,
+    pipeline_id: Any,
+    analyst_hourly_cost: float,
+    cost_currency: str,
+) -> dict:
+    try:
+        return service.generate_run_report(
+            tenant_id=str(tenant_id),
+            env_id=str(env_id),
+            run_id=str(run_id),
+            pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
+            analyst_hourly_cost=analyst_hourly_cost,
+            cost_currency=cost_currency,
+        )
+    except Exception:
+        cached = service.get_run_report(str(tenant_id), str(env_id), str(run_id))
+        if cached:
+            return cached
+        raise
+
+
+def _render_detailed_pdf(
+    report: dict,
+    chart_images: list[dict],
+    *,
+    audience: str,
+    strict_min_pages: bool,
+) -> bytes:
+    generator = FCCWorkbenchReportPDFGenerator()
+    return generator.generate(
+        report or {},
+        chart_images=chart_images or [],
+        audience=audience,
+        strict_min_pages=strict_min_pages,
+    )
 
 
 def _require_reportlab():
@@ -508,19 +552,18 @@ def download_report_pdf():
         analyst_hourly_cost = float(body.get("analyst_hourly_cost") or 85.0)
         cost_currency = str(body.get("cost_currency") or "GBP")
 
-        report = service.get_run_report(str(tenant_id), str(env_id), run_id)
-        if not report:
-            report = service.generate_run_report(
-                tenant_id=str(tenant_id),
-                env_id=str(env_id),
-                run_id=run_id,
-                pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
-                analyst_hourly_cost=analyst_hourly_cost,
-                cost_currency=cost_currency,
-            )
+        report = _resolve_report_for_pdf(
+            service,
+            tenant_id=str(tenant_id),
+            env_id=str(env_id),
+            run_id=run_id,
+            pipeline_id=pipeline_id,
+            analyst_hourly_cost=analyst_hourly_cost,
+            cost_currency=cost_currency,
+        )
 
         chart_images = _decode_chart_images(body.get("chart_images") or report.get("chart_images") or [])
-        pdf_bytes = _render_report_pdf(
+        pdf_bytes = _render_detailed_pdf(
             report or {},
             chart_images,
             strict_min_pages=strict_min_pages,
@@ -532,7 +575,7 @@ def download_report_pdf():
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"aml_run_report_{safe_run_id}_{audience.lower()}.pdf",
+            download_name=f"fcc_workbench_report_{safe_run_id}_{audience.lower()}.pdf",
         )
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
@@ -561,19 +604,18 @@ def download_report_pdf_get(run_id: str):
         analyst_hourly_cost = float(request.args.get("analyst_hourly_cost") or 85.0)
         cost_currency = str(request.args.get("cost_currency") or "GBP")
 
-        report = service.get_run_report(str(tenant_id), str(env_id), run_id)
-        if not report:
-            report = service.generate_run_report(
-                tenant_id=str(tenant_id),
-                env_id=str(env_id),
-                run_id=run_id,
-                pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
-                analyst_hourly_cost=analyst_hourly_cost,
-                cost_currency=cost_currency,
-            )
+        report = _resolve_report_for_pdf(
+            service,
+            tenant_id=str(tenant_id),
+            env_id=str(env_id),
+            run_id=run_id,
+            pipeline_id=pipeline_id,
+            analyst_hourly_cost=analyst_hourly_cost,
+            cost_currency=cost_currency,
+        )
 
         chart_images = _decode_chart_images(report.get("chart_images") or [])
-        pdf_bytes = _render_report_pdf(
+        pdf_bytes = _render_detailed_pdf(
             report or {},
             chart_images,
             strict_min_pages=strict_min_pages,
@@ -584,7 +626,7 @@ def download_report_pdf_get(run_id: str):
             io.BytesIO(pdf_bytes),
             mimetype="application/pdf",
             as_attachment=True,
-            download_name=f"aml_run_report_{safe_run_id}_{audience.lower()}.pdf",
+            download_name=f"fcc_workbench_report_{safe_run_id}_{audience.lower()}.pdf",
         )
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400

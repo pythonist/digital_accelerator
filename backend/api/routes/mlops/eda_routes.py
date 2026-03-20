@@ -15,6 +15,8 @@ Also add to mlopsApi.js under the eda section:
 
 from flask import Blueprint, request, jsonify
 from pathlib import Path
+import json
+import re
 
 # Re-use the shared env/tenant resolution from workbench_routes
 # (copy the helpers here so this file is self-contained)
@@ -100,6 +102,171 @@ def _ok(data: dict, code: int = 200):
 
 def _err(msg: str, code: int = 400, error_code: str = "BAD_REQUEST"):
     return jsonify({"success": False, "error": msg, "error_code": error_code}), code
+
+
+def _extract_llm_json(raw_text: str):
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        text = match.group(0)
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _clean_lines(values, max_items: int = 6) -> list[str]:
+    if not isinstance(values, (list, tuple)):
+        return []
+    cleaned = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        cleaned.append(text)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+def _build_eda_ai_fallback(body: dict, dataset: dict) -> dict:
+    title = str(body.get("chart_title") or body.get("title") or "EDA analysis").strip()
+    chart_key = str(body.get("chart_key") or "").strip()
+    scope = str(body.get("analysis_scope") or "chart").strip().lower() or "chart"
+    target_column = _get_target_col(body)
+    chart_focus = str(body.get("chart_focus") or title or "this chart").strip()
+    business_labels = body.get("business_labels") if isinstance(body.get("business_labels"), dict) else {}
+    deterministic = body.get("deterministic_insight") if isinstance(body.get("deterministic_insight"), dict) else {}
+    facts = _clean_lines(body.get("facts"), max_items=8)
+
+    positive_label = str(
+        business_labels.get("positive")
+        or business_labels.get("target_display")
+        or target_column
+        or "the modeled outcome"
+    ).strip()
+
+    what = str(
+        deterministic.get("what")
+        or (
+            f"{title} summarises {facts[0].lower()}"
+            if facts
+            else f"{title} shows the current pattern in {chart_focus.lower()}."
+        )
+    ).strip()
+
+    why = str(
+        deterministic.get("why")
+        or (
+            f"This matters because {facts[1].lower()}"
+            if len(facts) > 1
+            else f"This helps the team see whether {positive_label} is concentrated, separated, or evenly spread."
+        )
+    ).strip()
+
+    how = str(
+        deterministic.get("how_it_helps_model_building")
+        or (
+            f"Use this view to judge whether {chart_focus.lower()} should influence feature design, threshold choice, or review strategy."
+        )
+    ).strip()
+
+    action = str(
+        deterministic.get("action")
+        or deterministic.get("recommended_action")
+        or "Use this signal together with data quality, leakage, and validation checks before changing model rules."
+    ).strip()
+
+    watch_out = str(
+        body.get("watch_out")
+        or deterministic.get("watch_out")
+        or "Treat this as one signal, not the full decision. Confirm the pattern with other EDA views before acting."
+    ).strip()
+
+    return {
+        "analysis_source": "deterministic",
+        "llm_available": False,
+        "chart_title": title,
+        "chart_key": chart_key,
+        "analysis_scope": scope,
+        "dataset_type": dataset.get("dataset_type"),
+        "target_column": target_column,
+        "business_labels": business_labels,
+        "facts": facts,
+        "sections": {
+            "what_this_says": what,
+            "why_it_matters": why,
+            "how_it_helps_model_building": how,
+            "recommended_action": action,
+            "watch_out": watch_out,
+        },
+    }
+
+
+def _maybe_upgrade_eda_ai_explanation(body: dict, dataset: dict, fallback: dict) -> dict:
+    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    if not wrapper:
+        return fallback
+    try:
+        if not wrapper.check_connection():
+            return fallback
+    except Exception:
+        return fallback
+
+    prompt_payload = {
+        "analysis_scope": fallback.get("analysis_scope"),
+        "chart_title": fallback.get("chart_title"),
+        "chart_key": fallback.get("chart_key"),
+        "dataset_type": dataset.get("dataset_type"),
+        "chart_focus": str(body.get("chart_focus") or "").strip(),
+        "target_column": fallback.get("target_column"),
+        "business_labels": fallback.get("business_labels"),
+        "facts": fallback.get("facts") or [],
+        "deterministic_sections": fallback.get("sections") or {},
+    }
+    system_prompt = (
+        "You are an AML analytics assistant for FCC and transaction monitoring workbenches. "
+        "Explain structured chart facts in grounded business language. "
+        "Use only the facts provided. Do not invent numbers, columns, causes, or recommendations. "
+        "Do not use em dashes. Keep each answer concise and specific. "
+        "Return valid JSON with keys what_this_says, why_it_matters, "
+        "how_it_helps_model_building, recommended_action, watch_out."
+    )
+    response = wrapper.generate(
+        prompt=json.dumps(prompt_payload, default=str),
+        system_prompt=system_prompt,
+        temperature=0.2,
+        max_tokens=380,
+    )
+    if not response or not response.get("success"):
+        return fallback
+
+    parsed = _extract_llm_json(response.get("response", ""))
+    if not isinstance(parsed, dict):
+        return fallback
+
+    upgraded = dict(fallback)
+    upgraded["analysis_source"] = "ai"
+    upgraded["llm_available"] = True
+    upgraded["provider"] = response.get("provider")
+    upgraded["model"] = response.get("model")
+    upgraded["generated_at"] = response.get("timestamp")
+
+    sections = dict(upgraded.get("sections") or {})
+    for key in (
+        "what_this_says",
+        "why_it_matters",
+        "how_it_helps_model_building",
+        "recommended_action",
+        "watch_out",
+    ):
+        value = str(parsed.get(key) or "").strip()
+        if value:
+            sections[key] = value
+    upgraded["sections"] = sections
+    return upgraded
 
 
 # ─── 1. Dataset Overview ─────────────────────────────────────────────────────
@@ -392,6 +559,37 @@ def eda_insights():
 
 
 # ─── 11. Pairplot Data ───────────────────────────────────────────────────────
+
+@eda_bp.route("/ai-chart-explain", methods=["POST", "OPTIONS"])
+@eda_bp.route("/ai-chart-explain/", methods=["POST", "OPTIONS"])
+def eda_ai_chart_explain():
+    """
+    POST /api/eda/ai-chart-explain
+    Body: {
+      dataset_id,
+      chart_key?,
+      chart_title?,
+      chart_focus?,
+      analysis_scope?,
+      target_col?,
+      business_labels?,
+      deterministic_insight?,
+      facts?
+    }
+
+    Deterministic-first chart explanation with optional LLM rewrite.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        ds = _require_dataset(body)
+        fallback = _build_eda_ai_fallback(body, ds)
+        result = _maybe_upgrade_eda_ai_explanation(body, ds, fallback)
+        return _ok(result)
+    except ValueError as e:
+        return _err(str(e), 404, "NOT_FOUND")
+    except Exception as e:
+        return _err(str(e), 500, "SERVER_ERROR")
+
 
 @eda_bp.route("/pairplot", methods=["POST"])
 def eda_pairplot():

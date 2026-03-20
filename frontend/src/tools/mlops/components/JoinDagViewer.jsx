@@ -63,9 +63,9 @@ const C = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-const fmt  = (n) => (n == null ? '—' : Number(n).toLocaleString());
+const fmt  = (n) => (n == null ? '-' : Number(n).toLocaleString());
 const fmtK = (n) => {
-  if (n == null) return '—';
+  if (n == null) return '-';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
@@ -552,14 +552,14 @@ function EdgeInspector({ edge }) {
       sx={{ p: 1.5, borderRadius: 1.5, bgcolor: '#fafafa', mt: 1.5 }}
     >
       <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: C.text, mb: 0.75 }}>
-        Join inspector — {String(edge.from.id).toUpperCase()} → {String(edge.to.id).toUpperCase()}
+        Join inspector - {String(edge.from.id).toUpperCase()} → {String(edge.to.id).toUpperCase()}
       </Typography>
       <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
         {[
-          { label: 'Key',          value: edge.key || '—' },
+          { label: 'Key',          value: edge.key || '-' },
           { label: 'Join type',    value: JOIN_TYPE_LABELS[edge.joinType?.toLowerCase()] || edge.joinType },
           { label: 'Matched rows', value: fmt(edge.matchedRows) },
-          { label: 'Coverage',     value: cov != null ? `${cov.toFixed(1)}%` : '—',
+          { label: 'Coverage',     value: cov != null ? `${cov.toFixed(1)}%` : '-',
             color: coverageColor(cov), bg: coverageBg(cov) },
         ].map(({ label, value, color, bg }) => (
           <Box
@@ -595,7 +595,7 @@ function GrainAdvice({ anchorType, datasets }) {
               border: '1px solid #bbf7d0', mb: 1.5 }}>
         <CheckCircleOutline sx={{ fontSize: 16, color: C.green }} />
         <Typography sx={{ fontSize: 12, color: '#166534' }}>
-          <b>Correct grain.</b> Using <code>alerts</code> as anchor — each master row = one alert decision.
+          <b>Correct grain.</b> Using <code>alerts</code> as anchor - each master row = one alert decision.
           Master dataset will have ~{fmtK((datasets.find((d) => safe(d.dataset_type) === 'alerts'))?.row_count)} rows (same as alerts).
         </Typography>
       </Stack>
@@ -614,7 +614,7 @@ function GrainAdvice({ anchorType, datasets }) {
           <Typography sx={{ fontSize: 11.5, color: '#92400e' }}>
             Using <code>transactions</code> as anchor will produce ~{fmtK((datasets.find((d) => safe(d.dataset_type) === 'transactions'))?.row_count)} rows,
             but only ~{fmtK((datasets.find((d) => safe(d.dataset_type) === 'alerts'))?.row_count)} will have a label.
-            The rest will be unlabelled noise. Switch anchor to <b>alerts</b> — your master will correctly have one row per alert decision.
+            The rest will be unlabelled noise. Switch anchor to <b>alerts</b> - your master will correctly have one row per alert decision.
           </Typography>
         </Box>
       </Stack>
@@ -912,7 +912,7 @@ export default function JoinDagViewer({
           <Stack direction="row" alignItems="center" spacing={1}>
             <AccountTree sx={{ fontSize: 16, color: C.orange }} />
             <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>
-              Join pipeline — visual DAG
+              Join pipeline - visual DAG
             </Typography>
           </Stack>
           <Stack direction="row" spacing={1}>
@@ -1006,13 +1006,13 @@ export default function JoinDagViewer({
             sx={{ p: 1.5, borderRadius: 1.5, bgcolor: '#fafafa', mt: 1.5 }}
           >
             <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: C.text, mb: 0.75 }}>
-              Dataset inspector — {String(selectedNode.datasetType).toUpperCase()}
+              Dataset inspector - {String(selectedNode.datasetType).toUpperCase()}
             </Typography>
             <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
               {[
                 { label: 'Row count',   value: fmt(selectedNode.rowCount) },
                 { label: 'Role',        value: selectedNode.isAnchor ? 'Anchor (base grain)' : 'Joined dimension' },
-                { label: 'Coverage',    value: selectedNode.coverage != null ? `${selectedNode.coverage.toFixed(1)}%` : '—',
+                { label: 'Coverage',    value: selectedNode.coverage != null ? `${selectedNode.coverage.toFixed(1)}%` : '-',
                   color: coverageColor(selectedNode.coverage), bg: coverageBg(selectedNode.coverage) },
                 { label: 'Matched rows', value: fmt(selectedNode.matchedRows) },
               ].map(({ label, value, color, bg }) => (

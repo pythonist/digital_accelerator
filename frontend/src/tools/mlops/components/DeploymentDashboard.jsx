@@ -642,7 +642,17 @@ const InvestigatorQueueTable = ({ rows = [] }) => (
   </Box>
 );
 
-const ScoreBatchDialog = ({ open, onClose, deploymentId, runId, threshold, onScored, modelGrain = 'alert' }) => {
+const ScoreBatchDialog = ({
+  open,
+  onClose,
+  deploymentId,
+  runId,
+  threshold,
+  onScored,
+  modelGrain = 'alert',
+  actionsDisabled = false,
+  actionsMessage = '',
+}) => {
   const normalizedGrain = modelGrain === 'case' ? 'case' : 'alert';
   const [raw, setRaw] = useState(() => JSON.stringify(
     normalizedGrain === 'case'
@@ -660,12 +670,17 @@ const ScoreBatchDialog = ({ open, onClose, deploymentId, runId, threshold, onSco
   const [entityType, setEntityType] = useState(normalizedGrain);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const gatingMessage = actionsMessage || 'Deployment actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
   useEffect(() => {
     setEntityType(normalizedGrain);
   }, [normalizedGrain]);
 
   const handleScore = async () => {
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -719,7 +734,7 @@ const ScoreBatchDialog = ({ open, onClose, deploymentId, runId, threshold, onSco
           <Button
             variant="contained"
             onClick={handleScore}
-            disabled={canDisable(loading)}
+            disabled={actionsDisabled || canDisable(loading)}
             sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700 }}
           >
             {loading ? 'Scoring...' : 'Score Batch'}
@@ -737,6 +752,8 @@ const DeploymentDashboard = ({
   validationReport,
   registryEntry,
   onBack,
+  actionsDisabled = false,
+  actionsMessage = '',
 }) => {
   const propDeploymentId = registryEntry?.deployment_id || '';
   const propRunId = activeModelRun?.job_id || registryEntry?.job_id || '';
@@ -753,6 +770,7 @@ const DeploymentDashboard = ({
     || activeModelRun?.model_grain
     || 'alert',
   ).toLowerCase() === 'case' ? 'case' : 'alert';
+  const gatingMessage = actionsMessage || 'Deployment actions are blocked because this run is outdated. Rerun the upstream stages first.';
 
   const [activeDeployment, setActiveDeployment] = useState(() => (
     propDeploymentId
@@ -805,6 +823,8 @@ const DeploymentDashboard = ({
   const [loading, setLoading]           = useState({});
   const [errors, setErrors]             = useState({});
   const [scoreBatchOpen, setScoreBatchOpen] = useState(false);
+  const [publishingToSentinel, setPublishingToSentinel] = useState(false);
+  const [publishNotice, setPublishNotice] = useState(null);
   const [ledgerFilter, setLedgerFilter] = useState({ entity_type: modelGrain, decision: '' });
   const [inferRaw, setInferRaw] = useState(
     JSON.stringify(
@@ -1051,6 +1071,10 @@ const DeploymentDashboard = ({
 
   const runInferenceExplain = useCallback(async () => {
     if (!runId) return;
+    if (actionsDisabled) {
+      setInferError(gatingMessage);
+      return;
+    }
     setInferLoading(true);
     setInferError(null);
     try {
@@ -1067,7 +1091,7 @@ const DeploymentDashboard = ({
     } finally {
       setInferLoading(false);
     }
-  }, [runId, inferRaw, threshold]);
+  }, [actionsDisabled, gatingMessage, runId, inferRaw, threshold]);
 
   const appendStreamBatch = useCallback((data) => {
     setSimBatchHistory((prev) => {
@@ -1107,6 +1131,10 @@ const DeploymentDashboard = ({
 
   const runLiveSimulation = useCallback(async () => {
     if (!deploymentId || !runId) return;
+    if (actionsDisabled) {
+      setSimError(gatingMessage);
+      return;
+    }
     setStreamingActive(false);
     setSimBatchHistory([]);
     setStreamQueueRows([]);
@@ -1127,7 +1155,7 @@ const DeploymentDashboard = ({
     } finally {
       setSimLoading(false);
     }
-  }, [deploymentId, runId, simConfig.persist_to_ledger, executeLiveSimulation, fetchKpis, fetchAlertVsCase, fetchDrift, fetchLedger]);
+  }, [actionsDisabled, gatingMessage, deploymentId, runId, simConfig.persist_to_ledger, executeLiveSimulation, fetchKpis, fetchAlertVsCase, fetchDrift, fetchLedger]);
 
   const seedDeploymentLedger = useCallback(async (nextDeploymentId, nextRunId, nextThreshold) => {
     if (!nextDeploymentId || !nextRunId) return null;
@@ -1148,6 +1176,10 @@ const DeploymentDashboard = ({
 
   const activateSelectedDeployment = useCallback(async () => {
     if (!selectedRunId) return;
+    if (actionsDisabled) {
+      setSwitchError(gatingMessage);
+      return;
+    }
     setSwitchingDeployment(true);
     setSwitchError(null);
     try {
@@ -1180,6 +1212,8 @@ const DeploymentDashboard = ({
       setSwitchingDeployment(false);
     }
   }, [
+    actionsDisabled,
+    gatingMessage,
     selectedRunId,
     selectedThreshold,
     threshold,
@@ -1338,6 +1372,31 @@ const DeploymentDashboard = ({
   const effectiveLiveQueue = streamQueueRows.length > 0 ? streamQueueRows : liveQueue;
   const streamSummary = simBatchHistory.length > 0 ? simBatchHistory[simBatchHistory.length - 1] : null;
 
+  const publishRetainedQueue = async () => {
+    if (!deploymentId || !runId) return;
+    setPublishingToSentinel(true);
+    setPublishNotice(null);
+    try {
+      const res = await mlopsApi.publishToSentinel({
+        deployment_id: deploymentId,
+        run_id: runId,
+      });
+      const body = unwrap(res);
+      const payload = body?.publish || body || {};
+      setPublishNotice({
+        severity: 'success',
+        message: `Published ${fmt(payload?.published_rows)} retained ${grainLabel.toLowerCase()} records to Sentinel package ${String(payload?.publish_id || '').slice(0, 12)}.`,
+      });
+    } catch (err) {
+      setPublishNotice({
+        severity: 'error',
+        message: err?.message || 'Failed to publish retained FCC queue to Sentinel.',
+      });
+    } finally {
+      setPublishingToSentinel(false);
+    }
+  };
+
   // â”€â”€ Download report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const downloadReport = () => {
     const reasonCounts = {};
@@ -1462,10 +1521,20 @@ const DeploymentDashboard = ({
             variant="outlined"
             startIcon={<BarChart sx={{ fontSize: 15 }} />}
             onClick={() => setScoreBatchOpen(true)}
-            disabled={canDisable(!deploymentId || !runId)}
+            disabled={actionsDisabled || canDisable(!deploymentId || !runId)}
             sx={{ textTransform: 'none', fontSize: 12 }}
           >
             Score Batch
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ArrowForward sx={{ fontSize: 15 }} />}
+            onClick={publishRetainedQueue}
+            disabled={publishingToSentinel || actionsDisabled || canDisable(!deploymentId || !runId)}
+            sx={{ textTransform: 'none', fontSize: 12 }}
+          >
+            {publishingToSentinel ? 'Publishing...' : 'Send To Sentinel'}
           </Button>
           <Button
             size="small"
@@ -1481,6 +1550,16 @@ const DeploymentDashboard = ({
       </Box>
 
       <Box sx={{ px: 3, pt: 1.75 }}>
+        {actionsDisabled && (
+          <Alert severity="warning" sx={{ mb: 1.5, borderRadius: 2 }}>
+            {gatingMessage}
+          </Alert>
+        )}
+        {publishNotice && (
+          <Alert severity={publishNotice.severity} sx={{ mb: 1.5, borderRadius: 2 }}>
+            {publishNotice.message}
+          </Alert>
+        )}
         <Paper
           variant="outlined"
           sx={{
@@ -1533,7 +1612,7 @@ const DeploymentDashboard = ({
                   size="small"
                   variant="contained"
                   onClick={activateSelectedDeployment}
-                  disabled={canDisable(!selectedRunId || switchingDeployment)}
+                  disabled={actionsDisabled || canDisable(!selectedRunId || switchingDeployment)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, minWidth: 190 }}
                 >
                   {switchingDeployment ? 'Activating...' : 'Activate Deployment'}
@@ -1952,6 +2031,7 @@ const DeploymentDashboard = ({
                     size="small"
                     variant="contained"
                     onClick={() => setScoreBatchOpen(true)}
+                    disabled={actionsDisabled || canDisable(!deploymentId || !runId)}
                     sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontSize: 12, fontWeight: 700 }}
                   >
                     Score New Batch
@@ -2058,7 +2138,7 @@ const DeploymentDashboard = ({
                   size="small"
                   variant="contained"
                   onClick={runLiveSimulation}
-                  disabled={canDisable(!runId || !deploymentId || simLoading)}
+                  disabled={actionsDisabled || canDisable(!runId || !deploymentId || simLoading)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, height: 36 }}
                 >
                   {simLoading ? 'Running...' : 'Run Simulation'}
@@ -2077,7 +2157,7 @@ const DeploymentDashboard = ({
                     setLastStreamAt(null);
                     setStreamingActive(true);
                   }}
-                  disabled={canDisable(!runId || !deploymentId)}
+                  disabled={actionsDisabled || canDisable(!runId || !deploymentId)}
                   sx={{
                     textTransform: 'none',
                     fontWeight: 700,
@@ -2521,7 +2601,7 @@ const DeploymentDashboard = ({
                     size="small"
                     variant="contained"
                     onClick={runInferenceExplain}
-                    disabled={canDisable(!runId || inferLoading)}
+                    disabled={actionsDisabled || canDisable(!runId || inferLoading)}
                     sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700 }}
                   >
                     {inferLoading ? 'Running...' : 'Run Inference Explain'}
@@ -2603,6 +2683,8 @@ const DeploymentDashboard = ({
         runId={runId}
         threshold={threshold}
         modelGrain={modelGrain}
+        actionsDisabled={actionsDisabled}
+        actionsMessage={gatingMessage}
         onScored={(result) => {
           fetchAlertVsCase();
           fetchLedger();

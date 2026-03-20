@@ -32,7 +32,12 @@ import {
   TableHeader,
 } from './ValidationShared';
 
-const OOTValidationTab = ({ runs = [], defaultJobId = '' }) => {
+const OOTValidationTab = ({
+  runs = [],
+  defaultJobId = '',
+  actionsDisabled = false,
+  actionsMessage = '',
+}) => {
   const [jobId, setJobId] = useState(defaultJobId || '');
   const [threshold, setThreshold] = useState(0.5);
   const [scenario, setScenario] = useState('steady');
@@ -43,6 +48,7 @@ const OOTValidationTab = ({ runs = [], defaultJobId = '' }) => {
   const [statusMsg, setStatusMsg] = useState('');
   const [deploymentMeta, setDeploymentMeta] = useState(null);
   const [result, setResult] = useState(null);
+  const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
 
   const activeRun = useMemo(
     () => (runs || []).find((r) => String(r?.job_id || '') === String(jobId || '')) || null,
@@ -68,6 +74,10 @@ const OOTValidationTab = ({ runs = [], defaultJobId = '' }) => {
 
   const runOOTValidation = async () => {
     if (!jobId) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
@@ -182,13 +192,14 @@ const OOTValidationTab = ({ runs = [], defaultJobId = '' }) => {
           <Button
             variant="contained"
             onClick={runOOTValidation}
-            disabled={loading || !jobId}
+            disabled={actionsDisabled || loading || !jobId}
             sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', fontWeight: 700 }}
           >
             {loading ? 'Running OOT...' : 'Run OOT Validation'}
           </Button>
         </Stack>
         {statusMsg && <Alert severity="info" sx={{ mt: 1.25 }}>{statusMsg}</Alert>}
+        {actionsDisabled && <Alert severity="warning" sx={{ mt: 1.25 }}>{gatingMessage}</Alert>}
         {deploymentMeta?.deployment_id && (
           <Typography sx={{ fontSize: 11, color: V.textMuted, mt: 1 }}>
             Deployment context: {String(deploymentMeta.deployment_id).slice(0, 12)}... | Run {String(jobId).slice(0, 12)}...
@@ -270,7 +281,7 @@ const OOTValidationTab = ({ runs = [], defaultJobId = '' }) => {
                       key={`${row.threshold}-${idx}`}
                       style={{
                         borderBottom: `1px solid ${V.border}`,
-                        background: row.is_selected ? '#fff7ed' : 'transparent',
+                        background: row.is_selected ? V.warnLight : 'transparent',
                       }}
                     >
                       <td style={{ textAlign: 'right', padding: '6px 8px', fontFamily: 'monospace', fontWeight: row.is_selected ? 700 : 500 }}>{num(row.threshold, 2)}</td>

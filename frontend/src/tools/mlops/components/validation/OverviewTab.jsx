@@ -41,6 +41,7 @@ const OverviewTab = ({
   activeModel,
   onPromoteChampion,
   persona,
+  actionsDisabled = false,
 }) => {
   const [narrative, setNarrative] = useState(persona === 'technical' ? 'technical' : 'business');
   const champion = summary?.champion || chooseChampion(runs);
@@ -135,6 +136,7 @@ const OverviewTab = ({
               <Button
                 variant="contained"
                 onClick={() => onPromoteChampion?.(recommended.job_id)}
+                disabled={actionsDisabled}
                 sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', fontWeight: 700 }}
               >
                 Promote to Champion

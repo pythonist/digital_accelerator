@@ -1,6 +1,6 @@
 /**
  * PipelineDAG.jsx
- * Pipeline step tracker — MUI icons only, zero emojis.
+ * Pipeline step tracker - MUI icons only, zero emojis.
  * PwC color system: orange (#D04A02) on active/done nodes.
  *
  * step shape: { id, status, label?, message?, result? }
@@ -19,24 +19,25 @@ import {
   CheckCircle,
   Cancel,
 } from "@mui/icons-material";
+import { FCC_THEME } from "../../theme/fccWorkbenchTheme";
 
 const PWC = {
-  orange:      "#D04A02",
-  orangeDark:  "#A83A00",
-  orangeLight: "#FFF1EB",
-  cloud:       "#E0D8D0",
-  cream:       "#FAF8F5",
-  smoke:       "#EDE6DE",
-  ink:         "#1B1B1B",
-  slate:       "#555555",
-  fog:         "#777777",
-  mist:        "#999999",
-  silver:      "#BBBBBB",
-  white:       "#FFFFFF",
-  success:     "#1A6B3A",
-  error:       "#8B1A1A",
-  errorBg:     "#FDF0F0",
-  errorBd:     "#F0BEBE",
+  orange:      FCC_THEME.accent,
+  orangeDark:  FCC_THEME.accentHover,
+  orangeLight: FCC_THEME.accentSoft,
+  cloud:       FCC_THEME.border,
+  cream:       FCC_THEME.panelAlt,
+  smoke:       FCC_THEME.panelMuted,
+  ink:         FCC_THEME.textStrong,
+  slate:       FCC_THEME.textMuted,
+  fog:         FCC_THEME.textMuted,
+  mist:        FCC_THEME.textSoft,
+  silver:      FCC_THEME.textSoft,
+  white:       FCC_THEME.panel,
+  success:     FCC_THEME.success,
+  error:       FCC_THEME.error,
+  errorBg:     FCC_THEME.errorBg,
+  errorBd:     FCC_THEME.errorBorder,
 };
 
 // Step ID → MUI Icon + plain English labels

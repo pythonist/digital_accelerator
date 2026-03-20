@@ -6,6 +6,7 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import Check from '@mui/icons-material/Check';
+import { FCC_THEME } from '../../theme/fccWorkbenchTheme';
 
 const GoalCard = ({ goal, selected, onClick }) => {
   const isSelected = selected;
@@ -18,8 +19,8 @@ const GoalCard = ({ goal, selected, onClick }) => {
         minWidth: 180,
         cursor: 'pointer',
         borderRadius: 3,
-        border: `2px solid ${isSelected ? goal.color : '#e2e8f0'}`,
-        bgcolor: isSelected ? goal.bgColor : '#fff',
+        border: `2px solid ${isSelected ? goal.color : FCC_THEME.border}`,
+        bgcolor: isSelected ? goal.bgColor : FCC_THEME.panel,
         p: 2.5,
         transition: 'all 0.18s ease',
         position: 'relative',
@@ -50,7 +51,7 @@ const GoalCard = ({ goal, selected, onClick }) => {
         mb: 1.1,
         borderRadius: 1,
         border: `1px solid ${goal.color}55`,
-        bgcolor: '#ffffff',
+        bgcolor: FCC_THEME.panel,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -61,14 +62,14 @@ const GoalCard = ({ goal, selected, onClick }) => {
       <Typography sx={{
         fontSize: 13.5,
         fontWeight: 700,
-        color: isSelected ? goal.color : '#1e293b',
+        color: isSelected ? goal.color : FCC_THEME.text,
         mb: 0.5,
         lineHeight: 1.3,
       }}>
         {goal.title}
       </Typography>
 
-      <Typography sx={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.5 }}>
+      <Typography sx={{ fontSize: 11.5, color: FCC_THEME.textMuted, lineHeight: 1.5 }}>
         {goal.description}
       </Typography>
 

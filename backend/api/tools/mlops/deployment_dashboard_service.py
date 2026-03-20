@@ -110,6 +110,14 @@ class DeploymentDashboardService:
     def _conn(self):
         return duckdb.connect(str(self.db_path))
 
+    def _env_root(self) -> Path:
+        return self.db_path.parents[2]
+
+    def _scored_batches_dir(self) -> Path:
+        path = resolve_mlops_data_dir(self._env_root()) / "scored_batches"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
     def _ensure_schema(self) -> None:
         with self._conn() as conn:
             conn.execute("""
@@ -149,6 +157,96 @@ class DeploymentDashboardService:
             """)
 
     # ── Internal helpers ───────────────────────────────────────────────────────
+
+    def _json_safe(self, value: Any) -> Any:
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+        if isinstance(value, (pd.Timestamp, datetime)):
+            return value.isoformat()
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                pass
+        return value
+
+    def _build_scored_batch_records(
+        self,
+        *,
+        records: List[Dict[str, Any]],
+        persisted_rows: List[Dict[str, Any]],
+        run_id: str,
+        deployment_id: str,
+        feature_coverage: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        scored_records: List[Dict[str, Any]] = []
+        for idx, raw_record in enumerate(records):
+            payload = {str(k): self._json_safe(v) for k, v in dict(raw_record).items()}
+            persisted = persisted_rows[idx] if idx < len(persisted_rows) else {}
+            payload.update(
+                {
+                    "record_id": persisted.get("record_id"),
+                    "entity_id": persisted.get("entity_id"),
+                    "entity_type": persisted.get("entity_type"),
+                    "model_score": persisted.get("model_score"),
+                    "decision": persisted.get("decision"),
+                    "threshold": persisted.get("threshold"),
+                    "reason_code": persisted.get("reason_code"),
+                    "top_features": persisted.get("top_features") or [],
+                    "actual_label": persisted.get("actual_label"),
+                    "scored_at": persisted.get("scored_at"),
+                    "source": persisted.get("source") or "production",
+                    "run_id": str(run_id),
+                    "deployment_id": str(deployment_id),
+                    "feature_coverage": feature_coverage or {},
+                }
+            )
+            scored_records.append(payload)
+        return scored_records
+
+    def _persist_scored_batch_package(
+        self,
+        *,
+        batch_id: str,
+        run_id: str,
+        deployment_id: str,
+        model_grain: str,
+        threshold: float,
+        persisted: Dict[str, Any],
+        scored_records: List[Dict[str, Any]],
+        feature_coverage: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        batch_dir = self._scored_batches_dir() / str(batch_id)
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "batch_id": str(batch_id),
+            "run_id": str(run_id),
+            "deployment_id": str(deployment_id),
+            "model_grain": str(model_grain),
+            "threshold": float(threshold),
+            "scored_at": persisted.get("scored_at"),
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "total": int(persisted.get("total") or 0),
+            "suppressed": int(persisted.get("suppressed") or 0),
+            "escalated": int(persisted.get("escalated") or 0),
+            "suppression_rate": persisted.get("suppression_rate"),
+            "feature_coverage": feature_coverage or {},
+            "package_version": 1,
+        }
+        (batch_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, default=self._json_safe),
+            encoding="utf-8",
+        )
+        (batch_dir / "scored_records.json").write_text(
+            json.dumps(scored_records, indent=2, default=self._json_safe),
+            encoding="utf-8",
+        )
+        return manifest
 
     def _load_bundle(self, run_id: str) -> Dict:
         """Load the pickled model bundle from model_dir."""
@@ -1545,6 +1643,23 @@ class DeploymentDashboardService:
             batch_id=str(uuid.uuid4()),
             actual_labels=None,
             source="production",
+        )
+        scored_records = self._build_scored_batch_records(
+            records=records,
+            persisted_rows=persisted["ledger_rows"],
+            run_id=run_id,
+            deployment_id=deployment_id,
+            feature_coverage=coverage,
+        )
+        self._persist_scored_batch_package(
+            batch_id=str(persisted["batch_id"]),
+            run_id=run_id,
+            deployment_id=deployment_id,
+            model_grain=model_grain,
+            threshold=float(threshold),
+            persisted=persisted,
+            scored_records=scored_records,
+            feature_coverage=coverage,
         )
 
         return {

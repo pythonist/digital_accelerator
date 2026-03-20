@@ -1,6 +1,6 @@
 /**
  * AutoPipelineScreen.jsx
- * PwC Risk & Compliance — Model Builder
+ * PwC Risk & Compliance - Model Builder
  *
  * NOTE: NO NAVBAR rendered here. This component lives inside the app shell
  *     which already provides the top navigation.
@@ -14,10 +14,10 @@
  *  autoPilotApi.uploadModel() → called internally by PickleUploadCard
  *
  * ── PwC COLORS ───────────────────────────────────────────────────────────────
- *  #D04A02  PwC Orange — ALL primary actions, borders, active tabs, progress
- *  #FFB600  PwC Gold   — warnings only
- *  #1B1B1B  Near-black — strong headings, running banner background
- *  #F5F0EB  Parchment  — page canvas
+ *  #D04A02  PwC Orange - ALL primary actions, borders, active tabs, progress
+ *  #FFB600  PwC Gold   - warnings only
+ *  #1B1B1B  Near-black - strong headings, running banner background
+ *  #F5F0EB  Parchment  - page canvas
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
@@ -27,41 +27,47 @@ import mlopsApi         from "../services/mlopsApi";
 import StepData         from "./steps/StepData";
 import StepTarget       from "./steps/StepTarget";
 import StepGoal         from "./steps/StepGoal";
+import BusinessBriefPanel from "./components/BusinessBriefPanel";
+import DataUnderstandingPanel from "./components/DataUnderstandingPanel";
+import DefineObjectivePanel from "./components/DefineObjectivePanel";
+import OutcomeSummaryPanel from "./components/OutcomeSummaryPanel";
 import PipelineDAG      from "./components/PipelineDAG";
 import ResultsPanel     from "./components/ResultsPanel";
 import PickleUploadCard from "./components/PickleUploadCard";
+import BusinessStaleStepCard from "../components/BusinessStaleStepCard";
+import { FCC_STATUS_TONES, FCC_THEME } from "../theme/fccWorkbenchTheme";
 
 // ─── PwC tokens ───────────────────────────────────────────────────────────────
 const C = {
-  orange:      "#D04A02",
-  orangeDark:  "#A83A00",
-  orangeLight: "#FFF1EB",
-  gold:        "#FFB600",
-  ink:         "#1B1B1B",
-  steel:       "#3D3D3D",
-  slate:       "#3F3F3F",
-  fog:         "#5A5A5A",
-  mist:        "#6B6B6B",
-  silver:      "#BBBBBB",
-  cloud:       "#E0D8D0",
-  smoke:       "#EDE6DE",
-  parchment:   "#F5F0EB",
-  cream:       "#FAF8F5",
-  white:       "#FFFFFF",
-  success:     "#1A6B3A",
-  successBg:   "#EDF7F1",
-  successBd:   "#B2DFCC",
-  error:       "#8B1A1A",
-  errorBg:     "#FDF0F0",
-  errorBd:     "#F0BEBE",
-  warning:     "#7A5100",
-  warningBg:   "#FFFBF0",
-  warningBd:   "#F0D88A",
+  orange:      FCC_THEME.accent,
+  orangeDark:  FCC_THEME.accentHover,
+  orangeLight: FCC_THEME.accentSoft,
+  gold:        FCC_THEME.warning,
+  ink:         FCC_THEME.textStrong,
+  steel:       FCC_THEME.textMuted,
+  slate:       FCC_THEME.textMuted,
+  fog:         FCC_THEME.textMuted,
+  mist:        FCC_THEME.textSoft,
+  silver:      FCC_THEME.textSoft,
+  cloud:       FCC_THEME.border,
+  smoke:       FCC_THEME.panelMuted,
+  parchment:   FCC_THEME.canvas,
+  cream:       FCC_THEME.panelAlt,
+  white:       FCC_THEME.panel,
+  success:     FCC_THEME.success,
+  successBg:   FCC_THEME.successBg,
+  successBd:   FCC_THEME.successBorder,
+  error:       FCC_THEME.error,
+  errorBg:     FCC_THEME.errorBg,
+  errorBd:     FCC_THEME.errorBorder,
+  warning:     FCC_THEME.warning,
+  warningBg:   FCC_THEME.warningBg,
+  warningBd:   FCC_THEME.warningBorder,
 };
 
-const serif = "'Georgia','Times New Roman',serif";
-const body  = "'Helvetica Neue','Arial',sans-serif";
-const mono  = "'Courier New',monospace";
+const serif = "'IBM Plex Sans','Segoe UI','Helvetica Neue',Arial,sans-serif";
+const body  = "'IBM Plex Sans','Segoe UI','Helvetica Neue',Arial,sans-serif";
+const mono  = "'IBM Plex Mono','SFMono-Regular','Consolas','Courier New',monospace";
 
 const PIPELINE_ARTEFACT_TYPES = new Set([
   "master_dataset",
@@ -83,19 +89,21 @@ const formatRunTime = (value) => {
 };
 
 const STATUS_CHIP = {
-  pending: { bg: "#fff7ed", bd: "#fed7aa", fg: "#9a3412", label: "Pending" },
-  running: { bg: "#fff1ec", bd: "#f2c8b5", fg: "#A83A00", label: "Running" },
-  done: { bg: "#edf7f1", bd: "#b2dfcc", fg: "#1A6B3A", label: "Done" },
-  error: { bg: "#fdf0f0", bd: "#f0bebe", fg: "#8B1A1A", label: "Error" },
-  skipped: { bg: "#f8fafc", bd: "#e2e8f0", fg: "#475569", label: "Skipped" },
+  pending: FCC_STATUS_TONES.pending,
+  running: FCC_STATUS_TONES.running,
+  done: FCC_STATUS_TONES.done,
+  error: FCC_STATUS_TONES.error,
+  skipped: FCC_STATUS_TONES.skipped,
 };
 
 // ─── Wizard steps ────────────────────────────────────────────────────────────
 const STEPS = [
-  { id: "data",    label: "Data Sources"   },
-  { id: "target",  label: "Target Column"  },
-  { id: "goal",    label: "Operating Mode" },
-  { id: "confirm", label: "Confirm"        },
+  { id: "objective", label: "Define Objective" },
+  { id: "data",      label: "Load Data"        },
+  { id: "quality",   label: "Understand Data"  },
+  { id: "target",    label: "Pick Outcome"     },
+  { id: "goal",      label: "Set Priority"     },
+  { id: "confirm",   label: "Review Plan"      },
 ];
 
 // ─── Skeleton DAG before run starts ─────────────────────────────────────────
@@ -154,12 +162,13 @@ const WizardTabs = ({ current, onGoTo }) => (
 // ─── Running banner ───────────────────────────────────────────────────────────
 const RunBanner = ({ step }) => {
   if (!step) return null;
+
   return (
     <div style={{
       background: C.ink, padding: "13px 18px", marginBottom: 14,
       display: "flex", alignItems: "center", gap: 13,
     }}>
-      {/* CSS spinner — no emoji */}
+      {/* CSS spinner - no emoji */}
       <div style={{
         width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
         border: `2px solid rgba(208,74,2,0.25)`, borderTopColor: C.orange,
@@ -198,7 +207,7 @@ const DoneLog = ({ steps }) => {
       </div>
       {done.map(step => (
         <div key={step.id} style={{ padding: "9px 14px", borderBottom: `1px solid ${C.cloud}`, display: "flex", alignItems: "center", gap: 10 }}>
-          {/* SVG checkmark — no emoji */}
+          {/* SVG checkmark - no emoji */}
           <div style={{ width: 16, height: 16, background: C.successBg, border: `1px solid ${C.successBd}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
               <path d="M1 3.5L3.5 6L8 1" stroke={C.success} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -258,7 +267,7 @@ const RunLogsPanel = ({ logs = [] }) => {
   );
 };
 
-const RunHistoryCard = ({ runId, runHistory, loading, error, onRefresh }) => {
+const RunHistoryCard = ({ runId, runHistory, loading, error, onRefresh, onResume }) => {
   const rows = Array.isArray(runHistory) ? runHistory.slice(0, 6) : [];
   return (
     <div style={{ border: `1px solid ${C.cloud}`, background: C.white, marginBottom: 14 }}>
@@ -335,15 +344,19 @@ const RunHistoryCard = ({ runId, runHistory, loading, error, onRefresh }) => {
                   gap: 10,
                   padding: "9px 14px",
                   borderTop: `1px solid ${C.cloud}`,
-                  background: isActive ? C.orangeLight : C.white,
+                  background: C.white,
+                  borderLeft: isActive ? `3px solid ${C.orange}` : "3px solid transparent",
                 }}
               >
                 <div>
-                  <div style={{ fontFamily: mono, fontSize: 11.5, fontWeight: 700, color: C.ink }}>
-                    {r?.run_id || "-"}
+                  <div style={{ fontFamily: body, fontSize: 11.5, fontWeight: 700, color: C.ink }}>
+                    {r?.run_name || r?.config?.run_name || r?.run_id || "-"}
                   </div>
                   <div style={{ fontFamily: body, fontSize: 10.5, color: C.fog }}>
-                    {formatRunTime(r?.created_at)}
+                    {formatRunTime(r?.updated_at || r?.created_at)}
+                  </div>
+                  <div style={{ fontFamily: body, fontSize: 10.5, color: C.fog }}>
+                    {r?.current_step_label ? `${r.current_step_label}${r?.current_substep ? ` • ${r.current_substep}` : ''}` : 'Waiting for status'}
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -356,14 +369,31 @@ const RunHistoryCard = ({ runId, runHistory, loading, error, onRefresh }) => {
                       border: `1px solid ${chip.bd}`,
                       background: chip.bg,
                       color: chip.fg,
-                      borderRadius: 999,
+                      borderRadius: 0,
                     }}
                   >
                     {chip.label}
                   </span>
-                  <span style={{ fontFamily: mono, fontSize: 10.5, color: C.fog }}>
-                    #{shortRunId(r?.run_id)}
+                  <span style={{ fontFamily: body, fontSize: 10.5, color: C.fog }}>
+                    {Number.isFinite(Number(r?.completion_pct)) ? `${Math.round(Number(r.completion_pct))}% complete` : `#${shortRunId(r?.run_id)}`}
                   </span>
+                  {onResume ? (
+                    <button
+                      onClick={() => onResume(r?.run_id)}
+                      style={{
+                        padding: "4px 8px",
+                        border: `1px solid ${C.cloud}`,
+                        background: C.white,
+                        color: C.slate,
+                        fontFamily: body,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Open
+                    </button>
+                  ) : null}
                 </div>
               </div>
             );
@@ -377,7 +407,7 @@ const RunHistoryCard = ({ runId, runHistory, loading, error, onRefresh }) => {
 // ─── Pre-launch placeholder ───────────────────────────────────────────────────
 const Placeholder = () => (
   <div style={{ padding: "44px 32px", textAlign: "center", background: C.white, border: `1px solid ${C.cloud}` }}>
-    {/* PwC geometric mark — squares only, no emoji */}
+    {/* PwC geometric mark - squares only, no emoji */}
     <div style={{ display: "flex", justifyContent: "center", gap: 5, marginBottom: 20 }}>
       <div style={{ width: 18, height: 18, background: C.orange }} />
       <div style={{ width: 13, height: 13, background: C.gold, marginTop: 3 }} />
@@ -416,15 +446,15 @@ const ConfirmStep = ({ selectedIds, targetColumn, goal, modelName, setModelName 
   const GOAL_MAP = { catch_most: "Prioritise Detection", balanced: "Balanced Operation", minimize_false_alarms: "Efficiency First" };
   const rows = [
     { k: "Data sources",   v: `${selectedIds.length} table${selectedIds.length !== 1 ? "s" : ""}` },
-    { k: "Target column",  v: targetColumn || "—", mono: true },
-    { k: "Operating mode", v: GOAL_MAP[goal] || goal || "—" },
+    { k: "Target column",  v: targetColumn || "-", mono: true },
+    { k: "Operating mode", v: GOAL_MAP[goal] || goal || "-" },
     { k: "Est. duration",  v: "4 – 8 minutes" },
     { k: "Stages",         v: "6 automated" },
   ];
   return (
     <div>
       <div style={{ fontFamily: body, fontSize: 12, color: C.slate, marginBottom: 16, lineHeight: 1.65 }}>
-        Review your configuration. The pipeline runs fully automatically once started — no further input required.
+        Review your configuration. The pipeline runs fully automatically once started - no further input required.
       </div>
       <div style={{ marginBottom: 14 }}>
         <Eyebrow s={{ marginBottom: 5 }}>Model Name</Eyebrow>
@@ -462,13 +492,82 @@ const ConfirmStep = ({ selectedIds, targetColumn, goal, modelName, setModelName 
 };
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export default function AutoPipelineScreen({ onDeploySuccess }) {
+const BusinessPlanReview = ({ selectedIds, targetColumn, goal, modelName, setModelName }) => {
+  const GOAL_MAP = {
+    catch_most: "Prioritise Detection",
+    balanced: "Balanced Operation",
+    minimize_false_alarms: "Efficiency First",
+  };
+  const rows = [
+    { k: "Data sources", v: `${selectedIds.length} table${selectedIds.length !== 1 ? "s" : ""}` },
+    { k: "Outcome column", v: targetColumn || "Not selected", mono: true },
+    { k: "Operating mode", v: GOAL_MAP[goal] || goal || "Not selected" },
+    { k: "Est. duration", v: "4 to 8 minutes" },
+    { k: "Stages", v: "6 automated" },
+  ];
+
+  return (
+    <div>
+      <div style={{ fontFamily: body, fontSize: 12, color: C.slate, marginBottom: 16, lineHeight: 1.65 }}>
+        Review your setup. Once the build starts, the platform completes the workflow automatically.
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <Eyebrow s={{ marginBottom: 5 }}>Business Name For This Build</Eyebrow>
+        <input
+          value={modelName}
+          onChange={(e) => setModelName(e.target.value)}
+          style={{
+            width: "100%",
+            padding: "8px 10px",
+            fontFamily: body,
+            fontSize: 12.5,
+            border: `1px solid ${C.cloud}`,
+            borderBottom: `2px solid ${C.orange}`,
+            background: C.white,
+            color: C.ink,
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+      </div>
+      <div style={{ border: `1px solid ${C.cloud}`, marginBottom: 13 }}>
+        {rows.map(({ k, v, mono: useMono }, i) => (
+          <div
+            key={k}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "9px 13px",
+              background: i % 2 === 0 ? C.white : C.cream,
+              borderBottom: i < rows.length - 1 ? `1px solid ${C.cloud}` : "none",
+            }}
+          >
+            <span style={{ fontFamily: body, fontSize: 11.5, color: C.fog }}>{k}</span>
+            <span style={{ fontFamily: useMono ? mono : body, fontSize: 11.5, fontWeight: 700, color: C.ink }}>{v}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: "10px 13px", background: C.warningBg, border: `1px solid ${C.warningBd}`, borderLeft: `3px solid ${C.gold}` }}>
+        <div style={{ fontFamily: body, fontSize: 11, color: C.warning, lineHeight: 1.5 }}>
+          Make sure the selected outcome and business priority are correct before starting.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default function AutoPipelineScreen({
+  onDeploySuccess,
+  staleCard = null,
+  onStaleAction = null,
+}) {
   const [step,          setStep]          = useState(0);
   const [selectedIds,   setSelectedIds]   = useState([]);
   const [targetColumn,  setTargetColumn]  = useState("");
   const [workbenchTarget, setWorkbenchTarget] = useState("");
   const [goal,          setGoal]          = useState("balanced");
-  const [modelName,     setModelName]     = useState("Fraud Detection Model");
+  const [modelName,     setModelName]     = useState("Alert Reduction Model");
 
   const [datasets,      setDatasets]      = useState([]);
   const [dsLoading,     setDsLoading]     = useState(true);
@@ -477,7 +576,7 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
   const [runsLoading,   setRunsLoading]   = useState(false);
   const [runsError,     setRunsError]     = useState(null);
 
-  const { runId, run, error: runErr, startRun, reset: resetRun, cancelRun } = usePipelineRun();
+  const { runId, run, error: runErr, startRun, resumeRun, reset: resetRun, cancelRun } = usePipelineRun();
   const [canceling, setCanceling] = useState(false);
 
   const [deploying,    setDeploying]    = useState(false);
@@ -495,11 +594,17 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
   const doneCount  = liveSteps.filter(s => s.status === "done").length;
   const total      = liveSteps.length || 6;
   const progress   = Math.round((doneCount / total) * 100);
+  const latestCompletedRun = useMemo(
+    () => runHistory.find((entry) => String(entry?.status || '').toLowerCase() === 'done') || null,
+    [runHistory],
+  );
 
   const canAdvance = i => {
-    if (i === 0) return selectedIds.length > 0;
-    if (i === 1) return !!targetColumn;
-    if (i === 2) return !!goal;
+    if (i === 0) return true;
+    if (i === 1) return selectedIds.length > 0;
+    if (i === 2) return selectedIds.length > 0;
+    if (i === 3) return !!targetColumn;
+    if (i === 4) return !!goal;
     return true;
   };
   const canLaunch = selectedIds.length > 0 && !!targetColumn && !!goal;
@@ -524,6 +629,16 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
     const idSet = new Set(selectedIds.map((id) => Number(id)));
     return datasets.filter((d) => idSet.has(Number(d?.dataset_id)));
   }, [selectedIds, datasets]);
+
+  useEffect(() => {
+    const config = run?.config || null;
+    if (!config) return;
+    const datasetIds = Array.isArray(config.dataset_ids) ? config.dataset_ids.map((value) => Number(value)).filter((value) => Number.isFinite(value)) : [];
+    if (datasetIds.length) setSelectedIds(datasetIds);
+    if (config.target_column) setTargetColumn(String(config.target_column));
+    if (config.business_goal) setGoal(String(config.business_goal));
+    if (config.run_name || config.model_name) setModelName(String(config.run_name || config.model_name));
+  }, [run]);
 
   // Load datasets
   useEffect(() => {
@@ -576,14 +691,23 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
   const goNext   = () => canAdvance(step) && setStep(s => s + 1);
   const goTo     = i => phase === "config" && setStep(i);
 
+  const resumeExistingRun = useCallback(async (resumeRunId) => {
+    const resumed = await resumeRun(resumeRunId);
+    if (!resumed) return;
+    setStep(STEPS.length - 1);
+    await loadRunHistory({ silent: true });
+  }, [resumeRun, loadRunHistory]);
+
   const launch   = useCallback(async () => {
     const startedId = await startRun({
       dataset_ids: selectedIds,
       target_column: targetColumn,
       business_goal: goal,
       model_name: modelName,
+      run_name: modelName,
     });
     if (startedId) {
+      setStep(STEPS.length - 1);
       loadRunHistory({ silent: true });
     }
   }, [selectedIds, targetColumn, goal, modelName, startRun, loadRunHistory]);
@@ -613,17 +737,23 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
   const reset = useCallback(() => {
     resetRun();
     setStep(0); setSelectedIds([]);
-    setTargetColumn(""); setGoal("balanced"); setModelName("Fraud Detection Model");
+    setTargetColumn(""); setGoal("balanced"); setModelName("Alert Reduction Model");
     setDeployErr(null);
   }, [resetRun]);
 
   const EYEBROW = { config: "Pipeline Preview", running: "Build in Progress", done: "Build Report", error: "Build Error" }[phase];
   const TITLE   = {
     config:  "6 automated stages will execute in sequence",
-    running: `Stage ${doneCount + 1} of ${total} — processing`,
-    done:    "Build complete — model ready for deployment",
+    running: `Stage ${Math.min(doneCount + 1, total)} of ${total}, processing`,
+    done:    "Build complete, model ready for deployment",
     error:   "The build encountered an error",
   }[phase];
+  const displayTitle =
+    phase === "running" && activeStep?.businessAction
+      ? activeStep.businessAction
+      : phase === "running" && activeStep?.message
+        ? activeStep.message
+        : TITLE;
 
   return (
     <>
@@ -639,7 +769,7 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
       {/*
         ┌─────────────────────────────────────────────────────────────────────┐
         │  height: 100% fills whatever container the app shell provides.      │
-        │  Do NOT use height:100vh — the app shell already sets the viewport. │
+        │  Do NOT use height:100vh - the app shell already sets the viewport. │
         └─────────────────────────────────────────────────────────────────────┘
       */}
       <div style={{ display: "flex", height: "100%", minHeight: 0, background: C.parchment, fontFamily: body, overflow: "hidden" }}>
@@ -653,9 +783,12 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
 
           {/* Left header */}
           <div style={{ padding: "20px 22px 0", flexShrink: 0 }}>
-            <Eyebrow s={{ marginBottom: 5 }}>Model Builder Configuration</Eyebrow>
+            <Eyebrow s={{ marginBottom: 5 }}>Business Workspace</Eyebrow>
             <div style={{ fontFamily: serif, fontSize: 17, fontWeight: 700, color: C.ink, lineHeight: 1.35, marginBottom: 18 }}>
-              Build a model<br />
+              Guided decision build
+              <div style={{ fontFamily: body, fontSize: 11.5, fontWeight: 500, color: C.fog, lineHeight: 1.6, marginTop: 6 }}>
+                Start with the business problem and expected outcome, then move into data selection, data understanding, and model setup.
+              </div>
             </div>
             <WizardTabs current={step} onGoTo={goTo} />
           </div>
@@ -666,7 +799,16 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
             {step === 0 && (
               <div style={{ animation: "apFade .2s ease" }}>
                 <div style={{ fontFamily: body, fontSize: 12, color: C.slate, marginBottom: 14, lineHeight: 1.65 }}>
-                  Select the raw source tables this model should learn from. System-generated datasets (master/preprocessed) are excluded here because this pipeline builds fresh artifacts for each run.
+                  Start with the business objective first. This page explains what problem the tool solves, how false positive suppression works, and how different model families are validated.
+                </div>
+                <DefineObjectivePanel />
+              </div>
+            )}
+
+            {step === 1 && (
+              <div style={{ animation: "apFade .2s ease" }}>
+                <div style={{ fontFamily: body, fontSize: 12, color: C.slate, marginBottom: 14, lineHeight: 1.65 }}>
+                  Select the data sources that describe the alert reduction problem you want to improve. The platform will build a fresh decision workflow from these raw inputs.
                 </div>
                 {dsLoading ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "18px 0", color: C.fog, fontSize: 12 }}>
@@ -695,7 +837,16 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
               </div>
             )}
 
-            {step === 1 && (
+            {step === 2 && (
+              <div style={{ animation: "apFade .2s ease" }}>
+                <DataUnderstandingPanel
+                  selectedDatasets={selectedDatasets}
+                  targetColumn={targetColumn}
+                />
+              </div>
+            )}
+
+            {step === 3 && (
               <div style={{ animation: "apFade .2s ease" }}>
                 {/* StepTarget calls mlopsApi.schemaPreview() internally */}
                 <StepTarget
@@ -707,20 +858,26 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
               </div>
             )}
 
-            {step === 2 && (
+            {step === 4 && (
               <div style={{ animation: "apFade .2s ease" }}>
                 <StepGoal selectedGoal={goal} onGoalChange={setGoal} />
               </div>
             )}
 
-            {step === 3 && (
+            {step === 5 && (
               <div style={{ animation: "apFade .2s ease" }}>
-                <ConfirmStep selectedIds={selectedIds} targetColumn={targetColumn} goal={goal} modelName={modelName} setModelName={setModelName} />
+                <BusinessPlanReview
+                  selectedIds={selectedIds}
+                  targetColumn={targetColumn}
+                  goal={goal}
+                  modelName={modelName}
+                  setModelName={setModelName}
+                />
               </div>
             )}
           </div>
 
-          {/* Left footer — nav buttons */}
+          {/* Left footer - nav buttons */}
           <div style={{ padding: "12px 22px", borderTop: `1px solid ${C.cloud}`, background: C.cream, display: "flex", gap: 7, flexShrink: 0 }}>
             {phase !== "config" ? (
               <button
@@ -779,7 +936,7 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
             )}
           </div>
 
-          {/* PickleUploadCard — calls autoPilotApi.uploadModel() internally */}
+          {/* PickleUploadCard - calls autoPilotApi.uploadModel() internally */}
           <div style={{ padding: "14px 22px 18px", borderTop: `1px solid ${C.cloud}`, flexShrink: 0 }}>
             <PickleUploadCard onUploaded={d => console.info("Model uploaded:", d)} />
           </div>
@@ -797,7 +954,7 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
             <div>
               <Eyebrow s={{ marginBottom: 3 }}>{EYEBROW}</Eyebrow>
               <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 700, color: C.ink }}>
-                {TITLE}
+                {displayTitle}
               </div>
             </div>
 
@@ -851,8 +1008,8 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
             {phase === "config" && runHistory.length > 0 && (
               <div style={{ textAlign: "right" }}>
                 <Eyebrow s={{ color: C.slate }}>Latest Run</Eyebrow>
-                <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 700, color: C.ink }}>
-                  {shortRunId(runHistory[0]?.run_id)}
+                <div style={{ fontFamily: body, fontSize: 12, fontWeight: 700, color: C.ink }}>
+                  {runHistory[0]?.run_name || shortRunId(runHistory[0]?.run_id)}
                 </div>
               </div>
             )}
@@ -867,12 +1024,38 @@ export default function AutoPipelineScreen({ onDeploySuccess }) {
 
           {/* Right body */}
           <div style={{ flex: 1, overflow: "auto", padding: "22px 26px" }}>
+            {staleCard ? (
+              <BusinessStaleStepCard
+                currentStepLabel={staleCard.currentStepLabel}
+                whatChanged={staleCard.whatChanged}
+                whyRerun={staleCard.whyRerun}
+                nextAction={staleCard.nextAction}
+                actionLabel={staleCard.actionLabel || "Open required step"}
+                onAction={onStaleAction}
+              />
+            ) : null}
+
+            <OutcomeSummaryPanel
+              selectedDatasets={selectedDatasets}
+              activeRun={run}
+              latestCompletedRun={latestCompletedRun}
+              goal={goal}
+              onResumeRun={resumeExistingRun}
+            />
+
             <RunHistoryCard
               runId={runId}
               runHistory={runHistory}
               loading={runsLoading}
               error={runsError}
               onRefresh={() => loadRunHistory()}
+              onResume={resumeExistingRun}
+            />
+
+            <BusinessBriefPanel
+              selectedDatasets={selectedDatasets}
+              targetColumn={targetColumn}
+              goal={goal}
             />
 
             {(phase === "config" || phase === "running") && (

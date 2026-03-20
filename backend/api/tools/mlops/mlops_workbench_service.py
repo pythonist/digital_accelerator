@@ -34,6 +34,104 @@ _ENTITY_KEYS = frozenset({
 
 _HIGH_RISK_COUNTRIES = frozenset({"KY", "VG", "NG", "IR", "PK"})
 
+_PIPELINE_STEP_LABELS = {
+    "data": "Load Data",
+    "data_upload": "Load Data",
+    "master": "Master Dataset",
+    "target": "Target Definition",
+    "eda": "Pattern Analysis",
+    "preprocess": "Feature Preparation",
+    "model": "Model Development",
+    "validation": "Validation",
+    "registry": "Registry",
+    "ready": "Deployment Readiness",
+    "dashboard": "Monitoring",
+    "pipelines": "Run Center",
+    "reports": "Reports",
+}
+
+_MASTER_SUBSTEP_LABELS = {
+    "base": "Choose Base Table",
+    "tables": "Select Tables to Join",
+    "rollup": "Aggregate Transaction History",
+    "aggregation": "Review Aggregations",
+    "transforms": "Apply Business Rules",
+    "labels": "Define Outcome Labels",
+    "preview": "Preview and Build",
+}
+
+_TARGET_SUBSTEP_LABELS = {
+    0: "Select Outcome",
+    1: "Define Rules",
+    2: "Preview Mapping",
+}
+
+_PREPROCESS_SUBSTEP_LABELS = {
+    0: "Plan",
+    1: "Builder",
+    2: "Engineer",
+    3: "Select",
+    4: "Preview",
+    5: "Run",
+}
+
+_VALIDATION_SUBSTEP_LABELS = {
+    0: "Overview",
+    1: "Model Comparison",
+    2: "Threshold Tuning",
+    3: "OOT Validation",
+    4: "Stability and Risks",
+}
+
+_PROGRESS_STAGE_ORDER = (
+    "data",
+    "master",
+    "target",
+    "eda",
+    "preprocess",
+    "model",
+    "validation",
+    "registry",
+    "ready",
+    "dashboard",
+)
+
+_SCREEN_TO_STEP = {
+    "data_upload": "data",
+    "master": "master",
+    "target": "target",
+    "eda": "eda",
+    "preprocess": "preprocess",
+    "model": "model",
+    "validation": "validation",
+    "registry": "registry",
+    "ready": "ready",
+    "dashboard": "dashboard",
+    "reports": "reports",
+}
+
+_DEPENDENCY_GRAPH = {
+    "data_upload": ("master", "target", "eda", "preprocess", "model", "validation", "registry", "ready", "dashboard", "reports"),
+    "master": ("target", "eda", "preprocess", "model", "validation", "registry", "ready", "dashboard", "reports"),
+    "target": ("eda", "preprocess", "model", "validation", "registry", "ready", "dashboard", "reports"),
+    "preprocess": ("model", "validation", "registry", "ready", "dashboard", "reports"),
+    "model": ("validation", "registry", "ready", "dashboard", "reports"),
+    "validation": ("registry", "ready", "dashboard", "reports"),
+    "registry": ("ready", "dashboard", "reports"),
+    "ready": ("dashboard", "reports"),
+}
+
+_DEPENDENCY_SOURCE_LABELS = {
+    "data_upload": "loaded data",
+    "master": "master dataset logic",
+    "target": "target definition",
+    "preprocess": "feature preparation",
+    "model": "model selection",
+    "validation": "validation settings",
+    "registry": "registry decision",
+    "ready": "deployment readiness settings",
+}
+
 
 def _is_event_table(dataset_type: str) -> bool:
     return str(dataset_type or "").strip().lower() in _HIGH_CARDINALITY_EVENT_TYPES
@@ -131,6 +229,298 @@ def _aggregate_event_table(df: pd.DataFrame, group_key: str) -> pd.DataFrame:
         for c in result.columns
     ]
     return result
+
+
+def _screen_state_map(steps: List[Dict]) -> Dict[str, Dict]:
+    states: Dict[str, Dict] = {}
+    for step in steps or []:
+        if str(step.get("type") or "").strip().lower() != "screen_state":
+            continue
+        screen = str(step.get("screen") or "").strip().lower()
+        state = step.get("state")
+        if screen and isinstance(state, dict):
+            states[screen] = state
+    return states
+
+
+def _coerce_int(value, default: Optional[int] = None) -> Optional[int]:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _sort_jsonable(value):
+    if isinstance(value, list):
+        return [_sort_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sort_jsonable(value[key]) for key in sorted(value.keys())}
+    return value
+
+
+def _stable_json(value) -> str:
+    return json.dumps(_sort_jsonable(value), default=str, sort_keys=True)
+
+
+def _compact_join(join: Any) -> Dict[str, Any]:
+    row = join if isinstance(join, dict) else {}
+    return {
+        "left": str(row.get("left") or "").strip().lower(),
+        "right": str(row.get("right") or "").strip().lower(),
+        "key": str(row.get("key") or "").strip().lower(),
+        "join_type": str(row.get("join_type") or "left").strip().lower(),
+        "enabled": bool(row.get("enabled", True)),
+    }
+
+
+def _compact_transform(step: Any) -> Dict[str, Any]:
+    row = step if isinstance(step, dict) else {}
+    compact = {
+        "type": str(row.get("type") or "").strip().lower(),
+    }
+    if isinstance(row.get("config"), dict):
+        compact["config"] = row.get("config")
+    else:
+        for key in ("columns", "column", "method", "frac", "threshold_pct", "key", "fill_value"):
+            if key in row:
+                compact[key] = row.get(key)
+    return compact
+
+
+def _normalize_dependency_state(screen_key: str, state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    state = state if isinstance(state, dict) else {}
+    screen = str(screen_key or "").strip().lower()
+    if screen == "data_upload":
+        return {
+            "dataset_ids": sorted({
+                int(x) for x in (state.get("dataset_ids") or [])
+                if _coerce_int(x) is not None and int(x) > 0
+            }),
+            "uploaded_dataset_types": sorted({
+                str(x).strip().lower()
+                for x in (state.get("uploaded_dataset_types") or [])
+                if str(x).strip()
+            }),
+            "has_str_dataset": bool(state.get("has_str_dataset")),
+        }
+    if screen == "master":
+        return {
+            "grain": str(state.get("grain") or "").strip().lower(),
+            "anchorType": str(state.get("anchorType") or "").strip().lower(),
+            "outputName": str(state.get("outputName") or "").strip().lower(),
+            "enabledTables": sorted({
+                str(x).strip().lower()
+                for x in (state.get("enabledTables") or [])
+                if str(x).strip()
+            }),
+            "joins": [_compact_join(join) for join in (state.get("joins") or [])],
+            "transforms": [_compact_transform(step) for step in (state.get("transforms") or [])],
+            "rollupConfirmed": bool(state.get("rollupConfirmed")),
+            "strMode": str(state.get("strMode") or "").strip().lower(),
+            "replacementLabelColumn": str(state.get("replacementLabelColumn") or "").strip().lower(),
+            "dataset_ids": sorted({
+                int(x) for x in (state.get("dataset_ids") or [])
+                if _coerce_int(x) is not None and int(x) > 0
+            }),
+            "builtMasterDatasetId": _coerce_int(state.get("builtMasterDatasetId")),
+        }
+    if screen == "target":
+        return {
+            "strategy": str(state.get("strategy") or "").strip().lower(),
+            "selectedTargetColumn": str(state.get("selectedTargetColumn") or "").strip().lower(),
+            "currentTargetColumn": str(state.get("currentTargetColumn") or "").strip().lower(),
+            "masterDatasetId": _coerce_int(state.get("masterDatasetId")),
+        }
+    if screen == "preprocess":
+        return {
+            "steps": [_compact_transform(step) for step in (state.get("steps") or [])],
+            "masterDatasetId": _coerce_int(state.get("masterDatasetId")),
+            "preprocessedDatasetId": _coerce_int(state.get("preprocessedDatasetId")),
+        }
+    if screen == "model":
+        return {
+            "job_id": str(state.get("job_id") or "").strip(),
+            "algorithm": str(state.get("algorithm") or "").strip().lower(),
+            "dataset_id": _coerce_int(state.get("dataset_id")),
+            "threshold": state.get("threshold"),
+        }
+    if screen == "validation":
+        return {
+            "job_id": str(state.get("job_id") or "").strip(),
+            "optimal_threshold": state.get("optimal_threshold"),
+            "report_id": str(state.get("report_id") or "").strip(),
+        }
+    if screen == "registry":
+        return {
+            "job_id": str(state.get("job_id") or "").strip(),
+            "stage": str(state.get("stage") or "").strip().lower(),
+            "threshold": state.get("threshold"),
+            "deployment_id": str(state.get("deployment_id") or "").strip(),
+        }
+    if screen == "ready":
+        return {
+            "deployment_id": str(state.get("deployment_id") or "").strip(),
+            "job_id": str(state.get("job_id") or "").strip(),
+        }
+    return None
+
+
+def _state_fingerprint(screen_key: str, state: Dict[str, Any]) -> str:
+    normalized = _normalize_dependency_state(screen_key, state)
+    return _stable_json(normalized) if normalized is not None else ""
+
+
+def _dependency_state_payload(steps: List[Dict]) -> Dict[str, Any]:
+    screen_states = _screen_state_map(steps or [])
+    raw = screen_states.get("workbench_dependencies") or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _join_labels(items: List[str]) -> str:
+    labels = [str(item).strip() for item in items if str(item).strip()]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+
+def _build_dependency_message(screen_key: str, impacted_steps: List[str]) -> str:
+    source_label = _DEPENDENCY_SOURCE_LABELS.get(screen_key, screen_key.replace("_", " "))
+    impacted_labels = [_PIPELINE_STEP_LABELS.get(step, step.replace("_", " ").title()) for step in impacted_steps]
+    return (
+        f"You changed {source_label}. "
+        f"{_join_labels(impacted_labels)} are now outdated and should be rerun."
+    )
+
+
+def _progress_stale_summary(steps: List[Dict]) -> Dict[str, Any]:
+    dependency_state = _dependency_state_payload(steps)
+    stale_map = dependency_state.get("stale_steps") or {}
+    stage_order = {stage: idx for idx, stage in enumerate((*_PROGRESS_STAGE_ORDER, "reports"))}
+    stale_steps = sorted([
+        step for step in stale_map.keys()
+        if str(step).strip().lower() in set(_PROGRESS_STAGE_ORDER) | {"reports"}
+    ], key=lambda step: stage_order.get(str(step).strip().lower(), 999))
+    latest_change = dependency_state.get("latest_change") or {}
+    return {
+        "stale_steps": stale_steps,
+        "stale_details": stale_map if isinstance(stale_map, dict) else {},
+        "latest_change": latest_change if isinstance(latest_change, dict) else {},
+    }
+
+
+def _derive_substep(screen_key: str, screen_states: Dict[str, Dict]) -> Tuple[str, str]:
+    screen = str(screen_key or "").strip().lower()
+    state = screen_states.get(screen) or {}
+    if screen == "master":
+        raw = str(state.get("currentStepId") or "").strip().lower()
+        return raw, _MASTER_SUBSTEP_LABELS.get(raw, raw.replace("_", " ").title() if raw else "")
+    if screen == "target":
+        raw = _coerce_int(state.get("activeTab"))
+        if raw is None:
+            return "", ""
+        return str(raw), _TARGET_SUBSTEP_LABELS.get(raw, f"Tab {raw + 1}")
+    if screen == "preprocess":
+        raw = _coerce_int(state.get("activeTab") if "activeTab" in state else state.get("tab"))
+        if raw is None:
+            return "", ""
+        return str(raw), _PREPROCESS_SUBSTEP_LABELS.get(raw, f"Tab {raw + 1}")
+    if screen == "validation":
+        raw = _coerce_int(state.get("activeTab"))
+        if raw is None:
+            return "", ""
+        return str(raw), _VALIDATION_SUBSTEP_LABELS.get(raw, f"Tab {raw + 1}")
+    return "", ""
+
+
+def _fallback_progress_summary(steps: List[Dict], status: Optional[str] = None) -> Dict[str, Any]:
+    screen_states = _screen_state_map(steps or [])
+    completed_flags = {
+        "data": bool(screen_states.get("data_upload")),
+        "master": bool(screen_states.get("master")),
+        "target": bool(screen_states.get("target")),
+        "eda": bool(screen_states.get("eda")),
+        "preprocess": bool(screen_states.get("preprocess")),
+        "model": bool(screen_states.get("model")),
+        "validation": bool(screen_states.get("validation")),
+        "registry": bool(screen_states.get("registry")),
+        "ready": bool(screen_states.get("ready")),
+        "dashboard": bool(screen_states.get("dashboard")),
+    }
+    completed_steps = sum(1 for key in _PROGRESS_STAGE_ORDER if completed_flags.get(key))
+    total_steps = len(_PROGRESS_STAGE_ORDER)
+
+    current_step = "data"
+    for stage in reversed(_PROGRESS_STAGE_ORDER):
+        if completed_flags.get(stage):
+            current_step = stage
+            break
+    if completed_steps < total_steps:
+        for stage in _PROGRESS_STAGE_ORDER:
+            if not completed_flags.get(stage):
+                current_step = stage
+                break
+
+    current_substep, current_substep_label = _derive_substep(current_step, screen_states)
+    completion_pct = int(round((completed_steps / max(total_steps, 1)) * 100))
+    summary_status = str(status or "").strip().lower() or ("complete" if completion_pct >= 100 else "in_progress")
+    return {
+        "current_step": current_step,
+        "current_step_label": _PIPELINE_STEP_LABELS.get(current_step, current_step.replace("_", " ").title()),
+        "current_substep": current_substep,
+        "current_substep_label": current_substep_label,
+        "completion_pct": completion_pct,
+        "completed_steps": completed_steps,
+        "total_steps": total_steps,
+        "run_status": summary_status,
+    }
+
+
+def _progress_summary_from_steps(steps: List[Dict], status: Optional[str] = None) -> Dict[str, Any]:
+    screen_states = _screen_state_map(steps or [])
+    journey = screen_states.get("workbench_journey") or {}
+    summary = _fallback_progress_summary(steps, status=status)
+    stale_summary = _progress_stale_summary(steps)
+
+    current_step = str(journey.get("current_step") or summary["current_step"]).strip().lower()
+    current_step = current_step or summary["current_step"]
+    current_step_label = _PIPELINE_STEP_LABELS.get(
+        current_step,
+        str(journey.get("current_step_label") or "").strip() or summary["current_step_label"],
+    )
+
+    current_substep = str(journey.get("current_substep") or "").strip()
+    current_substep_label = str(journey.get("current_substep_label") or "").strip()
+    if not current_substep_label:
+        derived_substep, derived_substep_label = _derive_substep(current_step, screen_states)
+        current_substep = current_substep or derived_substep
+        current_substep_label = derived_substep_label
+
+    completion_pct = _coerce_int(journey.get("completion_pct"), summary["completion_pct"])
+    completed_steps = _coerce_int(journey.get("completed_steps"), summary["completed_steps"])
+    total_steps = _coerce_int(journey.get("total_steps"), summary["total_steps"])
+    run_status = str(journey.get("run_status") or summary["run_status"] or status or "").strip().lower()
+    if not run_status:
+        run_status = "complete" if int(completion_pct or 0) >= 100 else "in_progress"
+    if stale_summary["stale_steps"]:
+        run_status = "stale"
+
+    return {
+        "current_step": current_step,
+        "current_step_label": current_step_label,
+        "current_substep": current_substep,
+        "current_substep_label": current_substep_label,
+        "completion_pct": int(completion_pct or 0),
+        "completed_steps": int(completed_steps or 0),
+        "total_steps": int(total_steps or len(_PROGRESS_STAGE_ORDER)),
+        "run_status": run_status,
+        "stale_steps": stale_summary["stale_steps"],
+        "stale_details": stale_summary["stale_details"],
+        "latest_change": stale_summary["latest_change"],
+    }
 
 
 class MLOpsWorkbenchService:
@@ -1318,11 +1708,14 @@ class MLOpsWorkbenchService:
                     """,
                     [tenant_id, env_id, int(dataset_id)],
                 ).fetchall()
-        return [
-            {
+        results: List[Dict[str, Any]] = []
+        for r in rows:
+            steps = json.loads(r[2] or "[]")
+            record = {
                 "pipeline_id": int(r[0]),
+                "run_ref": f"FCC-RUN-{int(r[0]):05d}",
                 "name": r[1],
-                "steps": json.loads(r[2] or "[]"),
+                "steps": steps,
                 "created_at": r[3].isoformat() if hasattr(r[3], "isoformat") else r[3],
                 "updated_at": r[4].isoformat() if hasattr(r[4], "isoformat") else r[4],
                 "status": r[5] or "draft",
@@ -1335,8 +1728,9 @@ class MLOpsWorkbenchService:
                 "dataset_ids": json.loads(r[12] or "[]"),
                 "schedule": json.loads(r[13] or "{}"),
             }
-            for r in rows
-        ]
+            record.update(_progress_summary_from_steps(steps, status=record["status"]))
+            results.append(record)
+        return results
 
     def save_pipeline(
         self,
@@ -1471,8 +1865,9 @@ class MLOpsWorkbenchService:
             ).fetchone()
         if not row:
             raise ValueError(f"Pipeline {pipeline_id} not found")
-        return {
+        result = {
             "pipeline_id": int(row[0]),
+            "run_ref": f"FCC-RUN-{int(row[0]):05d}",
             "name": row[1],
             "steps": json.loads(row[2] or "[]"),
             "grain": row[3] or "transaction",
@@ -1491,6 +1886,108 @@ class MLOpsWorkbenchService:
             "last_run_at": row[16].isoformat() if hasattr(row[16], "isoformat") else row[16],
             "output_dataset_id": int(row[17]) if row[17] is not None else None,
         }
+        result.update(_progress_summary_from_steps(result["steps"], status=result["status"]))
+        return result
+
+    def save_pipeline_screen_state(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        screen: str,
+        state: Dict,
+    ) -> Dict[str, Any]:
+        screen_key = str(screen or "").strip().lower()
+        if not screen_key:
+            raise ValueError("screen is required")
+
+        with get_connection(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT steps_json
+                FROM mlops_pipelines
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [int(pipeline_id), tenant_id, env_id],
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Pipeline {pipeline_id} not found")
+
+            steps = json.loads(row[0] or "[]")
+            screen_states = _screen_state_map(steps or [])
+            prior_state = screen_states.get(screen_key) or {}
+            dependency_state = _dependency_state_payload(steps or {})
+            fingerprints = dict(dependency_state.get("fingerprints") or {})
+            stale_steps = dict(dependency_state.get("stale_steps") or {})
+            latest_change = dependency_state.get("latest_change") if isinstance(dependency_state.get("latest_change"), dict) else {}
+
+            stage_id = _SCREEN_TO_STEP.get(screen_key)
+            if stage_id and stage_id in stale_steps:
+                stale_steps.pop(stage_id, None)
+
+            previous_fp = str(fingerprints.get(screen_key) or _state_fingerprint(screen_key, prior_state) or "")
+            next_fp = _state_fingerprint(screen_key, state)
+            if next_fp:
+                fingerprints[screen_key] = next_fp
+
+            if screen_key in _DEPENDENCY_GRAPH and previous_fp and next_fp and previous_fp != next_fp:
+                impacted_steps = list(_DEPENDENCY_GRAPH.get(screen_key) or [])
+                changed_at = datetime.utcnow().isoformat()
+                message = _build_dependency_message(screen_key, impacted_steps)
+                source_step = _SCREEN_TO_STEP.get(screen_key, screen_key)
+                source_label = _PIPELINE_STEP_LABELS.get(source_step, source_step.replace("_", " ").title())
+                for step_id in impacted_steps:
+                    stale_steps[step_id] = {
+                        "step": step_id,
+                        "step_label": _PIPELINE_STEP_LABELS.get(step_id, step_id.replace("_", " ").title()),
+                        "source_step": source_step,
+                        "source_label": source_label,
+                        "message": message,
+                        "changed_at": changed_at,
+                    }
+                latest_change = {
+                    "source_step": source_step,
+                    "source_label": source_label,
+                    "message": message,
+                    "impacted_steps": impacted_steps,
+                    "changed_at": changed_at,
+                }
+
+            if not stale_steps:
+                latest_change = {}
+
+            next_steps = [
+                step for step in (steps or [])
+                if not (
+                    str(step.get("type") or "").strip().lower() == "screen_state"
+                    and str(step.get("screen") or "").strip().lower() in {screen_key, "workbench_dependencies"}
+                )
+            ]
+            next_steps.append({
+                "type": "screen_state",
+                "screen": screen_key,
+                "state": state if isinstance(state, dict) else {},
+            })
+            next_steps.append({
+                "type": "screen_state",
+                "screen": "workbench_dependencies",
+                "state": {
+                    "fingerprints": fingerprints,
+                    "stale_steps": stale_steps,
+                    "latest_change": latest_change,
+                },
+            })
+
+            conn.execute(
+                """
+                UPDATE mlops_pipelines
+                SET steps_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [json.dumps(next_steps, default=str), int(pipeline_id), tenant_id, env_id],
+            )
+
+        return self.load_pipeline(tenant_id, env_id, int(pipeline_id))
 
     def list_pipeline_versions(self, tenant_id: str, env_id: str, pipeline_id: int) -> List[Dict]:
         """Return all saved version snapshots for one pipeline."""
@@ -2254,6 +2751,10 @@ class MLOpsWorkbenchService:
                 "distinct_count": distinct,
                 "dtype": str(series.dtype),
                 "numeric_parse_ratio": float(numeric_ratio),
+                "sample_values": [
+                    str(value)
+                    for value in series.dropna().astype(str).unique()[:5].tolist()
+                ],
             }
             if numeric is not None and numeric.notna().any():
                 entry.update(
@@ -5923,6 +6424,41 @@ class MLOpsWorkbenchService:
             return int(default)
 
     @staticmethod
+    def _report_has_value(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in {"", "-", "--", "na", "n/a", "none", "null", "nan", "not recorded", "not available"}:
+                return False
+            return True
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) > 0
+        return True
+
+    def _report_pick_value(
+        self,
+        *values: Any,
+        numeric: bool = False,
+        zero_means_missing: bool = False,
+        default: Any = None,
+    ) -> Any:
+        fallback_numeric = None
+        for value in values:
+            if not self._report_has_value(value):
+                continue
+            if numeric:
+                numeric_value = self._report_float(value, 0.0)
+                if zero_means_missing and abs(numeric_value) < 1e-12:
+                    if fallback_numeric is None:
+                        fallback_numeric = value
+                    continue
+            return value
+        if fallback_numeric is not None:
+            return fallback_numeric
+        return default
+
+    @staticmethod
     def _report_iso(value: Any) -> Optional[str]:
         if value is None:
             return None
@@ -6012,6 +6548,15 @@ class MLOpsWorkbenchService:
             "dataset_id": self._report_int(row.get("dataset_id"), 0),
             "target_column": str(row.get("target_column") or ""),
             "algorithm": str(row.get("algorithm") or ""),
+            "grain": str(
+                (result_payload.get("grain") if isinstance(result_payload, dict) else "")
+                or row.get("grain")
+                or "alert"
+            ),
+            "id_column": str(
+                (result_payload.get("id_column") if isinstance(result_payload, dict) else "")
+                or ""
+            ),
             "run_name": str(
                 (result_payload.get("model_name") if isinstance(result_payload, dict) else "")
                 or f"{str(row.get('algorithm') or 'model').replace('_', ' ').title()} {str(run_id)[:8]}"
@@ -6023,10 +6568,22 @@ class MLOpsWorkbenchService:
             "result": result_payload if isinstance(result_payload, dict) else {},
             "feature_diagnostics": feature_diag if isinstance(feature_diag, dict) else {},
             "threshold_table": metrics.get("threshold_table") if isinstance(metrics, dict) else [],
+            "test_truth": self._report_json_load(row.get("test_truth_json"), []),
+            "test_prob": self._report_json_load(row.get("test_prob_json"), []),
             "selected_threshold": self._report_float(
                 (result_payload.get("selected_threshold") if isinstance(result_payload, dict) else None)
                 or row.get("selected_threshold"),
                 0.5,
+            ),
+            "hml_high_threshold": self._report_float(
+                (result_payload.get("hml_high_threshold") if isinstance(result_payload, dict) else None)
+                or row.get("hml_high_threshold"),
+                0.65,
+            ),
+            "hml_low_threshold": self._report_float(
+                (result_payload.get("hml_low_threshold") if isinstance(result_payload, dict) else None)
+                or row.get("hml_low_threshold"),
+                0.35,
             ),
             "split_strategy": str(
                 (result_payload.get("split_strategy") if isinstance(result_payload, dict) else "")
@@ -6221,6 +6778,8 @@ class MLOpsWorkbenchService:
                 "result": {},
                 "feature_diagnostics": {},
                 "threshold_table": threshold_table if isinstance(threshold_table, list) else [],
+                "test_truth": self._report_json_load(legacy.get("test_truth_json"), []),
+                "test_prob": self._report_json_load(legacy.get("test_prob_json"), []),
                 "selected_threshold": self._report_float(legacy.get("selected_threshold"), 0.4),
                 "split_strategy": "random",
                 "split_date": None,
@@ -6315,6 +6874,303 @@ class MLOpsWorkbenchService:
                 return result.get("data")
             return result
         return None
+
+    def _report_binary_label_name(self, value: Any) -> str:
+        label = str(value or "").strip().lower()
+        if label in {"1", "true", "yes", "positive", "tp"}:
+            return "Positive"
+        if label in {"0", "false", "no", "negative", "tn"}:
+            return "Negative"
+        return str(value or "Class")
+
+    def _build_report_validation_metrics(
+        self,
+        test_truth: Any,
+        test_prob: Any,
+        *,
+        selected_threshold: float,
+    ) -> Dict[str, Any]:
+        truth = np.asarray(test_truth if isinstance(test_truth, list) else [], dtype=float).reshape(-1)
+        prob = np.asarray(test_prob if isinstance(test_prob, list) else [], dtype=float).reshape(-1)
+        if truth.size == 0 or prob.size == 0 or truth.size != prob.size:
+            return {}
+
+        try:
+            from sklearn.metrics import (
+                average_precision_score,
+                confusion_matrix,
+                precision_recall_curve,
+                roc_auc_score,
+                roc_curve,
+            )
+        except Exception:
+            return {}
+
+        y_true = truth.astype(int)
+        y_prob = prob.astype(float)
+        threshold = float(selected_threshold)
+
+        def _sample_curve(points: List[Dict[str, Any]], limit: int = 180) -> List[Dict[str, Any]]:
+            if len(points) <= limit:
+                return points
+            step = max(1, len(points) // max(limit - 1, 1))
+            sampled = points[::step]
+            if sampled and sampled[-1] != points[-1]:
+                sampled.append(points[-1])
+            return sampled[:limit]
+
+        try:
+            auc = float(roc_auc_score(y_true, y_prob))
+        except Exception:
+            auc = 0.0
+        try:
+            pr_auc = float(average_precision_score(y_true, y_prob))
+        except Exception:
+            pr_auc = 0.0
+
+        threshold_table = self._threshold_analysis(y_true, y_prob)
+        selected_row = {}
+        if threshold_table:
+            selected_row = min(
+                threshold_table,
+                key=lambda row: abs(float(row.get("threshold", 0.5)) - threshold),
+            )
+
+        try:
+            fpr_arr, tpr_arr, _ = roc_curve(y_true, y_prob)
+            roc_curve_data = _sample_curve([
+                {"fpr": round(float(fpr), 4), "tpr": round(float(tpr), 4)}
+                for fpr, tpr in zip(fpr_arr, tpr_arr)
+            ])
+        except Exception:
+            roc_curve_data = []
+
+        try:
+            precision_arr, recall_arr, _ = precision_recall_curve(y_true, y_prob)
+            pr_curve_data = _sample_curve([
+                {"recall": round(float(recall), 4), "precision": round(float(precision), 4)}
+                for precision, recall in zip(precision_arr, recall_arr)
+            ])
+        except Exception:
+            pr_curve_data = []
+
+        pred = (y_prob >= threshold).astype(int)
+        try:
+            tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
+        except Exception:
+            tn, fp, fn, tp = 0, 0, 0, 0
+
+        total = max(int(len(y_true)), 1)
+        positives = max(int(np.sum(y_true == 1)), 1)
+        precision = float(tp / max(tp + fp, 1))
+        recall = float(tp / max(tp + fn, 1))
+        specificity = float(tn / max(tn + fp, 1))
+        accuracy = float((tp + tn) / total)
+        balanced_accuracy = float((recall + specificity) / 2.0)
+        f1 = float((2 * tp) / max((2 * tp) + fp + fn, 1))
+        suppression_rate_pct = float((tn + fn) / total * 100.0)
+        event_loss_pct = float(fn / positives * 100.0)
+
+        return {
+            "roc_auc": round(auc, 4),
+            "pr_auc": round(pr_auc, 4),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "accuracy": round(accuracy, 4),
+            "specificity": round(specificity, 4),
+            "balanced_accuracy": round(balanced_accuracy, 4),
+            "suppression_rate_pct": round(
+                self._report_float(selected_row.get("suppression_rate_pct"), suppression_rate_pct),
+                2,
+            ),
+            "event_loss_pct": round(
+                self._report_float(selected_row.get("event_loss_pct"), event_loss_pct),
+                2,
+            ),
+            "confusion_matrix": {
+                "tn": int(tn),
+                "fp": int(fp),
+                "fn": int(fn),
+                "tp": int(tp),
+            },
+            "threshold_table": threshold_table,
+            "roc_curve": roc_curve_data,
+            "pr_curve": pr_curve_data,
+        }
+
+    def _build_report_eda_snapshot(
+        self,
+        *,
+        tenant_id: str,
+        env_id: str,
+        dataset_id: int,
+        target_col: str,
+        existing_raw: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        merged = dict(existing_raw) if isinstance(existing_raw, dict) else {}
+        chart_data: Dict[str, Any] = {}
+        if isinstance(merged.get("chart_data"), dict):
+            chart_data.update(merged.get("chart_data") or {})
+        else:
+            for key in (
+                "class_distribution_chart",
+                "risk_score_by_label_chart",
+                "missing_values_chart",
+                "sar_rate_by_rule_chart",
+                "feature_correlation_chart",
+                "column_role_chart",
+                "correlation_pairs_chart",
+                "row_completeness_chart",
+            ):
+                if key in merged:
+                    chart_data[key] = merged.get(key)
+
+        if not dataset_id:
+            merged["chart_data"] = chart_data or None
+            return merged
+
+        try:
+            dataset = self.get_dataset(tenant_id, env_id, int(dataset_id))
+        except Exception as exc:
+            logger.warning("Report EDA dataset lookup failed for dataset_id=%s: %s", dataset_id, exc)
+            merged["chart_data"] = chart_data or None
+            return merged
+
+        try:
+            from api.tools.mlops.eda_service import EDAService
+
+            eda_service = EDAService()
+        except Exception as exc:
+            logger.warning("Report EDA service import failed for dataset_id=%s: %s", dataset_id, exc)
+            merged["chart_data"] = chart_data or None
+            return merged
+
+        sample_rows = 30_000
+        overview = {}
+        missing = {}
+        correlation = {}
+        feature_target = {}
+
+        try:
+            overview = eda_service.dataset_overview(dataset, sample_rows=sample_rows)
+        except Exception as exc:
+            logger.warning("Report EDA overview failed for dataset_id=%s: %s", dataset_id, exc)
+        try:
+            missing = eda_service.missing_analysis(dataset, sample_rows=sample_rows)
+        except Exception as exc:
+            logger.warning("Report EDA missing analysis failed for dataset_id=%s: %s", dataset_id, exc)
+        try:
+            correlation = eda_service.correlation_matrix(dataset, sample_rows=min(sample_rows, 12_000))
+        except Exception as exc:
+            logger.warning("Report EDA correlation failed for dataset_id=%s: %s", dataset_id, exc)
+        if target_col:
+            try:
+                feature_target = eda_service.feature_target_analysis(
+                    dataset,
+                    target_col=target_col,
+                    sample_rows=min(sample_rows, 20_000),
+                    max_features=80,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Report feature-target analysis failed for dataset_id=%s target=%s: %s",
+                    dataset_id,
+                    target_col,
+                    exc,
+                )
+
+        if overview:
+            merged["overview"] = overview
+            if not chart_data.get("class_distribution_chart") and isinstance(overview.get("class_balance"), dict):
+                chart_data["class_distribution_chart"] = [
+                    {
+                        "name": self._report_binary_label_name(label),
+                        "value": round(self._report_float(value), 2),
+                    }
+                    for label, value in (overview.get("class_balance") or {}).items()
+                ]
+            if not chart_data.get("column_role_chart"):
+                chart_data["column_role_chart"] = [
+                    {"name": "Numeric", "value": len(overview.get("numeric_columns") or [])},
+                    {"name": "Categorical", "value": len(overview.get("categorical_columns") or [])},
+                    {"name": "Binary", "value": len(overview.get("binary_columns") or [])},
+                    {"name": "Timestamp", "value": len(overview.get("timestamp_columns") or [])},
+                    {"name": "ID", "value": len(overview.get("id_columns") or [])},
+                ]
+
+        if missing:
+            merged["missing_analysis"] = missing
+            merged["missing_columns"] = [
+                row.get("column")
+                for row in (missing.get("column_summary") or [])[:12]
+                if isinstance(row, dict) and row.get("column")
+            ]
+            merged["max_missing_pct"] = (
+                (missing.get("column_summary") or [{}])[0].get("pct_missing")
+                if (missing.get("column_summary") or [])
+                else missing.get("overall_missing_pct")
+            )
+            merged["overall_missing_pct"] = missing.get("overall_missing_pct")
+            if not chart_data.get("missing_values_chart"):
+                chart_data["missing_values_chart"] = [
+                    {
+                        "column": row.get("column"),
+                        "pct_missing": row.get("pct_missing"),
+                        "n_missing": row.get("n_missing"),
+                    }
+                    for row in (missing.get("column_summary") or [])[:10]
+                    if isinstance(row, dict) and row.get("column")
+                ]
+            if not chart_data.get("row_completeness_chart"):
+                chart_data["row_completeness_chart"] = [
+                    {
+                        "missing_columns": row.get("n_missing_cols"),
+                        "rows": row.get("n_rows"),
+                    }
+                    for row in (missing.get("row_completeness_dist") or [])[:10]
+                    if isinstance(row, dict)
+                ]
+
+        if correlation:
+            merged["correlation_analysis"] = correlation
+            if not chart_data.get("correlation_pairs_chart"):
+                chart_data["correlation_pairs_chart"] = [
+                    {
+                        "pair": f"{str(row.get('col_a') or '').strip()} vs {str(row.get('col_b') or '').strip()}".strip(),
+                        "correlation": row.get("correlation"),
+                    }
+                    for row in (correlation.get("top_pairs") or [])[:10]
+                    if isinstance(row, dict) and row.get("col_a") and row.get("col_b")
+                ]
+
+        if feature_target:
+            merged["feature_target_analysis"] = feature_target
+            matrix = feature_target.get("matrix") or []
+            if not chart_data.get("feature_correlation_chart"):
+                chart_data["feature_correlation_chart"] = [
+                    {
+                        "feature": row.get("feature"),
+                        "value": row.get("value"),
+                        "metric": row.get("metric"),
+                        "dtype": row.get("dtype"),
+                    }
+                    for row in matrix[:10]
+                    if isinstance(row, dict) and row.get("feature") and row.get("value") is not None
+                ]
+            if not merged.get("top_correlated_with_target"):
+                merged["top_correlated_with_target"] = [
+                    {
+                        "feature": row.get("feature"),
+                        "score": row.get("value"),
+                        "metric": row.get("metric"),
+                    }
+                    for row in matrix[:10]
+                    if isinstance(row, dict) and row.get("feature")
+                ]
+
+        merged["chart_data"] = chart_data or None
+        return merged
 
     def _build_report_eda_chart_fallback(
         self,
@@ -6439,6 +7295,24 @@ class MLOpsWorkbenchService:
             )
         return out
 
+    def _threshold_rows_have_metrics(self, rows: Any) -> bool:
+        for item in rows or []:
+            if not isinstance(item, dict):
+                continue
+            for key in (
+                "suppression_pct",
+                "suppression_rate_pct",
+                "event_loss_pct",
+                "event_loss",
+                "precision",
+                "recall",
+                "tp",
+                "fn",
+            ):
+                if self._report_has_value(item.get(key)):
+                    return True
+        return False
+
     def _select_recommended_threshold(
         self,
         rows: List[Dict[str, Any]],
@@ -6464,6 +7338,7 @@ class MLOpsWorkbenchService:
         if explicit:
             best = explicit[0]
             best["recommended"] = True
+            best["selection_reason"] = "Using the threshold already flagged as recommended in the saved run."
             return best
 
         near_selected = min(
@@ -6472,14 +7347,29 @@ class MLOpsWorkbenchService:
         )
         valid = [r for r in rows if self._report_float(r.get("event_loss_pct"), 0.0) <= float(max_event_loss_pct)]
         if valid:
-            best_valid = max(valid, key=lambda r: self._report_float(r.get("suppression_pct"), 0.0))
-            if abs(float(best_valid.get("threshold", 0.0)) - float(selected_threshold)) <= 0.051:
-                best_valid["recommended"] = True
-                return best_valid
-            near_selected["recommended"] = True
-            return near_selected
+            best_valid = max(
+                valid,
+                key=lambda r: (
+                    self._report_float(r.get("suppression_pct"), 0.0),
+                    -self._report_float(r.get("event_loss_pct"), 0.0),
+                    self._report_float(r.get("recall"), 0.0),
+                    self._report_float(r.get("precision"), 0.0),
+                ),
+            )
+            best_valid["recommended"] = True
+            best_valid["selection_reason"] = (
+                "Selected as the threshold that gives the highest suppression while staying within the allowed event-loss limit."
+            )
+            if abs(float(best_valid.get("threshold", 0.0)) - float(selected_threshold)) <= 0.0005:
+                best_valid["selection_reason"] = (
+                    "The configured threshold already gave the best suppression available within the allowed event-loss limit."
+                )
+            return best_valid
 
         near_selected["recommended"] = True
+        near_selected["selection_reason"] = (
+            "No tested threshold stayed within the allowed event-loss limit, so the configured threshold was retained for reporting."
+        )
         return near_selected
 
     def _build_narratives(self, report: Dict[str, Any]) -> Dict[str, str]:
@@ -6536,9 +7426,9 @@ class MLOpsWorkbenchService:
                 f"at {rec_event_loss:.2f}% Event Loss, within the {reg_limit:.1f}% limit."
             ),
             "impact": (
-                f"{self._report_int(bi.get('alerts_suppressed'), 0):,} alerts auto-closed, "
-                f"{self._report_float(bi.get('hours_recovered'), 0.0):.0f} analyst hours recovered, "
-                f"estimated {bi.get('cost_currency', 'GBP')} {self._report_float(bi.get('cost_saving_estimate'), 0.0):,.0f} savings."
+                f"{self._report_int(bi.get('alerts_suppressed'), 0):,} alerts move out of manual review, "
+                f"{self._report_int(bi.get('alerts_escalated'), 0):,} remain in the investigation queue, and "
+                f"{self._report_int(bi.get('sars_missed'), 0):,} suspicious cases remain the miss-risk to govern."
             ),
             "governance": (
                 f"Split strategy: {ds.get('split_type') or 'random'}. Event Loss constraint enforced at <= {reg_limit:.1f}%."
@@ -6639,6 +7529,96 @@ class MLOpsWorkbenchService:
                     }
                 )
 
+        pipeline_steps = pipeline_meta.get("steps") if isinstance(pipeline_meta, dict) else []
+        pipeline_joins = pipeline_meta.get("joins") if isinstance(pipeline_meta, dict) else []
+        pipeline_transforms = pipeline_meta.get("transforms") if isinstance(pipeline_meta, dict) else []
+        pipeline_steps = pipeline_steps if isinstance(pipeline_steps, list) else []
+        pipeline_joins = pipeline_joins if isinstance(pipeline_joins, list) else []
+        pipeline_transforms = pipeline_transforms if isinstance(pipeline_transforms, list) else []
+
+        def _transform_summary(step: Dict[str, Any]) -> str:
+            stype = str(step.get("type") or "").lower()
+            if stype == "imputation":
+                return f"Fill missing values using {step.get('strategy') or 'configured'} logic."
+            if stype.startswith("encoding_"):
+                return "Convert business categories into model-usable numeric inputs."
+            if stype.startswith("scaling_") or stype == "normalize_l2":
+                return "Bring numeric columns onto a consistent scale."
+            if stype.startswith("feature_") or stype in {"datetime_extract", "text_features"}:
+                return "Create derived variables so the model can pick up behavioural patterns."
+            if stype in {"drop_columns", "mapping_id", "tag_mapping_id", "keep_mapping"}:
+                return "Control which columns are retained for modelling and traceability."
+            return "Apply the configured preprocessing rule."
+
+        preprocess_steps: List[Dict[str, Any]] = []
+        preprocess_category_counts: Dict[str, Dict[str, Any]] = {}
+        for idx, raw_step in enumerate(pipeline_transforms, start=1):
+            step = raw_step if isinstance(raw_step, dict) else {}
+            meta = self._preprocess_step_meta(step.get("type") or "")
+            requested_columns = step.get("columns") if isinstance(step.get("columns"), list) else []
+            category = str(meta.get("category") or "clean")
+            category_bucket = preprocess_category_counts.setdefault(
+                category,
+                {
+                    "category": category,
+                    "label": meta.get("label") if category == "select" and category not in preprocess_category_counts else category.title(),
+                    "steps": 0,
+                    "applied_steps": 0,
+                    "added_columns": 0,
+                    "dropped_columns": 0,
+                },
+            )
+            category_bucket["label"] = {
+                "clean": "Cleaning",
+                "encode": "Encoding",
+                "scale": "Scaling",
+                "feat": "Feature Engineering",
+                "select": "Selection & Mapping",
+            }.get(category, category.title())
+            category_bucket["steps"] += 1
+            category_bucket["applied_steps"] += 1
+
+            preprocess_steps.append(
+                {
+                    "step_no": idx,
+                    "type": str(step.get("type") or ""),
+                    "label": str(meta.get("label") or "Step"),
+                    "category": category,
+                    "requested_columns": requested_columns[:12],
+                    "requested_column_count": int(len(requested_columns)),
+                    "summary": _transform_summary(step),
+                }
+            )
+
+        pipeline_summary = {
+            "pipeline_id": int(pipeline_id_int) if pipeline_id_int is not None else None,
+            "name": pipeline_meta.get("name") if isinstance(pipeline_meta, dict) else None,
+            "version": self._report_int((pipeline_meta or {}).get("version"), 0) if isinstance(pipeline_meta, dict) else None,
+            "grain": str((pipeline_meta or {}).get("grain") or run.get("grain") or "alert") if isinstance(pipeline_meta, dict) else str(run.get("grain") or "alert"),
+            "status": (pipeline_meta or {}).get("status") if isinstance(pipeline_meta, dict) else None,
+            "output_name": (pipeline_meta or {}).get("output_name") if isinstance(pipeline_meta, dict) else None,
+            "created_by_persona": (pipeline_meta or {}).get("created_by_persona") if isinstance(pipeline_meta, dict) else None,
+            "created_at": (pipeline_meta or {}).get("created_at") if isinstance(pipeline_meta, dict) else None,
+            "updated_at": (pipeline_meta or {}).get("updated_at") if isinstance(pipeline_meta, dict) else None,
+            "last_run_at": (pipeline_meta or {}).get("last_run_at") if isinstance(pipeline_meta, dict) else None,
+            "dataset_count": int(len(dataset_ids)),
+            "join_count": int(len(pipeline_joins)),
+            "step_count": int(len(pipeline_steps)),
+        }
+
+        preprocessing_summary = {
+            "transform_count": int(len(preprocess_steps)),
+            "categories": list(preprocess_category_counts.values()),
+            "steps": preprocess_steps,
+            "summary": {
+                "input_rows": None,
+                "output_rows": None,
+                "input_columns": None,
+                "output_columns": None,
+                "applied_steps": int(len(preprocess_steps)),
+            },
+        }
+
         target_meta = self._load_target_summary_for_dataset(
             tenant_id=str(tenant_id),
             env_id=str(env_id),
@@ -6694,6 +7674,13 @@ class MLOpsWorkbenchService:
         )
 
         eda_raw = self._load_eda_summary_for_dataset(dataset_id=self._report_int(run.get("dataset_id"), 0))
+        eda_raw = self._build_report_eda_snapshot(
+            tenant_id=str(tenant_id),
+            env_id=str(env_id),
+            dataset_id=self._report_int(run.get("dataset_id"), 0),
+            target_col=str(run.get("target_column") or ""),
+            existing_raw=eda_raw if isinstance(eda_raw, dict) else None,
+        )
         eda_chart_data = None
         if isinstance(eda_raw, dict):
             if isinstance(eda_raw.get("chart_data"), dict):
@@ -6705,22 +7692,47 @@ class MLOpsWorkbenchService:
                     "missing_values_chart",
                     "sar_rate_by_rule_chart",
                     "feature_correlation_chart",
+                    "column_role_chart",
+                    "correlation_pairs_chart",
+                    "row_completeness_chart",
                 ]
                 if any(k in eda_raw for k in chart_keys):
                     eda_chart_data = {k: eda_raw.get(k) for k in chart_keys if k in eda_raw}
 
         metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
-        cm = self._normalize_confusion_matrix(metrics.get("confusion_matrix"))
+        test_truth = run.get("test_truth") if isinstance(run.get("test_truth"), list) else []
+        test_prob = run.get("test_prob") if isinstance(run.get("test_prob"), list) else []
+        selected_threshold = self._report_float(run.get("selected_threshold"), 0.5)
+        computed_validation = self._build_report_validation_metrics(
+            test_truth,
+            test_prob,
+            selected_threshold=selected_threshold,
+        )
+        raw_cm = self._report_pick_value(
+            metrics.get("confusion_matrix"),
+            computed_validation.get("confusion_matrix"),
+            default={},
+        )
+        cm = self._normalize_confusion_matrix(raw_cm)
+        if sum(cm.values()) == 0 and isinstance(computed_validation.get("confusion_matrix"), dict):
+            computed_cm = self._normalize_confusion_matrix(computed_validation.get("confusion_matrix"))
+            if sum(computed_cm.values()) > 0:
+                cm = computed_cm
 
+        threshold_source_rows = run.get("threshold_table") if isinstance(run.get("threshold_table"), list) else []
+        if (
+            (not threshold_source_rows or not self._threshold_rows_have_metrics(threshold_source_rows))
+            and isinstance(computed_validation.get("threshold_table"), list)
+        ):
+            threshold_source_rows = computed_validation.get("threshold_table") or []
         threshold_rows = self._normalize_threshold_rows(
-            run.get("threshold_table") if isinstance(run.get("threshold_table"), list) else [],
+            threshold_source_rows,
             hml_summary=run.get("hml_summary") if isinstance(run.get("hml_summary"), dict) else {},
         )
         max_event_loss_limit = self._report_float(
             metrics.get("max_event_loss_pct_constraint", 5.0),
             5.0,
         )
-        selected_threshold = self._report_float(run.get("selected_threshold"), 0.5)
         recommended_row = self._select_recommended_threshold(
             threshold_rows,
             selected_threshold=selected_threshold,
@@ -6790,6 +7802,50 @@ class MLOpsWorkbenchService:
                 }
             )
 
+        preprocessing_summary["summary"].update(
+            {
+                "input_rows": int(max(n_total, 0)),
+                "output_rows": int(max(n_labelled, 0)),
+                "input_columns": int(self._report_int(fd.get("raw_feature_columns"), 0)),
+                "output_columns": int(self._report_int(fd.get("encoded_feature_count"), 0)),
+            }
+        )
+
+        feature_selection = {
+            "raw_feature_columns": self._report_int(fd.get("raw_feature_columns"), 0),
+            "encoded_feature_count": self._report_int(fd.get("encoded_feature_count"), 0),
+            "feature_multiplier": round(self._report_float(fd.get("feature_multiplier"), 0.0), 3),
+            "numeric_columns": self._report_int(fd.get("numeric_columns"), 0),
+            "categorical_columns": self._report_int(fd.get("categorical_columns"), 0),
+            "onehot_columns_count": self._report_int(fd.get("onehot_columns_count"), 0),
+            "frequency_encoded_count": self._report_int(fd.get("frequency_encoded_count"), 0),
+            "categorical_levels_total": self._report_int(fd.get("categorical_levels_total"), 0),
+            "dropped_leakage_count": self._report_int(fd.get("dropped_leakage_count"), 0),
+            "dropped_leakage_columns": fd.get("dropped_leakage_columns") or [],
+            "dropped_id_count": self._report_int(fd.get("dropped_id_count"), 0),
+            "dropped_id_columns": fd.get("dropped_id_columns") or [],
+            "dropped_constant_count": self._report_int(fd.get("dropped_constant_count"), 0),
+            "dropped_constant_columns": fd.get("dropped_constant_columns") or [],
+            "datetime_expanded_count": self._report_int(fd.get("datetime_expanded_count"), 0),
+            "datetime_expanded_columns": fd.get("datetime_expanded_columns") or [],
+            "top_categorical_expansions": fd.get("top_categorical_expansions") or [],
+        }
+
+        run_result = run.get("result") if isinstance(run.get("result"), dict) else {}
+        training_process = {
+            "grain": str(run.get("grain") or run_result.get("grain") or "alert"),
+            "id_column": str(run.get("id_column") or run_result.get("id_column") or ""),
+            "cv_folds": self._report_int(run_result.get("cv_folds"), 0),
+            "split_summary": run_result.get("split_summary") if isinstance(run_result.get("split_summary"), dict) else {},
+            "class_weight": run_result.get("class_weight"),
+            "calibration": run_result.get("calibration"),
+            "timeline": run_result.get("timeline") if isinstance(run_result.get("timeline"), list) else [],
+            "artifact_path": run.get("artifact_path"),
+            "trained_at": run_result.get("trained_at") or run.get("finished_at"),
+            "hml_high_threshold": round(self._report_float(run.get("hml_high_threshold"), 0.65), 4),
+            "hml_low_threshold": round(self._report_float(run.get("hml_low_threshold"), 0.35), 4),
+        }
+
         if not isinstance(eda_chart_data, dict) or not eda_chart_data:
             eda_chart_data = self._build_report_eda_chart_fallback(
                 n_positive=n_positive,
@@ -6799,6 +7855,106 @@ class MLOpsWorkbenchService:
                 feature_importance=feature_importance,
             )
 
+        metric_roc_auc = self._report_pick_value(
+            metrics.get("roc_auc"),
+            metrics.get("test_auc_roc"),
+            computed_validation.get("roc_auc"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_pr_auc = self._report_pick_value(
+            metrics.get("pr_auc"),
+            metrics.get("test_auc_pr"),
+            metrics.get("avg_precision"),
+            computed_validation.get("pr_auc"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_cv_auc_mean = self._report_pick_value(
+            metrics.get("cv_auc_mean"),
+            metrics.get("cv_auc"),
+            computed_validation.get("roc_auc"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_cv_auc_std = self._report_pick_value(
+            metrics.get("cv_auc_std"),
+            default=0.0,
+        )
+        metric_precision = self._report_pick_value(
+            metrics.get("precision"),
+            computed_validation.get("precision"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_recall = self._report_pick_value(
+            metrics.get("recall"),
+            computed_validation.get("recall"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_f1 = self._report_pick_value(
+            metrics.get("f1"),
+            computed_validation.get("f1"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_accuracy = self._report_pick_value(
+            metrics.get("accuracy"),
+            computed_validation.get("accuracy"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_specificity = self._report_pick_value(
+            metrics.get("specificity"),
+            computed_validation.get("specificity"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_balanced_accuracy = self._report_pick_value(
+            metrics.get("balanced_accuracy"),
+            computed_validation.get("balanced_accuracy"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_suppression_pct = self._report_pick_value(
+            metrics.get("suppression_rate_pct"),
+            computed_validation.get("suppression_rate_pct"),
+            recommended_row.get("suppression_pct"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+        metric_event_loss_pct = self._report_pick_value(
+            metrics.get("event_loss_pct"),
+            computed_validation.get("event_loss_pct"),
+            recommended_row.get("event_loss_pct"),
+            numeric=True,
+            zero_means_missing=True,
+            default=0.0,
+        )
+
+        midpoint_row = (
+            min(
+                threshold_rows,
+                key=lambda r: abs(float(r.get("threshold", 0.0)) - 0.5),
+            )
+            if threshold_rows
+            else {}
+        )
+        midpoint_threshold = self._report_float(midpoint_row.get("threshold"), 0.5)
+        midpoint_suppression_pct = self._report_float(midpoint_row.get("suppression_pct"), 0.0)
+        midpoint_event_loss_pct = self._report_float(midpoint_row.get("event_loss_pct"), 0.0)
+
         model_performance = {
             "algorithm": str(run.get("algorithm") or ""),
             "hyperparameters": (
@@ -6806,19 +7962,26 @@ class MLOpsWorkbenchService:
                 if isinstance(run.get("result"), dict)
                 else {}
             ),
-            "test_auc_roc": round(self._report_float(metrics.get("roc_auc", metrics.get("test_auc_roc")), 0.0), 4),
-            "test_auc_pr": round(self._report_float(metrics.get("pr_auc", metrics.get("test_auc_pr", metrics.get("avg_precision"))), 0.0), 4),
-            "cv_auc_mean": round(self._report_float(metrics.get("cv_auc_mean", metrics.get("cv_auc")), 0.0), 4),
-            "cv_auc_std": round(self._report_float(metrics.get("cv_auc_std"), 0.0), 4),
-            "precision": round(self._report_float(metrics.get("precision"), 0.0), 4),
-            "recall": round(self._report_float(metrics.get("recall"), 0.0), 4),
-            "f1": round(self._report_float(metrics.get("f1"), 0.0), 4),
+            "test_auc_roc": round(self._report_float(metric_roc_auc, 0.0), 4),
+            "test_auc_pr": round(self._report_float(metric_pr_auc, 0.0), 4),
+            "cv_auc_mean": round(self._report_float(metric_cv_auc_mean, 0.0), 4),
+            "cv_auc_std": round(self._report_float(metric_cv_auc_std, 0.0), 4),
+            "precision": round(self._report_float(metric_precision, 0.0), 4),
+            "recall": round(self._report_float(metric_recall, 0.0), 4),
+            "f1": round(self._report_float(metric_f1, 0.0), 4),
+            "accuracy": round(self._report_float(metric_accuracy, 0.0), 4),
+            "specificity": round(self._report_float(metric_specificity, 0.0), 4),
+            "balanced_accuracy": round(self._report_float(metric_balanced_accuracy, 0.0), 4),
+            "suppression_rate_pct": round(self._report_float(metric_suppression_pct, 0.0), 2),
+            "event_loss_pct": round(self._report_float(metric_event_loss_pct, 0.0), 2),
             "confusion_matrix": cm,
             "auc_interpretation": (
-                f"AUC {round(self._report_float(metrics.get('roc_auc'), 0.0), 2):.2f} is an honest baseline trained on investigator outcomes. "
+                f"AUC {round(self._report_float(metric_roc_auc, 0.0), 2):.2f} is an honest baseline trained on investigator outcomes. "
                 "Synthetic-label leakage can inflate AUC dramatically; production performance should be judged on out-of-time data."
             ),
             "feature_importance": feature_importance,
+            "roc_curve": metrics.get("roc_curve") if isinstance(metrics.get("roc_curve"), list) and metrics.get("roc_curve") else (computed_validation.get("roc_curve") or []),
+            "pr_curve": metrics.get("pr_curve") if isinstance(metrics.get("pr_curve"), list) and metrics.get("pr_curve") else (computed_validation.get("pr_curve") or []),
         }
         model_performance["confusion_matrix_business_explainer"] = (
             f"TP={cm['tp']} alerts correctly escalated (real suspicious cases kept), "
@@ -6829,20 +7992,33 @@ class MLOpsWorkbenchService:
 
         threshold_analysis = {
             "regulatory_limit_pct": round(float(max_event_loss_limit), 2),
+            "configured_threshold": round(float(selected_threshold), 4),
             "recommended_threshold": round(float(recommended_row.get("threshold", selected_threshold)), 4),
-            "recommended_suppression_pct": round(self._report_float(recommended_row.get("suppression_pct"), 0.0), 2),
-            "recommended_event_loss_pct": round(self._report_float(recommended_row.get("event_loss_pct"), 0.0), 2),
-            "recommended_precision": round(self._report_float(recommended_row.get("precision"), 0.0), 4),
-            "recommended_recall": round(self._report_float(recommended_row.get("recall"), 0.0), 4),
-            "within_regulatory_limit": self._report_float(recommended_row.get("event_loss_pct"), 0.0) <= float(max_event_loss_limit),
+            "recommended_suppression_pct": round(self._report_float(self._report_pick_value(recommended_row.get("suppression_pct"), metric_suppression_pct, numeric=True, zero_means_missing=True, default=0.0), 0.0), 2),
+            "recommended_event_loss_pct": round(self._report_float(self._report_pick_value(recommended_row.get("event_loss_pct"), metric_event_loss_pct, numeric=True, zero_means_missing=True, default=0.0), 0.0), 2),
+            "recommended_precision": round(self._report_float(self._report_pick_value(recommended_row.get("precision"), metric_precision, numeric=True, zero_means_missing=True, default=0.0), 0.0), 4),
+            "recommended_recall": round(self._report_float(self._report_pick_value(recommended_row.get("recall"), metric_recall, numeric=True, zero_means_missing=True, default=0.0), 0.0), 4),
+            "within_regulatory_limit": self._report_float(self._report_pick_value(recommended_row.get("event_loss_pct"), metric_event_loss_pct, numeric=True, zero_means_missing=True, default=0.0), 0.0) <= float(max_event_loss_limit),
+            "midpoint_threshold": round(float(midpoint_threshold), 4),
+            "midpoint_suppression_pct": round(float(midpoint_suppression_pct), 2),
+            "midpoint_event_loss_pct": round(float(midpoint_event_loss_pct), 2),
+            "recommendation_reason": str(recommended_row.get("selection_reason") or ""),
             "threshold_table": threshold_rows,
             "hml_tiers": hml_tiers,
         }
         threshold_analysis["business_threshold_explainer"] = (
-            "Threshold is the operating policy: lowering it catches more suspicious cases but increases analyst workload; "
-            "raising it suppresses more alerts but can miss true suspicious cases. "
-            f"Chosen threshold {threshold_analysis['recommended_threshold']:.2f} keeps Event Loss within "
-            f"{threshold_analysis['regulatory_limit_pct']:.1f}% while maximizing suppression."
+            "Threshold is an operating decision, not a universal default. "
+            "A score cut-off of 0.50 is only the midpoint of the score scale; it is not automatically the best boundary for AML alert handling because the score is chosen for workload and miss-risk trade-off, not because 0.50 is mathematically sacred. "
+            f"For this run, the configured threshold was {threshold_analysis['configured_threshold']:.2f}. "
+            f"The report recommends {threshold_analysis['recommended_threshold']:.2f} because it provides the strongest suppression while keeping Event Loss within "
+            f"{threshold_analysis['regulatory_limit_pct']:.1f}%. "
+            f"The nearest 0.50 operating point would give {threshold_analysis['midpoint_suppression_pct']:.2f}% suppression at "
+            f"{threshold_analysis['midpoint_event_loss_pct']:.2f}% Event Loss."
+            + (
+                f" {threshold_analysis['recommendation_reason']}"
+                if threshold_analysis.get("recommendation_reason")
+                else ""
+            )
         )
 
         recommended_suppression_pct = self._report_float(threshold_analysis["recommended_suppression_pct"], 0.0)
@@ -6999,6 +8175,10 @@ class MLOpsWorkbenchService:
             "strategy": label_strategy,
             "source_column": source_column,
             "derived_column": str(run.get("target_column") or "IS_TRUE_POS"),
+            "excluded_count": int(max(n_excluded, 0)),
+            "business_explanation": (
+                "Completed investigator outcomes are used as the target so the model learns from confirmed suspicious and confirmed non-suspicious cases, while unresolved cases stay out of training."
+            ),
             "mapping": {
                 "CLOSED_SAR_FILED": 1,
                 "CLOSED_FALSE_POSITIVE": 0,
@@ -7057,6 +8237,10 @@ class MLOpsWorkbenchService:
             "threshold_analysis": threshold_analysis,
             "business_impact": business_impact,
             "governance": governance,
+            "pipeline_summary": pipeline_summary,
+            "preprocessing_summary": preprocessing_summary,
+            "feature_selection": feature_selection,
+            "training_process": training_process,
         }
         report["narratives"] = self._build_narratives(report)
 

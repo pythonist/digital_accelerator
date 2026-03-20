@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -32,15 +32,15 @@ import {
 
 const tone = {
   border: '#e2e8f0',
-  bg: '#f8fafc',
+  bg: '#fbfcfd',
   text: '#1f2937',
-  muted: '#64748b',
+  muted: '#5b6470',
   orange: '#D04A02',
-  orangeSoft: '#fff1ec',
+  orangeSoft: '#f6f7f8',
   good: '#166534',
-  goodBg: '#f0fdf4',
+  goodBg: '#f2f6f3',
   warn: '#b45309',
-  warnBg: '#fffbeb',
+  warnBg: '#f5f7fa',
 };
 
 const pick = (res) => res?.data ?? res;
@@ -115,6 +115,10 @@ const ScreenPipelineRail = ({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [collapsed, setCollapsed] = useState(false);
+  const hydratedPipelineRef = useRef('');
+  const hydratingRef = useRef(false);
+  const autosaveTimerRef = useRef(null);
+  const skipAutosaveRef = useRef(false);
 
   useEffect(() => {
     if (activePipelineName) {
@@ -127,6 +131,10 @@ const ScreenPipelineRail = ({
       setSelectedPipelineId(String(activePipelineId));
     }
   }, [activePipelineId]);
+
+  useEffect(() => () => {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+  }, []);
 
   const currentJson = useMemo(() => stableStringify(currentState), [currentState]);
   const unsavedChanges = Boolean(baselineJson) && baselineJson !== currentJson;
@@ -159,6 +167,75 @@ const ScreenPipelineRail = ({
   useEffect(() => {
     loadPipelines();
   }, [loadPipelines]);
+
+  useEffect(() => {
+    const pipelineId = activePipelineId != null && activePipelineId !== '' ? String(activePipelineId) : '';
+    if (!pipelineId) {
+      hydratedPipelineRef.current = '';
+      return;
+    }
+    if (hydratedPipelineRef.current === pipelineId) return;
+
+    let alive = true;
+    hydratingRef.current = true;
+    setSelectedPipelineId(pipelineId);
+
+    (async () => {
+      try {
+        const res = await mlopsApi.pipelineGet(pipelineId);
+        const payload = pick(res);
+        const nextState = getStateFromPipeline(payload, screenKey);
+        if (!alive) return;
+        if (nextState) {
+          skipAutosaveRef.current = true;
+          onLoadState?.(nextState, payload);
+          setBaselineJson(stableStringify(nextState));
+        } else {
+          setBaselineJson('');
+        }
+        hydratedPipelineRef.current = pipelineId;
+      } catch (e) {
+        if (!alive) return;
+        setError(e?.message || 'Failed to restore saved run state');
+      } finally {
+        if (alive) hydratingRef.current = false;
+      }
+    })();
+
+    return () => {
+      alive = false;
+      hydratingRef.current = false;
+    };
+  }, [activePipelineId, onLoadState, screenKey]);
+
+  useEffect(() => {
+    const pipelineId = activePipelineId != null && activePipelineId !== '' ? String(activePipelineId) : '';
+    if (!pipelineId || hydratingRef.current) return undefined;
+    if (skipAutosaveRef.current) {
+      skipAutosaveRef.current = false;
+      return undefined;
+    }
+    if (baselineJson === currentJson) return undefined;
+
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await mlopsApi.pipelineSaveScreenState(pipelineId, {
+          screen: screenKey,
+          state: currentState,
+        });
+        const payload = pick(res);
+        setBaselineJson(currentJson);
+        if (payload?.pipeline_id) onPipelineActivated?.(payload);
+      } catch (e) {
+        setError(e?.message || 'Failed to autosave progress');
+      }
+    }, 900);
+
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [activePipelineId, baselineJson, currentJson, currentState, screenKey]);
 
   useEffect(() => {
     if (!comparePipelineId) {
@@ -233,10 +310,22 @@ const ScreenPipelineRail = ({
       const savedId = String(result?.pipeline_id || '');
       if (savedId) setSelectedPipelineId(savedId);
       if (savedId) {
-        onPipelineActivated?.({
-          pipeline_id: Number(savedId),
-          name: trimmed,
-        });
+        try {
+          const fullRes = await mlopsApi.pipelineGet(savedId);
+          const fullPayload = pick(fullRes);
+          if (fullPayload?.pipeline_id) onPipelineActivated?.(fullPayload);
+          else {
+            onPipelineActivated?.({
+              pipeline_id: Number(savedId),
+              name: trimmed,
+            });
+          }
+        } catch {
+          onPipelineActivated?.({
+            pipeline_id: Number(savedId),
+            name: trimmed,
+          });
+        }
       }
       setBaselineJson(currentJson);
       setMessage(`Saved as "${trimmed}"`);
@@ -274,7 +363,7 @@ const ScreenPipelineRail = ({
         return;
       }
       onLoadState?.(nextState, payload);
-      onPipelineActivated?.({
+      onPipelineActivated?.(payload?.pipeline_id ? payload : {
         pipeline_id: Number(payload?.pipeline_id || selectedPipelineId),
         name: payload?.name || '',
       });
@@ -292,7 +381,7 @@ const ScreenPipelineRail = ({
         width: collapsed ? 52 : 300,
         minWidth: collapsed ? 52 : 300,
         borderColor: tone.border,
-        borderRadius: 2,
+        borderRadius: 1.25,
         alignSelf: 'flex-start',
         position: sticky ? 'sticky' : 'static',
         top: sticky ? 8 : 'auto',
@@ -328,9 +417,10 @@ const ScreenPipelineRail = ({
                 sx={{
                   mt: 0.8,
                   fontSize: 10.5,
-                  bgcolor: tone.goodBg,
+                  bgcolor: '#ffffff',
                   color: tone.good,
                   fontWeight: 700,
+                  border: `1px solid ${tone.border}`,
                 }}
               />
             )}
@@ -354,7 +444,7 @@ const ScreenPipelineRail = ({
             startIcon={<Save sx={{ fontSize: 14 }} />}
             onClick={handleSave}
             disabled={saving}
-            sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' } }}
+            sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' }, borderRadius: 1 }}
           >
             {saving ? 'Saving...' : 'Save'}
           </Button>
@@ -420,7 +510,7 @@ const ScreenPipelineRail = ({
         )}
 
         {compareDiffKeys.length > 0 && (
-          <Stack spacing={0.5} sx={{ p: 1, borderRadius: 1.25, bgcolor: tone.orangeSoft }}>
+          <Stack spacing={0.5} sx={{ p: 1, borderRadius: 1, bgcolor: tone.orangeSoft, border: `1px solid ${tone.border}` }}>
             <Stack direction="row" spacing={0.6} alignItems="center">
               <CompareArrows sx={{ fontSize: 13, color: tone.orange }} />
               <Typography sx={{ fontSize: 11, color: tone.text, fontWeight: 700 }}>
@@ -434,7 +524,7 @@ const ScreenPipelineRail = ({
         )}
 
         {summaryItems.length > 0 && (
-          <Stack spacing={0.4} sx={{ p: 1, borderRadius: 1.25, bgcolor: '#ffffff', border: `1px solid ${tone.border}` }}>
+          <Stack spacing={0.4} sx={{ p: 1, borderRadius: 1, bgcolor: '#ffffff', border: `1px solid ${tone.border}` }}>
             <Typography sx={{ fontSize: 10, color: tone.muted, textTransform: 'uppercase', fontWeight: 700, letterSpacing: 0.6 }}>
               Current Plan
             </Typography>

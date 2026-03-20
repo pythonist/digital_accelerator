@@ -14,8 +14,9 @@ import {
   PictureAsPdf,
 } from '@mui/icons-material';
 import mlopsApi from '../../services/mlopsApi';
+import { FCC_THEME } from '../../theme/fccWorkbenchTheme';
 
-const MetricCard = ({ icon, title, value, subtitle, color = '#D04A02' }) => (
+const MetricCard = ({ icon, title, value, subtitle, color = FCC_THEME.accent }) => (
   <Paper
     variant="outlined"
     sx={{
@@ -30,8 +31,8 @@ const MetricCard = ({ icon, title, value, subtitle, color = '#D04A02' }) => (
   >
     <Box sx={{ display: 'flex', justifyContent: 'center', mb: 0.6 }}>{icon}</Box>
     <Typography sx={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{value}</Typography>
-    <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#1e293b', mt: 0.5 }}>{title}</Typography>
-    {subtitle && <Typography sx={{ fontSize: 10.5, color: '#64748b', mt: 0.25 }}>{subtitle}</Typography>}
+    <Typography sx={{ fontSize: 12, fontWeight: 700, color: FCC_THEME.text, mt: 0.5 }}>{title}</Typography>
+    {subtitle && <Typography sx={{ fontSize: 10.5, color: FCC_THEME.textMuted, mt: 0.25 }}>{subtitle}</Typography>}
   </Paper>
 );
 
@@ -46,7 +47,7 @@ const translateMetrics = (run) => {
   const catchRate = Math.round(auc * 100);
   const suppressionPct = Math.round((1 - threshold) * 45 + 20);
   const tier = auc >= 0.9 ? 'Excellent' : auc >= 0.8 ? 'Good' : auc >= 0.7 ? 'Fair' : 'Needs review';
-  const tierColor = auc >= 0.9 ? '#1A6B3A' : auc >= 0.8 ? '#D04A02' : auc >= 0.7 ? '#A83A00' : '#7A5100';
+  const tierColor = auc >= 0.9 ? FCC_THEME.success : auc >= 0.8 ? FCC_THEME.accent : auc >= 0.7 ? FCC_THEME.accentHover : FCC_THEME.warning;
 
   return { catchRate, suppressionPct, tier, tierColor, auc, threshold, goal };
 };
@@ -126,15 +127,15 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
           p: 3,
           mb: 2.5,
           borderRadius: 3,
-          background: 'linear-gradient(135deg, #0f1117 0%, #1a2035 100%)',
-          border: '1px solid #1e2433',
+          background: `linear-gradient(135deg, ${FCC_THEME.chrome} 0%, ${FCC_THEME.rail} 100%)`,
+          border: `1px solid ${FCC_THEME.chromeBorder}`,
         }}
       >
         <Stack direction="row" alignItems="center" spacing={1.5} mb={1.5}>
-          <CheckCircle sx={{ fontSize: 28, color: '#D04A02' }} />
+          <CheckCircle sx={{ fontSize: 28, color: FCC_THEME.accent }} />
           <Box>
-            <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#f0f2f5' }}>Your model is ready</Typography>
-            <Typography sx={{ fontSize: 12, color: '#94a3b8' }}>{GOAL_SUMMARIES[goal] || GOAL_SUMMARIES.balanced}</Typography>
+            <Typography sx={{ fontSize: 16, fontWeight: 800, color: FCC_THEME.textOnDark }}>Your model is ready</Typography>
+            <Typography sx={{ fontSize: 12, color: FCC_THEME.textMutedOnDark }}>{GOAL_SUMMARIES[goal] || GOAL_SUMMARIES.balanced}</Typography>
           </Box>
           <Box sx={{ ml: 'auto' }}>
             <Chip label={tier} sx={{ bgcolor: `${tierColor}22`, color: tierColor, fontWeight: 700, fontSize: 12 }} />
@@ -143,18 +144,18 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
 
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
           <MetricCard
-            icon={<TrackChanges sx={{ fontSize: 24, color: '#D04A02' }} />}
+            icon={<TrackChanges sx={{ fontSize: 24, color: FCC_THEME.accent }} />}
             title="Cases it will catch"
             value={`${catchRate}%`}
             subtitle="Out of 100 real fraud cases"
-            color="#D04A02"
+            color={FCC_THEME.accent}
           />
           <MetricCard
-            icon={<AccessTime sx={{ fontSize: 24, color: '#A83A00' }} />}
+            icon={<AccessTime sx={{ fontSize: 24, color: FCC_THEME.accentHover }} />}
             title="Team time saved"
             value={`~${suppressionPct}%`}
             subtitle="Fewer false alarms to review"
-            color="#A83A00"
+            color={FCC_THEME.accentHover}
           />
           <MetricCard
             icon={<Psychology sx={{ fontSize: 24, color: tierColor }} />}
@@ -165,17 +166,17 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
           />
         </Stack>
 
-        <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: 2, fontStyle: 'italic' }}>
+        <Typography sx={{ fontSize: 11, color: FCC_THEME.textMutedOnDark, mt: 2, fontStyle: 'italic' }}>
           These are estimates based on training data. Real-world outcomes depend on incoming data quality and case mix.
         </Typography>
       </Paper>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: '#e2e8f0', mb: 2 }}>
-        <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#1e293b', mb: 1 }}>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: FCC_THEME.border, mb: 2 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 700, color: FCC_THEME.text, mb: 1 }}>
           Build Summary And Artifacts
         </Typography>
         <Stack spacing={0.75}>
-          <Typography sx={{ fontSize: 11.5, color: '#475569' }}>
+          <Typography sx={{ fontSize: 11.5, color: FCC_THEME.textMuted }}>
             Model run:{' '}
             {links.modelUrl ? (
               <Link href={links.modelUrl} target="_blank" rel="noreferrer" underline="hover" sx={{ fontWeight: 700 }}>
@@ -185,7 +186,7 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
               <strong>{jobId || 'Not available'}</strong>
             )}
           </Typography>
-          <Typography sx={{ fontSize: 11.5, color: '#475569' }}>
+          <Typography sx={{ fontSize: 11.5, color: FCC_THEME.textMuted }}>
             Run report:{' '}
             {links.reportUrl ? (
               <Link href={links.reportUrl} target="_blank" rel="noreferrer" underline="hover" sx={{ fontWeight: 700 }}>
@@ -196,7 +197,7 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
             )}
           </Typography>
           {links.reportPdfUrl ? (
-            <Typography sx={{ fontSize: 11.5, color: '#475569' }}>
+            <Typography sx={{ fontSize: 11.5, color: FCC_THEME.textMuted }}>
               PDF link:{' '}
               <Link href={links.reportPdfUrl} target="_blank" rel="noreferrer" underline="hover" sx={{ fontWeight: 700 }}>
                 Download PDF endpoint
@@ -219,8 +220,8 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
           disabled={deploying || !jobId}
           sx={{
             flex: 1,
-            bgcolor: '#D04A02',
-            '&:hover': { bgcolor: '#b83d00' },
+            bgcolor: FCC_THEME.accent,
+            '&:hover': { bgcolor: FCC_THEME.accentHover },
             height: 48,
             fontSize: 14,
             fontWeight: 700,
@@ -243,8 +244,8 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
             fontWeight: 600,
             textTransform: 'none',
             borderRadius: 2,
-            borderColor: '#d6d3d1',
-            color: '#334155',
+            borderColor: FCC_THEME.borderStrong,
+            color: FCC_THEME.textMuted,
           }}
         >
           {reportBusy ? 'Working...' : (reportReady ? 'Refresh Report' : 'Generate Report')}
@@ -262,8 +263,8 @@ const ResultsPanel = ({ run, onDeploy, deploying }) => {
             fontWeight: 600,
             textTransform: 'none',
             borderRadius: 2,
-            borderColor: '#d6d3d1',
-            color: '#334155',
+            borderColor: FCC_THEME.borderStrong,
+            color: FCC_THEME.textMuted,
           }}
         >
           PDF Report

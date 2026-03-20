@@ -27,7 +27,14 @@ import { V } from './validationTheme';
 import { unwrap, fmt, num, pct, safeNumber, normalizeLabel } from './validationUtils';
 import { SectionCard, SectionTitle, StatCard, ConfusionMatrixGrid, DeltaPill, TableHeader } from './ValidationShared';
 
-const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) => {
+const ThresholdTuningTab = ({
+  jobId,
+  runs,
+  onValidationComplete,
+  onJobChange,
+  actionsDisabled = false,
+  actionsMessage = '',
+}) => {
   const [maxEventLoss, setMaxEventLoss] = useState(5);
   const [optimizationMode, setOptimizationMode] = useState('max_suppression_under_event_loss');
   const [targetSuppression, setTargetSuppression] = useState(70);
@@ -38,6 +45,7 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
   const [loadingThreshold, setLoadingThreshold] = useState(false);
   const [error, setError] = useState(null);
   const [activeJobId, setActiveJobId] = useState(jobId || '');
+  const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
 
   useEffect(() => {
     if (jobId && jobId !== activeJobId) setActiveJobId(jobId);
@@ -69,6 +77,10 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
 
   const runValidation = async () => {
     if (!activeJobId) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setLoadingReport(true);
     setError(null);
     try {
@@ -115,6 +127,10 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
 
   const applyThreshold = async (thr = selectedThreshold) => {
     if (!activeJobId) return;
+    if (actionsDisabled) {
+      setError(gatingMessage);
+      return;
+    }
     setLoadingThreshold(true);
     setError(null);
     try {
@@ -263,7 +279,7 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
             <Button
               variant="contained"
               onClick={runValidation}
-              disabled={!activeJobId || loadingReport}
+              disabled={actionsDisabled || !activeJobId || loadingReport}
               sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', fontWeight: 700 }}
             >
               {loadingReport ? 'Running...' : 'Run Validation'}
@@ -273,6 +289,7 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
       </SectionCard>
 
       {error && <Alert severity="error" sx={{ borderRadius: 2 }}>{error}</Alert>}
+      {actionsDisabled && <Alert severity="warning" sx={{ borderRadius: 2 }}>{gatingMessage}</Alert>}
 
       {report && (
         <>
@@ -368,7 +385,7 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
                   size="small"
                   variant="contained"
                   onClick={() => applyThreshold(selectedThreshold)}
-                  disabled={loadingThreshold}
+                  disabled={actionsDisabled || loadingThreshold}
                   sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', fontWeight: 700 }}
                 >
                   {loadingThreshold ? 'Applying...' : 'Apply Threshold'}
@@ -377,6 +394,7 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
                   size="small"
                   variant="outlined"
                   onClick={useRecommended}
+                  disabled={actionsDisabled}
                   sx={{ textTransform: 'none', fontWeight: 700, borderColor: V.border, color: V.textMuted }}
                 >
                   Use Recommended
@@ -462,6 +480,7 @@ const ThresholdTuningTab = ({ jobId, runs, onValidationComplete, onJobChange }) 
                               setSelectedThreshold(rowThr);
                               applyThreshold(rowThr);
                             }}
+                            disabled={actionsDisabled}
                             sx={{ textTransform: 'none', minWidth: 64, fontSize: 11, color: V.orange }}
                           >
                             Apply

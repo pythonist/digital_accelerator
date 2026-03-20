@@ -308,13 +308,14 @@ INVESTIGATOR QUESTION: {question}
 
 Provide a clear, professional response based ONLY on these facts. Be concise and actionable."""
 
-        if not services.ollama_wrapper:
+        llm_service = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+        if not llm_service or not llm_service.check_connection():
             return jsonify({
                 "success": False,
-                "error": "LLM service not available. Please ensure Ollama is running."
+                "error": "LLM service not available. Configure Ollama or GPT4All first."
             }), 500
         
-        result = services.ollama_wrapper.generate(
+        result = llm_service.generate(
             prompt=facts_summary,
             system_prompt="You are an AML investigation assistant. Provide clear, professional responses based ONLY on the provided case facts. Be concise and focus on actionable insights.",
             temperature=0.7,

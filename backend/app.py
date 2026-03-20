@@ -260,6 +260,16 @@ def _register_blueprints(app: Flask, backend_profile: str):
         traceback.print_exc()
         status["deployment_dashboard"] = False
 
+    try:
+        from api.routes.fcc_bridge import fcc_bridge_bp
+
+        app.register_blueprint(fcc_bridge_bp, url_prefix="/api/v2")
+        status["fcc_bridge"] = True
+    except Exception as e:
+        print("FCC bridge module import failed:", repr(e))
+        traceback.print_exc()
+        status["fcc_bridge"] = False
+
     print(f"Backend profile: {backend_profile}")
     print(f"Mule module  : {'ENABLED' if status.get('mule') else 'DISABLED'}")
     print(f"BTSY module  : {'ENABLED' if status.get('btsy') else 'DISABLED'}")
