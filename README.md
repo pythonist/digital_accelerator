@@ -66,10 +66,17 @@ App will be available at:
 - `http://localhost:5000` (backend API + served frontend build)
 
 Notes:
-- Container runs backend in `mlops` profile by default.
+- Container runs the full FCC workbench profile by default.
+- Override `AML_BACKEND_PROFILE=mlops` if you want the lighter MLOps-only backend.
+- Production containers now start with Gunicorn multi-worker threading defaults:
+  - `WEB_CONCURRENCY=4`
+  - `GUNICORN_THREADS=8`
 - Persistent environment data is mounted via:
   - `./backend/data -> /app/backend/data`
   - `./data -> /app/data`
+- Health endpoints:
+  - `GET /health` for liveness
+  - `GET /ready` for readiness
 
 ## Performance Optimizations Applied
 - Route-level lazy loading for all major screens/platforms.
@@ -81,6 +88,8 @@ Notes:
 - `.env`, virtual environments, node_modules, temp datasets, and runtime DB files are git-ignored.
 - Use `.env.example` files as templates on each machine.
 - Backend supports cross-platform virtualenv bootstrap path resolution.
+- Kubernetes deployment templates are available under `deploy/k8s`.
+- Architecture and scaling guidance is documented in `docs/fcc_workbench_system_design_review.md`.
 
 ## Useful Commands
 ```bash

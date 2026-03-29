@@ -447,6 +447,26 @@ def mlops_upload_dataset(dataset_type):
             filename=f"{effective_type}{ext}",
             file_path=save_path,
         )
+        pipeline_id_raw = request.args.get("pipeline_id") or (request.form.get("pipeline_id") if request.form else None)
+        try:
+            pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        except Exception:
+            pipeline_id = None
+        if pipeline_id:
+            try:
+                mlops_svc.attach_pipeline_asset(
+                    tenant_id=tenant_id,
+                    env_id=env_id,
+                    pipeline_id=int(pipeline_id),
+                    asset_kind="dataset",
+                    asset_id=dataset["dataset_id"],
+                    stage="data_upload",
+                    relation="uploaded_source",
+                    metadata={"dataset_type": dataset["dataset_type"]},
+                    numeric=True,
+                )
+            except Exception:
+                pass
 
         response_payload = {
             "success": True,
@@ -843,7 +863,32 @@ def mlops_save_str_rules():
 
 def _require_dataset(mlops_svc, tenant_id, env_id, body):
     dataset_id = int(body.get("dataset_id") or 0)
-    dataset    = mlops_svc.get_dataset(tenant_id, env_id, dataset_id)
+    dataset = None
+    if dataset_id:
+        try:
+            dataset = mlops_svc.get_dataset(tenant_id, env_id, dataset_id)
+        except ValueError:
+            try:
+                dataset = mlops_svc.get_dataset(dataset_id)
+            except ValueError:
+                dataset = None
+
+    inline_dataset = body.get("dataset") or {}
+    if not dataset and isinstance(inline_dataset, dict):
+        file_path = str(inline_dataset.get("file_path") or "").strip()
+        if file_path:
+            dataset = {
+                "dataset_id": int(inline_dataset.get("dataset_id") or dataset_id or 0),
+                "tenant_id": inline_dataset.get("tenant_id") or tenant_id,
+                "env_id": inline_dataset.get("env_id") or env_id,
+                "dataset_type": inline_dataset.get("dataset_type") or inline_dataset.get("name") or "inline_dataset",
+                "filename": inline_dataset.get("filename") or Path(file_path).name,
+                "file_path": file_path,
+                "row_count": int(inline_dataset.get("row_count") or 0),
+                "columns": inline_dataset.get("columns") or [],
+                "column_types": inline_dataset.get("column_types") or {},
+            }
+
     if not dataset:
         raise ValueError("Dataset not found")
     return dataset
@@ -1334,6 +1379,30 @@ def mlops_pipeline_get(pipeline_id):
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/rename", methods=["POST"])
+def mlops_pipeline_rename(pipeline_id):
+    """POST /api/mlops/pipeline/<id>/rename"""
+    try:
+        body = request.get_json(silent=True) or {}
+        next_name = str(body.get("name") or "").strip()
+        if not next_name:
+            return jsonify({
+                "success": False,
+                "error": "name is required",
+                "error_code": "VALIDATION_ERROR",
+            }), 400
+
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.rename_pipeline(tenant_id, env_id, int(pipeline_id), next_name)
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 

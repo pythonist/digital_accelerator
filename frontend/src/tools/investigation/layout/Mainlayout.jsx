@@ -6,7 +6,7 @@ import SharedWorkbenchLayout from '../../shared/layout/SharedWorkbenchLayout';
 import { getInvestigationNavigationSections } from './navigationConfig';
 import { appTheme } from '../theme';
 
-const MainLayout = ({ children, activeScreen, setActiveScreen }) => {
+const MainLayout = ({ children, activeScreen, setActiveScreen, headerActions = null }) => {
   const navigate = useNavigate();
   const { datasetLoaded, username, activeBankName, activeEnv, handleLogout } = useAppContext();
 
@@ -20,6 +20,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen }) => {
         sections={getInvestigationNavigationSections(datasetLoaded)}
         username={username}
         activeEnvironment={activeBankName || activeEnv}
+        headerActions={headerActions}
         onBackToTools={() => navigate('/tools')}
         onLogout={async () => {
           await handleLogout();

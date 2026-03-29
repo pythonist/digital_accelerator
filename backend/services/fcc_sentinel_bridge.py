@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+import random
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -48,6 +49,26 @@ def _prepare_sqlite_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame() if df is None else df
 
+    # SQLite treats column names case-insensitively, so collapse duplicates like
+    # KYC_INCOMPLETE_FLAG vs kyc_incomplete_flag before writing or merging.
+    grouped_columns: Dict[str, Dict[str, Any]] = {}
+    for index, raw_col in enumerate(list(df.columns)):
+        col_name = str(raw_col or "").strip() or f"column_{index}"
+        key = col_name.lower()
+        meta = grouped_columns.setdefault(
+            key,
+            {"name": col_name, "indexes": []},
+        )
+        meta["indexes"].append(index)
+
+    normalized_df = pd.DataFrame(index=df.index)
+    for meta in grouped_columns.values():
+        series = None
+        for index in meta["indexes"]:
+            next_series = df.iloc[:, index]
+            series = next_series.copy() if series is None else series.combine_first(next_series)
+        normalized_df[meta["name"]] = series
+
     def _normalize(value: Any) -> Any:
         if isinstance(value, (dict, list, tuple, set)):
             try:
@@ -56,7 +77,31 @@ def _prepare_sqlite_df(df: pd.DataFrame) -> pd.DataFrame:
                 return str(value)
         return _json_safe(value)
 
-    return df.apply(lambda col: col.map(_normalize))
+    return normalized_df.apply(lambda col: col.map(_normalize))
+
+
+def _read_sqlite_table(conn, table_name: str) -> pd.DataFrame:
+    try:
+        return pd.read_sql(f'SELECT * FROM "{table_name}"', conn)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _resolve_target_db_path(target_env_root: Path) -> Path:
+    """Choose the investigation DB file the live Sentinel routes will read."""
+    root = Path(target_env_root)
+    existing_candidates = [
+        root / "investigation" / "investigation.db",
+        root / "database.db",
+        root / "investigation.db",
+    ]
+    for candidate in existing_candidates:
+        if candidate.exists():
+            return candidate
+
+    if (root / "investigation").exists():
+        return root / "investigation" / "investigation.db"
+    return root / "database.db"
 
 
 def _coalesce(row: Dict[str, Any], *keys: str) -> Any:
@@ -79,6 +124,501 @@ def _derive_risk_level(score: float) -> str:
     if score >= 0.40:
         return "Medium"
     return "Low"
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or str(value).strip() == "":
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None or str(value).strip() == "":
+            return int(default)
+        return int(float(value))
+    except Exception:
+        return int(default)
+
+
+def _parse_datetime(value: Any, default: Optional[datetime] = None) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if value is None:
+        return default or datetime.utcnow()
+    try:
+        text = str(value).strip()
+        if not text:
+            return default or datetime.utcnow()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is not None:
+            return parsed.replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return default or datetime.utcnow()
+
+
+def _normalize_risk_level(value: Any, score_hint: Optional[float] = None) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"critical", "crit"}:
+        return "Critical"
+    if text in {"high", "severe"}:
+        return "High"
+    if text in {"medium", "moderate"}:
+        return "Medium"
+    if text in {"low", "normal"}:
+        return "Low"
+    normalized_score = _safe_float(score_hint)
+    if normalized_score > 1.0:
+        normalized_score = normalized_score / 100.0
+    return _derive_risk_level(normalized_score)
+
+
+def _priority_from_risk_level(risk_level: str, risk_score: float) -> str:
+    normalized = str(risk_level or "").strip().lower()
+    if normalized == "critical" or risk_score >= 88:
+        return "High"
+    if normalized == "high" or risk_score >= 65:
+        return "Medium"
+    return "Low"
+
+
+def _historical_frequency_label(txn_count: int) -> str:
+    if txn_count >= 22:
+        return "Dense"
+    if txn_count >= 10:
+        return "Active"
+    if txn_count >= 4:
+        return "Moderate"
+    return "Sparse"
+
+
+def _profile_templates() -> List[Dict[str, Any]]:
+    return [
+        {
+            "key": "dense_network",
+            "label": "Rapid movement across shared counterparties",
+            "txn_range": (18, 30),
+            "prior_alert_range": (3, 6),
+            "prior_case_range": (1, 3),
+            "linked_case_range": (2, 5),
+            "counterparty_range": (4, 7),
+            "channels": ["SWIFT", "RTGS", "NEFT"],
+            "countries": ["AE", "SG", "HK", "GB"],
+            "typologies": ["LAYERING", "RAPID_MOVEMENT"],
+            "amount_band": (85000, 360000),
+            "customer_segment": "CORPORATE",
+        },
+        {
+            "key": "structuring",
+            "label": "Repeated threshold-sized cash and transfer activity",
+            "txn_range": (9, 16),
+            "prior_alert_range": (2, 4),
+            "prior_case_range": (1, 2),
+            "linked_case_range": (1, 3),
+            "counterparty_range": (2, 4),
+            "channels": ["CASH", "UPI", "NEFT"],
+            "countries": ["IN", "AE"],
+            "typologies": ["STRUCTURING", "HIGH_VALUE_CASH"],
+            "amount_band": (9000, 55000),
+            "customer_segment": "RETAIL",
+        },
+        {
+            "key": "legacy_repeat",
+            "label": "Recurring alerts on an already known relationship",
+            "txn_range": (12, 20),
+            "prior_alert_range": (4, 7),
+            "prior_case_range": (2, 4),
+            "linked_case_range": (2, 4),
+            "counterparty_range": (2, 5),
+            "channels": ["NEFT", "IMPS", "RTGS"],
+            "countries": ["IN", "SG", "US"],
+            "typologies": ["MULE", "RAPID_MOVEMENT"],
+            "amount_band": (35000, 180000),
+            "customer_segment": "SME",
+        },
+        {
+            "key": "noisy_commercial",
+            "label": "High-volume commercial behavior with a few suspicious spikes",
+            "txn_range": (16, 26),
+            "prior_alert_range": (1, 3),
+            "prior_case_range": (0, 1),
+            "linked_case_range": (0, 2),
+            "counterparty_range": (5, 8),
+            "channels": ["UPI", "NEFT", "CARD", "RTGS"],
+            "countries": ["IN", "AE", "GB"],
+            "typologies": ["NONE", "NONE", "VELOCITY_SPIKE"],
+            "amount_band": (12000, 90000),
+            "customer_segment": "COMMERCIAL",
+        },
+        {
+            "key": "sparse_watch",
+            "label": "Sparse history with limited prior review activity",
+            "txn_range": (2, 6),
+            "prior_alert_range": (0, 2),
+            "prior_case_range": (0, 1),
+            "linked_case_range": (0, 1),
+            "counterparty_range": (1, 3),
+            "channels": ["UPI", "ATM", "NEFT"],
+            "countries": ["IN", "NP"],
+            "typologies": ["NONE", "HIGH_RISK_DEST"],
+            "amount_band": (4000, 30000),
+            "customer_segment": "RETAIL",
+        },
+    ]
+
+
+def _choose_context_profile(risk_score: float, rng: random.Random) -> Dict[str, Any]:
+    profiles = _profile_templates()
+    if risk_score >= 85:
+        candidates = [profiles[0], profiles[2], profiles[1]]
+    elif risk_score >= 65:
+        candidates = [profiles[1], profiles[2], profiles[3]]
+    elif risk_score >= 40:
+        candidates = [profiles[3], profiles[4], profiles[1]]
+    else:
+        candidates = [profiles[4], profiles[3]]
+    return candidates[rng.randrange(len(candidates))]
+
+
+def _build_investigation_context(
+    tables: Dict[str, pd.DataFrame],
+    *,
+    manifest: Dict[str, Any],
+    context_profile: str = "balanced",
+) -> Dict[str, pd.DataFrame]:
+    case_records = [
+        {str(k): _json_safe(v) for k, v in row.items()}
+        for row in tables.get("cases", pd.DataFrame()).replace({pd.NA: None}).to_dict(orient="records")
+    ]
+    alert_records = [
+        {str(k): _json_safe(v) for k, v in row.items()}
+        for row in tables.get("alerts", pd.DataFrame()).replace({pd.NA: None}).to_dict(orient="records")
+    ]
+    transaction_records = [
+        {str(k): _json_safe(v) for k, v in row.items()}
+        for row in tables.get("transactions", pd.DataFrame()).replace({pd.NA: None}).to_dict(orient="records")
+    ]
+    account_records = [
+        {str(k): _json_safe(v) for k, v in row.items()}
+        for row in tables.get("accounts", pd.DataFrame()).replace({pd.NA: None}).to_dict(orient="records")
+    ]
+    customer_records = [
+        {str(k): _json_safe(v) for k, v in row.items()}
+        for row in tables.get("customers", pd.DataFrame()).replace({pd.NA: None}).to_dict(orient="records")
+    ]
+
+    if not case_records:
+        return tables
+
+    publish_id = str(manifest.get("publish_id") or "PUBCTX")
+    publish_token = publish_id.replace("-", "").replace("_", "")[:8] or "PUBCTX"
+    pipeline_id = manifest.get("pipeline_id")
+    pipeline_name = manifest.get("pipeline_name")
+    run_id = manifest.get("run_id")
+    publish_label = manifest.get("publish_label")
+
+    alerts_by_case: Dict[str, List[Dict[str, Any]]] = {}
+    for row in alert_records:
+        case_id = str(row.get("case_id") or "").strip()
+        if case_id:
+            alerts_by_case.setdefault(case_id, []).append(row)
+
+    accounts_by_id = {
+        str(row.get("account_id") or "").strip(): row
+        for row in account_records
+        if str(row.get("account_id") or "").strip()
+    }
+    customers_by_id = {
+        str(row.get("customer_id") or "").strip(): row
+        for row in customer_records
+        if str(row.get("customer_id") or "").strip()
+    }
+    transactions_by_id = {
+        str(row.get("transaction_id") or "").strip(): row
+        for row in transaction_records
+        if str(row.get("transaction_id") or "").strip()
+    }
+
+    for case_index, case_row in enumerate(case_records, start=1):
+        case_id = str(case_row.get("case_id") or "").strip()
+        if not case_id:
+            continue
+
+        case_alerts = alerts_by_case.get(case_id, [])
+        primary_alert = case_alerts[0] if case_alerts else {}
+        account_id = str(
+            case_row.get("account_id")
+            or primary_alert.get("account_id")
+            or f"FCC-ACCT-{publish_token}-{case_index:03d}"
+        ).strip()
+        customer_id = str(
+            case_row.get("customer_id")
+            or primary_alert.get("customer_id")
+            or f"FCC-CUST-{publish_token}-{case_index:03d}"
+        ).strip()
+        seed = "|".join([publish_id, case_id, account_id, customer_id, context_profile])
+        rng = random.Random(seed)
+
+        current_dt = _parse_datetime(
+            case_row.get("created_at")
+            or primary_alert.get("created_at")
+            or primary_alert.get("alert_date")
+            or manifest.get("published_at")
+            or _now_iso(),
+        )
+        risk_score = _safe_float(case_row.get("risk_score") or primary_alert.get("risk_score") or 0.0)
+        if risk_score <= 1.0:
+            risk_score *= 100.0
+        risk_level = _normalize_risk_level(
+            case_row.get("risk_rating") or primary_alert.get("severity"),
+            score_hint=risk_score,
+        )
+        profile = _choose_context_profile(risk_score, rng)
+
+        history_txn_count = rng.randint(*profile["txn_range"])
+        prior_alert_count = rng.randint(*profile["prior_alert_range"])
+        prior_case_count = rng.randint(*profile["prior_case_range"])
+        linked_case_count = rng.randint(*profile["linked_case_range"])
+        counterparty_count = rng.randint(*profile["counterparty_range"])
+        history_span_days = max(14, min(220, history_txn_count * rng.randint(4, 10)))
+        amount_low, amount_high = profile["amount_band"]
+        base_amount = max(amount_low, min(amount_high, _safe_float(primary_alert.get("amount"), default=amount_low * 1.2)))
+        if base_amount <= 0:
+            base_amount = rng.randint(amount_low, amount_high)
+
+        customer_name = str(
+            case_row.get("customer_name")
+            or customers_by_id.get(customer_id, {}).get("customer_name")
+            or f"Customer {case_index:03d}"
+        )
+        customer_country = str(
+            customers_by_id.get(customer_id, {}).get("country")
+            or customers_by_id.get(customer_id, {}).get("nationality")
+            or rng.choice(profile["countries"])
+        )
+
+        case_priority = _priority_from_risk_level(risk_level, risk_score)
+        historical_frequency = _historical_frequency_label(history_txn_count)
+        linked_case_refs = [
+            f"CASECTX-{publish_token}-{case_index:03d}-{idx + 1:02d}"
+            for idx in range(max(linked_case_count, prior_case_count))
+        ]
+
+        account_record = accounts_by_id.setdefault(
+            account_id,
+            {
+                "account_id": account_id,
+                "case_id": case_id,
+                "customer_id": customer_id,
+            },
+        )
+        account_record.update(
+            {
+                "case_id": case_id,
+                "customer_id": customer_id,
+                "account_type": account_record.get("account_type") or "Checking",
+                "status": account_record.get("status") or "ACTIVE",
+                "risk_rating": account_record.get("risk_rating") or risk_level,
+                "account_risk_rating": account_record.get("account_risk_rating") or risk_level,
+                "current_balance": round(base_amount * rng.uniform(1.4, 5.8), 2),
+                "expected_monthly_txn": history_txn_count * rng.randint(2, 6),
+                "num_linked_accounts": max(linked_case_count, counterparty_count),
+                "currency": account_record.get("currency") or "USD",
+                "fcc_bridge_context_ready": 1,
+                "fcc_bridge_context_profile": profile["key"],
+                "behavior_context": profile["label"],
+            }
+        )
+
+        customer_record = customers_by_id.setdefault(
+            customer_id,
+            {
+                "customer_id": customer_id,
+                "case_id": case_id,
+                "customer_name": customer_name,
+            },
+        )
+        customer_record.update(
+            {
+                "case_id": case_id,
+                "customer_name": customer_name,
+                "risk_rating": customer_record.get("risk_rating") or risk_level,
+                "customer_risk_rating": customer_record.get("customer_risk_rating") or risk_level,
+                "segment": customer_record.get("segment") or profile["customer_segment"],
+                "country": customer_country,
+                "nationality": customer_record.get("nationality") or customer_country,
+                "pep_flag": customer_record.get("pep_flag") if customer_record.get("pep_flag") is not None else (1 if risk_level in {"High", "Critical"} and rng.random() < 0.35 else 0),
+                "adverse_media_flag": customer_record.get("adverse_media_flag") if customer_record.get("adverse_media_flag") is not None else (1 if rng.random() < 0.28 else 0),
+                "sanction_hit": customer_record.get("sanction_hit") if customer_record.get("sanction_hit") is not None else (1 if risk_level == "Critical" and rng.random() < 0.12 else 0),
+                "kyc_completeness_pct": customer_record.get("kyc_completeness_pct") or rng.randint(68, 99),
+                "days_since_kyc": customer_record.get("days_since_kyc") or rng.randint(14, 540),
+                "years_as_customer": customer_record.get("years_as_customer") or round(rng.uniform(0.8, 14.0), 1),
+                "num_products_held": customer_record.get("num_products_held") or rng.randint(1, 5),
+                "fcc_bridge_context_ready": 1,
+                "fcc_bridge_context_profile": profile["key"],
+                "behavior_context": profile["label"],
+            }
+        )
+
+        counterparty_pairs: List[tuple[str, str]] = []
+        for cp_index in range(counterparty_count):
+            cp_account_id = f"FCC-CP-ACCT-{publish_token}-{case_index:03d}-{cp_index + 1:02d}"
+            cp_customer_id = f"FCC-CP-CUST-{publish_token}-{case_index:03d}-{cp_index + 1:02d}"
+            counterparty_pairs.append((cp_account_id, cp_customer_id))
+            accounts_by_id.setdefault(
+                cp_account_id,
+                {
+                    "account_id": cp_account_id,
+                    "customer_id": cp_customer_id,
+                    "account_type": rng.choice(["Checking", "Savings", "Corporate"]),
+                    "status": "ACTIVE",
+                    "risk_rating": rng.choice(["Low", "Medium", risk_level]),
+                    "account_risk_rating": rng.choice(["Low", "Medium", risk_level]),
+                    "current_balance": round(base_amount * rng.uniform(0.8, 4.2), 2),
+                    "currency": "USD",
+                    "fcc_bridge_context_role": "counterparty",
+                    "fcc_bridge_context_profile": profile["key"],
+                },
+            )
+            customers_by_id.setdefault(
+                cp_customer_id,
+                {
+                    "customer_id": cp_customer_id,
+                    "customer_name": f"Related Party {case_index:03d}-{cp_index + 1:02d}",
+                    "risk_rating": rng.choice(["Low", "Medium", risk_level]),
+                    "customer_risk_rating": rng.choice(["Low", "Medium", risk_level]),
+                    "segment": rng.choice(["RETAIL", "SME", "CORPORATE"]),
+                    "country": rng.choice(profile["countries"]),
+                    "fcc_bridge_context_role": "counterparty",
+                    "fcc_bridge_context_profile": profile["key"],
+                },
+            )
+
+        generated_txn_ids: List[str] = []
+        for txn_index in range(history_txn_count):
+            tx_id = f"TXNCTX-{publish_token}-{case_index:03d}-{txn_index + 1:03d}"
+            cp_account_id, cp_customer_id = counterparty_pairs[txn_index % len(counterparty_pairs)]
+            days_back = max(1, int(((txn_index + 1) * history_span_days) / max(1, history_txn_count + 1)))
+            tx_dt = current_dt - timedelta(days=days_back, hours=rng.randint(0, 21), minutes=rng.randint(0, 59))
+            multiplier = rng.uniform(0.42, 1.65)
+            if profile["key"] == "dense_network":
+                multiplier = rng.uniform(0.9, 2.8)
+            elif profile["key"] == "structuring":
+                multiplier = rng.uniform(0.08, 0.24)
+            elif profile["key"] == "sparse_watch":
+                multiplier = rng.uniform(0.4, 0.9)
+            amount = round(max(1500.0, base_amount * multiplier), 2)
+            txn_row = {
+                "transaction_id": tx_id,
+                "case_id": case_id,
+                "account_id": account_id,
+                "customer_id": customer_id,
+                "counterparty_account": cp_account_id,
+                "counterparty_customer_id": cp_customer_id,
+                "txn_timestamp": tx_dt.isoformat() + "Z",
+                "amount": amount,
+                "direction": rng.choice(["DEBIT", "CREDIT"]),
+                "channel": rng.choice(profile["channels"]),
+                "beneficiary_country": rng.choice(profile["countries"]),
+                "typology_type": rng.choice(profile["typologies"]),
+                "narrative": profile["label"],
+                "fcc_pipeline_id": pipeline_id,
+                "fcc_pipeline_name": pipeline_name,
+                "fcc_publish_id": publish_id,
+                "fcc_publish_label": publish_label,
+                "fcc_source_run_id": run_id,
+                "fcc_bridge_context_role": "historical_transaction",
+                "fcc_bridge_context_profile": profile["key"],
+                "behavior_context": profile["label"],
+            }
+            transactions_by_id[tx_id] = txn_row
+            generated_txn_ids.append(tx_id)
+
+        for alert_index in range(prior_alert_count):
+            history_alert_id = f"ALTCTX-{publish_token}-{case_index:03d}-{alert_index + 1:03d}"
+            alert_dt = current_dt - timedelta(days=max(1, rng.randint(3, history_span_days)))
+            linked_txn_id = generated_txn_ids[alert_index % len(generated_txn_ids)] if generated_txn_ids else None
+            alert_records.append(
+                {
+                    "alert_id": history_alert_id,
+                    "case_id": case_id,
+                    "alert_type": profile["label"],
+                    "created_at": alert_dt.isoformat() + "Z",
+                    "customer_id": customer_id,
+                    "account_id": account_id,
+                    "transaction_id": linked_txn_id,
+                    "amount": transactions_by_id.get(linked_txn_id, {}).get("amount") if linked_txn_id else None,
+                    "severity": risk_level if alert_index == 0 else rng.choice(["Medium", risk_level]),
+                    "status": "CLOSED" if alert_dt < current_dt - timedelta(days=7) else "OPEN",
+                    "fcc_score": round(max(0.15, min(0.99, risk_score / 100.0 * rng.uniform(0.62, 1.0))), 6),
+                    "fcc_decision": "RETAIN",
+                    "fcc_pipeline_id": pipeline_id,
+                    "fcc_pipeline_name": pipeline_name,
+                    "fcc_publish_id": publish_id,
+                    "fcc_publish_label": publish_label,
+                    "rule_triggered": rng.choice(["R001_HIGH_VALUE_CASH", "R006_HIGH_RISK_DEST", "R007_VELOCITY_SPIKE"]),
+                    "historical_frequency": historical_frequency,
+                    "behavior_context": profile["label"],
+                    "fcc_bridge_context_role": "historical_alert",
+                    "fcc_bridge_context_profile": profile["key"],
+                }
+            )
+
+        for alert_row in case_alerts:
+            alert_row.setdefault("historical_frequency", historical_frequency)
+            alert_row.setdefault("behavior_context", profile["label"])
+            alert_row.setdefault("fcc_publish_label", publish_label)
+            alert_row.setdefault("fcc_bridge_context_profile", profile["key"])
+            alert_row.setdefault("fcc_bridge_context_role", "imported_alert")
+            if not alert_row.get("severity"):
+                alert_row["severity"] = risk_level
+            if not alert_row.get("transaction_id") and generated_txn_ids:
+                alert_row["transaction_id"] = generated_txn_ids[0]
+
+        case_row.update(
+            {
+                "account_id": account_id,
+                "customer_id": customer_id,
+                "customer_name": customer_name,
+                "risk_rating": risk_level,
+                "risk_score": round(max(risk_score, _safe_float(case_row.get("risk_score"), default=0.0)), 2),
+                "status": case_row.get("status") or "NEW",
+                "priority": case_row.get("priority") or case_priority,
+                "customer_risk_rating": customer_record.get("customer_risk_rating") or risk_level,
+                "account_risk_rating": account_record.get("account_risk_rating") or risk_level,
+                "prior_alerts_count": prior_alert_count,
+                "prior_case_count": prior_case_count,
+                "linked_cases_count": linked_case_count,
+                "linked_case_refs": json.dumps(linked_case_refs),
+                "history_transaction_count": history_txn_count,
+                "historical_frequency": historical_frequency,
+                "behavior_context": profile["label"],
+                "alert_count": max(_safe_int(case_row.get("alert_count"), default=0), len(case_alerts) + prior_alert_count),
+                "counterparty_count": len(counterparty_pairs),
+                "investigation_readiness": "Prepared",
+                "fcc_bridge_context_ready": 1,
+                "fcc_bridge_context_profile": profile["key"],
+                "fcc_source_run_id": case_row.get("fcc_source_run_id") or run_id,
+                "fcc_pipeline_id": case_row.get("fcc_pipeline_id") or pipeline_id,
+                "fcc_pipeline_name": case_row.get("fcc_pipeline_name") or pipeline_name,
+                "fcc_publish_id": case_row.get("fcc_publish_id") or publish_id,
+                "fcc_publish_label": case_row.get("fcc_publish_label") or publish_label,
+            }
+        )
+
+    return {
+        "cases": _records_to_df(case_records),
+        "alerts": _records_to_df(alert_records),
+        "transactions": _records_to_df(transactions_by_id.values()),
+        "accounts": _records_to_df(accounts_by_id.values()),
+        "customers": _records_to_df(customers_by_id.values()),
+    }
 
 
 def build_investigation_tables(
@@ -153,6 +693,10 @@ def build_investigation_tables(
         account_type = _coalesce(row, "account_type", "product_type", "acct_type")
         customer_country = _coalesce(row, "country", "customer_country", "nationality")
         customer_segment = _coalesce(row, "segment", "customer_segment", "customer_type")
+        pipeline_id = _coalesce(row, "fcc_pipeline_id", "pipeline_id")
+        pipeline_name = _coalesce(row, "fcc_pipeline_name", "pipeline_name")
+        publish_id = _coalesce(row, "fcc_publish_id", "publish_id")
+        publish_label = _coalesce(row, "fcc_publish_label", "publish_label")
 
         cases.setdefault(
             case_id,
@@ -166,13 +710,20 @@ def build_investigation_tables(
                 "account_id": account_id,
                 "risk_score": round(score * 100, 2),
                 "status": "NEW",
+                "priority": _priority_from_risk_level(str(risk_level), score * 100),
+                "alert_count": 0,
                 "fcc_source_run_id": row.get("run_id"),
                 "fcc_source_batch_id": row.get("batch_id"),
                 "fcc_deployment_id": row.get("deployment_id"),
                 "fcc_decision": row.get("decision"),
                 "fcc_reason_code": row.get("reason_code"),
+                "fcc_pipeline_id": pipeline_id,
+                "fcc_pipeline_name": pipeline_name,
+                "fcc_publish_id": publish_id,
+                "fcc_publish_label": publish_label,
             },
         )
+        cases[case_id]["alert_count"] = _safe_int(cases[case_id].get("alert_count"), default=0) + 1
 
         alerts.setdefault(
             alert_id,
@@ -190,6 +741,9 @@ def build_investigation_tables(
                 "fcc_score": round(score, 6),
                 "fcc_decision": row.get("decision"),
                 "fcc_reason_code": row.get("reason_code"),
+                "fcc_pipeline_id": pipeline_id,
+                "fcc_pipeline_name": pipeline_name,
+                "fcc_publish_id": publish_id,
             },
         )
 
@@ -208,6 +762,9 @@ def build_investigation_tables(
                     "direction": _coalesce(row, "direction", "dr_cr", "debit_credit", "type"),
                     "fcc_score": round(score, 6),
                     "fcc_decision": row.get("decision"),
+                    "fcc_pipeline_id": pipeline_id,
+                    "fcc_pipeline_name": pipeline_name,
+                    "fcc_publish_id": publish_id,
                 },
             )
 
@@ -247,6 +804,17 @@ def build_investigation_tables(
 
 
 class FCCSentinelBridgeService:
+    TABLE_PRIMARY_KEYS = {
+        "cases": "case_id",
+        "alerts": "alert_id",
+        "transactions": "transaction_id",
+        "accounts": "account_id",
+        "customers": "customer_id",
+        "master_case_summary": "case_id",
+        "master_cleaned_data": "case_id",
+        "fcc_scored_entities": "record_id",
+    }
+
     CORE_REPLACE_TABLES = (
         "alerts",
         "transactions",
@@ -297,6 +865,39 @@ class FCCSentinelBridgeService:
                 populated_tables.append(table_name)
         return populated_tables
 
+    def _merge_table_data(
+        self,
+        conn,
+        *,
+        table_name: str,
+        incoming_df: pd.DataFrame,
+        dedupe_key: Optional[str] = None,
+    ) -> None:
+        if incoming_df is None or incoming_df.empty:
+            return
+
+        existing_df = _read_sqlite_table(conn, table_name)
+        if existing_df.empty:
+            _prepare_sqlite_df(incoming_df).to_sql(table_name, conn, if_exists="replace", index=False)
+            return
+
+        combined = pd.concat([existing_df, incoming_df], ignore_index=True, sort=False)
+        key = str(dedupe_key or "").strip()
+        if key and key in combined.columns:
+            non_null = combined[key].notna()
+            deduped = combined.loc[~non_null].copy()
+            deduped = pd.concat(
+                [
+                    deduped,
+                    combined.loc[non_null].drop_duplicates(subset=[key], keep="last"),
+                ],
+                ignore_index=True,
+                sort=False,
+            )
+            combined = deduped
+
+        _prepare_sqlite_df(combined).to_sql(table_name, conn, if_exists="replace", index=False)
+
     def list_scored_batches(
         self,
         *,
@@ -335,6 +936,8 @@ class FCCSentinelBridgeService:
         deployment_id: Optional[str] = None,
         include_suppressed: bool = False,
         publish_label: Optional[str] = None,
+        pipeline_id: Optional[str] = None,
+        pipeline_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         resolved_batch_id = str(batch_id or "").strip()
         if not resolved_batch_id:
@@ -349,30 +952,60 @@ class FCCSentinelBridgeService:
         if not rows:
             raise ValueError("No retained FCC rows available to publish to Sentinel")
 
+        resolved_pipeline_id = str(
+            pipeline_id
+            or manifest.get("pipeline_id")
+            or manifest.get("fcc_pipeline_id")
+            or ""
+        ).strip() or None
+        resolved_pipeline_name = str(
+            pipeline_name
+            or manifest.get("pipeline_name")
+            or manifest.get("fcc_pipeline_name")
+            or ""
+        ).strip() or None
+        prepared_rows: List[Dict[str, Any]] = []
+        for raw_row in rows:
+            row = dict(raw_row)
+            if resolved_pipeline_id and not row.get("fcc_pipeline_id"):
+                row["fcc_pipeline_id"] = resolved_pipeline_id
+            if resolved_pipeline_name and not row.get("fcc_pipeline_name"):
+                row["fcc_pipeline_name"] = resolved_pipeline_name
+            prepared_rows.append(row)
+
         publish_id = f"PUB-{uuid.uuid4().hex[:12]}"
         publish_dir = self._publish_dir(publish_id)
         publish_dir.mkdir(parents=True, exist_ok=True)
+        publish_label_value = str(publish_label or f"FCC publish {resolved_batch_id[:8]}").strip()
+        for row in prepared_rows:
+            row["fcc_publish_id"] = publish_id
+            row["fcc_publish_label"] = publish_label_value
 
-        tables = build_investigation_tables(rows, model_grain=str(manifest.get("model_grain") or manifest.get("entity_type") or "alert"))
+        tables = build_investigation_tables(
+            prepared_rows,
+            model_grain=str(manifest.get("model_grain") or manifest.get("entity_type") or "alert"),
+        )
         published_manifest = {
             "publish_id": publish_id,
-            "publish_label": str(publish_label or f"FCC publish {resolved_batch_id[:8]}").strip(),
+            "publish_label": publish_label_value,
             "source_env_id": self.env_root.name,
             "source_batch_id": resolved_batch_id,
             "run_id": manifest.get("run_id"),
             "deployment_id": manifest.get("deployment_id"),
             "model_grain": manifest.get("model_grain"),
             "threshold": manifest.get("threshold"),
+            "pipeline_id": resolved_pipeline_id,
+            "pipeline_name": resolved_pipeline_name,
             "published_at": _now_iso(),
             "include_suppressed": bool(include_suppressed),
             "total_scored_rows": int(manifest.get("total", 0) or 0),
-            "published_rows": len(rows),
+            "published_rows": len(prepared_rows),
             "suppressed_rows_excluded": max(int(manifest.get("suppressed", 0) or 0), 0) if not include_suppressed else 0,
             "table_counts": {name: int(len(df.index)) for name, df in tables.items()},
         }
 
         (publish_dir / "manifest.json").write_text(json.dumps(published_manifest, indent=2, default=_json_safe), encoding="utf-8")
-        (publish_dir / "scored_records.json").write_text(json.dumps(rows, indent=2, default=_json_safe), encoding="utf-8")
+        (publish_dir / "scored_records.json").write_text(json.dumps(prepared_rows, indent=2, default=_json_safe), encoding="utf-8")
         for table_name, df in tables.items():
             (publish_dir / f"{table_name}.json").write_text(df.to_json(orient="records", indent=2), encoding="utf-8")
 
@@ -395,7 +1028,10 @@ class FCCSentinelBridgeService:
         tenant_id: str,
         target_env_id: str,
         replace_existing: bool = False,
+        merge_existing: bool = False,
         rerank_after_import: bool = True,
+        prepare_investigation_context: bool = True,
+        context_profile: str = "balanced",
     ) -> Dict[str, Any]:
         publish_dir = self._publish_dir(publish_id)
         manifest_path = publish_dir / "manifest.json"
@@ -404,12 +1040,7 @@ class FCCSentinelBridgeService:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
         target_env_root = resolve_env_root(target_env_id, tenant_id, create_if_missing=True)
-        metadata_style_db = target_env_root / "investigation" / "investigation.db"
-        flat_db = target_env_root / "investigation.db"
-        if metadata_style_db.exists() or (target_env_root / "investigation").exists():
-            target_db_path = metadata_style_db
-        else:
-            target_db_path = flat_db
+        target_db_path = _resolve_target_db_path(target_env_root)
         db_manager = DatabaseManager(str(target_db_path))
         db_manager.init_schema()
 
@@ -433,17 +1064,25 @@ class FCCSentinelBridgeService:
             except Exception:
                 scored_records = []
 
+        if prepare_investigation_context:
+            tables = _build_investigation_context(
+                tables,
+                manifest=manifest,
+                context_profile=str(context_profile or "balanced"),
+            )
+
         conn = db_manager.connect()
         try:
             cursor = conn.cursor()
             existing_tables = self._existing_target_tables(cursor)
-            if existing_tables and not replace_existing:
+            if existing_tables and not replace_existing and not merge_existing:
                 preview = ", ".join(existing_tables[:4])
                 if len(existing_tables) > 4:
                     preview += ", ..."
                 raise ValueError(
                     f'Target environment "{target_env_id}" already contains investigation data in '
-                    f"{preview}. Create a fresh workspace or enable replace_existing to overwrite it."
+                    f"{preview}. Enable replace_existing to reset the shared workspace, "
+                    "or enable merge_existing to append FCC-retained cases into the current investigation context."
                 )
             if replace_existing:
                 for table_name in self.CORE_REPLACE_TABLES:
@@ -453,17 +1092,46 @@ class FCCSentinelBridgeService:
             for table_name, df in tables.items():
                 if df.empty:
                     continue
-                df.to_sql(table_name, conn, if_exists="replace", index=False)
+                if merge_existing and not replace_existing:
+                    self._merge_table_data(
+                        conn,
+                        table_name=table_name,
+                        incoming_df=df,
+                        dedupe_key=self.TABLE_PRIMARY_KEYS.get(table_name),
+                    )
+                else:
+                    _prepare_sqlite_df(df).to_sql(table_name, conn, if_exists="replace", index=False)
 
             cases_df = tables.get("cases", pd.DataFrame())
             if not cases_df.empty:
-                cases_df.to_sql("master_case_summary", conn, if_exists="replace", index=False)
-                cases_df.to_sql("master_cleaned_data", conn, if_exists="replace", index=False)
+                if merge_existing and not replace_existing:
+                    self._merge_table_data(
+                        conn,
+                        table_name="master_case_summary",
+                        incoming_df=cases_df,
+                        dedupe_key=self.TABLE_PRIMARY_KEYS.get("master_case_summary"),
+                    )
+                    self._merge_table_data(
+                        conn,
+                        table_name="master_cleaned_data",
+                        incoming_df=cases_df,
+                        dedupe_key=self.TABLE_PRIMARY_KEYS.get("master_cleaned_data"),
+                    )
+                else:
+                    _prepare_sqlite_df(cases_df).to_sql("master_case_summary", conn, if_exists="replace", index=False)
+                    _prepare_sqlite_df(cases_df).to_sql("master_cleaned_data", conn, if_exists="replace", index=False)
 
             scored_df = _records_to_df(scored_records)
             if not scored_df.empty:
-                scored_df = _prepare_sqlite_df(scored_df)
-                scored_df.to_sql("fcc_scored_entities", conn, if_exists="replace", index=False)
+                if merge_existing and not replace_existing:
+                    self._merge_table_data(
+                        conn,
+                        table_name="fcc_scored_entities",
+                        incoming_df=scored_df,
+                        dedupe_key=self.TABLE_PRIMARY_KEYS.get("fcc_scored_entities"),
+                    )
+                else:
+                    _prepare_sqlite_df(scored_df).to_sql("fcc_scored_entities", conn, if_exists="replace", index=False)
 
             cursor.execute(
                 """
@@ -475,16 +1143,34 @@ class FCCSentinelBridgeService:
                     imported_at TEXT,
                     run_id TEXT,
                     deployment_id TEXT,
+                    pipeline_id TEXT,
+                    pipeline_name TEXT,
+                    publish_label TEXT,
                     imported_rows INTEGER,
-                    replace_existing INTEGER
+                    replace_existing INTEGER,
+                    merge_existing INTEGER,
+                    prepare_investigation_context INTEGER,
+                    context_profile TEXT
                 )
                 """
             )
+            cursor.execute("PRAGMA table_info(fcc_bridge_imports)")
+            existing_cols = {str(row[1]) for row in cursor.fetchall()}
+            for col_name, col_type in (
+                ("pipeline_id", "TEXT"),
+                ("pipeline_name", "TEXT"),
+                ("publish_label", "TEXT"),
+                ("merge_existing", "INTEGER"),
+                ("prepare_investigation_context", "INTEGER"),
+                ("context_profile", "TEXT"),
+            ):
+                if col_name not in existing_cols:
+                    cursor.execute(f'ALTER TABLE fcc_bridge_imports ADD COLUMN "{col_name}" {col_type}')
             cursor.execute(
                 """
                 INSERT INTO fcc_bridge_imports
-                  (import_id, publish_id, source_env_id, target_env_id, imported_at, run_id, deployment_id, imported_rows, replace_existing)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                  (import_id, publish_id, source_env_id, target_env_id, imported_at, run_id, deployment_id, pipeline_id, pipeline_name, publish_label, imported_rows, replace_existing, merge_existing, prepare_investigation_context, context_profile)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     f"IMP-{uuid.uuid4().hex[:12]}",
@@ -494,8 +1180,14 @@ class FCCSentinelBridgeService:
                     _now_iso(),
                     manifest.get("run_id"),
                     manifest.get("deployment_id"),
+                    manifest.get("pipeline_id"),
+                    manifest.get("pipeline_name"),
+                    manifest.get("publish_label"),
                     int(manifest.get("published_rows") or 0),
                     1 if replace_existing else 0,
+                    1 if merge_existing and not replace_existing else 0,
+                    1 if prepare_investigation_context else 0,
+                    str(context_profile or "balanced"),
                 ),
             )
             conn.commit()
@@ -517,6 +1209,82 @@ class FCCSentinelBridgeService:
             "source_env_id": manifest.get("source_env_id"),
             "target_env_id": target_env_id,
             "imported_at": _now_iso(),
+            "merge_existing": bool(merge_existing and not replace_existing),
+            "pipeline_id": manifest.get("pipeline_id"),
+            "pipeline_name": manifest.get("pipeline_name"),
+            "publish_label": manifest.get("publish_label"),
+            "prepare_investigation_context": bool(prepare_investigation_context),
+            "context_profile": str(context_profile or "balanced"),
             "table_counts": {name: int(len(df.index)) for name, df in tables.items()},
+            "imported_case_ids": [
+                str(value)
+                for value in tables.get("cases", pd.DataFrame()).get("case_id", pd.Series(dtype=object)).dropna().astype(str).tolist()
+            ],
+            "imported_alert_ids": [
+                str(value)
+                for value in tables.get("alerts", pd.DataFrame()).get("alert_id", pd.Series(dtype=object)).dropna().astype(str).tolist()
+            ],
+            "imported_case_count": int(len(tables.get("cases", pd.DataFrame()).index)),
+            "imported_alert_count": int(len(tables.get("alerts", pd.DataFrame()).index)),
             "focus_result": focus_result,
+        }
+
+    def set_active_case_scope(
+        self,
+        *,
+        tenant_id: str,
+        target_env_id: str,
+        case_ids: List[str],
+        run_id: Optional[str] = None,
+        scope_type: str = "CUSTOM",
+        scope_value: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        target_env_root = resolve_env_root(target_env_id, tenant_id, create_if_missing=True)
+        target_db_path = _resolve_target_db_path(target_env_root)
+        db_manager = DatabaseManager(str(target_db_path))
+        db_manager.init_schema()
+        normalized_case_ids = [str(value).strip() for value in (case_ids or []) if str(value or "").strip()]
+        stored_scope_value = scope_value if scope_value is not None else normalized_case_ids
+        if isinstance(stored_scope_value, (list, dict)):
+            stored_scope_value = json.dumps(stored_scope_value, default=str)
+
+        conn = db_manager.connect()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS active_case_scope (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    scope_type TEXT NOT NULL,
+                    scope_value TEXT,
+                    case_ids TEXT,
+                    run_id TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO active_case_scope
+                  (id, scope_type, scope_value, case_ids, run_id, updated_at)
+                VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    str(scope_type or "CUSTOM"),
+                    stored_scope_value,
+                    json.dumps(normalized_case_ids, default=str),
+                    str(run_id or "").strip() or None,
+                ),
+            )
+            conn.commit()
+        finally:
+            db_manager.close_connection(conn)
+
+        return {
+            "success": True,
+            "scope_type": str(scope_type or "CUSTOM"),
+            "run_id": str(run_id or "").strip() or None,
+            "case_ids": normalized_case_ids,
+            "case_count": len(normalized_case_ids),
         }

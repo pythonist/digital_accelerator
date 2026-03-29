@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
@@ -35,6 +35,9 @@ import {
 const OOTValidationTab = ({
   runs = [],
   defaultJobId = '',
+  defaultThreshold = null,
+  result: controlledResult = null,
+  onResultChange = null,
   actionsDisabled = false,
   actionsMessage = '',
 }) => {
@@ -47,8 +50,12 @@ const OOTValidationTab = ({
   const [error, setError] = useState(null);
   const [statusMsg, setStatusMsg] = useState('');
   const [deploymentMeta, setDeploymentMeta] = useState(null);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(controlledResult);
   const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
+
+  useEffect(() => {
+    setResult(controlledResult);
+  }, [controlledResult]);
 
   const activeRun = useMemo(
     () => (runs || []).find((r) => String(r?.job_id || '') === String(jobId || '')) || null,
@@ -62,6 +69,10 @@ const OOTValidationTab = ({
   }, [jobId, runs]);
 
   useEffect(() => {
+    if (defaultThreshold != null && String(defaultJobId || '') === String(jobId || '')) {
+      setThreshold(Number(defaultThreshold));
+      return;
+    }
     if (!activeRun) return;
     const nextThreshold = Number(
       activeRun?.selected_threshold
@@ -70,9 +81,9 @@ const OOTValidationTab = ({
       || 0.5,
     );
     setThreshold(nextThreshold);
-  }, [activeRun]);
+  }, [activeRun, defaultJobId, defaultThreshold, jobId]);
 
-  const runOOTValidation = async () => {
+  const runOOTValidation = useCallback(async () => {
     if (!jobId) return;
     if (actionsDisabled) {
       setError(gatingMessage);
@@ -93,6 +104,7 @@ const OOTValidationTab = ({
           new_job_id: jobId,
           threshold: Number(threshold || 0.5),
           deployment_name: `oot_${String(jobId).slice(0, 8)}`,
+          validation_only: true,
         });
         dep = unwrap(swapRes);
       }
@@ -114,14 +126,16 @@ const OOTValidationTab = ({
         scenario,
         batch_size: Number(batchSize || 240),
       });
-      setResult(unwrap(simRes));
+      const nextResult = unwrap(simRes);
+      setResult(nextResult);
+      onResultChange?.(nextResult);
       setStatusMsg('OOT validation completed.');
     } catch (e) {
       setError(e?.response?.data?.error || e?.message || 'Failed to run OOT validation');
     } finally {
       setLoading(false);
     }
-  };
+  }, [actionsDisabled, batchSize, gatingMessage, jobId, maxEventLoss, onResultChange, scenario, threshold]);
 
   const oot = result?.oot_validation || null;
   const thresholdTable = oot?.threshold_table || [];

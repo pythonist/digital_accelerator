@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '@context/AppContext';
 import apiClient from '@services/api';
+import { mergeFccSentinelHandoff } from '../../../../utils/fccSentinelHandoff';
 
 // ✅ 1. Import Layout Components
 import PageContainer from "@investigation-layout/PageContainer";
@@ -62,10 +63,13 @@ const CasePriorityInbox = ({ setActiveTab }) => {
   const activeBucket = priorityBuckets.activeBucket;
 
   useEffect(() => {
-    if (activeEnv) {
-      loadInbox();
-      loadHistory();
-    }
+    if (!activeEnv || priorityBuckets.allCases.length > 0) return;
+    loadInbox();
+  }, [activeEnv, priorityBuckets.allCases.length]);
+
+  useEffect(() => {
+    if (!activeEnv) return;
+    loadHistory();
   }, [activeEnv]);
 
   useEffect(() => {
@@ -86,7 +90,6 @@ const CasePriorityInbox = ({ setActiveTab }) => {
       if (res.success) {
         setCases(res.cases || []);
         setMeta({ run_id: res.run_id, run_at: res.run_at });
-        refreshPriorityBuckets();
       }
     } catch (err) {
       setError("Failed to load inbox");
@@ -168,6 +171,14 @@ const CasePriorityInbox = ({ setActiveTab }) => {
   const handleBucketChange = (bucketName) => {
     activateBucket(bucketName);
     setCurrentPage(1);
+  };
+
+  const openCaseInvestigation = (caseId) => {
+    mergeFccSentinelHandoff({
+      selected_case_id: caseId,
+      preferred_screen: 'investigate',
+    });
+    setActiveTab?.('investigate');
   };
 
   const filteredCases = cases.filter(c => 
@@ -396,6 +407,7 @@ const CasePriorityInbox = ({ setActiveTab }) => {
                           />
                         </TableCell>
                         <TableCell sx={{ fontWeight: 'bold' }}>Case ID</TableCell>
+                        <TableCell sx={{ fontWeight: 'bold' }}>Source</TableCell>
                         <TableCell sx={{ fontWeight: 'bold' }}>Risk Score</TableCell>
                         <TableCell sx={{ fontWeight: 'bold' }}>Key Drivers</TableCell>
                         <TableCell sx={{ fontWeight: 'bold' }}>Alert Vol</TableCell>
@@ -418,6 +430,42 @@ const CasePriorityInbox = ({ setActiveTab }) => {
                           </TableCell>
                           <TableCell sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{c.case_id}</TableCell>
                           <TableCell>
+                            <Stack spacing={0.5}>
+                              <Chip
+                                label={c.source_pipeline_name || 'Sentinel workspace'}
+                                size="small"
+                                color={c.source_pipeline_name ? 'primary' : 'default'}
+                                variant={c.source_pipeline_name ? 'filled' : 'outlined'}
+                                sx={{ maxWidth: 180, '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }}
+                              />
+                              {c.source_publish_label ? (
+                                <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 180 }} noWrap>
+                                  {c.source_publish_label}
+                                </Typography>
+                              ) : null}
+                              {(c.case_priority || c.historical_frequency) ? (
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                  {c.case_priority ? (
+                                    <Chip
+                                      label={`Priority ${c.case_priority}`}
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ height: 18, fontSize: '0.62rem' }}
+                                    />
+                                  ) : null}
+                                  {c.historical_frequency ? (
+                                    <Chip
+                                      label={`${c.historical_frequency} history`}
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ height: 18, fontSize: '0.62rem' }}
+                                    />
+                                  ) : null}
+                                </Stack>
+                              ) : null}
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               <Box sx={{ width: 80, height: 6, bgcolor: 'grey.200', borderRadius: 1, overflow: 'hidden' }}>
                                 <Box 
@@ -432,10 +480,40 @@ const CasePriorityInbox = ({ setActiveTab }) => {
                             </Box>
                           </TableCell>
                           <TableCell>
-                            <Stack direction="row" spacing={0.5}>
-                              {c.reasons?.slice(0, 2).map((r, i) => (
-                                <Chip key={i} label={r} size="small" sx={{ height: 20, fontSize: '0.65rem' }} />
-                              ))}
+                            <Stack spacing={0.6}>
+                              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                {(c.reasons?.length ? c.reasons.slice(0, 2) : [c.behavior_context].filter(Boolean)).map((r, i) => (
+                                  <Chip key={i} label={r} size="small" sx={{ height: 20, fontSize: '0.65rem' }} />
+                                ))}
+                              </Stack>
+                              {(c.linked_cases_count || c.prior_alerts_count || c.customer_risk_rating) ? (
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                  {c.customer_risk_rating ? (
+                                    <Chip
+                                      label={`Customer ${c.customer_risk_rating}`}
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ height: 18, fontSize: '0.62rem' }}
+                                    />
+                                  ) : null}
+                                  {c.prior_alerts_count ? (
+                                    <Chip
+                                      label={`${c.prior_alerts_count} prior alerts`}
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ height: 18, fontSize: '0.62rem' }}
+                                    />
+                                  ) : null}
+                                  {c.linked_cases_count ? (
+                                    <Chip
+                                      label={`${c.linked_cases_count} linked cases`}
+                                      size="small"
+                                      variant="outlined"
+                                      sx={{ height: 18, fontSize: '0.62rem' }}
+                                    />
+                                  ) : null}
+                                </Stack>
+                              ) : null}
                             </Stack>
                           </TableCell>
                           <TableCell>
@@ -452,7 +530,7 @@ const CasePriorityInbox = ({ setActiveTab }) => {
                           </TableCell>
                           <TableCell align="right">
                             <Button 
-                              onClick={() => setActiveTab?.('investigate')}
+                              onClick={() => openCaseInvestigation(c.case_id)}
                               size="small"
                               endIcon={<ArrowForward />}
                               sx={{ textTransform: 'none' }}

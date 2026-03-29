@@ -10,6 +10,8 @@ import pandas as pd
 
 from case_pack.case_pack_generator import CasePackGenerator
 from services.mule_detection.money_flow import MoneyFlowAnalyzer, MoneyFlowConfig
+from services.network_intelligence_service import NetworkIntelligenceService
+from services.network_report_adapter_service import NetworkReportAdapterService
 
 analysis_bp = Blueprint('analysis', __name__)
 
@@ -341,6 +343,67 @@ def get_priority_cases():
 # ============================================================================
 # GRAPH ANALYSIS ROUTES
 # ============================================================================
+
+@analysis_bp.route('/network-intelligence/<case_id>', methods=['GET'])
+@handle_errors
+def get_saved_network_intelligence(case_id):
+    env_id, db = _get_env_db()
+    if not db:
+        return jsonify({'error': 'DB not ready', 'env_id': env_id}), 503
+    conn = db.connect()
+    try:
+        adapter = NetworkReportAdapterService()
+        saved = adapter.load_case_result(conn.cursor(), case_id)
+        if not saved:
+            return jsonify({'success': True, 'case_id': case_id, 'saved': None})
+        return jsonify({'success': True, 'case_id': case_id, 'saved': saved})
+    finally:
+        db.close_connection(conn)
+
+
+@analysis_bp.route('/network-intelligence/analyze', methods=['POST'])
+@handle_errors
+def analyze_network_intelligence():
+    req = request.get_json(silent=True) or {}
+    case_id = str(req.get('case_id') or '').strip()
+    if not case_id:
+        return jsonify({'error': 'Case ID is required'}), 400
+
+    env_id, db = _get_env_db()
+    if not db:
+        return jsonify({'error': 'DB not ready', 'env_id': env_id}), 503
+
+    service = NetworkIntelligenceService(db)
+    result = service.analyze(case_id, filters=req.get('filters') or {})
+    return jsonify({'success': True, **result})
+
+
+@analysis_bp.route('/network-intelligence/save', methods=['POST'])
+@handle_errors
+def save_network_intelligence():
+    req = request.get_json(silent=True) or {}
+    case_id = str(req.get('case_id') or '').strip()
+    payload = req.get('payload') if isinstance(req.get('payload'), dict) else {}
+    if not case_id or not payload:
+        return jsonify({'error': 'case_id and payload are required'}), 400
+
+    env_id, db = _get_env_db()
+    if not db:
+        return jsonify({'error': 'DB not ready', 'env_id': env_id}), 503
+
+    conn = db.connect()
+    try:
+        adapter = NetworkReportAdapterService()
+        saved = adapter.save_case_result(
+            conn.cursor(),
+            case_id,
+            payload,
+            include_in_report=bool(req.get('include_in_report', True)),
+        )
+        conn.commit()
+        return jsonify({'success': True, 'saved': saved})
+    finally:
+        db.close_connection(conn)
 
 @analysis_bp.route('/graph/build-full-case', methods=['POST'])
 @handle_errors
@@ -826,11 +889,17 @@ def key_players():
 @analysis_bp.route('/typology/analyze-case', methods=['POST'])
 @handle_errors
 def analyze_typology():
-    """Money laundering typology detection"""
-    matches = services.typology_detector.analyze_case(request.json.get('case_id'))
-    return jsonify({
-        'matches': [m.__dict__ for m in matches]
-    })
+    """Typology intelligence assessment alias."""
+    from services.typology_intelligence_service import TypologyIntelligenceService
+
+    req = request.get_json(silent=True) or {}
+    case_id = str(req.get('case_id') or '').strip()
+    if not case_id:
+        return jsonify({'error': 'Case ID is required'}), 400
+
+    service = TypologyIntelligenceService(services.investigation_db)
+    result = service.analyze(case_id, options=req.get('options') or {})
+    return jsonify({'success': True, **result})
 
 
 # ============================================================================

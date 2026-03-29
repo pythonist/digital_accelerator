@@ -41,12 +41,15 @@ import threading
 import traceback
 import uuid
 import inspect
+import re
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.tools.mlops.duckdb_manager import get_connection
+from api.tools.mlops.path_utils import resolve_data_file_path
+from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 import numpy as np
 import pandas as pd
 
@@ -56,6 +59,10 @@ AML_CLASS_WEIGHT_DEFAULT = {0: 1.0, 1: 15.0}
 AML_EVENT_LOSS_MAX_PCT_DEFAULT = 5.0
 AML_BASELINE_LOW_THRESHOLD = 0.40
 AML_BASELINE_HIGH_THRESHOLD = 0.70
+BUSINESS_DEFAULT_THRESHOLD = 0.50
+DEPLOYABLE_THRESHOLD_MIN = 0.50
+DEPLOYABLE_THRESHOLD_MAX = 0.60
+DEFAULT_SPLIT_STRATEGY = "auto"
 TREE_BASED_ALGORITHMS = {
     "decision_tree",
     "random_forest",
@@ -66,8 +73,58 @@ TREE_BASED_ALGORITHMS = {
     "hist_gradient_boosting",
     "adaboost",
 }
-UNSUPERVISED_ALGORITHMS = {"kmeans", "dbscan", "isolation_forest"}
-DEEP_LEARNING_ALGORITHMS = {"mlp_classifier"}
+UNSUPERVISED_ALGORITHMS = {
+    "kmeans",
+    "gaussian_mixture",
+    "agglomerative_clustering",
+    "dbscan",
+    "isolation_forest",
+    "local_outlier_factor",
+    "one_class_svm",
+}
+DEEP_LEARNING_ALGORITHMS = {
+    "mlp_classifier",
+    "deep_mlp_classifier",
+    "tabular_autoencoder",
+}
+NOTEBOOK_V5_FORBIDDEN_COLUMNS = {
+    "tp_from_str",
+    "case_status",
+    "case_label",
+    "case_id",
+    "investigator_id",
+    "resolution_days",
+    "priority",
+    "str_filed_date",
+    "final_label",
+    "rule_triggered",
+    "prior_sar_rate",
+    "prior_str_rate",
+    "sar_rate",
+    "str_rate",
+    "analyst_risk_score",
+    "docs_requested",
+    "customer_contacted",
+    "edd_triggered",
+    "linked_cases_count",
+}
+TARGET_ALIAS_COLUMNS = (
+    "FINAL_LABEL",
+    "IS_TRUE_POS",
+    "str_label",
+    "CASE_LABEL",
+    "CASE_STATUS",
+    "TP_FROM_STR",
+)
+
+
+def _normalize_feature_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+
+
+NORMALIZED_NOTEBOOK_V5_FORBIDDEN_COLUMNS = {
+    _normalize_feature_token(value) for value in NOTEBOOK_V5_FORBIDDEN_COLUMNS
+}
 
 
 def _to_jsonable(obj):
@@ -100,6 +157,64 @@ def _minmax_normalize(values: np.ndarray, min_value: Optional[float] = None, max
     if hi <= lo:
         return np.full(arr.shape, 0.5, dtype=float)
     return np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
+
+
+def _cluster_rate_lookup(labels: np.ndarray, y_true: pd.Series) -> Dict[int, float]:
+    label_arr = np.asarray(labels, dtype=int).reshape(-1)
+    y_arr = np.asarray(y_true, dtype=float).reshape(-1)
+    rates: Dict[int, float] = {}
+    for label in np.unique(label_arr).tolist():
+        mask = label_arr == int(label)
+        if not np.any(mask):
+            continue
+        rates[int(label)] = float(np.nanmean(y_arr[mask]))
+    return rates
+
+
+def _cluster_summary_rows(labels: np.ndarray, y_true: pd.Series) -> List[Dict[str, Any]]:
+    label_arr = np.asarray(labels, dtype=int).reshape(-1)
+    y_arr = np.asarray(y_true, dtype=float).reshape(-1)
+    rows: List[Dict[str, Any]] = []
+    for label in np.unique(label_arr).tolist():
+        mask = label_arr == int(label)
+        if not np.any(mask):
+            continue
+        rows.append(
+            {
+                "cluster": int(label),
+                "count": int(mask.sum()),
+                "event_rate_pct": round(float(np.nanmean(y_arr[mask])) * 100.0, 2),
+                "is_noise": bool(int(label) == -1),
+            }
+        )
+    return rows
+
+
+def _assign_nearest_centroid_labels(
+    train_vectors: np.ndarray,
+    train_labels: np.ndarray,
+    new_vectors: np.ndarray,
+) -> np.ndarray:
+    train_vectors = np.asarray(train_vectors, dtype=float)
+    train_labels = np.asarray(train_labels, dtype=int).reshape(-1)
+    new_vectors = np.asarray(new_vectors, dtype=float)
+    unique_labels = np.unique(train_labels).tolist()
+    if train_vectors.size == 0 or not unique_labels or new_vectors.size == 0:
+        return np.zeros(len(new_vectors), dtype=int)
+    centroids = []
+    centroid_labels = []
+    for label in unique_labels:
+        mask = train_labels == int(label)
+        if not np.any(mask):
+            continue
+        centroids.append(train_vectors[mask].mean(axis=0))
+        centroid_labels.append(int(label))
+    if not centroids:
+        return np.zeros(len(new_vectors), dtype=int)
+    centroid_arr = np.asarray(centroids, dtype=float)
+    distances = np.linalg.norm(new_vectors[:, None, :] - centroid_arr[None, :, :], axis=2)
+    nearest = np.argmin(distances, axis=1)
+    return np.asarray([centroid_labels[idx] for idx in nearest], dtype=int)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -570,6 +685,10 @@ _TARGET_PROXY_COLUMNS = {
     "label",
 }
 
+NORMALIZED_TARGET_PROXY_COLUMNS = {
+    _normalize_feature_token(value) for value in _TARGET_PROXY_COLUMNS
+}
+
 _LABEL_LEAKAGE_TOKENS = (
     "case_status",
     "case_label",
@@ -583,17 +702,32 @@ _LABEL_LEAKAGE_TOKENS = (
     "closed_by",
     "report_date",
     "investigator",
+    "str_label",
+    "sar_label",
+    "prior_sar_rate",
+    "prior_str_rate",
+    "sar_rate",
+    "str_rate",
+    "analyst_risk_score",
+    "docs_requested",
+    "customer_contacted",
+    "edd_triggered",
+    "linked_cases_count",
 )
 
 
 def _is_known_label_leakage_feature(col_name: str, target_column: str) -> bool:
-    lname = str(col_name or "").strip().lower()
-    target_l = str(target_column or "").strip().lower()
+    lname = _normalize_feature_token(col_name)
+    target_l = _normalize_feature_token(target_column)
     if not lname or lname == target_l:
         return False
-    if lname in _TARGET_PROXY_COLUMNS:
+    if lname in NORMALIZED_TARGET_PROXY_COLUMNS:
+        return True
+    if lname in NORMALIZED_NOTEBOOK_V5_FORBIDDEN_COLUMNS:
         return True
     if any(tok in lname for tok in _LABEL_LEAKAGE_TOKENS):
+        return True
+    if re.search(r"(?:^|_)(sar|str)(?:_|$)", lname) and ("label" in lname or "rate" in lname or "filed" in lname):
         return True
     return False
 
@@ -734,6 +868,22 @@ def _prepare_features(
         key=lambda item: item["levels"], reverse=True,
     )[:15]
 
+    included_feature_columns = [str(col) for col in X_enc.columns.tolist()]
+    excluded_feature_inventory: List[Dict[str, Any]] = (
+        [{"column": str(col), "reason": "target_proxy"} for col in dropped_leakage]
+        + [{"column": str(col), "reason": "identifier"} for col in dropped_id]
+        + [{"column": str(col), "reason": "constant"} for col in dropped_constant]
+        + [{"column": str(col), "reason": "datetime-expanded"} for col in datetime_expanded]
+    )
+    suspicious_included_features = sorted(
+        {
+            str(col)
+            for col in included_feature_columns
+            if _is_known_label_leakage_feature(str(col), target_column)
+            or _normalize_feature_token(str(col)) in NORMALIZED_NOTEBOOK_V5_FORBIDDEN_COLUMNS
+        }
+    )
+
     diagnostics = {
         "grain":                   grain,
         "id_column":               id_col,
@@ -760,6 +910,10 @@ def _prepare_features(
         "frequency_encoded_columns":frequency_encoded[:20],
         "encoded_feature_count":   int(X_enc.shape[1]),
         "feature_multiplier":      round(float(X_enc.shape[1]) / max(raw_feature_columns, 1), 3),
+        "included_feature_count":  int(len(included_feature_columns)),
+        "included_feature_columns": included_feature_columns,
+        "excluded_feature_inventory": excluded_feature_inventory,
+        "suspicious_included_features": suspicious_included_features,
     }
 
     return X_enc, y.astype(int), X_enc.columns.tolist(), diagnostics
@@ -826,6 +980,403 @@ def _first_matching_column(df: pd.DataFrame, candidates: List[str]) -> Optional[
         if str(col).strip().lower() in wanted:
             return str(col)
     return None
+
+
+def _preview_value(value: Any) -> Any:
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    if isinstance(value, float):
+        if not np.isfinite(value):
+            return None
+        return round(float(value), 6)
+    if isinstance(value, (dict, list, tuple)):
+        return _to_jsonable(value)
+    return value
+
+
+def _preview_table(df: pd.DataFrame, *, max_rows: int = 30, max_columns: int = 240) -> Dict[str, Any]:
+    frame = df.copy()
+    columns = [str(col) for col in frame.columns[:max_columns].tolist()]
+    rows: List[Dict[str, Any]] = []
+    if columns:
+        for _, row in frame.loc[:, columns].head(max_rows).iterrows():
+            rows.append({col: _preview_value(row[col]) for col in columns})
+    return {
+        "columns": columns,
+        "rows": rows,
+        "row_count": int(len(frame)),
+        "column_count": int(frame.shape[1]),
+        "truncated_rows": bool(len(frame) > max_rows),
+        "truncated_columns": bool(frame.shape[1] > max_columns),
+    }
+
+
+def _is_generated_temporal_component(column_name: Optional[str]) -> bool:
+    lname = str(column_name or "").strip().lower()
+    if not lname:
+        return False
+    generated_suffixes = (
+        "_year",
+        "_month",
+        "_day",
+        "_dow",
+        "_weekday",
+        "_week",
+        "_weekofyear",
+        "_hour",
+        "_minute",
+        "_quarter",
+    )
+    return lname.endswith(generated_suffixes)
+
+
+def _datetime_parse_ratio(series: pd.Series, *, column_name: Optional[str] = None) -> float:
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return 1.0
+    non_null = series.dropna()
+    if len(non_null) == 0:
+        return 0.0
+    if _is_generated_temporal_component(column_name):
+        return 0.0
+    if pd.api.types.is_numeric_dtype(series):
+        numeric = pd.to_numeric(non_null.head(1000), errors="coerce").dropna()
+        if len(numeric) == 0:
+            return 0.0
+        median_abs = float(numeric.abs().median())
+        # Reject expanded date parts like 2022 / 6 / 24 that parse to nanosecond
+        # timestamps around 1970 and break temporal holdouts. Preserve epoch-like
+        # integer timestamps when the values are large enough to plausibly encode
+        # seconds / milliseconds / microseconds since Unix epoch.
+        if median_abs < 1e8:
+            return 0.0
+        unit_candidates: List[str] = []
+        if median_abs >= 1e17:
+            unit_candidates = ["ns"]
+        elif median_abs >= 1e14:
+            unit_candidates = ["us", "ns"]
+        elif median_abs >= 1e11:
+            unit_candidates = ["ms", "us"]
+        else:
+            unit_candidates = ["s", "ms"]
+        best_ratio = 0.0
+        for unit in unit_candidates:
+            try:
+                parsed = pd.to_datetime(numeric, unit=unit, errors="coerce")
+            except Exception:
+                continue
+            ratio = float(parsed.notna().mean()) if len(parsed) else 0.0
+            if ratio > best_ratio:
+                best_ratio = ratio
+        return best_ratio
+    try:
+        parsed = pd.to_datetime(non_null.head(1000), errors="coerce")
+    except Exception:
+        return 0.0
+    return float(parsed.notna().mean()) if len(parsed) else 0.0
+
+
+def _candidate_temporal_split_columns(
+    df: pd.DataFrame,
+    *,
+    grain: str = "alert",
+    requested_date_column: Optional[str] = None,
+) -> List[str]:
+    candidates: List[str] = []
+    if requested_date_column:
+        candidates.append(str(requested_date_column))
+    candidates.extend(
+        [
+            "ALERT_DATE",
+            "CASE_CREATED_DATE",
+            "CASE_DATE",
+            "EVENT_DATE",
+            "TRANSACTION_DATE",
+            "TXN_DATE",
+            "CREATED_AT",
+            "OPEN_DATE",
+            "UPDATED_AT",
+        ]
+    )
+    if str(grain or "alert").strip().lower() == "case":
+        candidates.insert(0, "CASE_CREATED_DATE")
+        candidates.insert(1, "CASE_DATE")
+
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for candidate in candidates:
+        match = _first_matching_column(df, [candidate])
+        if match and str(match).lower() not in seen:
+            ordered.append(str(match))
+            seen.add(str(match).lower())
+
+    for col in df.columns:
+        lname = str(col).strip().lower()
+        if lname in seen:
+            continue
+        if any(token in lname for token in ("date", "time", "timestamp", "created", "opened")):
+            ordered.append(str(col))
+            seen.add(lname)
+
+    valid_columns: List[str] = []
+    for col in ordered:
+        try:
+            if _datetime_parse_ratio(df[col], column_name=col) >= 0.60:
+                valid_columns.append(str(col))
+        except Exception:
+            continue
+    return valid_columns
+
+
+def _detect_temporal_split_column(
+    df: pd.DataFrame,
+    *,
+    grain: str = "alert",
+    requested_date_column: Optional[str] = None,
+) -> Optional[str]:
+    candidates = _candidate_temporal_split_columns(
+        df,
+        grain=grain,
+        requested_date_column=requested_date_column,
+    )
+    return candidates[0] if candidates else None
+
+
+def _suggest_temporal_split_date(series: pd.Series, *, test_size: float = 0.2) -> Optional[str]:
+    try:
+        ts = pd.to_datetime(series, errors="coerce").dropna().sort_values().reset_index(drop=True)
+    except Exception:
+        return None
+    if len(ts) < 20:
+        return None
+    holdout_ratio = max(0.10, min(float(test_size), 0.40))
+    split_idx = int(np.floor(len(ts) * (1.0 - holdout_ratio)))
+    split_idx = max(1, min(split_idx, len(ts) - 1))
+    split_ts = pd.Timestamp(ts.iloc[split_idx])
+    return str(split_ts.date())
+
+
+def _resolve_split_strategy(
+    df: pd.DataFrame,
+    *,
+    requested_strategy: str = DEFAULT_SPLIT_STRATEGY,
+    test_size: float = 0.2,
+    grain: str = "alert",
+    requested_date_column: Optional[str] = None,
+    split_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    strategy = str(requested_strategy or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY
+    if strategy not in {"auto", "random", "temporal"}:
+        strategy = DEFAULT_SPLIT_STRATEGY
+
+    available_date_columns = _candidate_temporal_split_columns(
+        df,
+        grain=grain,
+        requested_date_column=requested_date_column,
+    )
+    detected_date_column = _detect_temporal_split_column(
+        df,
+        grain=grain,
+        requested_date_column=requested_date_column,
+    )
+    auto_selected = False
+    warnings: List[str] = []
+
+    if strategy == "auto":
+        auto_selected = True
+        strategy = "temporal" if detected_date_column else "random"
+        if strategy == "random":
+            warnings.append("No reliable alert/case date column was found, so the split fell back to random.")
+
+    resolved_split_date = str(split_date).strip() if split_date is not None and str(split_date).strip() else None
+    if strategy == "temporal":
+        if not detected_date_column:
+            raise ValueError("Temporal split requested, but no valid alert/case date column was found.")
+        if not resolved_split_date:
+            resolved_split_date = _suggest_temporal_split_date(df[detected_date_column], test_size=test_size)
+        if not resolved_split_date:
+            raise ValueError(
+                f"Temporal split could not derive a stable split date from '{detected_date_column}'."
+            )
+
+    return {
+        "requested_strategy": str(requested_strategy or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY,
+        "split_strategy": strategy,
+        "date_column": str(detected_date_column) if detected_date_column else None,
+        "split_date": resolved_split_date,
+        "available_date_columns": available_date_columns,
+        "auto_selected": bool(auto_selected),
+        "warnings": warnings,
+    }
+
+
+def _split_dataset(
+    X: pd.DataFrame,
+    y: pd.Series,
+    df_source: pd.DataFrame,
+    *,
+    test_size: float = 0.2,
+    stratify: bool = True,
+    random_state: int = 42,
+    requested_strategy: str = DEFAULT_SPLIT_STRATEGY,
+    grain: str = "alert",
+    requested_date_column: Optional[str] = None,
+    split_date: Optional[str] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, Dict[str, Any]]:
+    from sklearn.model_selection import train_test_split
+
+    source_for_split = df_source.loc[X.index].copy()
+    split_meta = _resolve_split_strategy(
+        source_for_split,
+        requested_strategy=requested_strategy,
+        test_size=test_size,
+        grain=grain,
+        requested_date_column=requested_date_column,
+        split_date=split_date,
+    )
+
+    if split_meta["split_strategy"] == "temporal":
+        X_train, X_test, y_train, y_test, temporal_summary = _temporal_split_features(
+            X,
+            y,
+            source_for_split[split_meta["date_column"]],
+            str(split_meta["split_date"]),
+        )
+        split_meta.update(temporal_summary)
+    else:
+        strat_y = y if (stratify and int(y.nunique()) > 1) else None
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=strat_y,
+        )
+        split_meta.update(
+            {
+                "split_strategy": "random",
+                "test_size": float(test_size),
+                "train_rows": int(len(X_train)),
+                "test_rows": int(len(X_test)),
+            }
+        )
+
+    split_meta.update(
+        {
+            "train_rows": int(len(X_train)),
+            "test_rows": int(len(X_test)),
+            "train_positive_rows": int((y_train == 1).sum()),
+            "test_positive_rows": int((y_test == 1).sum()),
+            "train_negative_rows": int((y_train == 0).sum()),
+            "test_negative_rows": int((y_test == 0).sum()),
+            "train_event_rate_pct": round(float(y_train.mean()) * 100.0, 2),
+            "test_event_rate_pct": round(float(y_test.mean()) * 100.0, 2),
+        }
+    )
+
+    return X_train, X_test, y_train, y_test, split_meta
+
+
+def _build_target_check_payload(
+    df: pd.DataFrame,
+    *,
+    target_column: str,
+    feature_names: List[str],
+    grain: str,
+    feature_diag: Dict[str, Any],
+) -> Dict[str, Any]:
+    target_series = _coerce_binary_target_for_grain(df[target_column], grain).astype("float64")
+    positive_rows = int((target_series == 1).sum())
+    negative_rows = int((target_series == 0).sum())
+    unlabeled_rows = int(target_series.isna().sum())
+    labelled_rows = int(positive_rows + negative_rows)
+    aliases_present = [
+        str(col)
+        for col in df.columns
+        if str(col).strip().lower() in {alias.lower() for alias in TARGET_ALIAS_COLUMNS}
+    ]
+    suspicious_included = list(feature_diag.get("suspicious_included_features") or [])
+
+    return {
+        "canonical_target_column": str(target_column),
+        "target_aliases_present": aliases_present,
+        "target_is_separated": bool(str(target_column) not in {str(col) for col in feature_names}),
+        "target_proxy_features_present": suspicious_included,
+        "positive_rows": positive_rows,
+        "negative_rows": negative_rows,
+        "labelled_rows": labelled_rows,
+        "unlabeled_rows": unlabeled_rows,
+        "dropped_rows": int(unlabeled_rows),
+        "event_rate_pct": round(float(positive_rows / max(labelled_rows, 1)) * 100.0, 2),
+        "mapping": {
+            "CASE_STATUS -> CASE_LABEL": {
+                "CLOSED_SAR_FILED": 1,
+                "CLOSED_FALSE_POSITIVE": 0,
+                "CLOSED_MONITORING": 0,
+            },
+            "TP_FROM_STR": "STR look-forward linkage",
+            "FINAL_LABEL": "1 if TP_FROM_STR == 1 else CASE_LABEL",
+        },
+        "notebook_v5_forbidden_columns": sorted(NOTEBOOK_V5_FORBIDDEN_COLUMNS),
+    }
+
+
+def _build_feature_usage_payload(
+    *,
+    target_column: str,
+    feature_names: List[str],
+    feature_diag: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    included_features = [{"column": str(col), "reason": "model_feature"} for col in feature_names]
+    excluded_features: List[Dict[str, Any]] = [{"column": str(target_column), "reason": "target"}]
+    excluded_features.extend(list(feature_diag.get("excluded_feature_inventory") or []))
+    return included_features, excluded_features
+
+
+def _build_training_readiness(
+    *,
+    target_check: Dict[str, Any],
+    split_preview: Dict[str, Any],
+    feature_diag: Dict[str, Any],
+    feature_names: List[str],
+) -> Dict[str, Any]:
+    blocking_reasons: List[str] = []
+    warnings: List[str] = []
+
+    if not target_check.get("target_is_separated"):
+        blocking_reasons.append("The canonical target column is still present in the model feature list.")
+    if list(target_check.get("target_proxy_features_present") or []):
+        blocking_reasons.append("Target-like proxy columns were detected in the model feature matrix.")
+    if int(target_check.get("positive_rows", 0)) == 0 or int(target_check.get("negative_rows", 0)) == 0:
+        blocking_reasons.append("Both target classes are required before training can start.")
+    if int(len(feature_names)) == 0:
+        blocking_reasons.append("No model features remain after preprocessing and leakage removal.")
+    if int(split_preview.get("train_rows", 0)) == 0 or int(split_preview.get("test_rows", 0)) == 0:
+        blocking_reasons.append("The train/test split is empty.")
+
+    dropped_leakage = list(feature_diag.get("dropped_leakage_columns") or [])
+    if dropped_leakage:
+        warnings.append(
+            f"Notebook v5 leakage-sensitive columns were found upstream and excluded automatically: {', '.join(dropped_leakage[:6])}."
+        )
+    if bool(split_preview.get("auto_selected")) and split_preview.get("split_strategy") == "temporal":
+        warnings.append(
+            f"Temporal split was selected automatically using '{split_preview.get('date_column')}' to match notebook v5."
+        )
+    warnings.extend(list(split_preview.get("warnings") or []))
+
+    return {
+        "ready": not blocking_reasons,
+        "blocking_reasons": blocking_reasons,
+        "warnings": warnings,
+        "verdict": "ready" if not blocking_reasons else "blocked",
+    }
 
 
 def _derive_case_label_from_status(series: pd.Series) -> pd.Series:
@@ -1426,6 +1977,235 @@ def _classification_preview_metrics(
     }
 
 
+def _select_deployable_threshold_row(
+    threshold_table: Optional[List[Dict[str, Any]]],
+    *,
+    max_event_loss_pct: float = AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+) -> Dict[str, Any]:
+    rows = [row for row in list(threshold_table or []) if isinstance(row, dict)]
+    band_rows = [
+        row for row in rows
+        if DEPLOYABLE_THRESHOLD_MIN <= float(row.get("threshold", -1.0)) <= DEPLOYABLE_THRESHOLD_MAX
+    ]
+    valid_rows = [row for row in band_rows if float(row.get("event_loss_pct", 999.0)) <= float(max_event_loss_pct)]
+    preferred = valid_rows or band_rows
+    if not preferred:
+        return {}
+    return max(
+        preferred,
+        key=lambda row: (
+            float(row.get("suppression_rate_pct", row.get("suppression_rate", 0.0))),
+            -float(row.get("event_loss_pct", 999.0)),
+        ),
+    )
+
+
+def _build_deploy_threshold_policy(
+    threshold_table: Optional[List[Dict[str, Any]]],
+    *,
+    configured_threshold: float = BUSINESS_DEFAULT_THRESHOLD,
+    max_event_loss_pct: float = AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+) -> Dict[str, Any]:
+    deployable_row = _select_deployable_threshold_row(
+        threshold_table,
+        max_event_loss_pct=max_event_loss_pct,
+    )
+    deployable_threshold = (
+        float(deployable_row.get("threshold"))
+        if deployable_row and deployable_row.get("threshold") is not None
+        else float(BUSINESS_DEFAULT_THRESHOLD)
+    )
+    return {
+        "default_threshold": float(BUSINESS_DEFAULT_THRESHOLD),
+        "configured_threshold": float(configured_threshold),
+        "threshold_band_min": float(DEPLOYABLE_THRESHOLD_MIN),
+        "threshold_band_max": float(DEPLOYABLE_THRESHOLD_MAX),
+        "deployable_threshold": float(deployable_threshold),
+        "selected_row": dict(deployable_row or {}),
+        "event_loss_cap_pct": float(max_event_loss_pct),
+        "within_band": DEPLOYABLE_THRESHOLD_MIN <= float(configured_threshold) <= DEPLOYABLE_THRESHOLD_MAX,
+    }
+
+
+def _assess_run_quality(
+    *,
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    feature_names: List[str],
+    target_column: str,
+    feature_diag: Dict[str, Any],
+    metrics: Dict[str, Any],
+) -> Dict[str, Any]:
+    findings: List[Dict[str, Any]] = []
+    flags: List[str] = []
+
+    suspicious_features = sorted(
+        {
+            str(col)
+            for col in list(feature_names or [])
+            if _is_known_label_leakage_feature(str(col), target_column)
+            or _normalize_feature_token(str(col)) in NORMALIZED_NOTEBOOK_V5_FORBIDDEN_COLUMNS
+        }
+    )
+    if suspicious_features:
+        flags.append("target_like_features_present")
+        findings.append(
+            {
+                "severity": "high",
+                "code": "target_like_features_present",
+                "message": "Target-like or notebook-forbidden columns reached the model feature matrix.",
+                "columns": suspicious_features[:20],
+            }
+        )
+
+    unique_scores = np.unique(np.round(np.asarray(y_prob, dtype=float), 8))
+    if unique_scores.size <= 1 or float(np.nanstd(np.asarray(y_prob, dtype=float))) <= 1e-8:
+        flags.append("constant_scores_detected")
+        findings.append(
+            {
+                "severity": "high",
+                "code": "constant_scores_detected",
+                "message": "The model produced almost constant scores on the holdout sample.",
+            }
+        )
+
+    roc_auc = float(metrics.get("roc_auc", 0.0) or 0.0)
+    pr_auc = float(metrics.get("pr_auc", 0.0) or 0.0)
+    if roc_auc >= 0.995 or pr_auc >= 0.995:
+        flags.append("near_perfect_discrimination")
+        findings.append(
+            {
+                "severity": "high",
+                "code": "near_perfect_discrimination",
+                "message": "Near-perfect ROC-AUC / PR-AUC suggests target leakage or over-separable synthetic data.",
+                "roc_auc": round(roc_auc, 4),
+                "pr_auc": round(pr_auc, 4),
+            }
+        )
+
+    dropped_leakage = list(feature_diag.get("dropped_leakage_columns") or [])
+    if dropped_leakage:
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "upstream_leakage_columns_excluded",
+                "message": "Leakage-sensitive upstream columns were detected and excluded before training.",
+                "columns": dropped_leakage[:20],
+            }
+        )
+
+    return {
+        "review_required": bool(flags),
+        "blocking": bool(flags),
+        "quality_flags": flags,
+        "findings": findings,
+    }
+
+
+def _format_driver_label(feature_name: str) -> str:
+    text = str(feature_name or "").replace("_", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text.title()
+
+
+def _build_suppressed_cases_preview(
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+    y_prob: np.ndarray,
+    meta_test: pd.DataFrame,
+    feature_importance: List[Dict[str, Any]],
+    *,
+    threshold: float = BUSINESS_DEFAULT_THRESHOLD,
+    limit: int = 20,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    entity_column = next(
+        (col for col in ("ALERT_ID", "CASE_ID", "CUSTOMER_ID", "ACCOUNT_ID") if col in meta_test.columns),
+        None,
+    )
+    suppressed_idx = np.where(np.asarray(y_prob, dtype=float) < float(threshold))[0]
+    if suppressed_idx.size == 0:
+        return [], {
+            "threshold": float(threshold),
+            "suppressed_case_count": 0,
+            "potentially_missed_events": 0,
+            "headline": "No cases were suppressed at the approved operating threshold.",
+            "top_driver_features": [],
+        }
+
+    rank = suppressed_idx[np.argsort(np.asarray(y_prob, dtype=float)[suppressed_idx])[::-1]]
+    driver_features = [
+        str(item.get("feature"))
+        for item in list(feature_importance or [])
+        if item and str(item.get("feature") or "") in X_test.columns
+    ]
+    if not driver_features:
+        driver_features = [str(col) for col in X_test.columns[:8].tolist()]
+
+    rows: List[Dict[str, Any]] = []
+    driver_counter: Dict[str, int] = {}
+    for idx in rank[: max(1, int(limit))].tolist():
+        row = X_test.iloc[int(idx)]
+        drivers: List[Dict[str, Any]] = []
+        for feature_name in driver_features:
+            value = row.get(feature_name)
+            try:
+                numeric_value = float(value)
+                if abs(numeric_value) <= 1e-10:
+                    continue
+            except Exception:
+                numeric_value = None
+            drivers.append(
+                {
+                    "feature": str(feature_name),
+                    "label": _format_driver_label(str(feature_name)),
+                    "value": _preview_value(value),
+                }
+            )
+            driver_counter[str(feature_name)] = int(driver_counter.get(str(feature_name), 0)) + 1
+            if len(drivers) >= 3:
+                break
+
+        entity_id = meta_test.iloc[int(idx)].get(entity_column) if entity_column else None
+        actual_positive = int(y_test.iloc[int(idx)]) == 1
+        reason_text = (
+            f"Suppressed because score {float(y_prob[int(idx)]):.2f} stayed below the approved "
+            f"{float(threshold):.2f} review threshold."
+        )
+        if drivers:
+            reason_text += " Main drivers: " + ", ".join(
+                f"{driver['label']}={driver['value']}" for driver in drivers
+            ) + "."
+
+        rows.append(
+            {
+                "sample_index": int(idx),
+                "entity_id": None if pd.isna(entity_id) else str(entity_id),
+                "score": round(float(y_prob[int(idx)]), 4),
+                "decision": "SUPPRESS",
+                "actual_label": "Escalate" if actual_positive else "Suppress",
+                "potential_false_suppression": bool(actual_positive),
+                "reason_text": reason_text,
+                "top_drivers": drivers,
+            }
+        )
+
+    top_driver_features = [
+        {"feature": feature, "count": int(count)}
+        for feature, count in sorted(driver_counter.items(), key=lambda item: (-item[1], item[0]))[:5]
+    ]
+    summary = {
+        "threshold": float(threshold),
+        "suppressed_case_count": int(len(rows)),
+        "potentially_missed_events": int(sum(1 for row in rows if row.get("potential_false_suppression"))),
+        "headline": (
+            f"At threshold {float(threshold):.2f}, {int(len(rows))} preview cases would be suppressed "
+            "and are listed with their main business drivers."
+        ),
+        "top_driver_features": top_driver_features,
+    }
+    return rows, summary
+
+
 def _histogram_buckets(values: np.ndarray, bins: int = 12) -> List[Dict[str, Any]]:
     arr = np.asarray(values, dtype=float).reshape(-1)
     if arr.size == 0:
@@ -1866,16 +2646,8 @@ class ModelTrainingService:
     # ── File resolution ────────────────────────────────────────────────────────
 
     def _resolve_file_path(self, file_path: Path) -> Path:
-        p = Path(file_path)
-        if p.is_absolute() and p.exists():
-            return p
-        backend_root   = Path(__file__).resolve().parents[3]
-        workspace_root = backend_root.parent.parent
-        candidates = [p, Path.cwd() / p, backend_root / p, workspace_root / p]
-        for c in candidates:
-            if c.exists():
-                return c
-        return p
+        env_root = Path(self.model_dir).resolve().parents[1]
+        return resolve_data_file_path(file_path, env_root=env_root)
 
     # ── Job store helpers ──────────────────────────────────────────────────────
 
@@ -1929,7 +2701,94 @@ class ModelTrainingService:
                 result.pop("_X_val", None)
                 result.pop("_y_val", None)
                 return _to_jsonable(result)
-        return self._load_result_from_db(job_id)
+        result = self._load_result_from_db(job_id)
+        if result is not None:
+            return result
+        return self._load_result_from_artifact(job_id)
+
+    def _load_result_from_artifact(self, job_id: str) -> Optional[Dict]:
+        artifact_path = self._resolve_file_path(self.model_dir / f"{job_id}.pkl")
+        if not artifact_path.exists():
+            candidates = sorted(self.model_dir.glob(f"*{job_id}*.pkl"))
+            if not candidates:
+                return None
+            artifact_path = self._resolve_file_path(candidates[0])
+
+        try:
+            bundle = load_pickle_compat(artifact_path)
+        except Exception as exc:
+            logger.warning("_load_result_from_artifact failed for %s: %s", job_id, exc)
+            return None
+
+        if not isinstance(bundle, dict) or "model" not in bundle:
+            return None
+
+        feature_columns = [str(value) for value in list(bundle.get("feature_columns") or [])]
+        suspicious_exact = {
+            "label",
+            "labels",
+            "actual_label",
+            "final_label",
+            "is_true_pos",
+            "target",
+            "target_label",
+            "str_label",
+            "ground_truth",
+            "prior_sar_rate",
+            "prior_str_rate",
+        }
+        suspicious_pattern = re.compile(r"(?:^|_)(label|target|truth)(?:$|_)")
+        leakage_features = sorted(
+            {
+                feat for feat in feature_columns
+                if _normalize_feature_token(feat) in suspicious_exact
+                or suspicious_pattern.search(_normalize_feature_token(feat))
+                or _is_known_label_leakage_feature(str(feat), str(bundle.get("target_column") or ""))
+            }
+        )
+
+        trained_at = bundle.get("trained_at")
+        if hasattr(trained_at, "isoformat"):
+            trained_at = trained_at.isoformat()
+        elif trained_at is None:
+            trained_at = datetime.utcfromtimestamp(artifact_path.stat().st_mtime).isoformat() + "Z"
+
+        selected_threshold = bundle.get("threshold")
+        try:
+            selected_threshold = float(selected_threshold) if selected_threshold is not None else 0.5
+        except Exception:
+            selected_threshold = 0.5
+
+        metrics = bundle.get("metrics") if isinstance(bundle.get("metrics"), dict) else {}
+        feature_diagnostics = bundle.get("feature_diagnostics") if isinstance(bundle.get("feature_diagnostics"), dict) else {}
+        if leakage_features and not feature_diagnostics.get("leakage_features"):
+            feature_diagnostics = {
+                **feature_diagnostics,
+                "leakage_features": leakage_features,
+            }
+
+        payload = {
+            "job_id": job_id,
+            "algorithm": bundle.get("algorithm") or type(bundle.get("model")).__name__,
+            "target_column": bundle.get("target_column"),
+            "artifact_path": str(artifact_path),
+            "dataset_id": int(bundle.get("dataset_id") or 0),
+            "trained_at": trained_at,
+            "selected_threshold": selected_threshold,
+            "grain": bundle.get("grain") or "alert",
+            "hml_high_threshold": float(bundle.get("hml_high_threshold") or 0.65),
+            "hml_low_threshold": float(bundle.get("hml_low_threshold") or 0.35),
+            "metrics": metrics,
+            "feature_diagnostics": feature_diagnostics,
+            "feature_columns": feature_columns,
+            "features_used": len(feature_columns),
+            "id_column": bundle.get("id_column"),
+            "summary": bundle.get("summary"),
+            "timeline": bundle.get("timeline"),
+            "model_internals": bundle.get("model_internals"),
+            "feature_importance": bundle.get("feature_importance"),
+        }
+        return _to_jsonable(payload)
 
     def build_training_workbench_preview(
         self,
@@ -1944,6 +2803,9 @@ class ModelTrainingService:
         stratify: bool = True,
         random_state: int = 42,
         sample_index: Optional[int] = None,
+        split_strategy: str = DEFAULT_SPLIT_STRATEGY,
+        split_date: Optional[str] = None,
+        date_column: str = "ALERT_DATE",
     ) -> Dict[str, Any]:
         from sklearn.cluster import DBSCAN, KMeans
         from sklearn.decomposition import PCA
@@ -1972,6 +2834,20 @@ class ModelTrainingService:
         working_df = df.loc[valid_target_mask].copy().reset_index(drop=True)
         X_full = X_full.reset_index(drop=True)
         y_full = y_full.reset_index(drop=True)
+        raw_preview = _preview_table(working_df)
+        preprocessed_preview = _preview_table(X_full)
+        target_check = _build_target_check_payload(
+            df,
+            target_column=target_column,
+            feature_names=feature_names,
+            grain=grain,
+            feature_diag=feature_diag,
+        )
+        included_features, excluded_features = _build_feature_usage_payload(
+            target_column=target_column,
+            feature_names=feature_names,
+            feature_diag=feature_diag,
+        )
 
         if len(X_full) < 12:
             raise ValueError("Training workbench requires at least 12 labelled rows after preprocessing.")
@@ -1996,6 +2872,43 @@ class ModelTrainingService:
             meta_work = working_df.copy()
 
         prep_ms = (perf_counter() - prep_started) * 1000.0
+        split_started = perf_counter()
+        X_train, X_test, y_train, y_test, split_preview = _split_dataset(
+            X_work,
+            y_work,
+            meta_work,
+            test_size=max(0.1, min(float(test_size), 0.5)),
+            stratify=stratify,
+            random_state=int(random_state),
+            requested_strategy=split_strategy,
+            grain=grain,
+            requested_date_column=date_column,
+            split_date=split_date,
+        )
+        meta_train = meta_work.loc[X_train.index].copy().reset_index(drop=True)
+        meta_test = meta_work.loc[X_test.index].copy().reset_index(drop=True)
+        X_train = X_train.reset_index(drop=True)
+        X_test = X_test.reset_index(drop=True)
+        y_train = y_train.reset_index(drop=True)
+        y_test = y_test.reset_index(drop=True)
+        split_ms = (perf_counter() - split_started) * 1000.0
+        split_preview["duration_ms"] = round(split_ms, 2)
+        training_readiness = _build_training_readiness(
+            target_check=target_check,
+            split_preview=split_preview,
+            feature_diag=feature_diag,
+            feature_names=feature_names,
+        )
+        leakage_findings = list(training_readiness.get("warnings") or [])
+        if list(target_check.get("target_proxy_features_present") or []):
+            leakage_findings.append(
+                "Target-like columns are still visible in the encoded feature matrix and must be removed before training."
+            )
+        deploy_threshold_policy = _build_deploy_threshold_policy(
+            [],
+            configured_threshold=BUSINESS_DEFAULT_THRESHOLD,
+            max_event_loss_pct=AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+        )
         base_summary = {
             "dataset_id": int(dataset.get("dataset_id") or 0),
             "dataset_name": str(dataset.get("name") or dataset.get("filename") or dataset_file_path.name),
@@ -2008,12 +2921,29 @@ class ModelTrainingService:
             "negative_rows": int((y_work == 0).sum()),
             "feature_diagnostics": feature_diag,
             "preview_sampled": bool(len(X_work) != len(X_full)),
+            "split_strategy": split_preview.get("split_strategy"),
+            "date_column": split_preview.get("date_column"),
+            "split_date": split_preview.get("split_date"),
+        }
+        common_payload = {
+            "raw_preview": raw_preview,
+            "preprocessed_preview": preprocessed_preview,
+            "target_check": target_check,
+            "split_preview": split_preview,
+            "included_features": included_features,
+            "excluded_features": excluded_features,
+            "leakage_findings": leakage_findings,
+            "training_readiness": training_readiness,
+            "deploy_threshold_policy": deploy_threshold_policy,
         }
 
         if mode_key == "unsupervised":
             scale_started = perf_counter()
             scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_work)
+            X_all = pd.concat([X_train, X_test], ignore_index=True)
+            y_all = pd.concat([y_train, y_test], ignore_index=True)
+            meta_all = pd.concat([meta_train, meta_test], ignore_index=True)
+            X_scaled = scaler.fit_transform(X_all)
             if X_scaled.shape[1] >= 2:
                 pca = PCA(n_components=2, random_state=int(random_state))
                 coords = pca.fit_transform(X_scaled)
@@ -2023,23 +2953,23 @@ class ModelTrainingService:
                 explained_variance = [1.0, 0.0]
             scale_ms = (perf_counter() - scale_started) * 1000.0
 
-            point_cap = min(450, len(X_work))
-            point_idx = np.linspace(0, len(X_work) - 1, num=point_cap, dtype=int) if len(X_work) > point_cap else np.arange(len(X_work))
+            point_cap = min(450, len(X_all))
+            point_idx = np.linspace(0, len(X_all) - 1, num=point_cap, dtype=int) if len(X_all) > point_cap else np.arange(len(X_all))
             entity_column = next(
-                (col for col in (_grain_id_column(grain), "CUSTOMER_ID", "ACCOUNT_ID") if col in meta_work.columns),
+                (col for col in (_grain_id_column(grain), "CUSTOMER_ID", "ACCOUNT_ID") if col in meta_all.columns),
                 None,
             )
 
             def _project_points(labels: np.ndarray, scores: Optional[np.ndarray] = None) -> List[Dict[str, Any]]:
                 rows: List[Dict[str, Any]] = []
                 for idx in point_idx.tolist():
-                    entity_id = meta_work.iloc[idx].get(entity_column) if entity_column else None
+                    entity_id = meta_all.iloc[idx].get(entity_column) if entity_column else None
                     row = {
                         "sample_index": int(idx),
                         "x": round(float(coords[idx, 0]), 4),
                         "y": round(float(coords[idx, 1]), 4),
                         "label": int(labels[idx]) if labels is not None else 0,
-                        "actual": int(y_work.iloc[idx]),
+                        "actual": int(y_all.iloc[idx]),
                         "entity_id": None if pd.isna(entity_id) else str(entity_id),
                     }
                     if scores is not None:
@@ -2059,7 +2989,7 @@ class ModelTrainingService:
                 kmeans_summary.append({
                     "cluster": int(label),
                     "count": int(mask.sum()),
-                    "event_rate_pct": round(float(y_work.loc[mask].mean()) * 100.0, 2),
+                    "event_rate_pct": round(float(y_all.loc[mask].mean()) * 100.0, 2),
                 })
 
             dbscan = DBSCAN(eps=1.15, min_samples=12)
@@ -2079,7 +3009,7 @@ class ModelTrainingService:
                 dbscan_summary.append({
                     "cluster": int(label),
                     "count": int(mask.sum()),
-                    "event_rate_pct": round(float(y_work.loc[mask].mean()) * 100.0, 2) if mask.any() else 0.0,
+                    "event_rate_pct": round(float(y_all.loc[mask].mean()) * 100.0, 2) if mask.any() else 0.0,
                     "is_noise": bool(int(label) == -1),
                 })
 
@@ -2094,12 +3024,12 @@ class ModelTrainingService:
             anomaly_rank = np.argsort(anomaly_scores)[::-1][:12]
             top_anomalies = []
             for idx in anomaly_rank.tolist():
-                entity_id = meta_work.iloc[idx].get(entity_column) if entity_column else None
+                entity_id = meta_all.iloc[idx].get(entity_column) if entity_column else None
                 top_anomalies.append({
                     "sample_index": int(idx),
                     "entity_id": None if pd.isna(entity_id) else str(entity_id),
                     "anomaly_score": round(float(anomaly_scores[idx]), 4),
-                    "actual": int(y_work.iloc[idx]),
+                    "actual": int(y_all.iloc[idx]),
                 })
 
             recommended = "kmeans" if kmeans_silhouette >= max(dbscan_silhouette, 0.15) else ("dbscan" if len(non_noise) >= 2 else "isolation_forest")
@@ -2111,6 +3041,7 @@ class ModelTrainingService:
                     "projection_axes": ["PC1", "PC2"],
                     "explained_variance_ratio": explained_variance,
                     "prep_duration_ms": round(prep_ms, 2),
+                    "split_duration_ms": round(split_ms, 2),
                     "projection_duration_ms": round(scale_ms, 2),
                 },
                 "recommended_technique": recommended,
@@ -2137,24 +3068,8 @@ class ModelTrainingService:
                         "anomaly_rate_pct": round(float(anomaly_flags.mean()) * 100.0, 2),
                     },
                 },
+                **common_payload,
             })
-
-        split_started = perf_counter()
-        indices = np.arange(len(X_work))
-        train_idx, test_idx = train_test_split(
-            indices,
-            test_size=max(0.1, min(float(test_size), 0.5)),
-            random_state=int(random_state),
-            stratify=y_work if stratify and int(y_work.nunique()) > 1 else None,
-        )
-        train_idx = np.asarray(train_idx, dtype=int)
-        test_idx = np.asarray(test_idx, dtype=int)
-        X_train = X_work.iloc[train_idx].reset_index(drop=True)
-        X_test = X_work.iloc[test_idx].reset_index(drop=True)
-        y_train = y_work.iloc[train_idx].reset_index(drop=True)
-        y_test = y_work.iloc[test_idx].reset_index(drop=True)
-        meta_test = meta_work.iloc[test_idx].reset_index(drop=True)
-        split_ms = (perf_counter() - split_started) * 1000.0
 
         if mode_key == "supervised":
             fit_started = perf_counter()
@@ -2223,6 +3138,14 @@ class ModelTrainingService:
                     "internals": internals,
                 },
                 "decision_tree": tree_preview,
+                **{
+                    **common_payload,
+                    "deploy_threshold_policy": _build_deploy_threshold_policy(
+                        metrics.get("threshold_table"),
+                        configured_threshold=BUSINESS_DEFAULT_THRESHOLD,
+                        max_event_loss_pct=AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+                    ),
+                },
             })
 
         scale_started = perf_counter()
@@ -2304,6 +3227,14 @@ class ModelTrainingService:
                     ],
                 },
             },
+            **{
+                **common_payload,
+                "deploy_threshold_policy": _build_deploy_threshold_policy(
+                    metrics.get("threshold_table"),
+                    configured_threshold=BUSINESS_DEFAULT_THRESHOLD,
+                    max_event_loss_pct=AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+                ),
+            },
         })
 
     def _build_supervised_tree_explainer(
@@ -2378,15 +3309,19 @@ class ModelTrainingService:
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
-        split_strategy: str = "random",
+        split_strategy: str = DEFAULT_SPLIT_STRATEGY,
         split_date: Optional[str] = None,
         date_column: str = "ALERT_DATE",
     ) -> None:
-        from sklearn.cluster import DBSCAN, KMeans
+        from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
         from sklearn.decomposition import PCA
         from sklearn.ensemble import IsolationForest
+        from sklearn.metrics import silhouette_score
+        from sklearn.mixture import GaussianMixture
         from sklearn.model_selection import train_test_split
+        from sklearn.neighbors import LocalOutlierFactor
         from sklearn.preprocessing import StandardScaler
+        from sklearn.svm import OneClassSVM
 
         log = self._append_log
         algorithm = str(algorithm or "").strip().lower()
@@ -2415,30 +3350,19 @@ class ModelTrainingService:
         prep_ms = (perf_counter() - prep_started) * 1000.0
         log(job_id, f"Feature matrix ready: {X_enc.shape[1]} features", 0.16)
 
-        split_meta: Dict[str, Any] = {"split_strategy": str(split_strategy or "random").strip().lower()}
         split_started = perf_counter()
-        if split_meta["split_strategy"] == "temporal":
-            if not split_date:
-                raise ValueError("split_date is required when split_strategy='temporal'")
-            date_col = next((c for c in df_enriched.columns if str(c).lower() == str(date_column or "").strip().lower()), None)
-            if not date_col:
-                raise ValueError(f"date_column '{date_column}' not found for temporal split")
-            X_train, X_test, y_train, y_test, split_meta = _temporal_split_features(
-                X_enc,
-                y,
-                df_enriched.loc[X_enc.index, date_col],
-                str(split_date),
-            )
-            split_meta["date_column"] = str(date_col)
-        else:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_enc,
-                y,
-                test_size=test_size,
-                random_state=random_state,
-                stratify=y if (stratify and y.nunique() > 1) else None,
-            )
-            split_meta["test_size"] = float(test_size)
+        X_train, X_test, y_train, y_test, split_meta = _split_dataset(
+            X_enc,
+            y,
+            df_enriched,
+            test_size=test_size,
+            stratify=stratify,
+            random_state=random_state,
+            requested_strategy=str(split_strategy or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY,
+            grain=grain,
+            requested_date_column=date_column,
+            split_date=split_date,
+        )
         split_ms = (perf_counter() - split_started) * 1000.0
         log(job_id, f"Split ready: train {len(X_train):,} / test {len(X_test):,}", 0.24)
 
@@ -2491,28 +3415,92 @@ class ModelTrainingService:
 
         fit_started = perf_counter()
         technique_payload: Dict[str, Any]
+
+        def _safe_silhouette(labels: np.ndarray) -> Optional[float]:
+            label_arr = np.asarray(labels, dtype=int).reshape(-1)
+            unique_labels = np.unique(label_arr)
+            if unique_labels.size < 2 or unique_labels.size >= len(label_arr):
+                return None
+            try:
+                return round(float(silhouette_score(X_all_scaled, label_arr)), 4)
+            except Exception:
+                return None
+
+        def _top_anomalies(scores: np.ndarray) -> List[Dict[str, Any]]:
+            top_rank = np.argsort(scores)[::-1][:12]
+            rows: List[Dict[str, Any]] = []
+            for idx in top_rank.tolist():
+                entity_id = all_meta.iloc[idx].get(entity_column) if entity_column else None
+                rows.append(
+                    {
+                        "sample_index": int(idx),
+                        "entity_id": None if pd.isna(entity_id) else str(entity_id),
+                        "anomaly_score": round(float(scores[idx]), 4),
+                        "actual": int(all_y.iloc[idx]),
+                    }
+                )
+            return rows
+
         if algorithm == "kmeans":
-            model = KMeans(n_clusters=max(2, int(hyperparams.get("n_clusters", 4))), random_state=int(random_state), n_init=10)
+            model = KMeans(
+                n_clusters=max(2, int(hyperparams.get("n_clusters", 4))),
+                random_state=int(random_state),
+                n_init=10,
+            )
             train_labels = model.fit_predict(X_train_scaled)
             test_labels = model.predict(X_test_scaled)
             all_labels = model.predict(X_all_scaled)
-            rate_map = {int(label): float(y_train.loc[train_labels == label].mean()) for label in np.unique(train_labels).tolist()}
+            rate_map = _cluster_rate_lookup(train_labels, y_train)
             base_rate = float(y_train.mean())
             y_prob_test = np.asarray([rate_map.get(int(label), base_rate) for label in test_labels], dtype=float)
-            cluster_summary = [
-                {
-                    "cluster": int(label),
-                    "count": int((all_labels == label).sum()),
-                    "event_rate_pct": round(float(all_y.loc[all_labels == label].mean()) * 100.0, 2),
-                }
-                for label in sorted(np.unique(all_labels).tolist())
-            ]
             technique_payload = {
                 "label": "KMeans",
+                "technique_type": "clustering",
                 "projection": _project_points(all_labels),
-                "cluster_summary": cluster_summary,
-                "silhouette_score": None,
+                "cluster_summary": _cluster_summary_rows(all_labels, all_y),
+                "silhouette_score": _safe_silhouette(all_labels),
                 "inertia": round(float(model.inertia_), 4),
+            }
+        elif algorithm == "gaussian_mixture":
+            model = GaussianMixture(
+                n_components=max(2, int(hyperparams.get("n_components", hyperparams.get("n_clusters", 4)))),
+                covariance_type=str(hyperparams.get("covariance_type", "full")),
+                random_state=int(random_state),
+            )
+            model.fit(X_train_scaled)
+            train_labels = model.predict(X_train_scaled)
+            test_labels = model.predict(X_test_scaled)
+            all_labels = model.predict(X_all_scaled)
+            rate_map = _cluster_rate_lookup(train_labels, y_train)
+            base_rate = float(y_train.mean())
+            y_prob_test = np.asarray([rate_map.get(int(label), base_rate) for label in test_labels], dtype=float)
+            all_membership = model.predict_proba(X_all_scaled)
+            technique_payload = {
+                "label": "Gaussian Mixture",
+                "technique_type": "clustering",
+                "projection": _project_points(all_labels),
+                "cluster_summary": _cluster_summary_rows(all_labels, all_y),
+                "silhouette_score": _safe_silhouette(all_labels),
+                "avg_membership_confidence": round(float(np.max(all_membership, axis=1).mean()), 4),
+            }
+        elif algorithm == "agglomerative_clustering":
+            model = AgglomerativeClustering(
+                n_clusters=max(2, int(hyperparams.get("n_clusters", 4))),
+                linkage=str(hyperparams.get("linkage", "ward")),
+            )
+            train_labels = model.fit_predict(X_train_scaled)
+            test_labels = _assign_nearest_centroid_labels(X_train_scaled, train_labels, X_test_scaled)
+            all_labels = np.concatenate([train_labels, test_labels])
+            rate_map = _cluster_rate_lookup(train_labels, y_train)
+            base_rate = float(y_train.mean())
+            y_prob_test = np.asarray([rate_map.get(int(label), base_rate) for label in test_labels], dtype=float)
+            technique_payload = {
+                "label": "Agglomerative Clustering",
+                "technique_type": "clustering",
+                "projection": _project_points(all_labels),
+                "cluster_summary": _cluster_summary_rows(all_labels, all_y),
+                "silhouette_score": _safe_silhouette(all_labels),
+                "linkage": str(hyperparams.get("linkage", "ward")),
             }
         elif algorithm == "dbscan":
             eps = float(hyperparams.get("eps", 115)) / 100.0
@@ -2533,27 +3521,57 @@ class ModelTrainingService:
 
             test_labels = _predict_dbscan(X_test_scaled)
             all_labels = np.concatenate([train_labels, test_labels])
-            rate_map = {
-                int(label): float(y_train.loc[train_labels == label].mean())
-                for label in np.unique(train_labels).tolist()
-                if np.any(train_labels == label)
-            }
+            rate_map = _cluster_rate_lookup(train_labels, y_train)
             base_rate = float(y_train.mean())
             y_prob_test = np.asarray([rate_map.get(int(label), base_rate) for label in test_labels], dtype=float)
             technique_payload = {
                 "label": "DBSCAN",
+                "technique_type": "clustering",
                 "projection": _project_points(all_labels),
-                "cluster_summary": [
-                    {
-                        "cluster": int(label),
-                        "count": int((all_labels == label).sum()),
-                        "event_rate_pct": round(float(all_y.loc[all_labels == label].mean()) * 100.0, 2) if np.any(all_labels == label) else 0.0,
-                        "is_noise": bool(int(label) == -1),
-                    }
-                    for label in np.unique(all_labels).tolist()
-                ],
-                "silhouette_score": None,
+                "cluster_summary": _cluster_summary_rows(all_labels, all_y),
+                "silhouette_score": _safe_silhouette(all_labels),
                 "noise_count": int((all_labels == -1).sum()),
+            }
+        elif algorithm == "local_outlier_factor":
+            contamination = min(0.25, max(0.01, float(hyperparams.get("contamination_pct", 5)) / 100.0))
+            model = LocalOutlierFactor(
+                n_neighbors=max(5, int(hyperparams.get("n_neighbors", 20))),
+                contamination=contamination,
+                novelty=True,
+            )
+            model.fit(X_train_scaled)
+            train_scores = -np.asarray(model.score_samples(X_train_scaled), dtype=float)
+            test_scores = -np.asarray(model.score_samples(X_test_scaled), dtype=float)
+            all_scores = -np.asarray(model.score_samples(X_all_scaled), dtype=float)
+            anomaly_flags = model.predict(X_all_scaled) == -1
+            y_prob_test = _minmax_normalize(test_scores, float(train_scores.min()), float(train_scores.max()))
+            technique_payload = {
+                "label": "Local Outlier Factor",
+                "technique_type": "anomaly",
+                "projection": _project_points(anomaly_flags.astype(int), all_scores),
+                "score_distribution": _histogram_buckets(all_scores, bins=14),
+                "top_anomalies": _top_anomalies(all_scores),
+                "anomaly_rate_pct": round(float(anomaly_flags.mean()) * 100.0, 2),
+            }
+        elif algorithm == "one_class_svm":
+            model = OneClassSVM(
+                kernel=str(hyperparams.get("kernel", "rbf")),
+                nu=min(0.4, max(0.01, float(hyperparams.get("nu", 0.08)))),
+                gamma=str(hyperparams.get("gamma", "scale")),
+            )
+            model.fit(X_train_scaled)
+            train_scores = -np.asarray(model.decision_function(X_train_scaled), dtype=float).reshape(-1)
+            test_scores = -np.asarray(model.decision_function(X_test_scaled), dtype=float).reshape(-1)
+            all_scores = -np.asarray(model.decision_function(X_all_scaled), dtype=float).reshape(-1)
+            anomaly_flags = model.predict(X_all_scaled) == -1
+            y_prob_test = _minmax_normalize(test_scores, float(train_scores.min()), float(train_scores.max()))
+            technique_payload = {
+                "label": "One-Class SVM",
+                "technique_type": "anomaly",
+                "projection": _project_points(anomaly_flags.astype(int), all_scores),
+                "score_distribution": _histogram_buckets(all_scores, bins=14),
+                "top_anomalies": _top_anomalies(all_scores),
+                "anomaly_rate_pct": round(float(anomaly_flags.mean()) * 100.0, 2),
             }
         else:
             model = IsolationForest(
@@ -2567,20 +3585,12 @@ class ModelTrainingService:
             all_scores = -np.asarray(model.score_samples(X_all_scaled), dtype=float)
             anomaly_flags = model.predict(X_all_scaled) == -1
             y_prob_test = _minmax_normalize(test_scores, float(train_scores.min()), float(train_scores.max()))
-            top_rank = np.argsort(all_scores)[::-1][:12]
             technique_payload = {
                 "label": "Isolation Forest",
+                "technique_type": "anomaly",
                 "projection": _project_points(anomaly_flags.astype(int), all_scores),
                 "score_distribution": _histogram_buckets(all_scores, bins=14),
-                "top_anomalies": [
-                    {
-                        "sample_index": int(idx),
-                        "entity_id": None if pd.isna(all_meta.iloc[idx].get(entity_column)) else str(all_meta.iloc[idx].get(entity_column)),
-                        "anomaly_score": round(float(all_scores[idx]), 4),
-                        "actual": int(all_y.iloc[idx]),
-                    }
-                    for idx in top_rank.tolist()
-                ],
+                "top_anomalies": _top_anomalies(all_scores),
                 "anomaly_rate_pct": round(float(anomaly_flags.mean()) * 100.0, 2),
             }
 
@@ -2708,12 +3718,12 @@ class ModelTrainingService:
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
-        split_strategy: str = "random",
+        split_strategy: str = DEFAULT_SPLIT_STRATEGY,
         split_date: Optional[str] = None,
         date_column: str = "ALERT_DATE",
     ) -> None:
         from sklearn.model_selection import train_test_split
-        from sklearn.neural_network import MLPClassifier
+        from sklearn.neural_network import MLPClassifier, MLPRegressor
         from sklearn.preprocessing import StandardScaler
 
         log = self._append_log
@@ -2742,30 +3752,19 @@ class ModelTrainingService:
         prep_ms = (perf_counter() - prep_started) * 1000.0
         log(job_id, f"Feature matrix ready: {X_enc.shape[1]} features", 0.16)
 
-        split_meta: Dict[str, Any] = {"split_strategy": str(split_strategy or "random").strip().lower()}
         split_started = perf_counter()
-        if split_meta["split_strategy"] == "temporal":
-            if not split_date:
-                raise ValueError("split_date is required when split_strategy='temporal'")
-            date_col = next((c for c in df_enriched.columns if str(c).lower() == str(date_column or "").strip().lower()), None)
-            if not date_col:
-                raise ValueError(f"date_column '{date_column}' not found for temporal split")
-            X_train, X_test, y_train, y_test, split_meta = _temporal_split_features(
-                X_enc,
-                y,
-                df_enriched.loc[X_enc.index, date_col],
-                str(split_date),
-            )
-            split_meta["date_column"] = str(date_col)
-        else:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X_enc,
-                y,
-                test_size=test_size,
-                random_state=random_state,
-                stratify=y if (stratify and y.nunique() > 1) else None,
-            )
-            split_meta["test_size"] = float(test_size)
+        X_train, X_test, y_train, y_test, split_meta = _split_dataset(
+            X_enc,
+            y,
+            df_enriched,
+            test_size=test_size,
+            stratify=stratify,
+            random_state=random_state,
+            requested_strategy=str(split_strategy or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY,
+            grain=grain,
+            requested_date_column=date_column,
+            split_date=split_date,
+        )
         split_ms = (perf_counter() - split_started) * 1000.0
         log(job_id, f"Split ready: train {len(X_train):,} / test {len(X_test):,}", 0.24)
 
@@ -2779,29 +3778,113 @@ class ModelTrainingService:
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
         scale_ms = (perf_counter() - scale_started) * 1000.0
-        hidden_layers = tuple(
-            v for v in (
-                max(8, int(hyperparams.get("hidden_layer_1", 64))),
-                max(4, int(hyperparams.get("hidden_layer_2", 32))),
-            )
-            if v > 0
-        )
-
         fit_started = perf_counter()
-        model = MLPClassifier(
-            hidden_layer_sizes=hidden_layers,
-            activation="relu",
-            solver="adam",
-            max_iter=max(20, int(hyperparams.get("max_iter", 120))),
-            early_stopping=True,
-            validation_fraction=0.15,
-            random_state=int(random_state),
-        )
-        model.fit(X_train_scaled, y_train)
+
+        score_calibration: Optional[Dict[str, float]] = None
+
+        if algorithm == "deep_mlp_classifier":
+            hidden_layers = tuple(
+                v for v in (
+                    max(16, int(hyperparams.get("hidden_layer_1", 128))),
+                    max(8, int(hyperparams.get("hidden_layer_2", 64))),
+                    max(4, int(hyperparams.get("hidden_layer_3", 32))),
+                )
+                if v > 0
+            )
+            model = MLPClassifier(
+                hidden_layer_sizes=hidden_layers,
+                activation="relu",
+                solver="adam",
+                max_iter=max(30, int(hyperparams.get("max_iter", 180))),
+                early_stopping=True,
+                validation_fraction=0.15,
+                random_state=int(random_state),
+            )
+            model.fit(X_train_scaled, y_train)
+            y_prob = _predict_binary_probability(model, pd.DataFrame(X_test_scaled))
+            method_label = "Deep MLP Classifier"
+            architecture_family = "classifier"
+            output_activation = "sigmoid-like calibrated score"
+            curve_rows = [
+                {
+                    "epoch": int(idx + 1),
+                    "loss": round(float(loss), 4),
+                    "validation_score": round(float(model.validation_scores_[idx]), 4)
+                    if idx < len(getattr(model, "validation_scores_", []) or [])
+                    else None,
+                }
+                for idx, loss in enumerate(getattr(model, "loss_curve_", []) or [])
+            ]
+        elif algorithm == "tabular_autoencoder":
+            encoder_width = max(16, int(hyperparams.get("encoder_width", 96)))
+            latent_dim = max(4, int(hyperparams.get("latent_dim", 24)))
+            hidden_layers = (encoder_width, latent_dim, encoder_width)
+            model = MLPRegressor(
+                hidden_layer_sizes=hidden_layers,
+                activation="relu",
+                solver="adam",
+                max_iter=max(30, int(hyperparams.get("max_iter", 180))),
+                early_stopping=True,
+                validation_fraction=0.15,
+                random_state=int(random_state),
+            )
+            model.fit(X_train_scaled, X_train_scaled)
+            train_recon = np.asarray(model.predict(X_train_scaled), dtype=float)
+            test_recon = np.asarray(model.predict(X_test_scaled), dtype=float)
+            train_errors = np.mean(np.square(train_recon - np.asarray(X_train_scaled, dtype=float)), axis=1)
+            test_errors = np.mean(np.square(test_recon - np.asarray(X_test_scaled, dtype=float)), axis=1)
+            score_calibration = {
+                "reconstruction_error_min": float(train_errors.min()),
+                "reconstruction_error_max": float(train_errors.max()),
+            }
+            y_prob = _minmax_normalize(test_errors, float(train_errors.min()), float(train_errors.max()))
+            method_label = "Tabular Autoencoder"
+            architecture_family = "autoencoder"
+            output_activation = "reconstruction error"
+            curve_rows = [
+                {
+                    "epoch": int(idx + 1),
+                    "loss": round(float(loss), 4),
+                    "validation_score": None,
+                }
+                for idx, loss in enumerate(getattr(model, "loss_curve_", []) or [])
+            ]
+        else:
+            hidden_layers = tuple(
+                v for v in (
+                    max(8, int(hyperparams.get("hidden_layer_1", 64))),
+                    max(4, int(hyperparams.get("hidden_layer_2", 32))),
+                )
+                if v > 0
+            )
+            model = MLPClassifier(
+                hidden_layer_sizes=hidden_layers,
+                activation="relu",
+                solver="adam",
+                max_iter=max(20, int(hyperparams.get("max_iter", 120))),
+                early_stopping=True,
+                validation_fraction=0.15,
+                random_state=int(random_state),
+            )
+            model.fit(X_train_scaled, y_train)
+            y_prob = _predict_binary_probability(model, pd.DataFrame(X_test_scaled))
+            method_label = "MLP Classifier"
+            architecture_family = "classifier"
+            output_activation = "sigmoid-like calibrated score"
+            curve_rows = [
+                {
+                    "epoch": int(idx + 1),
+                    "loss": round(float(loss), 4),
+                    "validation_score": round(float(model.validation_scores_[idx]), 4)
+                    if idx < len(getattr(model, "validation_scores_", []) or [])
+                    else None,
+                }
+                for idx, loss in enumerate(getattr(model, "loss_curve_", []) or [])
+            ]
+
         fit_ms = (perf_counter() - fit_started) * 1000.0
         log(job_id, "Neural network fit complete.", 0.62)
 
-        y_prob = _predict_binary_probability(model, pd.DataFrame(X_test_scaled))
         metrics = _classification_preview_metrics(y_test.values, y_prob, threshold=0.5)
         metrics["cv_auc"] = metrics.get("roc_auc")
         metrics["cv_auc_mean"] = metrics.get("roc_auc")
@@ -2809,25 +3892,17 @@ class ModelTrainingService:
         hml_summary = _hml_summary(y_test.values, y_prob, hml_high_threshold, hml_low_threshold)
         log(job_id, "Computed holdout metrics and training curves.", 0.78)
 
-        layer_sizes = [int(X_train.shape[1]), *[int(v) for v in hidden_layers], 1]
+        output_dim = int(X_train.shape[1]) if algorithm == "tabular_autoencoder" else 1
+        layer_sizes = [int(X_train.shape[1]), *[int(v) for v in hidden_layers], output_dim]
         parameter_count = 0
         for coef, intercept in zip(getattr(model, "coefs_", []) or [], getattr(model, "intercepts_", []) or []):
             parameter_count += int(np.size(coef) + np.size(intercept))
-        training_curves = [
-            {
-                "epoch": int(idx + 1),
-                "loss": round(float(loss), 4),
-                "validation_score": round(float(model.validation_scores_[idx]), 4)
-                if idx < len(getattr(model, "validation_scores_", []) or [])
-                else None,
-            }
-            for idx, loss in enumerate(getattr(model, "loss_curve_", []) or [])
-        ]
+        training_curves = curve_rows
         timeline = [
             {"id": "prepare", "label": "Prepare features", "detail": "Encode AML features and align the neural input matrix.", "duration_ms": round(prep_ms, 2), "status": "completed"},
             {"id": "split", "label": "Build train/test split", "detail": "Create the training and holdout partitions.", "duration_ms": round(split_ms, 2), "status": "completed"},
             {"id": "scale", "label": "Standardize features", "detail": "Scale features before neural training.", "duration_ms": round(scale_ms, 2), "status": "completed"},
-            {"id": "fit", "label": "Train MLP classifier", "detail": "Optimize network weights with early stopping.", "duration_ms": round(fit_ms, 2), "status": "completed"},
+            {"id": "fit", "label": f"Train {method_label}", "detail": "Optimize network weights with early stopping.", "duration_ms": round(fit_ms, 2), "status": "completed"},
         ]
 
         artifact_path = self.model_dir / f"{job_id}.pkl"
@@ -2845,6 +3920,7 @@ class ModelTrainingService:
                     "hyperparams": hyperparams,
                     "trained_at": datetime.utcnow().isoformat(),
                     "threshold": 0.5,
+                    "score_calibration": score_calibration,
                 },
                 fh,
                 protocol=pickle.HIGHEST_PROTOCOL,
@@ -2852,12 +3928,13 @@ class ModelTrainingService:
         log(job_id, f"[OK] Artefact saved: {artifact_path.name}", 0.90)
 
         method_payload = {
-            "label": "MLP Classifier",
+            "label": method_label,
+            "method_type": architecture_family,
             "metrics": metrics,
             "architecture": {
                 "input_dim": int(X_train.shape[1]),
                 "hidden_layers": [int(v) for v in hidden_layers],
-                "output_dim": 1,
+                "output_dim": output_dim,
                 "activation": "relu",
                 "solver": "adam",
                 "parameter_count": int(parameter_count),
@@ -2870,11 +3947,24 @@ class ModelTrainingService:
                     {"layer": f"Hidden {idx + 1}", "units": units, "activation": "relu"}
                     for idx, units in enumerate(layer_sizes[1:-1])
                 ],
-                {"layer": "Output", "units": 1, "activation": "sigmoid-like calibrated score"},
+                {"layer": "Output", "units": layer_sizes[-1], "activation": output_activation},
             ],
             "training_curves": training_curves,
             "timeline": timeline,
         }
+        if algorithm == "tabular_autoencoder":
+            test_recon = np.asarray(model.predict(X_test_scaled), dtype=float)
+            recon_errors = np.mean(np.square(test_recon - np.asarray(X_test_scaled, dtype=float)), axis=1)
+            method_payload["reconstruction_distribution"] = _histogram_buckets(recon_errors, bins=12)
+            top_idx = np.argsort(recon_errors)[::-1][:12]
+            method_payload["top_reconstruction_cases"] = [
+                {
+                    "sample_index": int(idx),
+                    "reconstruction_error": round(float(recon_errors[idx]), 4),
+                    "actual": int(y_test.iloc[idx]),
+                }
+                for idx in top_idx.tolist()
+            ]
 
         result = {
             "job_id": job_id,
@@ -2963,7 +4053,8 @@ class ModelTrainingService:
                     SELECT result_json, metrics_json, feature_diagnostics_json,
                            selected_threshold, algorithm, target_column,
                            artifact_path, dataset_id, trained_at,
-                           grain, hml_high_threshold, hml_low_threshold
+                           grain, hml_high_threshold, hml_low_threshold,
+                           validation_json
                     FROM model_training_runs WHERE job_id = ?
                     """,
                     [job_id],
@@ -2974,12 +4065,18 @@ class ModelTrainingService:
         if not row:
             return None
         result_json = row[0]
+        try:
+            validation = json.loads(row[12] or "{}")
+        except Exception:
+            validation = {}
         if result_json:
             try:
                 result = json.loads(result_json)
                 if isinstance(result, dict):
                     for k in ("_y_test","_y_prob","_X_train","_y_train","_X_val","_y_val"):
                         result.pop(k, None)
+                    if isinstance(validation, dict) and validation:
+                        result["validation"] = validation
                     return result
             except Exception:
                 pass
@@ -3004,6 +4101,7 @@ class ModelTrainingService:
             "hml_low_threshold":  float(row[11]) if row[11] is not None else 0.35,
             "metrics":            metrics,
             "feature_diagnostics":feature_diagnostics,
+            "validation":         validation if isinstance(validation, dict) else {},
         }
 
     def _load_scores(self, job_id: str) -> Tuple[np.ndarray, np.ndarray]:
@@ -3162,7 +4260,7 @@ class ModelTrainingService:
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
-        split_strategy: str = "random",
+        split_strategy: str = DEFAULT_SPLIT_STRATEGY,
         split_date: Optional[str] = None,
         date_column: str = "ALERT_DATE",
     ) -> str:
@@ -3226,7 +4324,7 @@ class ModelTrainingService:
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
-        split_strategy: str = "random",
+        split_strategy: str = DEFAULT_SPLIT_STRATEGY,
         split_date: Optional[str] = None,
         date_column: str = "ALERT_DATE",
     ) -> None:
@@ -3302,17 +4400,10 @@ class ModelTrainingService:
                         f"[grain={grain}, id_col={id_col}]", 0.06)
 
             if target_column not in df.columns:
-                if str(target_column).strip().lower() == "is_true_pos":
-                    final_col = next((c for c in df.columns if str(c).strip().lower() == "final_label"), None)
-                    if final_col:
-                        log(
-                            job_id,
-                            "[Target fallback] 'IS_TRUE_POS' missing; using 'FINAL_LABEL' derived target.",
-                            0.065,
-                        )
-                        target_column = str(final_col)
-                if target_column not in df.columns:
-                    raise ValueError(f"Target column '{target_column}' not found in dataset")
+                raise ValueError(
+                    f"Target column '{target_column}' not found in dataset. "
+                    "FCC now requires one explicit canonical target and no silent alias fallback."
+                )
             if df[target_column].nunique() < 2:
                 raise ValueError(f"Target column '{target_column}' has fewer than 2 unique values")
 
@@ -3326,7 +4417,7 @@ class ModelTrainingService:
                 log(job_id, f"[Warning] ID column '{id_col}' not found in dataset "
                             f"— scoring ledger will use row index.", 0.08)
 
-            split_strategy_l = str(split_strategy or "random").strip().lower()
+            split_strategy_l = str(split_strategy or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY
 
             # ── 2. AML feature enrichment + feature matrix ───────────────────
             prep_started = perf_counter()
@@ -3347,37 +4438,29 @@ class ModelTrainingService:
 
             # ── 3. Train / test split ─────────────────────────────────────────
             split_started = perf_counter()
-            split_meta: Dict[str, Any] = {"split_strategy": split_strategy_l}
-            if split_strategy_l == "temporal":
-                if not split_date:
-                    raise ValueError("split_date is required when split_strategy='temporal'")
-                date_col = next(
-                    (c for c in df_enriched.columns if str(c).lower() == str(date_column or "").strip().lower()),
-                    None,
-                )
-                if not date_col:
-                    raise ValueError(f"date_column '{date_column}' not found for temporal split")
-                log(job_id, f"Temporal split on {date_col} at {split_date}...", 0.22)
-                date_series = df_enriched.loc[X_enc.index, date_col]
-                X_train, X_test, y_train, y_test, split_meta = _temporal_split_features(
-                    X_enc,
-                    y,
-                    date_series,
-                    str(split_date),
-                )
-                split_meta["date_column"] = str(date_col)
-                log(job_id, f"Temporal split complete (train<{split_meta.get('split_date')} / test>={split_meta.get('split_date')}).", 0.245)
+            X_train, X_test, y_train, y_test, split_meta = _split_dataset(
+                X_enc,
+                y,
+                df_enriched,
+                test_size=test_size,
+                stratify=stratify,
+                random_state=random_state,
+                requested_strategy=split_strategy_l,
+                grain=grain,
+                requested_date_column=date_column,
+                split_date=split_date,
+            )
+            if split_meta.get("split_strategy") == "temporal":
+                log(job_id, f"Temporal split on {split_meta.get('date_column')} at {split_meta.get('split_date')}...", 0.22)
             else:
                 log(job_id, f"Random split: {int((1-test_size)*100)}% train / {int(test_size*100)}% test...", 0.22)
-                strat_y = y if (stratify and y.nunique() > 1) else None
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X_enc, y, test_size=test_size,
-                    random_state=random_state, stratify=strat_y,
+            if split_meta.get("auto_selected"):
+                log(
+                    job_id,
+                    f"[Notebook parity] Auto-selected {split_meta.get('split_strategy')} split using "
+                    f"{split_meta.get('date_column') or 'available features only'}.",
+                    0.235,
                 )
-                split_meta.update({
-                    "split_strategy": "random",
-                    "test_size": float(test_size),
-                })
 
             log(job_id, f"Train: {len(X_train):,}  ·  Test: {len(X_test):,}  "
                         f"[TP in train: {int(y_train.sum()):,} | TP in test: {int(y_test.sum()):,}]", 0.25)
@@ -3667,6 +4750,30 @@ class ModelTrainingService:
                 score_override=y_prob_arr,
             )
             explain_ms = (perf_counter() - explain_started) * 1000.0 if decision_tree else 0.0
+            deploy_threshold_policy = _build_deploy_threshold_policy(
+                threshold_table,
+                configured_threshold=BUSINESS_DEFAULT_THRESHOLD,
+                max_event_loss_pct=AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+            )
+            selected_threshold_row = _closest_threshold_row(threshold_table, BUSINESS_DEFAULT_THRESHOLD)
+            suppressed_cases_preview, decision_reason_summary = _build_suppressed_cases_preview(
+                X_test.reset_index(drop=True),
+                y_test.reset_index(drop=True),
+                y_prob_arr,
+                meta_test,
+                feature_importance,
+                threshold=BUSINESS_DEFAULT_THRESHOLD,
+            )
+            quality_review = _assess_run_quality(
+                y_true=y_true_arr,
+                y_prob=y_prob_arr,
+                feature_names=feature_names,
+                target_column=target_column,
+                feature_diag=feature_diag,
+                metrics={"roc_auc": auc, "pr_auc": pr_auc},
+            )
+            if quality_review.get("blocking"):
+                log(job_id, "[Quality guard] Review required before deploy: suspicious model behaviour detected.", 0.895)
 
             # ── 11. Save artefact ──────────────────────────────────────────────
             log(job_id, "Saving model artefact (.pkl)...", 0.92)
@@ -3691,7 +4798,7 @@ class ModelTrainingService:
                         "split_date":          split_meta.get("split_date"),
                         "date_column":         split_meta.get("date_column"),
                         "trained_at":          datetime.utcnow().isoformat(),
-                        "threshold":           hml_low_threshold,
+                        "threshold":           BUSINESS_DEFAULT_THRESHOLD,
                     },
                     fh, protocol=pickle.HIGHEST_PROTOCOL,
                 )
@@ -3718,7 +4825,11 @@ class ModelTrainingService:
                 "train_rows":          int(len(X_train)),
                 "test_rows":           int(len(X_test)),
                 "features_used":       int(len(feature_names)),
-                "selected_threshold":  hml_low_threshold,
+                "selected_threshold":  BUSINESS_DEFAULT_THRESHOLD,
+                "configured_threshold": BUSINESS_DEFAULT_THRESHOLD,
+                "deployable_threshold": deploy_threshold_policy.get("deployable_threshold"),
+                "threshold_band_min":  DEPLOYABLE_THRESHOLD_MIN,
+                "threshold_band_max":  DEPLOYABLE_THRESHOLD_MAX,
                 "cv_folds":            cv_folds,
                 "trained_at":          datetime.utcnow().isoformat(),
                 "artifact_path":       str(artifact_path),
@@ -3761,6 +4872,7 @@ class ModelTrainingService:
                     "optimized_threshold": optimized_threshold,
                     "improvement_vs_baseline": improvement,
                     "max_event_loss_pct_constraint": AML_EVENT_LOSS_MAX_PCT_DEFAULT,
+                    "selected_threshold_row": selected_threshold_row,
                 },
                 "hml_summary":         hml_result,
                 "selected_algorithm": {
@@ -3784,6 +4896,10 @@ class ModelTrainingService:
                 "model_internals":     internals,
                 "feature_importance":  feature_importance,
                 "feature_diagnostics": feature_diag,
+                "deploy_threshold_policy": deploy_threshold_policy,
+                "decision_reason_summary": decision_reason_summary,
+                "suppressed_cases_preview": suppressed_cases_preview,
+                "quality_review": quality_review,
                 # Private — used by rescore_*, stripped from API responses
                 "_y_test":  y_true_arr.tolist(),
                 "_y_prob":  y_prob_arr.tolist(),
@@ -3817,7 +4933,7 @@ class ModelTrainingService:
                     test_truth=y_true_arr.tolist(),
                     test_prob=y_prob_arr.tolist(),
                     feature_diagnostics=feature_diag,
-                    selected_threshold=hml_low_threshold,
+                    selected_threshold=BUSINESS_DEFAULT_THRESHOLD,
                     artifact_path=str(artifact_path),
                     internals=internals,
                 )
@@ -3825,18 +4941,19 @@ class ModelTrainingService:
                 logger.warning("Non-fatal DB persistence failure: %s", db_exc)
 
             # Auto-generate a business run report (non-fatal if it fails).
-            try:
-                from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
+            if self.db_path is not None:
+                try:
+                    from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 
-                report_svc = MLOpsWorkbenchService(Path(self.db_path))
-                report_svc.generate_run_report(
-                    tenant_id=str(tenant_id),
-                    env_id=str(env_id),
-                    run_id=str(job_id),
-                    pipeline_id=None,
-                )
-            except Exception as report_err:
-                logger.warning("Run report generation failed for %s: %s", job_id, report_err)
+                    report_svc = MLOpsWorkbenchService(Path(self.db_path))
+                    report_svc.generate_run_report(
+                        tenant_id=str(tenant_id),
+                        env_id=str(env_id),
+                        run_id=str(job_id),
+                        pipeline_id=None,
+                    )
+                except Exception as report_err:
+                    logger.warning("Run report generation failed for %s: %s", job_id, report_err)
 
             with self._store_lock:
                 self._job_store[job_id]["result"]        = result
@@ -3902,6 +5019,19 @@ class ModelTrainingService:
                     )
             except Exception as exc:
                 logger.warning("Failed to persist threshold for %s: %s", job_id, exc)
+
+        try:
+            self.persist_validation_payload(
+                job_id,
+                {
+                    "selected_threshold": float(out["threshold"]),
+                    "locked_threshold": float(out["threshold"]),
+                    "active_threshold_metrics": dict(out),
+                },
+                merge=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist validation threshold state for %s: %s", job_id, exc)
 
         return out
 
@@ -3978,8 +5108,7 @@ class ModelTrainingService:
         fp = self._resolve_file_path(Path(artifact_path))
         if not fp.exists():
             raise FileNotFoundError(f"Artefact not found: {fp}")
-        with open(fp, "rb") as f:
-            bundle = pickle.load(f)
+        bundle = load_pickle_compat(fp)
         model         = bundle["model"]
         feature_names = bundle.get("feature_columns", [])
         algorithm     = bundle.get("algorithm", "unknown")
@@ -4030,8 +5159,7 @@ class ModelTrainingService:
         if not fp.exists():
             raise FileNotFoundError(f"Model artefact not found: {fp}")
 
-        with open(fp, "rb") as f:
-            bundle = pickle.load(f)
+        bundle = load_pickle_compat(fp)
 
         model         = bundle["model"]
         feature_cols  = bundle.get("feature_columns", [])
@@ -4290,8 +5418,57 @@ class ModelTrainingService:
         target_suppression_pct: Optional[float] = None,
         target_tolerance_pct: float = 2.0,
     ) -> Dict:
-        y_true, y_prob = self._load_scores(job_id)
-        table = _build_threshold_table(y_true, y_prob, thresholds)
+        result = self.get_job_result(job_id) or {}
+        metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}
+
+        def _normalize_saved_threshold_table(rows: Any) -> List[Dict[str, Any]]:
+            normalized: List[Dict[str, Any]] = []
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    continue
+                threshold_value = row.get("threshold")
+                if threshold_value is None:
+                    continue
+                try:
+                    threshold_float = float(threshold_value)
+                except Exception:
+                    continue
+                suppression_pct = row.get("suppression_rate_pct")
+                suppression_rate = row.get("suppression_rate")
+                if suppression_pct is None and suppression_rate is not None:
+                    suppression_pct = suppression_rate
+                if suppression_rate is None and suppression_pct is not None:
+                    suppression_rate = suppression_pct
+                normalized.append({
+                    **row,
+                    "threshold": threshold_float,
+                    "suppression_rate_pct": float(suppression_pct or 0.0),
+                    "suppression_rate": float(suppression_rate or 0.0),
+                    "event_loss_pct": float(row.get("event_loss_pct") or 0.0),
+                    "precision": float(row.get("precision")) if row.get("precision") is not None else None,
+                    "recall": float(row.get("recall")) if row.get("recall") is not None else None,
+                    "f1": float(row.get("f1")) if row.get("f1") is not None else None,
+                    "accuracy": float(row.get("accuracy")) if row.get("accuracy") is not None else None,
+                    "balanced_accuracy": float(row.get("balanced_accuracy")) if row.get("balanced_accuracy") is not None else None,
+                    "specificity": float(row.get("specificity")) if row.get("specificity") is not None else None,
+                    "tn": int(row.get("tn") or 0),
+                    "fp": int(row.get("fp") or 0),
+                    "fn": int(row.get("fn") or 0),
+                    "tp": int(row.get("tp") or 0),
+                })
+            normalized.sort(key=lambda item: float(item.get("threshold") or 0.0))
+            return normalized
+
+        try:
+            y_true, y_prob = self._load_scores(job_id)
+            table = _build_threshold_table(y_true, y_prob, thresholds)
+        except Exception:
+            saved_validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+            saved_report = saved_validation.get("report") if isinstance(saved_validation.get("report"), dict) else {}
+            fallback_table = metrics.get("threshold_table") or result.get("threshold_table") or saved_report.get("threshold_table")
+            table = _normalize_saved_threshold_table(fallback_table)
+            if not table:
+                raise
 
         valid_loss = [r for r in table if r["event_loss_pct"] <= max_event_loss_pct]
         if target_suppression_pct is not None:
@@ -4349,10 +5526,24 @@ class ModelTrainingService:
             target_gap_pct = float(optimal_row["suppression_rate"] - target_suppression_pct)
             target_within_tolerance = abs(target_gap_pct) <= target_tolerance_pct
 
+        configured_threshold = float(result.get("selected_threshold") or BUSINESS_DEFAULT_THRESHOLD)
+        deploy_policy = _build_deploy_threshold_policy(
+            table,
+            configured_threshold=configured_threshold,
+            max_event_loss_pct=max_event_loss_pct,
+        )
+        deployable_row = dict(deploy_policy.get("selected_row") or {})
+
         out = {
             "job_id":              job_id,
             "threshold_table":     table,
             "optimal_threshold":   optimal_row["threshold"] if optimal_row else None,
+            "configured_threshold": configured_threshold,
+            "selected_threshold": configured_threshold,
+            "locked_threshold": configured_threshold,
+            "deployable_threshold": deploy_policy.get("deployable_threshold"),
+            "threshold_band_min":   DEPLOYABLE_THRESHOLD_MIN,
+            "threshold_band_max":   DEPLOYABLE_THRESHOLD_MAX,
             "max_event_loss_pct":  max_event_loss_pct,
             "optimization_mode":   optimization_mode,
             "optimal_suppression_rate": optimal_row["suppression_rate"] if optimal_row else None,
@@ -4362,6 +5553,7 @@ class ModelTrainingService:
             "target_suppression_pct": target_suppression_pct,
             "target_gap_pct": target_gap_pct,
             "target_within_tolerance": target_within_tolerance,
+            "deployable_threshold_row": deployable_row,
         }
         if optimal_row is not None:
             out.update({
@@ -4377,7 +5569,92 @@ class ModelTrainingService:
                     [optimal_row.get("fn", 0), optimal_row.get("tp", 0)],
                 ],
             })
+        try:
+            self.persist_validation_payload(
+                job_id,
+                {
+                    "report": dict(out),
+                    "selected_threshold": configured_threshold,
+                    "locked_threshold": configured_threshold,
+                    "recommended_threshold": out.get("optimal_threshold"),
+                    "max_event_loss_pct": max_event_loss_pct,
+                    "optimization_mode": optimization_mode,
+                },
+                merge=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist validation report for %s: %s", job_id, exc)
         return out
+
+    def persist_validation_payload(
+        self,
+        job_id: str,
+        payload: Dict[str, Any],
+        *,
+        merge: bool = True,
+    ) -> Dict[str, Any]:
+        if not job_id:
+            raise ValueError("job_id is required")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be a dict")
+        next_payload = dict(payload)
+
+        with self._store_lock:
+            job = self._job_store.get(job_id)
+            if job is not None and job.get("status") == "complete":
+                result = job.get("result") if isinstance(job.get("result"), dict) else {}
+                existing = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+                next_payload = {**existing, **next_payload} if merge else dict(next_payload)
+                result["validation"] = next_payload
+                selected_threshold = next_payload.get("selected_threshold")
+                if selected_threshold is not None:
+                    try:
+                        result["selected_threshold"] = float(selected_threshold)
+                    except Exception:
+                        pass
+
+        if self.db_path is not None:
+            try:
+                with get_connection(str(self.db_path)) as conn:
+                    row = conn.execute(
+                        "SELECT validation_json FROM model_training_runs WHERE job_id=?",
+                        [job_id],
+                    ).fetchone()
+                    existing_db = {}
+                    if row and row[0]:
+                        try:
+                            existing_db = json.loads(row[0] or "{}")
+                        except Exception:
+                            existing_db = {}
+                    stored_payload = {**existing_db, **next_payload} if merge else dict(next_payload)
+                    selected_threshold = (
+                        stored_payload.get("selected_threshold")
+                        if stored_payload.get("selected_threshold") is not None
+                        else stored_payload.get("locked_threshold")
+                    )
+                    if selected_threshold is not None:
+                        conn.execute(
+                            """
+                            UPDATE model_training_runs
+                            SET validation_json=?, selected_threshold=?, updated_at=CURRENT_TIMESTAMP
+                            WHERE job_id=?
+                            """,
+                            [json.dumps(stored_payload, default=str), float(selected_threshold), job_id],
+                        )
+                    else:
+                        conn.execute(
+                            """
+                            UPDATE model_training_runs
+                            SET validation_json=?, updated_at=CURRENT_TIMESTAMP
+                            WHERE job_id=?
+                            """,
+                            [json.dumps(stored_payload, default=str), job_id],
+                        )
+                    next_payload = stored_payload
+            except Exception as exc:
+                logger.warning("Failed to persist validation payload for %s: %s", job_id, exc)
+
+        return next_payload
 
     # ── Registry methods (existing — enhanced with grain & HML) ───────────────
 
@@ -4517,7 +5794,7 @@ class ModelTrainingService:
         resolved_source = str(source or "trained").strip().lower() or "trained"
 
         stage = str(stage or "candidate").strip().lower()
-        if stage not in {"candidate","challenger","champion","archived","deployed"}:
+        if stage not in {"draft","candidate","challenger","champion","archived","deployed"}:
             stage = "candidate"
 
         if self.db_path is None:
@@ -4811,7 +6088,7 @@ class ModelTrainingService:
         changed_by: str = "",
     ) -> Dict:
         stage = str(stage or "").strip().lower()
-        if stage not in {"candidate","challenger","champion","archived","deployed"}:
+        if stage not in {"draft","candidate","challenger","champion","archived","deployed"}:
             raise ValueError("Invalid registry stage")
         if self.db_path is None:
             key = self._registry_mem_key(tenant_id, env_id, job_id)
@@ -5049,8 +6326,7 @@ class ModelTrainingService:
         if not dataset_file_path.exists():
             raise FileNotFoundError(f"Dataset file not found: {dataset_file_path}")
 
-        with open(raw_fp, "rb") as fh:
-            uploaded_obj = pickle.load(fh)
+        uploaded_obj = load_pickle_compat(raw_fp)
 
         if isinstance(uploaded_obj, dict) and "model" in uploaded_obj:
             model = uploaded_obj.get("model")
@@ -5310,8 +6586,83 @@ class ModelTrainingService:
         dataset_id: Optional[int] = None,
         limit: int = 200,
     ) -> List[Dict]:
+        def _artifact_run_rows(max_items: int) -> List[Dict[str, Any]]:
+            discovered: List[Dict[str, Any]] = []
+            suspicious_exact = {
+                "label",
+                "labels",
+                "actual_label",
+                "final_label",
+                "is_true_pos",
+                "target",
+                "target_label",
+                "str_label",
+                "ground_truth",
+                "prior_sar_rate",
+                "prior_str_rate",
+            }
+            suspicious_pattern = re.compile(r"(?:^|_)(label|target|truth)(?:$|_)")
+
+            for path in sorted(self.model_dir.glob("*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True):
+                try:
+                    bundle = load_pickle_compat(path)
+                except Exception:
+                    continue
+                if not isinstance(bundle, dict) or "model" not in bundle:
+                    continue
+
+                feature_columns = [str(v) for v in list(bundle.get("feature_columns") or [])]
+                leakage_features = sorted(
+                    {
+                        feat for feat in feature_columns
+                        if _normalize_feature_token(feat) in suspicious_exact
+                        or suspicious_pattern.search(_normalize_feature_token(feat))
+                        or _is_known_label_leakage_feature(str(feat), str(bundle.get("target_column") or ""))
+                    }
+                )
+                trained_at = bundle.get("trained_at")
+                if hasattr(trained_at, "isoformat"):
+                    trained_at = trained_at.isoformat()
+                elif trained_at is None:
+                    trained_at = datetime.utcfromtimestamp(path.stat().st_mtime).isoformat() + "Z"
+
+                quality_flags: List[str] = []
+                if leakage_features:
+                    quality_flags.append("label_leakage_features_present")
+
+                discovered.append(
+                    {
+                        "job_id": path.stem,
+                        "algorithm": bundle.get("algorithm") or type(bundle.get("model")).__name__,
+                        "target_column": bundle.get("target_column"),
+                        "metrics": {},
+                        "selected_threshold": float(bundle.get("threshold")) if bundle.get("threshold") is not None else None,
+                        "trained_at": trained_at,
+                        "registry_stage": None,
+                        "grain": bundle.get("grain") or "alert",
+                        "hml_high_threshold": float(bundle.get("hml_high_threshold")) if bundle.get("hml_high_threshold") is not None else 0.65,
+                        "hml_low_threshold": float(bundle.get("hml_low_threshold")) if bundle.get("hml_low_threshold") is not None else 0.35,
+                        "optimal_threshold": None,
+                        "suppression_rate_pct": None,
+                        "event_loss_pct": None,
+                        "precision": None,
+                        "recall": None,
+                        "f1": None,
+                        "specificity": None,
+                        "accuracy": None,
+                        "balanced_accuracy": None,
+                        "feature_count": len(feature_columns),
+                        "leakage_features": leakage_features,
+                        "quality_flags": quality_flags,
+                        "artifact_source": "model_dir_scan",
+                    }
+                )
+            return discovered
+
         if self.db_path is None:
-            return []
+            return _artifact_run_rows(limit)
+
+        rows = []
         try:
             with get_connection(str(self.db_path)) as conn:
                 params: List[Any] = [tenant_id, env_id]
@@ -5332,9 +6683,8 @@ class ModelTrainingService:
                 ).fetchall()
         except Exception as exc:
             logger.warning("list_runs failed: %s", exc)
-            return []
 
-        out = []
+        out: List[Dict[str, Any]] = []
         for r in rows:
             try:
                 metrics = json.loads(r[3] or "{}")
@@ -5377,7 +6727,30 @@ class ModelTrainingService:
                 "accuracy":           metrics.get("accuracy"),
                 "balanced_accuracy":  metrics.get("balanced_accuracy"),
             })
-        return out
+
+        artifact_rows = _artifact_run_rows(limit)
+        by_job_id: Dict[str, Dict[str, Any]] = {str(row.get("job_id") or ""): row for row in out}
+        for artifact_row in artifact_rows:
+            job_id = str(artifact_row.get("job_id") or "")
+            existing = by_job_id.get(job_id)
+            if existing is not None:
+                existing.setdefault("feature_count", artifact_row.get("feature_count"))
+                existing.setdefault("leakage_features", artifact_row.get("leakage_features") or [])
+                existing.setdefault("quality_flags", artifact_row.get("quality_flags") or [])
+                existing.setdefault("artifact_source", artifact_row.get("artifact_source"))
+                if existing.get("selected_threshold") is None:
+                    existing["selected_threshold"] = artifact_row.get("selected_threshold")
+                if not existing.get("grain"):
+                    existing["grain"] = artifact_row.get("grain") or "alert"
+                continue
+            out.append(artifact_row)
+            by_job_id[job_id] = artifact_row
+
+        out.sort(key=lambda row: str(row.get("trained_at") or ""), reverse=True)
+        out.sort(
+            key=lambda row: 1 if "label_leakage_features_present" in list(row.get("quality_flags") or []) else 0
+        )
+        return out[: int(limit)]
 
     # ── DB persistence (enhanced) ──────────────────────────────────────────────
 

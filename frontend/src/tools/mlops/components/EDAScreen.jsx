@@ -1130,12 +1130,31 @@ const TABS = [
 // ============================================================================
 // ROOT COMPONENT
 // ============================================================================
-const EDAScreen = ({ persona: propPersona, datasets=[], masterDataset, targetColumn:propTarget, onEdaDone, edaDone = false }) => {
-  const [tab,          setTab]          = useState('dashboard');
+const EDAScreen = ({
+  persona: propPersona,
+  datasets = [],
+  masterDataset,
+  targetColumn: propTarget,
+  onEdaDone,
+  edaDone = false,
+  initialTab = 'dashboard',
+  onTabChange,
+}) => {
+  const [tab,          setTab]          = useState(initialTab || 'dashboard');
   const [localTarget,  setLocalTarget]  = useState(propTarget||'');
   const [viewMode,     setViewMode]     = useState(propPersona==='business' ? 'business' : 'analyst');
   const [showQualityNote, setShowQualityNote] = useState(false);
   const [compactHeader, setCompactHeader] = useState(true);
+
+  useEffect(() => {
+    const next = String(initialTab || 'dashboard').trim();
+    if (!next) return;
+    setTab((prev) => (prev === next ? prev : next));
+  }, [initialTab]);
+
+  useEffect(() => {
+    onTabChange?.(tab);
+  }, [onTabChange, tab]);
 
   const masterDs = masterDataset || datasets.find(d =>
     d.dataset_type==='master_dataset' || d.dataset_type?.startsWith('master')

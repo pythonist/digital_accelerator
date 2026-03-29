@@ -15,7 +15,8 @@ import {
   Alert, Box, Button, Chip, CircularProgress,
   Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, InputLabel, MenuItem, Paper,
-  Select, Stack, Tab, Tabs, TextField, Tooltip,
+  Select, Stack, Tab, Tabs, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow,
   Typography,
 } from '@mui/material';
 import {
@@ -27,7 +28,6 @@ import {
   Tooltip as RTooltip, XAxis, YAxis,
 } from 'recharts';
 import mlopsApi from '../services/mlopsApi';
-import ScreenPipelineRail from './ScreenPipelineRail';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
 import { FCC_THEME as T } from '../theme/fccWorkbenchTheme';
 
@@ -53,19 +53,91 @@ const D = {
   panelAlt:    T.panelAlt,
 };
 
-const fmt     = (n) => (n == null ? '-' : Number(n).toLocaleString());
-const fmtPct  = (v) => `${(Number(v || 0) * 100).toFixed(1)}%`;
+const fmt = (n) => (n == null ? '-' : Number(n).toLocaleString());
+const fmtPct = (v) => `${(Number(v || 0) * 100).toFixed(1)}%`;
+const normalizeToken = (value = '') => String(value || '').trim().toLowerCase();
+const unwrapApiPayload = (payload) => payload?.data?.data || payload?.data || payload || {};
 
 // ── ID column detection ───────────────────────────────────────────────────────
 const ID_PATTERNS = ['_id', 'transaction_id', 'account_id', 'customer_id',
   'case_id', 'alert_id', 'entity_id', 'ref_no', 'uuid', 'guid'];
+const OUTCOME_PRIORITY_COLUMNS = ['is_true_pos', 'final_label', 'str_label', 'is_generated_target', 'target'];
+const DERIVED_OUTCOME_PATTERNS = ['is_true_pos', 'final_label', 'str_label', 'is_generated_target', 'target'];
+const CASE_DECISION_PATTERNS = ['case_status', 'case_disposition', 'disposition', 'resolution', 'outcome', 'sar_filed', 'str_filed'];
+const RISK_INDICATOR_PATTERNS = [
+  'pep', 'adverse', 'media', 'correspondent', 'risk', 'sanction',
+  'watchlist', 'high_risk', 'country', 'geo', 'segment', 'customer_type',
+  'account_type', 'occupation', 'rule_score', 'alert_score',
+];
+const POSITIVE_OUTCOME_TOKENS = new Set([
+  '1', 'true', 'yes', 'y', 'sar filed', 'sar_filed',
+  'closed_sar_filed', 'true_positive', 'escalated', 'escalation', 'confirmed escalation',
+]);
+const NEGATIVE_OUTCOME_TOKENS = new Set([
+  '0', 'false', 'no', 'n', 'false_positive', 'closed_false_positive',
+  'closed monitoring', 'closed_monitoring', 'monitoring', 'monitoring closure',
+]);
+const OPEN_OUTCOME_TOKENS = new Set([
+  '', '(missing)', 'missing', 'nan', 'null', 'none', 'open',
+  'unresolved', 'pending', 'in progress', 'unknown',
+]);
 
 const isIdColumn = (name = '') => {
-  const n = name.toLowerCase();
+  const n = normalizeToken(name);
   return n === 'id'
     || ID_PATTERNS.some((p) => n.includes(p))
     || (n.endsWith('_id') && n.length > 3);
 };
+
+const isDerivedOutcomeColumn = (name = '') => {
+  const token = normalizeToken(name);
+  return DERIVED_OUTCOME_PATTERNS.some((pattern) => token.includes(pattern));
+};
+
+const isCaseDecisionColumn = (name = '', detected = null) => {
+  const token = normalizeToken(name);
+  return Boolean(detected?.is_label_source) || CASE_DECISION_PATTERNS.some((pattern) => token.includes(pattern));
+};
+
+const isRiskIndicatorColumn = (name = '') => {
+  const token = normalizeToken(name);
+  if (!token || isIdColumn(token) || isDerivedOutcomeColumn(token) || isCaseDecisionColumn(token)) return false;
+  return RISK_INDICATOR_PATTERNS.some((pattern) => token.includes(pattern));
+};
+
+const FIELD_ROLE_META = {
+  system_outcome: {
+    label: 'System-created outcome',
+    description: 'Final Yes/No investigation outcome used for learning.',
+    chipSx: { bgcolor: D.greenBg, color: D.green, borderColor: D.green },
+  },
+  case_decision_source: {
+    label: 'Case decision source',
+    description: 'Read by the system and converted into the final learning outcome.',
+    chipSx: { bgcolor: D.blueBg, color: D.blue, borderColor: D.infoBorder },
+  },
+  risk_indicator: {
+    label: 'Risk indicator',
+    description: 'Useful as context or predictor, not as the final investigation outcome.',
+    chipSx: { bgcolor: D.amberBg, color: D.amber, borderColor: '#d4b483' },
+  },
+  candidate: {
+    label: 'Review field',
+    description: 'Available in the master dataset, but not clearly a final case decision.',
+    chipSx: { bgcolor: '#f8fafc', color: D.text, borderColor: D.border },
+  },
+};
+
+const getFieldRole = (column, detected = null) => {
+  const name = String(column?.name || '');
+  if (isDerivedOutcomeColumn(name)) return 'system_outcome';
+  if (isCaseDecisionColumn(name, detected)) return 'case_decision_source';
+  if (isRiskIndicatorColumn(name)) return 'risk_indicator';
+  if ((detected?.score ?? scoreColumn(column)) >= 35) return 'candidate';
+  return 'candidate';
+};
+
+const getFieldRoleMeta = (role) => FIELD_ROLE_META[role] || FIELD_ROLE_META.candidate;
 
 // ── Heuristic target scoring ─────────────────────────────────────────────────
 const TARGET_KW = [
@@ -96,10 +168,87 @@ const scoreColumn = (col) => {
 };
 
 const leakageRisk = (name = '') => {
-  const n = name.toLowerCase();
+  const n = normalizeToken(name);
   if (LEAKAGE_HIGH.some((k) => n.includes(k))) return 'high';
   if (LEAKAGE_MED.some((k) => n.includes(k))) return 'medium';
   return 'none';
+};
+
+const summarizeOutcomeCounts = (detail) => {
+  if (!detail) return null;
+
+  const valueCounts = (detail.top_categories || detail.value_counts || []).map((row) => ({
+    value: normalizeToken(row?.value ?? row?.label ?? ''),
+    count: Number(row?.count || 0),
+  }));
+
+  let escalated = 0;
+  let closedWithoutSar = 0;
+  let openOrNotUsed = Number(detail.missing_count || detail.null_count || 0);
+  let mappedAny = false;
+
+  valueCounts.forEach(({ value, count }) => {
+    if (POSITIVE_OUTCOME_TOKENS.has(value)) {
+      escalated += count;
+      mappedAny = true;
+      return;
+    }
+    if (NEGATIVE_OUTCOME_TOKENS.has(value)) {
+      closedWithoutSar += count;
+      mappedAny = true;
+      return;
+    }
+    if (OPEN_OUTCOME_TOKENS.has(value)) {
+      openOrNotUsed += count;
+      mappedAny = true;
+    }
+  });
+
+  if (!mappedAny && Number(detail.distinct_count || 0) <= 2) {
+    valueCounts.forEach(({ value, count }) => {
+      if (value === '1') escalated += count;
+      if (value === '0') closedWithoutSar += count;
+    });
+  }
+
+  const alertsWithFinalDecision = escalated + closedWithoutSar;
+  const totalRows = Number(detail.total_count || detail.rows_analyzed || (alertsWithFinalDecision + openOrNotUsed) || 0);
+
+  if (!alertsWithFinalDecision && !openOrNotUsed && !totalRows) return null;
+
+  return {
+    alertsWithFinalDecision,
+    escalated,
+    closedWithoutSar,
+    openOrNotUsed: Math.max(openOrNotUsed, totalRows - alertsWithFinalDecision),
+    totalRows,
+  };
+};
+
+const buildOutcomeMetaFromResponse = (payload, fallbackColumn = '') => {
+  const data = unwrapApiPayload(payload);
+  if (!data || typeof data !== 'object') return null;
+  const positiveCount = Number(data.n_positive || 0);
+  const negativeCount = Number(data.n_negative || 0);
+  const labelledCount = data.n_labelled ?? (positiveCount + negativeCount);
+  return {
+    targetColumn: String(data.target_column || fallbackColumn || '').trim(),
+    derivedColumn: String(data.derived_column || data.target_column || fallbackColumn || '').trim(),
+    sourceColumn: String(data.source_column || 'CASE_STATUS').trim(),
+    alertsWithFinalDecision: Number(labelledCount || 0),
+    escalated: positiveCount,
+    closedWithoutSar: negativeCount,
+    openOrNotUsed: Number(data.n_excluded ?? data.n_null ?? 0),
+    totalRows: Number(data.n_total ?? data.total_rows ?? 0),
+    strategy: String(data.strategy || '').trim(),
+    warning: data.warning || null,
+  };
+};
+
+const getPreviewCellText = (value) => {
+  if (value == null || value === '') return '-';
+  const text = String(value);
+  return text.length > 36 ? `${text.slice(0, 33)}...` : text;
 };
 
 // ── Normalise columns from master dataset ────────────────────────────────────
@@ -351,10 +500,11 @@ const TargetVariableScreen = ({
   onTargetChange,
   onStepAdvance,
   activePipelineId = null,
-  activePipelineName = '',
   onPipelineActivated,
+  initialActiveTab = 0,
+  onActiveTabChange,
 }) => {
-  const [tab,           setTab]          = useState(0);
+  const [tab,           setTab]          = useState(initialActiveTab);
   const [strategy,      setStrategy]     = useState('existing');
   const [columns,       setColumns]      = useState([]);
   const [selected,      setSelected]     = useState(targetColumn || '');
@@ -364,16 +514,111 @@ const TargetVariableScreen = ({
   const [message,       setMessage]      = useState(null);
   const [confirmChangeOpen, setConfirmChangeOpen] = useState(false);
   const [pendingTarget, setPendingTarget] = useState(null);
+  const [candidateCatalog, setCandidateCatalog] = useState([]);
+  const [candidateLoading, setCandidateLoading] = useState(false);
+  const [previewRows, setPreviewRows] = useState([]);
+  const [previewColumns, setPreviewColumns] = useState([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [outcomeMeta, setOutcomeMeta] = useState(null);
+  const completedTabs = useMemo(() => {
+    const done = new Set();
+    if (tab > 0 || selected || targetColumn) done.add(0);
+    if (tab > 1 || targetColumn) done.add(1);
+    if (targetColumn) done.add(2);
+    return done;
+  }, [selected, tab, targetColumn]);
+
+  useEffect(() => {
+    if (!Number.isInteger(initialActiveTab)) return;
+    setTab((prev) => (prev === initialActiveTab ? prev : initialActiveTab));
+  }, [initialActiveTab]);
+
+  useEffect(() => {
+    onActiveTabChange?.(tab);
+  }, [onActiveTabChange, tab]);
 
   // Load and score columns from master dataset
   useEffect(() => {
     setColumns(normalizeColumns(masterDataset));
   }, [masterDataset]);
 
+  useEffect(() => {
+    if (!masterDataset?.dataset_id) {
+      setCandidateCatalog([]);
+      return;
+    }
+    let alive = true;
+    setCandidateLoading(true);
+    mlopsApi.detectTarget({ dataset_id: masterDataset.dataset_id })
+      .then((res) => {
+        if (!alive) return;
+        const payload = unwrapApiPayload(res);
+        setCandidateCatalog(Array.isArray(payload?.candidates) ? payload.candidates : []);
+      })
+      .catch(() => {
+        if (alive) setCandidateCatalog([]);
+      })
+      .finally(() => {
+        if (alive) setCandidateLoading(false);
+      });
+    return () => { alive = false; };
+  }, [masterDataset?.dataset_id]);
+
+  useEffect(() => {
+    if (!masterDataset?.dataset_id) {
+      setPreviewRows([]);
+      setPreviewColumns([]);
+      return;
+    }
+    let alive = true;
+    setPreviewLoading(true);
+    mlopsApi.datasetRows(masterDataset.dataset_id, { sample_rows: 6 })
+      .then((res) => {
+        if (!alive) return;
+        const payload = unwrapApiPayload(res) || {};
+        const rows = Array.isArray(payload.preview) ? payload.preview : (Array.isArray(payload.rows) ? payload.rows : []);
+        const apiColumns = Array.isArray(payload.columns)
+          ? payload.columns
+            .map((column) => (typeof column === 'string' ? column : String(column?.name || column?.column || '').trim()))
+            .filter(Boolean)
+          : [];
+        const previewKeys = rows.flatMap((row) => (row && typeof row === 'object' ? Object.keys(row) : []));
+        setPreviewRows(rows);
+        setPreviewColumns(apiColumns.length ? apiColumns : Array.from(new Set(previewKeys)));
+      })
+      .catch(() => {
+        if (!alive) return;
+        setPreviewRows([]);
+        setPreviewColumns([]);
+      })
+      .finally(() => {
+        if (alive) setPreviewLoading(false);
+      });
+    return () => { alive = false; };
+  }, [masterDataset?.dataset_id]);
+
+  const detectedCandidateMap = useMemo(() => candidateCatalog.reduce((acc, item) => {
+    const name = String(item?.name || '').trim();
+    if (name) acc[name] = item;
+    return acc;
+  }, {}), [candidateCatalog]);
+
   // Auto-select best candidate
   useEffect(() => {
     if (selected) return;
     if (!columns.length) return;
+
+    const detectedOutcome = candidateCatalog.find((c) => isDerivedOutcomeColumn(c?.name));
+    if (detectedOutcome?.name && columns.some((col) => col.name === detectedOutcome.name)) {
+      setSelected(detectedOutcome.name);
+      return;
+    }
+
+    const detectedRecommended = candidateCatalog.find((c) => c?.is_recommended && columns.some((col) => col.name === c.name));
+    if (detectedRecommended?.name) {
+      setSelected(detectedRecommended.name);
+      return;
+    }
 
     const explicitNotebookTarget = columns.find((c) =>
       NOTEBOOK_PRIORITY_TARGETS.includes(String(c.name || '').toLowerCase()),
@@ -385,7 +630,7 @@ const TargetVariableScreen = ({
 
     const best = [...columns].sort((a, b) => scoreColumn(b) - scoreColumn(a))[0];
     if (best && scoreColumn(best) >= 35) setSelected(best.name);
-  }, [columns, selected]);
+  }, [candidateCatalog, columns, selected]);
 
   // Load column detail when selected changes
   useEffect(() => {
@@ -408,80 +653,129 @@ const TargetVariableScreen = ({
 
   const scored = useMemo(
     () => columns
-      .map((c) => ({ ...c, score: scoreColumn(c), leak: leakageRisk(c.name) }))
+      .map((c) => {
+        const detected = detectedCandidateMap[c.name] || null;
+        return {
+          ...c,
+          score: Number(detected?.score ?? scoreColumn(c)),
+          leak: String(detected?.leakage_risk || leakageRisk(c.name)),
+          distinct_count: detected?.unique_count ?? c.distinct_count,
+          missing_pct: detected?.null_pct ?? c.missing_pct,
+          is_label_source: Boolean(detected?.is_label_source),
+          is_recommended: Boolean(detected?.is_recommended),
+          label_source_hint: detected?.label_source_hint || null,
+        };
+      })
       .sort((a, b) => b.score - a.score),
-    [columns],
+    [columns, detectedCandidateMap],
   );
 
   const topCandidates = useMemo(
-    () => scored.filter((c) => c.score >= 35).slice(0, 6),
+    () => scored
+      .filter((c) => c.score >= 35 || c.is_label_source || isDerivedOutcomeColumn(c.name))
+      .slice(0, 6),
     [scored],
   );
+
+  const selectedCandidate = useMemo(
+    () => scored.find((column) => column.name === selected) || null,
+    [scored, selected],
+  );
+
+  const selectedFieldRole = useMemo(
+    () => getFieldRole(selectedCandidate || { name: selected }, selectedCandidate),
+    [selected, selectedCandidate],
+  );
+
+  const selectedFieldRoleMeta = useMemo(
+    () => getFieldRoleMeta(selectedFieldRole),
+    [selectedFieldRole],
+  );
+
+  const outcomeSummary = useMemo(() => {
+    const profileSummary = summarizeOutcomeCounts(detail);
+    if (profileSummary) {
+      return {
+        targetColumn: selected,
+        sourceColumn: isDerivedOutcomeColumn(selected) ? 'CASE_STATUS' : selected,
+        derivedColumn: isDerivedOutcomeColumn(selected) ? selected : '',
+        ...profileSummary,
+      };
+    }
+    return outcomeMeta?.targetColumn === selected ? outcomeMeta : null;
+  }, [detail, outcomeMeta, selected]);
+
+  const labelColumns = useMemo(() => {
+    const detectedLabels = scored
+      .filter((column) => {
+        const role = getFieldRole(column, column);
+        return role === 'system_outcome' || role === 'case_decision_source';
+      })
+      .map((column) => column.name);
+    return Array.from(new Set([
+      ...(selected ? [selected] : []),
+      ...detectedLabels,
+    ]));
+  }, [scored, selected]);
+
+  const previewVisibleColumns = useMemo(() => {
+    const sourceColumns = previewColumns.length
+      ? previewColumns
+      : (previewRows[0] && typeof previewRows[0] === 'object' ? Object.keys(previewRows[0]) : []);
+    const highlighted = sourceColumns.filter((column) => labelColumns.includes(column));
+    const supporting = sourceColumns.filter((column) => !highlighted.includes(column)).slice(0, Math.max(0, 6 - highlighted.length));
+    return [...highlighted, ...supporting].slice(0, 6);
+  }, [labelColumns, previewColumns, previewRows]);
+
+  const guideRows = useMemo(() => [...scored]
+    .sort((left, right) => {
+      const roleWeight = (column) => {
+        const role = getFieldRole(column, column);
+        if (role === 'system_outcome') return 0;
+        if (role === 'case_decision_source') return 1;
+        if (role === 'risk_indicator') return 2;
+        return 3;
+      };
+      const roleDiff = roleWeight(left) - roleWeight(right);
+      if (roleDiff !== 0) return roleDiff;
+      return (right.score || 0) - (left.score || 0);
+    })
+    .slice(0, 10), [scored]);
 
   const selectionSummary = useMemo(() => {
     if (strategy === 'generate') {
       return {
         tone: 'info',
-        title: 'Target will be generated from STR / case outcomes',
-        detail: 'The workbench will derive a supervised label from investigator outcomes and write it back into the master dataset.',
+        title: 'System-created outcome will be built from completed case decisions',
+        detail: 'The system will match alerts to cases, read the final decision, convert it to Yes / No, and leave open or unresolved cases out for now.',
       };
     }
     if (strategy === 'none') {
       return {
         tone: 'warning',
-        title: 'Target is not set',
-        detail: 'Only unsupervised EDA and downstream exploratory workflows will be available until a target is confirmed.',
+        title: 'No confirmed investigation outcome has been selected',
+        detail: 'Only exploratory analysis will be available until an investigation outcome is confirmed.',
       };
     }
     if (!selected) return null;
 
-    const isRecommended = topCandidates.some((c) => c.name === selected);
-    const current = scored.find((c) => c.name === selected);
-    const provenance = selected === targetColumn
-      ? 'This is the current target already attached to the master dataset.'
-      : isRecommended
-        ? 'This column was auto-ranked from the master dataset schema using AML target heuristics.'
-        : 'This column was selected manually from the master dataset column list.';
+    const current = selectedCandidate;
+    const provenance = selectedFieldRole === 'system_outcome'
+      ? 'This is the final Yes / No investigation outcome created by the system after the master dataset step.'
+      : selectedFieldRole === 'case_decision_source'
+        ? 'This field contains case decisions. The system reads it and converts it into the final learning outcome.'
+        : selectedFieldRole === 'risk_indicator'
+          ? 'This looks like a risk indicator or predictor, not the final confirmed investigation outcome.'
+          : selected === targetColumn
+            ? 'This is the current outcome already attached to the master dataset.'
+            : 'This field was selected from the master dataset column list.';
 
     return {
-      tone: current?.leak === 'high' ? 'warning' : 'success',
-      title: `Selected source column: ${selected}`,
+      tone: selectedFieldRole === 'risk_indicator' || current?.leak === 'high' ? 'warning' : 'success',
+      title: `Outcome used for learning: ${selected}`,
       detail: `${provenance} Distinct values: ${fmt(current?.distinct_count)}. Dtype: ${current?.dtype || 'unknown'}.`,
     };
-  }, [scored, selected, strategy, targetColumn, topCandidates]);
-
-  const targetPipelineState = useMemo(() => ({
-    strategy,
-    selectedTargetColumn: selected || '',
-    activeTab: tab,
-    currentTargetColumn: targetColumn || '',
-    masterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
-  }), [strategy, selected, tab, targetColumn, masterDataset?.dataset_id]);
-
-  const targetSummaryItems = useMemo(() => ([
-    `Strategy: ${strategy}`,
-    `Selected target: ${selected || '-'}`,
-    `Recommended candidates: ${topCandidates.length}`,
-    `Current target: ${targetColumn || '-'}`,
-  ]), [strategy, selected, topCandidates.length, targetColumn]);
-
-  const handleLoadTargetPipeline = useCallback((state) => {
-    if (!state || typeof state !== 'object') return;
-    if (typeof state.strategy === 'string') setStrategy(state.strategy);
-    if (typeof state.selectedTargetColumn === 'string') setSelected(state.selectedTargetColumn);
-    if (Number.isInteger(state.activeTab)) setTab(state.activeTab);
-  }, []);
-
-  const buildTargetSavePayload = useCallback(({ name, currentState, datasetId, persona: actor }) => ({
-    name,
-    dataset_id: Number(datasetId || 0),
-    created_by_persona: actor || 'technical',
-    steps: [{
-      type: 'screen_state',
-      screen: 'target',
-      state: currentState,
-    }],
-  }), []);
+  }, [selected, selectedCandidate, selectedFieldRole, strategy, targetColumn]);
 
   const syncResolvedTargetState = useCallback(async (nextTarget, nextStrategy = strategy) => {
     if (!activePipelineId) return;
@@ -523,6 +817,8 @@ const TargetVariableScreen = ({
         });
         const data = res?.data || res;
         const col = data?.target_column || 'str_label';
+        const meta = buildOutcomeMetaFromResponse(res, col);
+        if (meta) setOutcomeMeta(meta);
         if (targetColumn && col && col !== targetColumn) {
           setPendingTarget({
             column: col,
@@ -553,6 +849,8 @@ const TargetVariableScreen = ({
       });
 
       const resolved = (res?.data || res)?.target_column || selected;
+      const meta = buildOutcomeMetaFromResponse(res, resolved);
+      if (meta) setOutcomeMeta(meta);
       if (targetColumn && resolved && resolved !== targetColumn) {
         setPendingTarget({
           column: resolved,
@@ -590,21 +888,8 @@ const TargetVariableScreen = ({
   if (!masterDataset) {
     return (
       <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
-        <ScreenPipelineRail
-          screenKey="target"
-          screenLabel="Target"
-          persona={persona}
-          datasetId={null}
-          currentState={targetPipelineState}
-          onLoadState={handleLoadTargetPipeline}
-          buildSavePayload={buildTargetSavePayload}
-          summaryItems={targetSummaryItems}
-          activePipelineId={activePipelineId}
-          activePipelineName={activePipelineName}
-          onPipelineActivated={onPipelineActivated}
-        />
         <Alert severity="warning" sx={{ borderRadius: 2, flex: 1 }}>
-          Build the master dataset first (Step 2), then return here to define the target variable.
+          Build the master dataset first, then return here to confirm which completed investigation outcome the system should learn from.
         </Alert>
       </Box>
     );
@@ -630,20 +915,6 @@ const TargetVariableScreen = ({
         </DialogActions>
       </Dialog>
 
-      <ScreenPipelineRail
-        screenKey="target"
-        screenLabel="Target"
-        persona={persona}
-        datasetId={masterDataset?.dataset_id || null}
-        currentState={targetPipelineState}
-        onLoadState={handleLoadTargetPipeline}
-        buildSavePayload={buildTargetSavePayload}
-        summaryItems={targetSummaryItems}
-        activePipelineId={activePipelineId}
-        activePipelineName={activePipelineName}
-        onPipelineActivated={onPipelineActivated}
-      />
-
       <Stack spacing={2} sx={{ flex: 1, minWidth: 0 }}>
       {/* Header */}
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 1.25, bgcolor: D.panel }}>
@@ -651,17 +922,17 @@ const TargetVariableScreen = ({
           <Flag sx={{ color: D.orange, mt: 0.2 }} />
           <Box>
             <Typography sx={{ fontWeight: 700, fontSize: 15, mb: 0.4 }}>
-              {persona === 'business' ? 'What should the model predict?' : 'Target Variable Configuration'}
+              {persona === 'business' ? 'Which investigation outcome should the system learn from?' : 'Investigation Outcome Configuration'}
             </Typography>
             <Typography sx={{ fontSize: 12, color: D.muted }}>
               {persona === 'business'
-                ? 'Choose the column that represents a true AML outcome (SAR filed, true positive). The model learns to predict this.'
-                : 'Select the supervised binary label. ID columns are excluded. High-cardinality and leakage-prone fields are flagged.'}
+                ? 'This step explains how the final learning outcome is created after the master dataset is built. Choose the system-created outcome or the case decision field it comes from.'
+                : 'Confirm the final investigation outcome used for learning. The screen highlights system-created labels, case decision sources, and fields that should remain predictors only.'}
             </Typography>
             {targetColumn && (
               <Chip
                 icon={<CheckCircle sx={{ fontSize: 14 }} />}
-                label={`Current target: ${targetColumn}`}
+                label={`Current outcome: ${targetColumn}`}
                 size="small"
                 variant="outlined"
                 sx={{ mt: 1, bgcolor: '#fff', color: D.green, fontWeight: 700, fontSize: 11, borderColor: D.green }}
@@ -670,15 +941,21 @@ const TargetVariableScreen = ({
             <Stack direction="row" spacing={0.75} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
               <Chip
                 size="small"
-                label="1 = True Positive -> Escalate"
+                label="Yes = SAR filed / confirmed escalation"
                 variant="outlined"
                 sx={{ fontSize: 10, bgcolor: '#fff', color: D.red, fontWeight: 700, borderColor: D.redBg }}
               />
               <Chip
                 size="small"
-                label="0 = False Positive -> Suppress"
+                label="No = False positive / monitoring closure"
                 variant="outlined"
                 sx={{ fontSize: 10, bgcolor: '#fff', color: D.green, fontWeight: 700, borderColor: D.greenBg }}
+              />
+              <Chip
+                size="small"
+                label="Not used yet = Open or unresolved"
+                variant="outlined"
+                sx={{ fontSize: 10, bgcolor: '#fff', color: D.blue, fontWeight: 700, borderColor: D.infoBorder }}
               />
             </Stack>
             {selectionSummary && (
@@ -706,9 +983,25 @@ const TargetVariableScreen = ({
             '& .Mui-selected': { color: D.orange },
             '& .MuiTabs-indicator': { bgcolor: D.orange },
           }}>
-          <Tab icon={<AutoAwesome sx={{ fontSize: 15 }} />} iconPosition="start" label="Select Column" />
-          <Tab icon={<Lightbulb sx={{ fontSize: 15 }} />} iconPosition="start" label="STR / Generate" />
-          <Tab icon={<Info sx={{ fontSize: 15 }} />} iconPosition="start" label="ID Column Guide" />
+          {[
+            { icon: <AutoAwesome sx={{ fontSize: 15 }} />, label: 'Choose Outcome' },
+            { icon: <Lightbulb sx={{ fontSize: 15 }} />, label: 'Create Outcome' },
+            { icon: <Info sx={{ fontSize: 15 }} />, label: 'Field Guide' },
+          ].map((item, idx) => (
+            <Tab
+              key={item.label}
+              icon={item.icon}
+              iconPosition="start"
+              label={(
+                <Stack direction="row" spacing={0.65} alignItems="center">
+                  <span>{item.label}</span>
+                  {completedTabs.has(idx) && (
+                    <CheckCircle sx={{ fontSize: 13, color: D.green }} />
+                  )}
+                </Stack>
+              )}
+            />
+          ))}
         </Tabs>
 
         <Box sx={{ p: 2 }}>
@@ -721,7 +1014,9 @@ const TargetVariableScreen = ({
                   <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.75 }}>
                     <AutoAwesome sx={{ fontSize: 15, color: D.orange }} />
                     <Typography sx={{ fontWeight: 700, fontSize: 12.5 }}>Recommended columns</Typography>
-                    <Typography sx={{ fontSize: 11, color: D.muted }}>(auto-scored by name, dtype, cardinality)</Typography>
+                    <Typography sx={{ fontSize: 11, color: D.muted }}>
+                      {candidateLoading ? '(refreshing from master dataset...)' : '(ranked from the master dataset and case outcome lineage)'}
+                    </Typography>
                   </Stack>
                   <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                     {topCandidates.map((c) => (
@@ -746,8 +1041,8 @@ const TargetVariableScreen = ({
 
               {/* Dropdown */}
               <FormControl size="small" fullWidth>
-                <InputLabel>Or choose any column</InputLabel>
-                <Select value={selected} label="Or choose any column"
+                <InputLabel>Review another field</InputLabel>
+                <Select value={selected} label="Review another field"
                   onChange={(e) => setSelected(e.target.value)}>
                   {scored.map((c) => (
                     <MenuItem key={c.name} value={c.name}>
@@ -769,8 +1064,214 @@ const TargetVariableScreen = ({
                 </Select>
               </FormControl>
 
+              {selected && (
+                <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 1, bgcolor: '#fff' }}>
+                  <Stack spacing={1.15}>
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }}>
+                      <Box>
+                        <Typography sx={{ fontWeight: 700, fontSize: 13 }}>
+                          {selectedFieldRole === 'risk_indicator' ? 'Field review' : 'Derived investigation outcome'}
+                        </Typography>
+                        <Typography sx={{ fontSize: 11.25, color: D.muted, mt: 0.35 }}>
+                          The system matches alerts to cases, reads the final case decision, and converts it into a simple Yes / No outcome for learning.
+                        </Typography>
+                      </Box>
+                      <Chip
+                        label={selectedFieldRoleMeta.label}
+                        size="small"
+                        variant="outlined"
+                        sx={{
+                          fontWeight: 700,
+                          fontSize: 10.5,
+                          borderWidth: 1,
+                          ...selectedFieldRoleMeta.chipSx,
+                        }}
+                      />
+                    </Stack>
+
+                    <Typography sx={{ fontSize: 11.25, color: D.text }}>
+                      Created from alerts and case decisions after the master dataset is built.
+                    </Typography>
+                    <Chip
+                      label={`Lineage: ALERT_ID → CASE_STATUS → ${selectedFieldRole === 'system_outcome' ? selected : 'FINAL_LABEL'}`}
+                      size="small"
+                      variant="outlined"
+                      sx={{ alignSelf: 'flex-start', fontFamily: 'monospace', fontSize: 10.5, bgcolor: '#fff' }}
+                    />
+
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                      <Chip size="small" label="Yes = led to SAR filing or confirmed escalation" sx={{ bgcolor: D.redBg, color: D.red, fontSize: 10.5 }} />
+                      <Chip size="small" label="No = closed as false positive or monitoring" sx={{ bgcolor: D.greenBg, color: D.green, fontSize: 10.5 }} />
+                      <Chip size="small" label="Not used yet = case still open or unresolved" sx={{ bgcolor: D.blueBg, color: D.blue, fontSize: 10.5 }} />
+                    </Stack>
+
+                    {outcomeSummary && (
+                      <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr 1fr', lg: 'repeat(4, minmax(0, 1fr))' } }}>
+                        {[
+                          { label: 'Alerts with final decision', value: fmt(outcomeSummary.alertsWithFinalDecision) },
+                          { label: 'Escalated / SAR filed', value: fmt(outcomeSummary.escalated) },
+                          { label: 'Closed without SAR', value: fmt(outcomeSummary.closedWithoutSar) },
+                          { label: 'Open / not used', value: fmt(outcomeSummary.openOrNotUsed) },
+                        ].map((item) => (
+                          <Paper key={item.label} variant="outlined" sx={{ p: 1, borderRadius: 1, bgcolor: D.panelAlt }}>
+                            <Typography sx={{ fontSize: 10, color: D.muted, fontWeight: 700 }}>{item.label}</Typography>
+                            <Typography sx={{ fontWeight: 800, fontSize: 20, mt: 0.3 }}>{item.value}</Typography>
+                          </Paper>
+                        ))}
+                      </Box>
+                    )}
+
+                    <Alert severity={selectedFieldRole === 'risk_indicator' ? 'warning' : 'info'} sx={{ py: 0.45, fontSize: 11 }}>
+                      {selectedFieldRole === 'risk_indicator'
+                        ? 'This field looks like a customer or risk indicator, not a final investigation outcome. Fields like PEP, adverse media, or correspondent bank flags should stay as predictors, not the outcome used for learning.'
+                        : 'Only alerts with a completed case decision are used. Open, unresolved, or missing case outcomes are not used yet.'}
+                    </Alert>
+                  </Stack>
+                </Paper>
+              )}
+
               {/* Column detail */}
               <ColumnDetail colName={selected} detail={detail} loading={loadingDetail} />
+
+              <Paper variant="outlined" sx={{ borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+                <Box sx={{ px: 1.5, py: 1.15, borderBottom: `1px solid ${D.border}`, bgcolor: D.panelAlt }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 12.5 }}>
+                    Outcome field guide
+                  </Typography>
+                  <Typography sx={{ fontSize: 11, color: D.muted, mt: 0.3 }}>
+                    Outcome fields are highlighted first. Customer and risk indicators stay secondary because they help explain alerts but are not the final investigation outcome.
+                  </Typography>
+                </Box>
+                <TableContainer sx={{ maxHeight: 320 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        {['Field', 'How it is used', 'Why it matters here'].map((header) => (
+                          <TableCell key={header} sx={{ fontSize: 10.5, fontWeight: 800, color: D.muted, bgcolor: D.panelAlt }}>
+                            {header}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {guideRows.map((row) => {
+                        const role = getFieldRole(row, row);
+                        const roleMeta = getFieldRoleMeta(role);
+                        const highlight = role === 'system_outcome' || role === 'case_decision_source';
+                        const explanation = role === 'system_outcome'
+                          ? 'Used as the final Yes / No outcome for learning.'
+                          : role === 'case_decision_source'
+                            ? 'Read from the case record and converted into the final learning outcome.'
+                            : role === 'risk_indicator'
+                              ? 'Customer or alert indicator only. Helpful for prediction, not the final outcome.'
+                              : 'Review whether this is truly a completed case decision before using it as an outcome.';
+                        return (
+                          <TableRow
+                            key={row.name}
+                            hover
+                            selected={row.name === selected}
+                            sx={{
+                              '& td': {
+                                bgcolor: row.name === selected ? D.orangeLight : (highlight ? '#f8fbff' : '#fff'),
+                              },
+                            }}>
+                            <TableCell sx={{ minWidth: 200 }}>
+                              <Stack spacing={0.5}>
+                                <Typography sx={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 11.5 }}>
+                                  {row.name}
+                                </Typography>
+                                <Stack direction="row" spacing={0.6} flexWrap="wrap" useFlexGap>
+                                  <Chip
+                                    size="small"
+                                    label={roleMeta.label}
+                                    variant="outlined"
+                                    sx={{ fontSize: 9.5, height: 20, ...roleMeta.chipSx }}
+                                  />
+                                  {row.name === selected && (
+                                    <Chip size="small" label="Selected" sx={{ fontSize: 9.5, height: 20, bgcolor: D.orange, color: '#fff' }} />
+                                  )}
+                                </Stack>
+                              </Stack>
+                            </TableCell>
+                            <TableCell sx={{ width: 220 }}>
+                              <Typography sx={{ fontSize: 11, color: D.text }}>{roleMeta.description}</Typography>
+                            </TableCell>
+                            <TableCell sx={{ minWidth: 260 }}>
+                              <Typography sx={{ fontSize: 11, color: D.muted }}>{row.label_source_hint || explanation}</Typography>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+                <Box sx={{ px: 1.5, py: 1.15, borderBottom: `1px solid ${D.border}`, bgcolor: D.panelAlt }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 12.5 }}>
+                    Master dataset sample
+                  </Typography>
+                  <Typography sx={{ fontSize: 11, color: D.muted, mt: 0.3 }}>
+                    Highlighted columns show the investigation outcome lineage inside the master dataset preview.
+                  </Typography>
+                </Box>
+                {previewLoading ? (
+                  <Box sx={{ py: 2.5, textAlign: 'center' }}>
+                    <CircularProgress size={22} sx={{ color: D.orange }} />
+                  </Box>
+                ) : previewVisibleColumns.length && previewRows.length ? (
+                  <TableContainer sx={{ maxHeight: 320 }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          {previewVisibleColumns.map((column) => {
+                            const highlighted = labelColumns.includes(column);
+                            return (
+                              <TableCell
+                                key={column}
+                                sx={{
+                                  fontFamily: 'monospace',
+                                  fontSize: 10.5,
+                                  fontWeight: 800,
+                                  bgcolor: highlighted ? D.blueBg : D.panelAlt,
+                                  color: highlighted ? D.blue : D.text,
+                                  borderBottom: `1px solid ${highlighted ? D.infoBorder : D.border}`,
+                                }}>
+                                {column}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {previewRows.slice(0, 6).map((row, index) => (
+                          <TableRow key={`preview-row-${index}`} hover>
+                            {previewVisibleColumns.map((column) => {
+                              const highlighted = labelColumns.includes(column);
+                              return (
+                                <TableCell
+                                  key={`preview-cell-${index}-${column}`}
+                                  sx={{
+                                    fontSize: 11,
+                                    bgcolor: highlighted ? '#f8fbff' : '#fff',
+                                    fontFamily: highlighted ? 'monospace' : 'inherit',
+                                  }}>
+                                  {getPreviewCellText(row?.[column])}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Alert severity="info" sx={{ m: 1.25, fontSize: 11.5 }}>
+                    Preview rows are not available yet for this master dataset.
+                  </Alert>
+                )}
+              </Paper>
             </Stack>
           )}
 
@@ -781,26 +1282,26 @@ const TargetVariableScreen = ({
 
               <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 1, bgcolor: '#fff' }}>
                 <Typography sx={{ fontWeight: 700, fontSize: 13, mb: 1 }}>
-                  Choose a generation strategy
+                  Choose how the outcome should be created
                 </Typography>
                 <Stack spacing={1}>
                   {[
                     {
                       value: 'existing',
-                      label: 'Use existing str_label column',
-                      desc: 'The master dataset already has str_label (legacy str_flag also supported).',
+                      label: 'Use an existing system-created outcome column',
+                      desc: 'Best when the master dataset already includes FINAL_LABEL, IS_TRUE_POS, or STR_LABEL.',
                       recommended: true,
                     },
                     {
                       value: 'generate',
-                      label: 'Auto-generate from available data',
-                      desc: 'Scan uploaded files for SAR/STR indicators and build str_label automatically.',
+                      label: 'Create the outcome from case decisions',
+                      desc: 'Match alerts to cases, read the final case decision, and create the Yes / No learning outcome automatically.',
                       recommended: false,
                     },
                     {
                       value: 'none',
-                      label: 'No target (unsupervised)',
-                      desc: 'Continue without a target. Only EDA and clustering are available.',
+                      label: 'Continue without a confirmed outcome',
+                      desc: 'Continue without a final investigation outcome. Only exploratory analysis will be available.',
                       recommended: false,
                     },
                   ].map((opt) => (
@@ -840,7 +1341,7 @@ const TargetVariableScreen = ({
 
               {strategy === 'existing' && (
                 <Alert severity="info" sx={{ fontSize: 11 }}>
-                  Select "str_label" from the column dropdown in the <strong>Select Column</strong> tab.
+                  Select the existing final outcome field from the <strong>Choose Outcome</strong> tab.
                 </Alert>
               )}
             </Stack>
@@ -922,14 +1423,14 @@ const TargetVariableScreen = ({
           <Box>
             <Typography sx={{ fontWeight: 700, fontSize: 13, color: D.text }}>
               {strategy === 'existing' && selected
-                ? `Confirm "${selected}" as target column`
+                ? `Confirm "${selected}" as the investigation outcome`
                 : strategy === 'generate'
-                ? 'Auto-generate target from STR data'
-                : 'Continue in unsupervised mode'}
+                ? 'Create the system outcome from case decisions'
+                : 'Continue without a confirmed outcome'}
             </Typography>
             {selected && strategy === 'existing' && (
               <Typography sx={{ fontSize: 11, color: D.muted }}>
-                This column will be excluded from model features and used as the training label.
+                This field will be treated as the outcome used for learning and excluded from predictor features.
               </Typography>
             )}
           </Box>
@@ -945,7 +1446,7 @@ const TargetVariableScreen = ({
               textTransform: 'none', fontWeight: 700, borderRadius: 1,
             }}
           >
-            Confirm Target and Continue
+            Confirm Outcome and Continue
           </Button>
         </Stack>
 

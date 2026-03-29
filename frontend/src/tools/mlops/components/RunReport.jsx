@@ -38,6 +38,8 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
@@ -180,7 +182,109 @@ const ConfusionGrid = ({ cm = {} }) => {
   );
 };
 
-const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory = true }) => {
+const buildTreeLayout = (nodes = [], maxDepth = 2) => {
+  const nodeMap = new Map((nodes || []).map((node) => [Number(node.node_id), node]));
+  const placed = [];
+  const edges = [];
+  const width = 860;
+  const levelHeight = 108;
+
+  const visit = (nodeId, depth, left, right) => {
+    const node = nodeMap.get(Number(nodeId));
+    if (!node || depth > maxDepth) return;
+    const x = (left + right) / 2;
+    const y = 44 + depth * levelHeight;
+    placed.push({ ...node, x, y, depth });
+    if (depth >= maxDepth || node.is_leaf) return;
+    if (node.left_child != null && nodeMap.has(Number(node.left_child))) {
+      const childX = (left + x) / 2;
+      const childY = 44 + (depth + 1) * levelHeight;
+      edges.push({ x1: x, y1: y + 26, x2: childX, y2: childY - 26 });
+      visit(node.left_child, depth + 1, left, x);
+    }
+    if (node.right_child != null && nodeMap.has(Number(node.right_child))) {
+      const childX = (x + right) / 2;
+      const childY = 44 + (depth + 1) * levelHeight;
+      edges.push({ x1: x, y1: y + 26, x2: childX, y2: childY - 26 });
+      visit(node.right_child, depth + 1, x, right);
+    }
+  };
+
+  visit(0, 0, 40, width - 40);
+  return { placed, edges, width, height: 96 + maxDepth * levelHeight };
+};
+
+const TreeVisual = ({ nodes = [] }) => {
+  const layout = useMemo(() => buildTreeLayout(nodes, 2), [nodes]);
+  if (!layout.placed.length) return null;
+  return (
+    <svg viewBox={`0 0 ${layout.width} ${layout.height}`} width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+      {layout.edges.map((edge, idx) => (
+        <line key={`edge-${idx}`} x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2} stroke="#cbd5e1" strokeWidth="2" />
+      ))}
+      {layout.placed.map((node) => {
+        const isLeaf = !!node.is_leaf;
+        const fill = isLeaf ? (String(node.label || '').toUpperCase() === 'ESCALATE' ? '#fff1ec' : '#f8fafc') : '#ffffff';
+        const stroke = isLeaf ? (String(node.label || '').toUpperCase() === 'ESCALATE' ? '#D04A02' : '#64748b') : '#94a3b8';
+        const title = isLeaf
+          ? String(node.label || 'Leaf')
+          : `${String(node.feature || 'feature')} <= ${fmtRatio(node.threshold, 2)}`;
+        const sub = isLeaf ? `${fmt(node.samples)} rows` : `n=${fmt(node.samples)}`;
+        return (
+          <g key={`node-${node.node_id}`} transform={`translate(${node.x - 64}, ${node.y - 24})`}>
+            <rect width="128" height="48" rx="10" fill={fill} stroke={stroke} strokeWidth="1.5" />
+            <text x="64" y="18" textAnchor="middle" fontSize="10" fontWeight="700" fill="#1f2937">{title}</text>
+            <text x="64" y="34" textAnchor="middle" fontSize="9" fill="#64748b">{sub}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+const NetworkVisual = ({ layers = [] }) => {
+  const width = 860;
+  const height = 260;
+  const nodes = layers.map((layer, index) => {
+    const units = toNum(layer?.units, 0);
+    const displayCount = Math.min(7, Math.max(2, Math.round(Math.log2(Math.max(units, 2)))));
+    return { ...layer, index, displayCount, units };
+  });
+  if (!nodes.length) return null;
+  const xGap = width / Math.max(nodes.length, 2);
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+      {nodes.map((layer, idx) => {
+        const x = 80 + idx * xGap;
+        return (
+          <g key={`${layer.layer}-${idx}`}>
+            {idx < nodes.length - 1 && (
+              <line x1={x + 24} y1={130} x2={xGap + x - 24} y2={130} stroke="#cbd5e1" strokeWidth="2" />
+            )}
+            {Array.from({ length: layer.displayCount }).map((_, nodeIdx) => {
+              const y = 62 + nodeIdx * (140 / Math.max(layer.displayCount - 1, 1));
+              return (
+                <circle
+                  key={`${layer.layer}-${nodeIdx}`}
+                  cx={x}
+                  cy={y}
+                  r="14"
+                  fill={idx === 0 ? '#eff6ff' : idx === nodes.length - 1 ? '#fff1ec' : '#f8fafc'}
+                  stroke={idx === 0 ? '#2563eb' : idx === nodes.length - 1 ? '#D04A02' : '#94a3b8'}
+                  strokeWidth="1.5"
+                />
+              );
+            })}
+            <text x={x} y="220" textAnchor="middle" fontSize="11" fontWeight="700" fill="#1f2937">{layer.layer}</text>
+            <text x={x} y="236" textAnchor="middle" fontSize="10" fill="#64748b">{fmt(layer.units)} units</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = false, showHistory = true }) => {
   const [reports, setReports] = useState([]);
   const [selectedRunId, setSelectedRunId] = useState(runId ? String(runId) : '');
   const [report, setReport] = useState(null);
@@ -190,6 +294,8 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
   const [listError, setListError] = useState('');
   const [reportError, setReportError] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [modelResult, setModelResult] = useState(null);
+  const [modelResultLoading, setModelResultLoading] = useState(false);
   const [compareA, setCompareA] = useState('');
   const [compareB, setCompareB] = useState('');
   const [compareData, setCompareData] = useState(null);
@@ -255,6 +361,22 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
     }
   }, []);
 
+  const loadModelResult = useCallback(async (id) => {
+    if (!id) {
+      setModelResult(null);
+      return;
+    }
+    setModelResultLoading(true);
+    try {
+      const res = await mlopsApi.modelResults(id);
+      setModelResult(pick(res) || null);
+    } catch {
+      setModelResult(null);
+    } finally {
+      setModelResultLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadReports();
   }, [loadReports]);
@@ -263,16 +385,22 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
     if (!selectedRunId) return;
     onRunIdChange?.(selectedRunId);
     loadReport(selectedRunId);
-  }, [loadReport, onRunIdChange, selectedRunId]);
+    loadModelResult(selectedRunId);
+  }, [loadModelResult, loadReport, onRunIdChange, selectedRunId]);
 
   const handleGenerate = useCallback(async () => {
     if (!selectedRunId) return;
     setGenerating(true);
     setReportError('');
     try {
-      const res = await mlopsApi.generateReport({ run_id: selectedRunId });
-      const payload = pick(res);
-      const generated = payload?.report || payload;
+      const requestPayload = { run_id: selectedRunId };
+      const resolvedPipelineId = Number(pipelineId || 0);
+      if (Number.isFinite(resolvedPipelineId) && resolvedPipelineId > 0) {
+        requestPayload.pipeline_id = resolvedPipelineId;
+      }
+      const res = await mlopsApi.generateReport(requestPayload);
+      const responsePayload = pick(res);
+      const generated = responsePayload?.report || responsePayload;
       setReport(generated || null);
       setPending(false);
       await loadReports();
@@ -281,7 +409,7 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
     } finally {
       setGenerating(false);
     }
-  }, [loadReports, selectedRunId]);
+  }, [loadReports, pipelineId, selectedRunId]);
 
   const handleCompare = useCallback(async () => {
     if (!compareA || !compareB) return;
@@ -344,6 +472,25 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
   const narratives = report?.narratives || {};
 
   const chartData = edaSummary?.chart_data || {};
+  const visualMode = modelResult?.mode || 'supervised';
+  const visualInternals = modelResult?.model_internals || {};
+  const suppressedPreview = Array.isArray(modelResult?.suppressed_cases_preview) ? modelResult.suppressed_cases_preview : [];
+  const decisionSummary = modelResult?.decision_reason_summary || {};
+  const visualTechnique = modelResult?.techniques?.[
+    modelResult?.recommended_technique || Object.keys(modelResult?.techniques || {})[0] || ''
+  ];
+  const visualMethod = modelResult?.methods?.[
+    modelResult?.recommended_method || Object.keys(modelResult?.methods || {})[0] || ''
+  ];
+  const visualGroupedPoints = useMemo(() => {
+    const grouped = {};
+    (visualTechnique?.projection || []).forEach((row) => {
+      const key = String(row?.label ?? '0');
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(row);
+    });
+    return grouped;
+  }, [visualTechnique]);
   const classDistribution = useMemo(() => {
     if (Array.isArray(chartData?.class_distribution_chart) && chartData.class_distribution_chart.length > 0) {
       return chartData.class_distribution_chart.map((x) => ({ name: String(x.name || ''), value: toNum(x.value, 0) }));
@@ -376,7 +523,9 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
     const suppression = toNum(threshold?.recommended_suppression_pct, 0).toFixed(2);
     const eventLoss = toNum(threshold?.recommended_event_loss_pct, 0).toFixed(2);
     const limit = toNum(threshold?.regulatory_limit_pct, 5).toFixed(2);
-    return `At threshold ${thr}, the model suppresses ${suppression}% of workload and keeps Event Loss at ${eventLoss}% (regulatory cap: ${limit}%).`;
+    const bandMin = toNum(threshold?.threshold_band_min, 0.5).toFixed(2);
+    const bandMax = toNum(threshold?.threshold_band_max, 0.6).toFixed(2);
+    return `FCC uses a 0.50 operating default and only allows deployable thresholds between ${bandMin} and ${bandMax}. For this run, ${thr} suppresses ${suppression}% of workload and keeps Event Loss at ${eventLoss}% (regulatory cap: ${limit}%).`;
   }, [threshold]);
 
   const spacing = compact ? 1.5 : 2.5;
@@ -442,6 +591,7 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
               onClick={() => {
                 loadReports();
                 if (selectedRunId) loadReport(selectedRunId);
+                if (selectedRunId) loadModelResult(selectedRunId);
               }}
               sx={{ textTransform: 'none', borderColor: C.border, color: C.slate }}
             >
@@ -650,9 +800,194 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
             </Stack>
           </Section>
 
+          {modelResultLoading ? (
+            <Section icon={AutoGraph} title="Model Visuals" subtitle="Loading tree, cluster, and neural visual evidence">
+              <LinearProgress />
+            </Section>
+          ) : modelResult ? (
+            <Section icon={AutoGraph} title="Model Visuals" subtitle="Visual evidence captured from the trained FCC model">
+              {visualMode === 'supervised' ? (
+                <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' } }}>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 1.25, borderColor: C.border }}
+                    data-report-chart
+                    data-chart-title="Decision Tree Visual"
+                    data-chart-caption="Interpretable tree path showing how FCC separates retain vs suppress outcomes."
+                  >
+                    <Typography sx={{ fontSize: 11, color: C.slate, mb: 0.75 }}>
+                      {modelResult?.decision_tree?.tree_kind === 'surrogate' ? 'Explainer Tree' : 'Decision Tree'}
+                    </Typography>
+                    <Box sx={{ height: 320 }}>
+                      <TreeVisual nodes={modelResult?.decision_tree?.tree_nodes || []} />
+                    </Box>
+                  </Paper>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 1.25, borderColor: C.border }}
+                    data-report-chart
+                    data-chart-title="Model Internals"
+                    data-chart-caption="Feature importance, coefficients, or learning curve from the trained supervised model."
+                  >
+                    <Typography sx={{ fontSize: 11, color: C.slate, mb: 0.75 }}>
+                      {String(visualInternals?.viz_type || 'feature_importance').replaceAll('_', ' ')}
+                    </Typography>
+                    <Box sx={{ height: 320 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        {visualInternals?.viz_type === 'learning_curve' ? (
+                          <LineChart data={visualInternals?.data || []}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="round" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <RechartsTooltip />
+                            <Legend />
+                            <Line dataKey="train" name="Train" stroke={C.orange} strokeWidth={2} dot={false} />
+                            <Line dataKey="val" name="Validation" stroke="#334155" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+                          </LineChart>
+                        ) : (
+                          <BarChart
+                            data={(visualInternals?.data || []).slice(0, 10).map((row) => ({
+                              feature: String(row.feature || '').slice(0, 22),
+                              value: toNum(row.importance, row.coef),
+                            }))}
+                            layout="vertical"
+                            margin={{ top: 4, right: 10, left: 40, bottom: 4 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                            <XAxis type="number" tick={{ fontSize: 10 }} />
+                            <YAxis type="category" dataKey="feature" tick={{ fontSize: 10 }} width={120} />
+                            <RechartsTooltip />
+                            <Bar dataKey="value" fill={C.orange} radius={[0, 3, 3, 0]} />
+                          </BarChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Box>
+                  </Paper>
+                </Box>
+              ) : null}
+
+              {visualMode === 'unsupervised' ? (
+                <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', lg: '1.1fr 0.9fr' } }}>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 1.25, borderColor: C.border }}
+                    data-report-chart
+                    data-chart-title="Cluster Projection"
+                    data-chart-caption="2D projection of FCC behavior groups or anomaly zones."
+                  >
+                    <Typography sx={{ fontSize: 11, color: C.slate, mb: 0.75 }}>{visualTechnique?.label || 'Technique projection'}</Typography>
+                    <Box sx={{ height: 320 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart margin={{ top: 12, right: 12, left: 0, bottom: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" dataKey="x" tick={{ fontSize: 10 }} />
+                          <YAxis type="number" dataKey="y" tick={{ fontSize: 10 }} />
+                          <RechartsTooltip />
+                          <Legend />
+                          {Object.entries(visualGroupedPoints).map(([key, rows], idx) => (
+                            <Scatter key={key} name={(visualTechnique?.technique_type || '') === 'anomaly' ? (key === '1' ? 'Anomaly' : 'Normal') : (key === '-1' ? 'Noise' : `Cluster ${key}`)} data={rows} fill={['#0f766e', '#1d4ed8', '#b45309', '#9333ea', '#111827'][idx % 5]} />
+                          ))}
+                        </ScatterChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </Paper>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 1.25, borderColor: C.border }}
+                    data-report-chart
+                    data-chart-title="Cluster Summary"
+                    data-chart-caption="Cluster sizes, event rates, or anomaly score distribution for the selected unsupervised method."
+                  >
+                    <Typography sx={{ fontSize: 11, color: C.slate, mb: 0.75 }}>
+                      {(visualTechnique?.technique_type || '') === 'anomaly' ? 'Anomaly score distribution' : 'Cluster event-rate summary'}
+                    </Typography>
+                    <Box sx={{ height: 320 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        {(visualTechnique?.technique_type || '') === 'anomaly' ? (
+                          <BarChart data={visualTechnique?.score_distribution || []}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="bin_start" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <RechartsTooltip />
+                            <Bar dataKey="count" fill={C.orange} radius={[3, 3, 0, 0]} />
+                          </BarChart>
+                        ) : (
+                          <BarChart data={(visualTechnique?.cluster_summary || []).map((row) => ({ label: row.is_noise ? 'Noise' : `C${row.cluster}`, event_rate_pct: toNum(row.event_rate_pct, 0) }))}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <RechartsTooltip />
+                            <Bar dataKey="event_rate_pct" name="Event rate %" fill={C.orange} radius={[3, 3, 0, 0]} />
+                          </BarChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Box>
+                  </Paper>
+                </Box>
+              ) : null}
+
+              {visualMode === 'deep_learning' ? (
+                <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 1.25, borderColor: C.border }}
+                    data-report-chart
+                    data-chart-title="Neural Network Architecture"
+                    data-chart-caption="Layer topology for the trained FCC neural method."
+                  >
+                    <Typography sx={{ fontSize: 11, color: C.slate, mb: 0.75 }}>{visualMethod?.label || 'Neural network'}</Typography>
+                    <Box sx={{ height: 280 }}>
+                      <NetworkVisual layers={visualMethod?.model_summary || []} />
+                    </Box>
+                  </Paper>
+                  <Paper
+                    variant="outlined"
+                    sx={{ p: 1.25, borderColor: C.border }}
+                    data-report-chart
+                    data-chart-title="Neural Training Curves"
+                    data-chart-caption="Optimization history showing loss and validation behavior for the trained neural model."
+                  >
+                    <Typography sx={{ fontSize: 11, color: C.slate, mb: 0.75 }}>
+                      {(visualMethod?.method_type || '') === 'autoencoder' ? 'Reconstruction behavior' : 'Training behavior'}
+                    </Typography>
+                    <Box sx={{ height: 280 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        {(visualMethod?.method_type || '') === 'autoencoder' && Array.isArray(visualMethod?.reconstruction_distribution) ? (
+                          <BarChart data={visualMethod?.reconstruction_distribution || []}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="bin_start" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <RechartsTooltip />
+                            <Bar dataKey="count" fill={C.orange} radius={[3, 3, 0, 0]} />
+                          </BarChart>
+                        ) : (
+                          <LineChart data={visualMethod?.training_curves || []}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="epoch" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <RechartsTooltip />
+                            <Legend />
+                            <Line dataKey="loss" name="Loss" stroke={C.orange} strokeWidth={2} dot={false} />
+                            <Line dataKey="validation_score" name="Validation" stroke="#334155" strokeWidth={2} dot={false} strokeDasharray="5 3" connectNulls />
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </Box>
+                  </Paper>
+                </Box>
+              ) : null}
+            </Section>
+          ) : null}
+
           <Section icon={AutoGraph} title="Threshold And HML" subtitle="Workload vs Event Loss decision curve">
             <Stack spacing={1.25}>
               <Typography sx={{ fontSize: 12, color: C.dark }}>{narratives?.threshold || '-'}</Typography>
+              <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(4, minmax(0, 1fr))' } }}>
+                <MetricCard label="Default Threshold" value={fmtRatio(threshold?.default_threshold, 2)} />
+                <MetricCard label="Deploy Band" value={`${fmtRatio(threshold?.threshold_band_min, 2)}-${fmtRatio(threshold?.threshold_band_max, 2)}`} />
+                <MetricCard label="Recommended Threshold" value={fmtRatio(threshold?.recommended_threshold, 2)} />
+                <MetricCard label="Event Loss Cap" value={fmtPct(threshold?.regulatory_limit_pct, 2)} />
+              </Box>
               <Box
                 sx={{ height: 260 }}
                 data-report-chart
@@ -705,6 +1040,57 @@ const RunReport = ({ runId = null, onRunIdChange, compact = false, showHistory =
               </TableContainer>
             </Stack>
           </Section>
+
+          {(decisionSummary?.headline || suppressedPreview.length > 0) ? (
+            <Section icon={Assessment} title="Suppression Decisions" subtitle="Why FCC suppressed these alerts at the approved threshold">
+              <Stack spacing={1.25}>
+                <Typography sx={{ fontSize: 12, color: C.dark }}>
+                  {decisionSummary?.headline || 'Suppressed alerts are listed with their score and top business drivers.'}
+                </Typography>
+                <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' } }}>
+                  <MetricCard label="Suppressed Preview" value={fmt(decisionSummary?.suppressed_case_count ?? suppressedPreview.length)} />
+                  <MetricCard label="Potential Misses" value={fmt(decisionSummary?.potentially_missed_events)} tone={toNum(decisionSummary?.potentially_missed_events, 0) > 0 ? 'warn' : 'good'} />
+                  <MetricCard label="Applied Threshold" value={fmtRatio(decisionSummary?.threshold, 2)} />
+                </Box>
+                {(decisionSummary?.top_driver_features || []).length > 0 ? (
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                    {(decisionSummary?.top_driver_features || []).map((driver) => (
+                      <Chip key={driver?.feature} size="small" label={`${String(driver?.feature || '').replaceAll('_', ' ')} (${fmt(driver?.count)})`} sx={{ height: 22, fontSize: 10.5, bgcolor: '#fff7ed', color: C.warn, fontWeight: 700 }} />
+                    ))}
+                  </Stack>
+                ) : null}
+                <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 1.5, borderColor: C.border, maxHeight: 280 }}>
+                  <Table size="small" stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontSize: 10.5, fontWeight: 700 }}>Entity</TableCell>
+                        <TableCell sx={{ fontSize: 10.5, fontWeight: 700 }}>Score</TableCell>
+                        <TableCell sx={{ fontSize: 10.5, fontWeight: 700 }}>Decision</TableCell>
+                        <TableCell sx={{ fontSize: 10.5, fontWeight: 700 }}>Actual</TableCell>
+                        <TableCell sx={{ fontSize: 10.5, fontWeight: 700 }}>Reason</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {suppressedPreview.map((row) => (
+                        <TableRow key={`${row?.entity_id || 'row'}-${row?.sample_index}`}>
+                          <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{row?.entity_id || row?.sample_index || '-'}</TableCell>
+                          <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{row?.score != null ? fmtRatio(row.score, 4) : '-'}</TableCell>
+                          <TableCell sx={{ fontSize: 11.5 }}>{row?.decision || 'SUPPRESS'}</TableCell>
+                          <TableCell sx={{ fontSize: 11.5 }}>{row?.actual_label || '-'}</TableCell>
+                          <TableCell sx={{ fontSize: 11.5 }}>{row?.reason_text || '-'}</TableCell>
+                        </TableRow>
+                      ))}
+                      {!suppressedPreview.length ? (
+                        <TableRow>
+                          <TableCell colSpan={5} sx={{ fontSize: 11.5, color: C.slate }}>No suppressed preview rows were captured for this run.</TableCell>
+                        </TableRow>
+                      ) : null}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Stack>
+            </Section>
+          ) : null}
 
           <Section icon={Assessment} title="Business Impact" subtitle="Operational savings and risk tradeoff">
             <Stack spacing={1.25}>

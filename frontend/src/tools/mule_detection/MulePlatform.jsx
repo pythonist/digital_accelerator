@@ -1,9 +1,10 @@
 // frontend/src/tools/mule_detection/MulePlatform.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { useAppContext } from '@context/AppContext';
 import { muleTheme } from './theme';
 import { useMuleStore } from './store/muleStore';
+import usePersistedWorkbenchScreen from '../../hooks/usePersistedWorkbenchScreen';
 
 // Layout
 import MainLayout from './layout/MainLayout';
@@ -28,13 +29,13 @@ import RiskDashboardScreen from './screens/RiskDashboardScreen';
 const MulePlatform = () => {
   const { activeEnv } = useAppContext();
   
-  const [activeScreen, setActiveScreen] = useState('upload');
+  const [activeScreen, setActiveScreen] = usePersistedWorkbenchScreen('mule_detection', 'upload');
   const { hasData, hasModel, dataStats, loadingStatus, refreshStatus, setEnvId, loadAccounts, setSelectedAccountId, openInvestigation } = useMuleStore();
 
   // Set environment ID in localStorage for API calls
   useEffect(() => {
-    if (activeEnv?.id) {
-      setEnvId(activeEnv.id);
+    if (activeEnv) {
+      setEnvId(activeEnv);
     }
   }, [activeEnv, setEnvId]);
 

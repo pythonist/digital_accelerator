@@ -98,6 +98,7 @@ const SharedWorkbenchLayout = ({
   onLogout,
   accentColor = '#cbd5e1',
   navShape = 'rounded',
+  headerActions = null,
 }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -511,6 +512,8 @@ const SharedWorkbenchLayout = ({
                   </Typography>
                 </Box>
               )}
+
+              {headerActions}
 
               <Tooltip title="Help">
                 <IconButton size="small" sx={{ color: 'white', p: 0.5 }}>

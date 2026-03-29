@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext, usePersistentState } from "@context/AppContext";
 import apiClient from "@services/api";
+import { mergeCaseResolutionModule } from '../../utils/caseResolutionStore';
 
 // ✅ Import Layout Components
 import PageContainer from "@investigation-layout/PageContainer";
@@ -50,6 +51,19 @@ const VectorSearchScreen = () => {
   useEffect(() => {
     loadIndexMetrics();
   }, []);
+
+  useEffect(() => {
+    if (!selectedCaseId) return;
+    mergeCaseResolutionModule(selectedCaseId, 'vector', {
+      search_mode: searchMode,
+      query: textQuery || '',
+      top_k: topK,
+      filter_threshold: filterThreshold,
+      search_results: Array.isArray(searchResults) ? searchResults.slice(0, 8) : [],
+      comparison_results: comparisonResults || null,
+      explanations: explanations || {},
+    });
+  }, [selectedCaseId, searchMode, textQuery, topK, filterThreshold, searchResults, comparisonResults, explanations]);
 
   const loadIndexMetrics = async () => {
     try {

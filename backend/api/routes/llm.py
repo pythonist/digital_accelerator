@@ -3,9 +3,11 @@
 from flask import Blueprint, request, jsonify
 from api.utils import handle_errors
 from api.services import services
+from case_pack.case_pack_generator import CasePackGenerator
 import time
 import json
 import re
+import math
 from datetime import datetime
 
 llm_bp = Blueprint('llm', __name__)
@@ -13,6 +15,239 @@ llm_bp = Blueprint('llm', __name__)
 
 def _get_llm_service():
     return getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _jaccard_similarity(left, right):
+    left_set = {str(item).strip() for item in (left or []) if str(item).strip()}
+    right_set = {str(item).strip() for item in (right or []) if str(item).strip()}
+    if not left_set and not right_set:
+        return 0.0
+    union = len(left_set.union(right_set))
+    if union == 0:
+        return 0.0
+    return len(left_set.intersection(right_set)) / union
+
+
+def _cosine_similarity(left_vector, right_vector):
+    if not left_vector or not right_vector or len(left_vector) != len(right_vector):
+        return 0.0
+    dot = sum((float(a) * float(b)) for a, b in zip(left_vector, right_vector))
+    left_norm = math.sqrt(sum(float(a) * float(a) for a in left_vector))
+    right_norm = math.sqrt(sum(float(b) * float(b) for b in right_vector))
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+    return dot / (left_norm * right_norm)
+
+
+def _pick_first(record, keys):
+    if not isinstance(record, dict):
+        return None
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _extract_case_pack_features(pack):
+    alerts = list(pack.get('alerts') or [])
+    transactions = list(pack.get('transactions') or [])
+    customers = list(pack.get('customers') or [])
+    accounts = list(pack.get('accounts') or [])
+    financial_profile = pack.get('financial_profile') or {}
+    network_profile = pack.get('network_profile') or {}
+    network_graph = pack.get('network_graph') or {}
+
+    counterparties = set()
+    for item in network_profile.get('top_counterparties', []) or []:
+        name = _pick_first(item, ['name', 'counterparty', 'party'])
+        if name:
+            counterparties.add(str(name))
+    for item in network_graph.get('top_hubs', []) or []:
+        name = _pick_first(item, ['name', 'id'])
+        if name:
+            counterparties.add(str(name))
+    for txn in transactions:
+        for key in ['counterparty', 'beneficiary', 'party', 'beneficiary_account', 'counterparty_account', 'merchant_name']:
+            value = txn.get(key)
+            if value not in (None, ''):
+                counterparties.add(str(value))
+
+    alert_types = {
+        str(_pick_first(alert, ['type', 'alert_type', 'RULE_TRIGGERED', 'rule_triggered']) or '').strip()
+        for alert in alerts
+    }
+    alert_types.discard('')
+
+    txn_types = {
+        str(_pick_first(txn, ['type', 'txn_type', 'TXN_TYPE', 'transaction_type']) or '').strip()
+        for txn in transactions
+    }
+    txn_types.discard('')
+
+    customer_ids = {
+        str(_pick_first(customer, ['customer_id', 'CUSTOMER_ID', 'id', 'name']) or '').strip()
+        for customer in customers
+    }
+    customer_ids.discard('')
+
+    account_ids = {
+        str(_pick_first(account, ['account_id', 'ACCOUNT_ID', 'id']) or '').strip()
+        for account in accounts
+    }
+    account_ids.discard('')
+
+    total_volume = _safe_float(financial_profile.get('total_volume'), 0.0)
+    max_transaction = _safe_float(financial_profile.get('max_transaction'), 0.0)
+    avg_transaction = _safe_float(financial_profile.get('avg_transaction'), 0.0)
+    risk_score = _safe_float(pack.get('risk_score'), 0.0)
+
+    if avg_transaction <= 0 and transactions:
+      amounts = [_safe_float(_pick_first(txn, ['amount', 'txn_amount', 'transaction_amount', 'amt', 'value']), 0.0) for txn in transactions]
+      positive_amounts = [amount for amount in amounts if amount > 0]
+      if positive_amounts:
+          avg_transaction = sum(positive_amounts) / len(positive_amounts)
+          if max_transaction <= 0:
+              max_transaction = max(positive_amounts)
+
+    numeric_signature = [
+        math.log1p(max(total_volume, 0.0)),
+        math.log1p(max(max_transaction, 0.0)),
+        math.log1p(max(avg_transaction, 0.0)),
+        float(len(alerts)),
+        float(len(transactions)),
+        float(len(customers)),
+        float(len(counterparties)),
+        risk_score / 100.0,
+    ]
+
+    return {
+        'counterparties': counterparties,
+        'alert_types': alert_types,
+        'txn_types': txn_types,
+        'customer_ids': customer_ids,
+        'account_ids': account_ids,
+        'numeric_signature': numeric_signature,
+        'risk_score': risk_score,
+        'alert_count': len(alerts),
+        'transaction_count': len(transactions),
+        'total_volume': total_volume,
+    }
+
+
+def _hybrid_compare_case_packs(case_id_a, pack_a, case_id_b, pack_b):
+    features_a = _extract_case_pack_features(pack_a)
+    features_b = _extract_case_pack_features(pack_b)
+
+    counterparty_overlap = _jaccard_similarity(features_a['counterparties'], features_b['counterparties'])
+    alert_overlap = _jaccard_similarity(features_a['alert_types'], features_b['alert_types'])
+    txn_type_overlap = _jaccard_similarity(features_a['txn_types'], features_b['txn_types'])
+    customer_overlap = _jaccard_similarity(features_a['customer_ids'], features_b['customer_ids'])
+    account_overlap = _jaccard_similarity(features_a['account_ids'], features_b['account_ids'])
+    numeric_similarity = _cosine_similarity(features_a['numeric_signature'], features_b['numeric_signature'])
+
+    risk_gap = abs(features_a['risk_score'] - features_b['risk_score'])
+    risk_similarity = max(0.0, 1.0 - min(risk_gap / 100.0, 1.0))
+
+    volume_a = max(features_a['total_volume'], 0.0)
+    volume_b = max(features_b['total_volume'], 0.0)
+    if volume_a == 0 and volume_b == 0:
+        volume_similarity = 0.0
+    else:
+        volume_similarity = min(volume_a, volume_b) / max(volume_a, volume_b)
+
+    weighted_similarity = (
+        0.24 * numeric_similarity +
+        0.20 * counterparty_overlap +
+        0.14 * alert_overlap +
+        0.12 * txn_type_overlap +
+        0.10 * customer_overlap +
+        0.08 * account_overlap +
+        0.07 * risk_similarity +
+        0.05 * volume_similarity
+    )
+
+    drivers = []
+    if counterparty_overlap > 0:
+        drivers.append(f"counterparty overlap {round(counterparty_overlap * 100)}%")
+    if alert_overlap > 0:
+        drivers.append(f"alert-pattern overlap {round(alert_overlap * 100)}%")
+    if txn_type_overlap > 0:
+        drivers.append(f"transaction-channel overlap {round(txn_type_overlap * 100)}%")
+    if numeric_similarity > 0:
+        drivers.append(f"numeric behavior cosine {round(numeric_similarity * 100)}%")
+    if risk_similarity > 0.7:
+        drivers.append("risk profile is closely aligned")
+    if not drivers:
+        drivers.append("limited direct overlap but some profile proximity remains")
+
+    return {
+        'case_id': str(case_id_b),
+        'similarity': max(0.0, min(1.0, weighted_similarity)),
+        'method': 'hybrid_structured_similarity',
+        'reasons': drivers,
+        'details': {
+            'counterparty_overlap': round(counterparty_overlap, 4),
+            'alert_type_overlap': round(alert_overlap, 4),
+            'transaction_type_overlap': round(txn_type_overlap, 4),
+            'customer_overlap': round(customer_overlap, 4),
+            'account_overlap': round(account_overlap, 4),
+            'numeric_similarity': round(numeric_similarity, 4),
+            'risk_similarity': round(risk_similarity, 4),
+            'volume_similarity': round(volume_similarity, 4),
+        },
+    }
+
+
+def _build_hybrid_batch_compare(case_ids):
+    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or getattr(services.metadata_manager, 'active_env', None)
+    tenant_id = getattr(request, 'tenant_id', None)
+    if not env_id:
+        return {'error': 'No active environment selected for hybrid comparison fallback.'}
+
+    db_manager = services.get_investigation_db(env_id, tenant_id)
+    generator = CasePackGenerator(db_manager)
+    case_packs = {}
+
+    for case_id in case_ids:
+        pack = generator.generate_case_pack(case_id)
+        if isinstance(pack, dict) and pack.get('error'):
+            return {'error': f"Case {case_id}: {pack.get('error')}"}
+        case_packs[str(case_id)] = pack
+
+    matrix = []
+    for source_id in case_ids:
+        row = []
+        for target_id in case_ids:
+            if str(source_id) == str(target_id):
+                row.append({
+                    'case_id': str(target_id),
+                    'similarity': 1.0,
+                    'method': 'hybrid_structured_similarity',
+                    'reasons': ['same case'],
+                    'details': {},
+                })
+            else:
+                row.append(_hybrid_compare_case_packs(source_id, case_packs[str(source_id)], target_id, case_packs[str(target_id)]))
+        matrix.append({
+            'case_id': str(source_id),
+            'comparisons': row,
+        })
+
+    return {
+        'comparison_matrix': matrix,
+        'methodology': 'hybrid_structured_similarity',
+        'methodology_summary': 'Hybrid similarity fallback uses case-pack-derived features including numeric profile cosine similarity, counterparty overlap, alert-pattern overlap, transaction-channel overlap, customer overlap, account overlap, and risk proximity.',
+    }
 
 def clean_sql_output(text):
     """
@@ -340,9 +575,6 @@ def batch_compare():
     NEW ENDPOINT: Compare multiple cases in batch mode.
     Returns a similarity matrix showing relationships between all pairs.
     """
-    if not services.rag_system:
-        return jsonify({'error': 'RAG system not ready'}), 400
-    
     try:
         case_ids = request.json.get('case_ids', [])
         top_k = int(request.json.get('top_k', 5))
@@ -359,19 +591,36 @@ def batch_compare():
             }), 400
         
         print(f"📊 Batch comparing {len(case_ids)} cases...")
-        
-        result = services.rag_system.batch_compare_cases(case_ids, top_k=top_k)
-        
-        if 'error' in result:
-            return jsonify({
-                'status': 'error',
-                'error': result['error']
-            }), 500
-        
+
+        result = None
+        methodology = None
+        methodology_summary = None
+
+        if services.rag_system:
+            result = services.rag_system.batch_compare_cases(case_ids, top_k=top_k)
+            if 'error' not in (result or {}):
+                methodology = 'vector_rag_similarity'
+                methodology_summary = 'Portfolio compare used vector embeddings and cosine similarity over rich case summaries stored in the local case index.'
+
+        if not result or 'error' in result:
+            fallback = _build_hybrid_batch_compare(case_ids)
+            if 'error' in fallback:
+                root_error = result.get('error') if isinstance(result, dict) else None
+                return jsonify({
+                    'status': 'error',
+                    'error': fallback['error'] if not root_error else f"{root_error}. {fallback['error']}"
+                }), 500
+            result = fallback
+            methodology = fallback.get('methodology') or 'hybrid_structured_similarity'
+            methodology_summary = fallback.get('methodology_summary')
+
         return jsonify({
             'status': 'success',
             'comparison_matrix': result.get('comparison_matrix', []),
-            'case_count': len(case_ids)
+            'case_count': len(case_ids),
+            'methodology': methodology,
+            'methodology_summary': methodology_summary,
+            'rag_available': bool(services.rag_system),
         }), 200
         
     except Exception as e:

@@ -9,7 +9,8 @@ import PageContainer from "@investigation-layout/PageContainer";
 import {
   Box, Paper, Typography, TextField, Button, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Chip, Stack,
-  CircularProgress, Alert, Grid, InputAdornment, Tooltip, Tabs, Tab, Select, MenuItem, Divider
+  CircularProgress, Alert, Grid, InputAdornment, Tabs, Tab, Select, MenuItem, Divider,
+  Dialog, DialogTitle, DialogContent, IconButton
 } from '@mui/material';
 
 // MUI Icons
@@ -18,10 +19,125 @@ import {
   Refresh as RefreshIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as ErrorIcon,
-  Info as InfoIcon,
   History as HistoryIcon,
-  FilterList as FilterIcon
+  FilterList as FilterIcon,
+  VisibilityOutlined as ViewIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
+
+const prettifyKey = (value) => String(value || '')
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const formatDateTime = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value || '-') : date.toLocaleString();
+};
+
+const formatDuration = (ms) => {
+  const total = Number(ms);
+  if (!Number.isFinite(total) || total < 0) return '';
+  const seconds = Math.round(total / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+};
+
+const normalizeDetails = (details) => {
+  try {
+    return typeof details === 'string' ? JSON.parse(details) : details;
+  } catch {
+    return details;
+  }
+};
+
+const stringifyValue = (value) => {
+  if (value == null || value === '') return '-';
+  if (Array.isArray(value)) return value.join(' / ');
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'object') return Object.entries(value).map(([key, item]) => `${prettifyKey(key)}: ${stringifyValue(item)}`).join(', ');
+  return String(value);
+};
+
+const buildAuditNarrative = (action, details) => {
+  const normalizedAction = String(action || '').toLowerCase();
+  const data = normalizeDetails(details);
+  const objectData = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const breadcrumbs = Array.isArray(objectData.breadcrumbs) ? objectData.breadcrumbs.filter(Boolean) : [];
+  const screenName = objectData.screen || breadcrumbs[breadcrumbs.length - 1] || objectData.path || objectData.entity_id;
+  const durationText = formatDuration(objectData.duration_ms);
+
+  if (normalizedAction.includes('screen_visited')) {
+    return {
+      headline: `Opened ${screenName || 'screen'}`,
+      secondary: breadcrumbs.length ? `Navigation path: ${breadcrumbs.join(' / ')}` : (objectData.path ? `Path: ${objectData.path}` : 'Screen visit recorded'),
+      fields: objectData,
+    };
+  }
+
+  if (normalizedAction.includes('screen_left')) {
+    return {
+      headline: `Left ${screenName || 'screen'}`,
+      secondary: durationText ? `Time spent on screen: ${durationText}` : 'Screen exit recorded',
+      fields: objectData,
+    };
+  }
+
+  if (normalizedAction.includes('login')) {
+    const success = objectData.success === true || objectData.success === 'true';
+    return {
+      headline: success ? 'Login succeeded' : 'Login failed',
+      secondary: objectData.reason ? `Reason: ${objectData.reason}` : 'Authentication event recorded',
+      fields: objectData,
+    };
+  }
+
+  if (normalizedAction.includes('logout')) {
+    return {
+      headline: 'User logged out',
+      secondary: objectData.path ? `Path: ${objectData.path}` : 'Logout event recorded',
+      fields: objectData,
+    };
+  }
+
+  if (normalizedAction.includes('status')) {
+    const oldStatus = objectData.old_status || objectData.from_status;
+    const newStatus = objectData.new_status || objectData.to_status;
+    return {
+      headline: oldStatus && newStatus ? `Status changed from ${oldStatus} to ${newStatus}` : 'Status updated',
+      secondary: objectData.remarks || objectData.reason || 'Case workflow update recorded',
+      fields: objectData,
+    };
+  }
+
+  if (normalizedAction.includes('escalat')) {
+    return {
+      headline: `Escalated to ${objectData.recipient_role || objectData.target_role || objectData.escalation_level || 'reviewer'}`,
+      secondary: objectData.recipient_email ? `Recipient: ${objectData.recipient_email}` : (objectData.remarks || 'Escalation action recorded'),
+      fields: objectData,
+    };
+  }
+
+  if (normalizedAction.includes('mail')) {
+    return {
+      headline: `Mail ${objectData.status || objectData.send_status || 'event'} recorded`,
+      secondary: objectData.recipient_email ? `Recipient: ${objectData.recipient_email}` : (objectData.subject || 'Notification activity recorded'),
+      fields: objectData,
+    };
+  }
+
+  const prioritizedKeys = ['remarks', 'reason', 'path', 'screen', 'recipient_email', 'subject'];
+  const firstUsefulKey = prioritizedKeys.find((key) => objectData[key]);
+  return {
+    headline: prettifyKey(action || 'Audit Event'),
+    secondary: firstUsefulKey ? `${prettifyKey(firstUsefulKey)}: ${stringifyValue(objectData[firstUsefulKey])}` : (typeof data === 'string' ? data : 'Audit event recorded'),
+    fields: objectData,
+  };
+};
 
 const AuditTrailScreen = () => {
   const [filters, setFilters] = useState({ user: '', action: '', entity_type: '', entity_id: '' });
@@ -32,6 +148,7 @@ const AuditTrailScreen = () => {
   const [sessionEvents, setSessionEvents] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [detailDialog, setDetailDialog] = useState({ open: false, title: '', action: '', timestamp: '', details: {} });
 
   useEffect(() => { fetchLogs(); fetchSessions(); }, []);
 
@@ -105,7 +222,7 @@ const AuditTrailScreen = () => {
       }
     >
       {/* Main Content Area - Fixed height for scrolling */}
-      <Box sx={{ height: 'calc(100vh - 140px)', p: 3, display: 'flex', flexDirection: 'column', gap: 3, overflow: 'hidden' }}>
+      <Box sx={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', gap: 3, overflow: 'hidden' }}>
 
         <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
           <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} variant="scrollable" scrollButtons="auto">
@@ -210,7 +327,7 @@ const AuditTrailScreen = () => {
                   <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 180 }}>Action</TableCell>
                   <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 200 }}>Target Entity</TableCell>
                   <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 140 }}>IP Address</TableCell>
-                  <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold' }}>Details</TableCell>
+                  <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold' }}>Activity Summary</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -256,7 +373,16 @@ const AuditTrailScreen = () => {
                         {log.ip_address || 'N/A'}
                       </TableCell>
                       <TableCell>
-                        <AuditDetailView action={log.action} details={log.details} />
+                        <AuditDetailView
+                          action={log.action}
+                          details={log.details}
+                          timestamp={log.timestamp}
+                          onOpenDetails={(payload) => setDetailDialog({
+                            open: true,
+                            title: 'Audit Event Detail',
+                            ...payload,
+                          })}
+                        />
                       </TableCell>
                     </TableRow>
                   ))
@@ -295,7 +421,7 @@ const AuditTrailScreen = () => {
                     <TableRow>
                       <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 180 }}>Timestamp</TableCell>
                       <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold', width: 180 }}>Event</TableCell>
-                      <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold' }}>Details</TableCell>
+                      <TableCell sx={{ bgcolor: '#fafafa', fontWeight: 'bold' }}>Activity Summary</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -316,7 +442,16 @@ const AuditTrailScreen = () => {
                             <Chip label={log.action} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold', fontSize: '0.75rem', height: 24 }} />
                           </TableCell>
                           <TableCell>
-                            <AuditDetailView action={log.action} details={log.details} />
+                            <AuditDetailView
+                              action={log.action}
+                              details={log.details}
+                              timestamp={log.timestamp}
+                              onOpenDetails={(payload) => setDetailDialog({
+                                open: true,
+                                title: 'Session Event Detail',
+                                ...payload,
+                              })}
+                            />
                           </TableCell>
                         </TableRow>
                       ))
@@ -327,55 +462,101 @@ const AuditTrailScreen = () => {
             </Box>
           )}
         </Paper>
-
+        <AuditDetailDialog
+          open={detailDialog.open}
+          title={detailDialog.title}
+          action={detailDialog.action}
+          timestamp={detailDialog.timestamp}
+          details={detailDialog.details}
+          onClose={() => setDetailDialog({ open: false, title: '', action: '', timestamp: '', details: {} })}
+        />
       </Box>
     </PageContainer>
   );
 };
 
-// Sub-component for parsing details
-const AuditDetailView = ({ action, details }) => {
-  let data = {};
-  let isJson = false;
+const AuditDetailView = ({ action, details, timestamp, onOpenDetails }) => {
+  const narrative = buildAuditNarrative(action, details);
+  const normalized = normalizeDetails(details);
+  const success = String(action || '').toLowerCase().includes('login')
+    ? (normalized?.success === true || normalized?.success === 'true')
+    : null;
 
-  try { 
-    data = typeof details === 'string' ? JSON.parse(details) : details; 
-    isJson = true;
-  } catch (e) { 
-    data = details; 
-  }
-
-  // Login Specific
-  if (typeof action === 'string' && action.toLowerCase().includes('login')) {
-    const success = data.success === true || data.success === 'true';
-    return (
-      <Chip 
-        icon={success ? <CheckCircleIcon /> : <ErrorIcon />}
-        label={success ? 'Success' : 'Failed'}
-        color={success ? 'success' : 'error'}
-        size="small"
-        sx={{ height: 20, fontSize: '0.7rem' }}
-      />
-    );
-  }
-
-  // JSON Preview
-  if (isJson && typeof data === 'object') {
-    const preview = JSON.stringify(data).slice(0, 60);
-    return (
-      <Tooltip title={<pre style={{ fontSize: '0.7rem' }}>{JSON.stringify(data, null, 2)}</pre>} arrow placement="left">
-        <Typography variant="caption" sx={{ fontFamily: 'monospace', cursor: 'help', color: 'text.secondary', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <InfoIcon sx={{ fontSize: 14 }} /> {preview}{preview.length >= 60 ? '...' : ''}
-        </Typography>
-      </Tooltip>
-    );
-  }
-
-  // String Fallback
   return (
-    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-      {String(details)}
-    </Typography>
+    <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+      <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+        {success != null ? (
+          <Chip
+            icon={success ? <CheckCircleIcon /> : <ErrorIcon />}
+            label={success ? 'Success' : 'Failed'}
+            color={success ? 'success' : 'error'}
+            size="small"
+            sx={{ height: 22, fontSize: '0.72rem' }}
+          />
+        ) : null}
+        <Typography sx={{ fontSize: '0.82rem', fontWeight: 700, color: '#0f172a' }}>
+          {narrative.headline}
+        </Typography>
+      </Stack>
+      <Typography sx={{ fontSize: '0.76rem', color: '#64748b', lineHeight: 1.5 }}>
+        {narrative.secondary}
+      </Typography>
+      <Box>
+        <Button
+          size="small"
+          variant="text"
+          startIcon={<ViewIcon sx={{ fontSize: 16 }} />}
+          onClick={() => onOpenDetails({
+            action,
+            timestamp,
+            details: normalized,
+          })}
+          sx={{ px: 0, minWidth: 0 }}
+        >
+          View Details
+        </Button>
+      </Box>
+    </Stack>
+  );
+};
+
+const AuditDetailDialog = ({ open, title, action, timestamp, details, onClose }) => {
+  const normalized = normalizeDetails(details);
+  const fields = normalized && typeof normalized === 'object' && !Array.isArray(normalized)
+    ? Object.entries(normalized)
+    : [['Details', normalized]];
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle sx={{ pb: 1.5 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
+          <Box>
+            <Typography sx={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{title}</Typography>
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+              <Chip size="small" label={prettifyKey(action)} variant="outlined" />
+              <Chip size="small" label={formatDateTime(timestamp)} variant="outlined" />
+            </Stack>
+          </Box>
+          <IconButton onClick={onClose}>
+            <CloseIcon />
+          </IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent dividers>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '200px 1fr' }, gap: 1.25 }}>
+          {fields.map(([key, value]) => (
+            <React.Fragment key={key}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: '#475569' }}>
+                {prettifyKey(key)}
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: '#0f172a', lineHeight: 1.7, wordBreak: 'break-word' }}>
+                {stringifyValue(value)}
+              </Typography>
+            </React.Fragment>
+          ))}
+        </Box>
+      </DialogContent>
+    </Dialog>
   );
 };
 

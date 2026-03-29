@@ -108,6 +108,7 @@ import {
 } from 'recharts';
 import mlopsApi from '../services/mlopsApi';
 import PreprocessingBeforeAfter from './PreprocessingBeforeAfter';
+import FeatureGovernanceWorkbench from './FeatureGovernanceWorkbench';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
 import {
   findPipelineByName,
@@ -209,9 +210,9 @@ const PREPROCESS_TAB_GUIDES = {
     note: 'These are engineered features derived from data logic and AML heuristics, not from a generative model.',
   },
   3: {
-    title: 'Feature Selection Guidance',
-    subtitle: 'Review which columns look most useful, redundant, unstable, or risky before model training.',
-    note: 'The scores on this screen come from statistical tests and ranking methods. They are not GenAI judgements and they are not the final trained model.',
+    title: 'Feature Governance & Selection',
+    subtitle: 'Review and approve safe features before model training, with explicit buckets for approved, review, leakage, post-outcome, and redundant fields.',
+    note: 'No predictive model is trained here. This workbench blocks leakage, target proxies, post-investigation fields, and weak or redundant features before they reach AML model training.',
   },
   4: {
     title: 'Preview the Pipeline Output',
@@ -2382,6 +2383,79 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpen
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 3 - SELECT
 // ═══════════════════════════════════════════════════════════════════════════════
+const fallbackFeatureColumnName = (raw) => {
+  if (typeof raw === 'string') return String(raw).trim();
+  if (raw && typeof raw === 'object') {
+    return String(raw.name || raw.column || raw.col || '').trim();
+  }
+  return '';
+};
+
+const fallbackFeatureIsId = (name) => {
+  const col = String(name || '').trim().toLowerCase();
+  if (!col) return false;
+  if (['alert_id', 'transaction_id', 'account_id', 'customer_id', 'case_id', 'investigator_id'].includes(col)) return true;
+  return /(^|_)(id|uuid|guid|key|ref|num|nbr|no)$/.test(col);
+};
+
+const fallbackFeatureRole = (name) => {
+  const col = String(name || '').trim().toLowerCase();
+  if (fallbackFeatureIsId(col)) return { role: 'id', dtype: 'object', is_id: true };
+  if (/(date|time|timestamp|created|updated|open_date|close_date|alert_date)/.test(col)) {
+    return { role: 'timestamp', dtype: 'datetime64[ns]', is_id: false };
+  }
+  if (/(^is_|_is_|_flag$|_flag_|flag|pep|sanction|weekend|triggered|contacted|requested|issued|active|banking|hit$)/.test(col)) {
+    return { role: 'binary', dtype: 'int64', is_id: false };
+  }
+  if (/(score|amount|balance|days|hour|count|cnt|pct|ratio|volume|vol|avg|max|min|std|age|risk|tier|priority|linked|products|years)/.test(col)) {
+    return { role: 'numeric', dtype: 'float64', is_id: false };
+  }
+  return { role: 'categorical', dtype: 'object', is_id: false };
+};
+
+const buildFeatureScreeningFallback = ({ masterDataset, targetColumn, topN, varThresh, corrThresh }) => {
+  const rawColumns = Array.isArray(masterDataset?.columns) ? masterDataset.columns : [];
+  const normalizedColumns = rawColumns
+    .map((raw) => {
+      const name = fallbackFeatureColumnName(raw);
+      if (!name || String(name).toLowerCase() === String(targetColumn || '').toLowerCase()) return null;
+      const inferred = fallbackFeatureRole(name);
+      const source = raw && typeof raw === 'object' ? raw : {};
+      return {
+        name,
+        role: source.role || inferred.role,
+        dtype: source.dtype || inferred.dtype,
+        is_id: typeof source.is_id === 'boolean' ? source.is_id : inferred.is_id,
+        missing_pct: Number(source.missing_pct || 0),
+        distinct_count: Number(source.distinct_count || 0),
+        sample_values: Array.isArray(source.sample_values) ? source.sample_values : [],
+      };
+    })
+    .filter(Boolean);
+
+  if (!normalizedColumns.length) return null;
+
+  return {
+    target_column: targetColumn || null,
+    rows_analyzed: Number(masterDataset?.row_count || 0),
+    candidate_columns: normalizedColumns.filter((column) => !column.is_id).length,
+    columns: normalizedColumns,
+    available_techniques: FEATURE_SELECTION_TECHNIQUES,
+    technique_results: {},
+    recommended_supervised_metric: null,
+    recommended_supervised_reason: null,
+    recommended_filters: [],
+    default_technique_id: 'information_gain',
+    thresholds: {
+      variance_threshold: Number(varThresh || 0.01),
+      corr_threshold: Number(corrThresh || 0.95),
+      top_n: Number(topN || 20),
+    },
+    ranked_feature_count: 0,
+    __fallback_reason: 'The statistical screening service did not return a full payload, so FCC is showing a schema-first review from the current master dataset instead of blocking the workflow.',
+  };
+};
+
 const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
   const [data,       setData]       = useState(null);
   const [errors,     setErrors]     = useState({});
@@ -2414,7 +2488,35 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
         var_threshold: varThresh,
         corr_threshold: corrThresh,
       });
-      const nextData = { workbench: unwrapApiPayload(response) };
+      const payload = unwrapApiPayload(response);
+      const fallbackPayload = buildFeatureScreeningFallback({
+        masterDataset,
+        targetColumn,
+        topN,
+        varThresh,
+        corrThresh,
+      });
+      let resolvedPayload = payload;
+      if (!payload || typeof payload !== 'object') {
+        resolvedPayload = fallbackPayload;
+      } else if ((!Array.isArray(payload?.columns) || !payload.columns.length) && fallbackPayload) {
+        resolvedPayload = {
+          ...fallbackPayload,
+          ...payload,
+          columns: fallbackPayload.columns,
+          available_techniques: Array.isArray(payload?.available_techniques) && payload.available_techniques.length
+            ? payload.available_techniques
+            : fallbackPayload.available_techniques,
+          technique_results: payload?.technique_results || fallbackPayload.technique_results,
+          default_technique_id: payload?.default_technique_id || fallbackPayload.default_technique_id,
+          thresholds: payload?.thresholds || fallbackPayload.thresholds,
+          __fallback_reason: fallbackPayload.__fallback_reason,
+        };
+      }
+      if (!resolvedPayload || typeof resolvedPayload !== 'object') {
+        throw new Error('Feature screening returned no payload. Refresh the analysis and confirm the selected target is valid.');
+      }
+      const nextData = { workbench: resolvedPayload };
       setData(nextData);
       setErrors({});
       if (nextData?.workbench?.recommended_supervised_metric) {
@@ -2425,10 +2527,23 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
       }
     } catch (e) {
       console.error(e);
-      setData({ workbench: null });
-      setErrors({ workbench: e?.message || 'Feature-selection workbench failed' });
+      const fallbackPayload = buildFeatureScreeningFallback({
+        masterDataset,
+        targetColumn,
+        topN,
+        varThresh,
+        corrThresh,
+      });
+      if (fallbackPayload) {
+        setData({ workbench: fallbackPayload });
+        setErrors({});
+        setActiveTechniqueId(String(fallbackPayload.default_technique_id || 'information_gain'));
+      } else {
+        setData({ workbench: null });
+        setErrors({ workbench: e?.message || 'Feature-selection workbench failed' });
+      }
     } finally { setLoading(false); }
-  }, [corrThresh, masterDataset?.dataset_id, targetColumn, topN, varThresh]);
+  }, [corrThresh, masterDataset, masterDataset?.dataset_id, targetColumn, topN, varThresh]);
 
   useEffect(() => { load(); }, [masterDataset?.dataset_id, targetColumn]); // refresh uses latest thresholds on demand
 
@@ -2731,82 +2846,167 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
     dispersionRows,
     workbenchPayload?.rows_analyzed,
   ]);
+  const fallbackFeatureProfiles = useMemo(() => (
+    columnInventory
+      .filter((item) => !item?.is_id && String(item?.name || '') !== String(targetColumn || ''))
+      .slice(0, 24)
+      .map((item, idx) => {
+        const feature = String(item?.name || '');
+        const missingPct = Number(item?.missing_pct || 0);
+        const distinctCount = Number(item?.distinct_count || 0);
+        const proxyScorePct = Math.max(12, Math.min(55, Math.round((1 - missingPct) * 45) + Math.max(0, 10 - idx)));
+        return {
+          feature,
+          displayName: humanizeFeatureName(feature),
+          role: item?.role || 'unknown',
+          dtype: item?.dtype || item?.role || 'unknown',
+          recommendation: 'review',
+          recommendationLabel: FEATURE_DECISION_STYLES.review?.label || 'Review',
+          signalBand: targetColumn ? 'No clear signal' : 'Awaiting target definition',
+          hasLeakage: false,
+          hasRedundancy: false,
+          hasLowVariance: false,
+          weakSignal: true,
+          qualityLabel: featureQualityLabel(missingPct, false),
+          interpretabilityLabel: featureInterpretabilityLabel(item?.role, distinctCount),
+          businessMeaning: inferFeatureBusinessMeaning(feature, item?.role),
+          score: proxyScorePct / 100,
+          scoreNorm: proxyScorePct / 100,
+          scorePct: proxyScorePct,
+          rankPosition: idx + 1,
+          missingPct,
+          distinctCount,
+          uniqueRatio: 0,
+          sampleValues: Array.isArray(item?.sample_values) ? item.sample_values : [],
+          topCategories: Array.isArray(item?.top_categories) ? item.top_categories : [],
+          evidence: [
+            targetColumn
+              ? 'Supervised ranking is not available yet for this field, so the screen is showing a quality-first fallback review.'
+              : 'A target column is required before supervised feature usefulness can be ranked.',
+            missingPct >= 0.25
+              ? `${pct(missingPct, 0)} of rows are missing, which should be reviewed before training.`
+              : 'Coverage looks stable enough to keep reviewing this field.',
+          ],
+          issueTags: ['Fallback review'],
+        };
+      })
+  ), [columnInventory, targetColumn]);
+  const displayFeatureProfiles = featureProfiles.length ? featureProfiles : fallbackFeatureProfiles;
 
   const featureProfileLookup = useMemo(
-    () => Object.fromEntries(featureProfiles.map((profile) => [profile.feature, profile])),
-    [featureProfiles],
+    () => Object.fromEntries(displayFeatureProfiles.map((profile) => [profile.feature, profile])),
+    [displayFeatureProfiles],
   );
   const summaryCounts = useMemo(() => ({
-    keep: featureProfiles.filter((profile) => profile.recommendation === 'keep').length,
-    review: featureProfiles.filter((profile) => profile.recommendation === 'review').length,
-    redundant: featureProfiles.filter((profile) => profile.hasRedundancy).length,
-    risk: featureProfiles.filter((profile) => profile.hasLeakage).length,
-    weak: featureProfiles.filter((profile) => profile.weakSignal).length,
-  }), [featureProfiles]);
+    keep: displayFeatureProfiles.filter((profile) => profile.recommendation === 'keep').length,
+    review: displayFeatureProfiles.filter((profile) => profile.recommendation === 'review').length,
+    redundant: displayFeatureProfiles.filter((profile) => profile.hasRedundancy).length,
+    risk: displayFeatureProfiles.filter((profile) => profile.hasLeakage).length,
+    weak: displayFeatureProfiles.filter((profile) => profile.weakSignal).length,
+  }), [displayFeatureProfiles]);
   const leaderboardData = useMemo(
-    () => featureProfiles
+    () => displayFeatureProfiles
       .filter((profile) => profile.score != null || profile.recommendation === 'drop')
       .slice(0, 12),
-    [featureProfiles],
+    [displayFeatureProfiles],
   );
   const signalBandData = useMemo(() => {
     const order = ['Strong signal', 'Moderate signal', 'Weak signal', 'No clear signal', 'Awaiting target definition'];
     return order
       .map((label) => ({
         band: label,
-        count: featureProfiles.filter((profile) => profile.signalBand === label).length,
+        count: displayFeatureProfiles.filter((profile) => profile.signalBand === label).length,
       }))
       .filter((item) => item.count > 0);
-  }, [featureProfiles]);
+  }, [displayFeatureProfiles]);
   const qualityRiskMatrix = useMemo(
-    () => featureProfiles.slice(0, 18).map((profile) => ({
+    () => displayFeatureProfiles.slice(0, 18).map((profile) => ({
       feature: profile.displayName,
       usefulness: profile.scorePct || 0,
       qualityRisk: Math.round(((profile.missingPct || 0) + (profile.hasLowVariance ? 0.2 : 0) + (profile.hasRedundancy ? 0.1 : 0)) * 100),
       weight: profile.rankPosition ? Math.max(20 - profile.rankPosition, 4) : 6,
       recommendation: profile.recommendation,
     })),
-    [featureProfiles],
+    [displayFeatureProfiles],
   );
   const bucketGroups = useMemo(() => ([
     {
       key: 'keep',
       title: 'Strong business signal',
       description: 'Fields that look useful enough to keep moving forward.',
-      items: featureProfiles.filter((profile) => profile.recommendation === 'keep').slice(0, 8),
+      items: displayFeatureProfiles.filter((profile) => profile.recommendation === 'keep').slice(0, 8),
       tone: FEATURE_DECISION_STYLES.keep,
     },
     {
       key: 'review',
       title: 'Needs review',
       description: 'Fields with some value but a quality, coverage, or consistency caveat.',
-      items: featureProfiles.filter((profile) => profile.recommendation === 'review').slice(0, 8),
+      items: displayFeatureProfiles.filter((profile) => profile.recommendation === 'review').slice(0, 8),
       tone: FEATURE_DECISION_STYLES.review,
     },
     {
       key: 'redundant',
       title: 'Likely redundant',
       description: 'Fields that overlap heavily with other columns and may not add new information.',
-      items: featureProfiles.filter((profile) => profile.hasRedundancy).slice(0, 8),
+      items: displayFeatureProfiles.filter((profile) => profile.hasRedundancy).slice(0, 8),
       tone: { color: '#1d4ed8', border: '#bfdbfe', bg: '#eff6ff' },
     },
     {
       key: 'risk',
       title: 'Potential leakage or risk',
       description: 'Fields that look post-outcome, suspiciously perfect, or unsafe to rely on.',
-      items: featureProfiles.filter((profile) => profile.hasLeakage).slice(0, 8),
+      items: displayFeatureProfiles.filter((profile) => profile.hasLeakage).slice(0, 8),
       tone: FEATURE_DECISION_STYLES.drop,
     },
     {
       key: 'weak',
       title: 'Weak or noisy',
       description: 'Fields that show little signal or unstable behaviour in the current sample.',
-      items: featureProfiles.filter((profile) => profile.weakSignal || profile.hasLowVariance).slice(0, 8),
+      items: displayFeatureProfiles.filter((profile) => profile.weakSignal || profile.hasLowVariance).slice(0, 8),
       tone: { color: T.textSec, border: T.border, bg: T.surface },
     },
-  ]), [featureProfiles]);
-  const selectedProfile = featureProfileLookup[selectedFeature] || featureProfiles[0] || null;
+  ]), [displayFeatureProfiles]);
+  const selectedProfile = featureProfileLookup[selectedFeature] || displayFeatureProfiles[0] || null;
   const selectedFeatureBins = Array.isArray(featureDetail?.woe_bins) ? featureDetail.woe_bins : [];
+  const analysisHealth = useMemo(() => {
+    const candidateColumns = columnInventory.filter((item) => !item?.is_id).length;
+    if (workbenchPayload?.__fallback_reason) {
+      return {
+        severity: 'info',
+        title: 'Showing a schema-first fallback review',
+        detail: workbenchPayload.__fallback_reason,
+      };
+    }
+    if (!columnInventory.length) {
+      return {
+        severity: 'warning',
+        title: 'Feature screening returned no schema payload',
+        detail: 'Refresh the analysis. If the problem continues, confirm that the current master dataset and target are loaded correctly.',
+      };
+    }
+    if (!featureProfiles.length && fallbackFeatureProfiles.length) {
+      return {
+        severity: 'info',
+        title: 'Showing a fallback quality-first review',
+        detail: 'Supervised scores are not available for the current target or payload, so the charts below are using coverage and stability proxies until the target-aligned analysis returns.',
+      };
+    }
+    if (targetColumn && !miAll.length) {
+      return {
+        severity: 'info',
+        title: 'No supervised ranking was returned for the current target',
+        detail: 'The screen still shows quality and risk diagnostics, but target-linked ranking needs a target column with usable labelled rows.',
+      };
+    }
+    if (!candidateColumns) {
+      return {
+        severity: 'warning',
+        title: 'No candidate feature columns remain after identifier filtering',
+        detail: 'Most fields are currently classified as identifiers or excluded columns. Review the source dataset and the target mapping before training.',
+      };
+    }
+    return null;
+  }, [columnInventory, fallbackFeatureProfiles.length, featureProfiles.length, miAll.length, targetColumn]);
   const selectedFeatureEvidence = useMemo(() => {
     if (!selectedProfile) return [];
     return [
@@ -2820,14 +3020,14 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
   }, [selectedProfile]);
 
   useEffect(() => {
-    if (!featureProfiles.length) {
+    if (!displayFeatureProfiles.length) {
       setSelectedFeature('');
       return;
     }
     if (!selectedFeature || !featureProfileLookup[selectedFeature]) {
-      setSelectedFeature(featureProfiles[0].feature);
+      setSelectedFeature(displayFeatureProfiles[0].feature);
     }
-  }, [featureProfileLookup, featureProfiles, selectedFeature]);
+  }, [featureProfileLookup, displayFeatureProfiles, selectedFeature]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2923,6 +3123,12 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
               This step is statistical and rule-assisted. No predictive model or generative AI is used to score columns here.
             </Typography>
           </Alert>
+          {analysisHealth && (
+            <Alert severity={analysisHealth.severity} sx={{ mt: 1.1, borderRadius: 1.5 }}>
+              <Typography sx={{ fontSize: 12.2, fontWeight: 700, mb: 0.3 }}>{analysisHealth.title}</Typography>
+              <Typography sx={{ fontSize: 11.8, lineHeight: 1.7 }}>{analysisHealth.detail}</Typography>
+            </Alert>
+          )}
         </Box>
 
         <Box sx={{ p: 2.1 }}>
@@ -3049,7 +3255,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
             </Box>
             <Box sx={{ p: 2 }}>
               <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: 1.4 }}>
-                {featureProfiles.slice(0, 16).map((profile) => (
+                {displayFeatureProfiles.slice(0, 16).map((profile) => (
                   <Chip
                     key={profile.feature}
                     label={profile.displayName}
@@ -3564,6 +3770,7 @@ const PreviewTab = ({
   const [localPreview, setLocalPreview] = useState(parentPreview || null);
   const [loading,      setLoading]      = useState(false);
   const [err,          setErr]          = useState(null);
+  const [columnDialog, setColumnDialog] = useState(null);
 
   const run = useCallback(async () => {
     if (!masterDataset?.dataset_id || !steps.length) return;
@@ -3572,6 +3779,7 @@ const PreviewTab = ({
       if (onPreview) onPreview(steps);
       const res = await mlopsApi.preprocessPreview({
         dataset_id: masterDataset.dataset_id,
+        dataset: masterDataset,
         steps,
         sample_rows: 100,
         target_column: targetColumn,
@@ -3587,6 +3795,51 @@ const PreviewTab = ({
   const newCols     = afterCols.filter(c => !beforeCols.includes(c));
   const removedCols = beforeCols.filter(c => !afterCols.includes(c));
   const rows        = pv?.preview || [];
+  const columnDialogConfig = columnDialog === 'new'
+    ? {
+      title: 'New engineered columns',
+      subtitle: 'These columns are created by the current preprocessing plan and will be available to model training after the full run.',
+      items: newCols,
+      tone: 'success',
+      chipBg: '#dcfce7',
+      chipColor: '#166534',
+    }
+    : columnDialog === 'removed'
+      ? {
+        title: 'Dropped columns',
+        subtitle: 'These columns are removed by the current preprocessing and governance plan before model training.',
+        items: removedCols,
+        tone: 'error',
+        chipBg: '#fee2e2',
+        chipColor: T.danger,
+      }
+      : null;
+  const columnSummaryCards = [
+    {
+      key: 'new',
+      title: 'New engineered columns',
+      helper: 'Fresh business-ready columns created by the current plan.',
+      empty: 'No new engineered columns in this preview.',
+      items: newCols,
+      buttonLabel: 'View all engineered columns',
+      chipBg: '#dcfce7',
+      chipColor: '#166534',
+      borderColor: T.doneBorder,
+      bg: T.doneBg,
+    },
+    {
+      key: 'removed',
+      title: 'Dropped columns',
+      helper: 'Columns removed by governance, cleanup, or preprocessing logic.',
+      empty: 'No columns are being dropped in this preview.',
+      items: removedCols,
+      buttonLabel: 'View all dropped columns',
+      chipBg: '#fee2e2',
+      chipColor: T.danger,
+      borderColor: T.dangerBorder,
+      bg: T.dangerBg,
+    },
+  ].filter((card) => card.items.length > 0);
 
   if (!steps.length) return (
     <Alert severity="info" icon={<TableChart />} sx={{ borderRadius: 2 }}>
@@ -3618,7 +3871,7 @@ const PreviewTab = ({
 
       {pv && !loading && (
         <>
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1.25 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' }, gap: 1.25 }}>
             {[
               { k: 'Columns before', v: fmt(beforeCols.length),  color: T.textPri },
               { k: 'Columns after',  v: fmt(afterCols.length),   color: afterCols.length !== beforeCols.length ? T.orange : T.textPri },
@@ -3632,28 +3885,50 @@ const PreviewTab = ({
             ))}
           </Box>
 
-          {newCols.length > 0 && (
-            <Card sx={{ bgcolor: T.doneBg, borderColor: T.doneBorder }}>
-              <SLabel>New engineered columns</SLabel>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.6 }}>
-                {newCols.map(c => (
-                  <Chip key={c} label={c} size="small"
-                    sx={{ fontFamily: 'monospace', fontSize: 9.5, bgcolor: '#dcfce7', color: '#166534' }} />
-                ))}
-              </Box>
-            </Card>
-          )}
+          <Alert severity="info" sx={{ borderRadius: 1.5 }}>
+            Use this preview to confirm the current run order before the full preprocessing run. A safe AML pattern is: clean obvious data issues first, create business features next, then encode model-only fields, and keep final feature selection as the last pruning step.
+          </Alert>
 
-          {removedCols.length > 0 && (
-            <Card sx={{ bgcolor: T.dangerBg, borderColor: T.dangerBorder }}>
-              <SLabel>Dropped columns</SLabel>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.6 }}>
-                {removedCols.map(c => (
-                  <Chip key={c} label={c} size="small"
-                    sx={{ fontFamily: 'monospace', fontSize: 9.5, bgcolor: '#fee2e2', color: T.danger }} />
-                ))}
-              </Box>
-            </Card>
+          {!!columnSummaryCards.length && (
+            <Box sx={{ display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' } }}>
+              {columnSummaryCards.map((card) => (
+                <Card key={card.key} sx={{ bgcolor: card.bg, borderColor: card.borderColor }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                    <Box>
+                      <SLabel>{card.title}</SLabel>
+                      <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.4, lineHeight: 1.65 }}>
+                        {card.helper}
+                      </Typography>
+                    </Box>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setColumnDialog(card.key)}
+                      sx={{ textTransform: 'none', borderRadius: 1.25, borderColor: T.border, color: T.textPri, fontWeight: 700 }}
+                    >
+                      {card.buttonLabel} ({card.items.length})
+                    </Button>
+                  </Stack>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.6, mt: 1 }}>
+                    {card.items.slice(0, 14).map((c) => (
+                      <Chip
+                        key={`${card.key}-${c}`}
+                        label={c}
+                        size="small"
+                        sx={{ fontFamily: 'monospace', fontSize: 9.5, bgcolor: card.chipBg, color: card.chipColor }}
+                      />
+                    ))}
+                    {card.items.length > 14 && (
+                      <Chip
+                        label={`+${card.items.length - 14} more`}
+                        size="small"
+                        sx={{ fontSize: 9.5, bgcolor: 'white', border: `1px solid ${T.border}`, color: T.textSec }}
+                      />
+                    )}
+                  </Box>
+                </Card>
+              ))}
+            </Box>
           )}
 
           {rows.length > 0 && (
@@ -3720,6 +3995,34 @@ const PreviewTab = ({
         preview={pv}
         persona={persona}
       />
+
+      <Dialog open={Boolean(columnDialogConfig)} onClose={() => setColumnDialog(null)} fullWidth maxWidth="md">
+        <DialogTitle sx={{ fontWeight: 800, borderBottom: `1px solid ${T.border}` }}>
+          {columnDialogConfig?.title || 'Columns'}
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 2 }}>
+          {columnDialogConfig?.subtitle && (
+            <Typography sx={{ fontSize: 12, color: T.textSec, lineHeight: 1.7, mb: 1.5 }}>
+              {columnDialogConfig.subtitle}
+            </Typography>
+          )}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.7 }}>
+            {(columnDialogConfig?.items || []).map((column) => (
+              <Chip
+                key={`${columnDialog}-${column}`}
+                label={column}
+                size="small"
+                sx={{
+                  fontFamily: 'monospace',
+                  fontSize: 10,
+                  bgcolor: columnDialogConfig?.chipBg || 'white',
+                  color: columnDialogConfig?.chipColor || T.textPri,
+                }}
+              />
+            ))}
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 };
@@ -3828,6 +4131,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
       try {
         const res = await mlopsApi.preprocessPreview({
           dataset_id: masterDataset.dataset_id,
+          dataset: masterDataset,
           steps,
           sample_rows: 100,
           target_column: targetColumn,
@@ -4338,8 +4642,23 @@ const PreprocessingWorkbench = ({
   activePipelineName = '',
   onPipelineActivated,
 }) => {
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(3);
   const activeGuide = PREPROCESS_TAB_GUIDES[tab] || PREPROCESS_TAB_GUIDES[0];
+  const completedTabIndexes = useMemo(() => {
+    const done = new Set();
+    if (Array.isArray(suggestions) && suggestions.length) done.add(0);
+    if (Array.isArray(steps) && steps.length) {
+      done.add(0);
+      done.add(1);
+    }
+    if ((steps || []).some((step) => String(step?.type || '').toLowerCase().startsWith('feature_') || ['datetime_extract', 'text_features'].includes(String(step?.type || '').toLowerCase()))) {
+      done.add(2);
+    }
+    if ((Array.isArray(steps) && steps.length > 0) && (tab > 3 || preview || preprocessedDataset)) done.add(3);
+    if (preview || preprocessedDataset) done.add(4);
+    if (preprocessedDataset?.dataset_id) done.add(5);
+    return done;
+  }, [preprocessedDataset, preview, steps, suggestions, tab]);
 
   const removeStep = idx     => onStepsChange(steps.filter((_, i) => i !== idx));
   const moveStep   = (a, b) => {
@@ -4354,7 +4673,7 @@ const PreprocessingWorkbench = ({
     { Icon: Build,      label: 'Plan',      biz: 'Fix Issues', tip: 'Auto-detected cleaning issues and grouped recommendations' },
     { Icon: Code,       label: 'Builder',   biz: 'Builder',    tip: 'Custom preprocessing workbench with column explorer' },
     { Icon: TrendingUp, label: 'Engineer',  biz: 'Add Features', tip: 'AML domain templates + reusable feature engineering' },
-    { Icon: QueryStats, label: 'Select',    biz: 'Filter Cols', tip: 'Leakage removal, variance, correlation, and advanced feature selection' },
+    { Icon: QueryStats, label: 'Governance', biz: 'Feature Review', tip: 'Governed feature approval, leakage blocking, timing checks, and redundancy review' },
     { Icon: TableChart, label: 'Preview',   biz: 'Preview',     tip: 'Before/after schema diff + 100-row sample table' },
     { Icon: PlayArrow,  label: 'Run',       biz: 'Run',         tip: 'Execute pipeline on full dataset' },
   ];
@@ -4397,6 +4716,9 @@ const PreprocessingWorkbench = ({
                     <Stack direction="row" spacing={0.75} alignItems="center">
                       <TIcon sx={{ fontSize: 15 }} />
                       <span>{persona === 'business' ? t.biz : t.label}</span>
+                      {completedTabIndexes.has(i) && (
+                        <CheckCircle sx={{ fontSize: 13, color: T.done }} />
+                      )}
                       {i === TAB_DEFS.length - 1 && steps.length > 0 && (
                         <Box sx={{ px: 0.75, py: 0.1, bgcolor: 'white', border: `1px solid ${tab === TAB_DEFS.length - 1 ? T.orange : T.accentBorder}`, borderRadius: 0 }}>
                           <Typography sx={{ fontSize: 9.5, color: T.orange, fontWeight: 700 }}>
@@ -4441,11 +4763,13 @@ const PreprocessingWorkbench = ({
             />
           )}
           {tab === 3 && (
-            <SelectTab
+            <FeatureGovernanceWorkbench
               masterDataset={masterDataset}
+              datasets={datasets}
               steps={steps}
               onStepsChange={onStepsChange}
               targetColumn={targetColumn}
+              persona={persona}
             />
           )}
           {tab === 4 && (

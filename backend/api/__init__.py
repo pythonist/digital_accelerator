@@ -22,6 +22,9 @@ def create_app():
     from api.routes.auth import auth_bp
     from api.routes.data import data_bp
     from api.routes.cases import cases_bp
+    from api.routes.case_queue import case_queue_bp
+    from api.routes.case_retrieval import case_retrieval_bp
+    from api.routes.reports import reports_bp
     from api.routes.analysis import analysis_bp
     from api.routes.rules import rules_bp
     from api.routes.llm import llm_bp
@@ -41,6 +44,9 @@ def create_app():
     app.register_blueprint(auth_bp, url_prefix='/api') 
     app.register_blueprint(data_bp, url_prefix='/api/v2')
     app.register_blueprint(cases_bp, url_prefix='/api/v2')
+    app.register_blueprint(case_queue_bp, url_prefix='/api/v2')
+    app.register_blueprint(case_retrieval_bp, url_prefix='/api/v2')
+    app.register_blueprint(reports_bp, url_prefix='/api/v2')
     app.register_blueprint(analysis_bp, url_prefix='/api/v2')
     app.register_blueprint(rules_bp, url_prefix='/api/v2')
     app.register_blueprint(llm_bp, url_prefix='/api/v2')

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAppContext, usePersistentState } from "@context/AppContext";
 import apiClient from "@services/api";
+import { readInvestigationSettings, subscribeInvestigationSettings } from '../../utils/investigationSettings';
 
 // ✅ Correct Layout Import
 import PageContainer from "@investigation-layout/PageContainer";
@@ -23,13 +24,27 @@ const ChatAssistantScreen = () => {
   const { ollamaModels: contextModels } = useAppContext(); 
   const [localModels, setLocalModels] = useState([]);
   const [chatMessages, setChatMessages] = usePersistentState('chat_history', []);
-  const [selectedModel, setSelectedModel] = usePersistentState('chat_model', 'llama3.2:1b');
+  const [selectedModel, setSelectedModel] = usePersistentState('chat_model', readInvestigationSettings()?.assistant?.preferred_model || readInvestigationSettings()?.global?.default_model || 'llama3.2:1b');
   const [currentMessage, setCurrentMessage] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
   const availableModels = contextModels.length > 0 ? contextModels : localModels;
+
+  useEffect(() => {
+    const applySettings = (latestSettings) => {
+      const preferred = latestSettings?.assistant?.preferred_model || latestSettings?.global?.default_model || '';
+      if (preferred) {
+        setSelectedModel(preferred);
+      }
+      if (!latestSettings?.assistant?.keep_chat_history) {
+        setChatMessages([]);
+      }
+    };
+    applySettings(readInvestigationSettings());
+    return subscribeInvestigationSettings(applySettings);
+  }, [setChatMessages, setSelectedModel]);
 
   useEffect(() => {
     const fetchModels = async () => {

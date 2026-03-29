@@ -1,13 +1,23 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Box, CircularProgress, Paper, Stack, Tab, Tabs, Typography } from '@mui/material';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Box, Button, CircularProgress, Paper, Stack, Tab, Tabs, Typography } from '@mui/material';
+import { CheckCircle } from '@mui/icons-material';
 import { V } from './validation/validationTheme';
-import { unwrap, normalizeLabel } from './validation/validationUtils';
-import { DarkHeader, SectionCard } from './validation/ValidationShared';
+import {
+  formatSplitLabel,
+  getValidationContext,
+  mergeValidationModel,
+  normalizeLabel,
+  pct,
+  totalFromConfusionMatrix,
+  unwrap,
+} from './validation/validationUtils';
+import { MetricChip, SectionCard } from './validation/ValidationShared';
 import OverviewTab from './validation/OverviewTab';
 import ComparisonTab from './validation/ComparisonTab';
 import ThresholdTuningTab from './validation/ThresholdTuningTab';
 import StabilityRisksTab from './validation/StabilityRisksTab';
 import OOTValidationTab from './validation/OOTValidationTab';
+import ValidationSummaryTab from './validation/ValidationSummaryTab';
 import mlopsApi from '../services/mlopsApi';
 
 const tabs = [
@@ -16,42 +26,81 @@ const tabs = [
   { id: 'threshold', label: 'Threshold Tuning' },
   { id: 'oot', label: 'OOT Validation' },
   { id: 'stability', label: 'Stability & Risks' },
+  { id: 'summary', label: 'Summary' },
 ];
+
+const normalizeSelectedIds = (value) => {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || '').split(',');
+  return Array.from(new Set(
+    raw
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  )).slice(0, 6);
+};
 
 const ModelValidationScreen = ({
   persona,
   jobId,
+  datasetId = null,
   activeModelRun,
+  validationReport = null,
+  initialActiveTab = 0,
+  onActiveTabChange,
   onValidationComplete,
   onActiveRunChange,
+  onTrainAnotherModel,
+  onContinueToRelease,
   actionsDisabled = false,
   actionsMessage = '',
+  staleWarningMessage = '',
 }) => {
   const resolvedJobId = jobId || activeModelRun?.job_id || '';
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(Number.isInteger(initialActiveTab) ? initialActiveTab : 0);
   const [runs, setRuns] = useState([]);
   const [summary, setSummary] = useState(null);
   const [selectedJobIds, setSelectedJobIds] = useState([]);
   const [compareData, setCompareData] = useState([]);
   const [compareLoading, setCompareLoading] = useState(false);
   const [loadingRuns, setLoadingRuns] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [ootResult, setOotResult] = useState(null);
   const [error, setError] = useState(null);
   const [currentJobId, setCurrentJobId] = useState(resolvedJobId || '');
+  const [runDetailsByJobId, setRunDetailsByJobId] = useState({});
+  const lastPropagatedRunRef = useRef('');
+  const activeModelRunRef = useRef(activeModelRun);
   const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
+  const hasComparisonSelection = selectedJobIds.length >= 2;
+
+  useEffect(() => {
+    activeModelRunRef.current = activeModelRun;
+  }, [activeModelRun]);
 
   const loadRuns = useCallback(async () => {
     setLoadingRuns(true);
     setError(null);
     try {
-      const res = await mlopsApi.listTrainingRuns({ limit: 200 });
+      const params = { limit: 200 };
+      if (Number.isFinite(Number(datasetId)) && Number(datasetId) > 0) {
+        params.dataset_id = Number(datasetId);
+      }
+      const res = await mlopsApi.listTrainingRuns(params);
       const data = unwrap(res);
-      setRuns(Array.isArray(data) ? data : []);
+      const nextRuns = Array.isArray(data) ? data.slice() : [];
+      const activeRun = activeModelRunRef.current;
+      const activeJobId = String(activeRun?.job_id || '').trim();
+      if (activeJobId && !nextRuns.some((run) => String(run?.job_id || '') === activeJobId)) {
+        nextRuns.unshift(activeRun);
+      }
+      setRuns(nextRuns);
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to load training runs');
     } finally {
       setLoadingRuns(false);
     }
-  }, []);
+  }, [datasetId]);
 
   const loadSummary = useCallback(async () => {
     try {
@@ -64,7 +113,10 @@ const ModelValidationScreen = ({
   }, []);
 
   const loadCompare = useCallback(async () => {
-    if (!selectedJobIds.length) return;
+    if (selectedJobIds.length < 2) {
+      setCompareData([]);
+      return;
+    }
     setCompareLoading(true);
     setError(null);
     try {
@@ -77,6 +129,16 @@ const ModelValidationScreen = ({
       setCompareLoading(false);
     }
   }, [selectedJobIds]);
+
+  const handleSelectJobIds = useCallback((value) => {
+    const nextIds = normalizeSelectedIds(value);
+    setSelectedJobIds((prev) => {
+      if (prev.length === nextIds.length && prev.every((item, idx) => item === nextIds[idx])) {
+        return prev;
+      }
+      return nextIds;
+    });
+  }, []);
 
   const handlePromoteChampion = useCallback(async (job_id) => {
     if (!job_id) return;
@@ -131,10 +193,19 @@ const ModelValidationScreen = ({
   }, [resolvedJobId, currentJobId]);
 
   useEffect(() => {
-    if (!selectedJobIds.length && runs.length) {
-      setSelectedJobIds([runs[0].job_id]);
+    if (!Number.isInteger(initialActiveTab)) return;
+    setActiveTab((prev) => (prev === initialActiveTab ? prev : initialActiveTab));
+  }, [initialActiveTab]);
+
+  useEffect(() => {
+    onActiveTabChange?.(activeTab);
+  }, [activeTab, onActiveTabChange]);
+
+  useEffect(() => {
+    if (!selectedJobIds.length && (currentJobId || runs.length)) {
+      setSelectedJobIds([currentJobId || runs[0].job_id].filter(Boolean));
     }
-  }, [runs, selectedJobIds.length]);
+  }, [currentJobId, runs, selectedJobIds.length]);
 
   useEffect(() => {
     if (!currentJobId) return;
@@ -145,10 +216,16 @@ const ModelValidationScreen = ({
   }, [currentJobId]);
 
   useEffect(() => {
-    if ((activeTab === 1 || activeTab === 4) && selectedJobIds.length) {
+    if ((activeTab === 1 || activeTab === 4 || activeTab === 5) && selectedJobIds.length >= 2) {
       loadCompare();
     }
   }, [activeTab, selectedJobIds, loadCompare]);
+
+  useEffect(() => {
+    if (selectedJobIds.length < 2 && compareData.length) {
+      setCompareData([]);
+    }
+  }, [compareData.length, selectedJobIds.length]);
 
   const activeModel = useMemo(() => (
     [...runs, ...compareData].find((r) => String(r?.job_id || '') === String(currentJobId || ''))
@@ -162,44 +239,241 @@ const ModelValidationScreen = ({
   const effectiveJobId = currentJobId || activeModel?.job_id || '';
 
   useEffect(() => {
-    if (activeModel?.job_id) onActiveRunChange?.(activeModel);
-  }, [activeModel, onActiveRunChange]);
+    if (!activeModelRun?.job_id || !activeModelRun?.results) return;
+    setRunDetailsByJobId((prev) => {
+      if (prev[activeModelRun.job_id]) return prev;
+      return { ...prev, [activeModelRun.job_id]: activeModelRun.results };
+    });
+  }, [activeModelRun?.job_id, activeModelRun?.results]);
 
-  const headerSubtitle = activeModel
-    ? `Active model: ${normalizeLabel(activeModel)} | ${activeModel.algorithm_display || activeModel.algorithm}`
-    : 'Select a model run to begin validation.';
+  const requestedDetailIds = useMemo(
+    () => Array.from(new Set([effectiveJobId, ...selectedJobIds].filter(Boolean))),
+    [effectiveJobId, selectedJobIds],
+  );
+
+  useEffect(() => {
+    const missingIds = requestedDetailIds.filter((id) => !runDetailsByJobId[id]);
+    if (!missingIds.length) return undefined;
+    let cancelled = false;
+
+    (async () => {
+      setLoadingDetails(true);
+      try {
+        const payload = await Promise.all(
+          missingIds.map(async (job_id) => {
+            try {
+              const res = await mlopsApi.modelResults(job_id);
+              return [job_id, unwrap(res)];
+            } catch (detailError) {
+              return [job_id, null];
+            }
+          }),
+        );
+        if (cancelled) return;
+        setRunDetailsByJobId((prev) => {
+          const next = { ...prev };
+          payload.forEach(([job_id, detail]) => {
+            if (detail) next[job_id] = detail;
+          });
+          return next;
+        });
+      } finally {
+        if (!cancelled) setLoadingDetails(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedDetailIds, runDetailsByJobId]);
+
+  const activeModelResolved = useMemo(
+    () => mergeValidationModel(activeModel, runDetailsByJobId[effectiveJobId] || activeModel?.results || activeModelRun?.results),
+    [activeModel, activeModelRun?.results, effectiveJobId, runDetailsByJobId],
+  );
+
+  const comparisonRuns = useMemo(() => {
+    const order = new Map((selectedJobIds || []).map((job_id, idx) => [String(job_id), idx]));
+    const compareMap = new Map((compareData || []).map((model) => [String(model?.job_id || ''), model]));
+    const runMap = new Map((runs || []).map((run) => [String(run?.job_id || ''), run]));
+    return (selectedJobIds || [])
+      .map((job_id) => {
+        const normalizedId = String(job_id || '');
+        const baseModel = compareMap.get(normalizedId)
+          || runMap.get(normalizedId)
+          || { job_id: normalizedId };
+        const detailModel = runDetailsByJobId[normalizedId];
+        const merged = mergeValidationModel(baseModel, detailModel);
+        return merged?.job_id ? merged : null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => (order.get(String(left?.job_id || '')) ?? 999) - (order.get(String(right?.job_id || '')) ?? 999));
+  }, [compareData, runDetailsByJobId, runs, selectedJobIds]);
+
+  const activeModelSignature = useMemo(() => JSON.stringify({
+    job_id: activeModelResolved?.job_id || '',
+    selected_threshold: activeModelResolved?.selected_threshold ?? activeModelResolved?.threshold ?? null,
+    optimal_threshold: activeModelResolved?.optimal_threshold ?? activeModelResolved?.metrics?.optimal_threshold ?? null,
+    algorithm: activeModelResolved?.algorithm || activeModelResolved?.algorithm_display || '',
+    auc: activeModelResolved?.metrics?.roc_auc ?? activeModelResolved?.auc ?? null,
+  }), [activeModelResolved]);
+
+  useEffect(() => {
+    if (!activeModelResolved?.job_id || typeof onActiveRunChange !== 'function') return;
+    if (lastPropagatedRunRef.current === activeModelSignature) return;
+    lastPropagatedRunRef.current = activeModelSignature;
+    onActiveRunChange(activeModelResolved);
+  }, [activeModelResolved, activeModelSignature, onActiveRunChange]);
+
+  const activeContext = useMemo(
+    () => getValidationContext(activeModelResolved),
+    [activeModelResolved],
+  );
+  const activeHoldoutRows = Number.isFinite(activeContext.testRows)
+    ? activeContext.testRows
+    : totalFromConfusionMatrix(activeModelResolved?.confusion_matrix || activeModelResolved?.metrics?.confusion_matrix);
+  const activeTrainRows = Number.isFinite(activeContext.trainRows) ? activeContext.trainRows : null;
+  const activeSplitDetail = activeContext.splitStrategy === 'temporal'
+    ? `${activeContext.dateColumn || 'date'}${activeContext.splitDate ? ` @ ${activeContext.splitDate}` : ''}`
+    : activeContext.splitStrategy
+      ? `${activeContext.splitStrategy} split`
+      : 'Run a model comparison or validation report to populate holdout details.';
+  const activeThreshold = activeModelResolved?.metrics?.optimal_threshold ?? activeModelResolved?.optimal_threshold ?? null;
+  const activeThresholdText = activeThreshold == null || Number.isNaN(Number(activeThreshold))
+    ? '-'
+    : Number(activeThreshold).toFixed(2);
+  const completedTabIndexes = useMemo(() => {
+    const done = new Set();
+    for (let idx = 0; idx < activeTab; idx += 1) done.add(idx);
+    return done;
+  }, [activeTab]);
+  const headerCards = [
+    {
+      label: 'Active Model',
+      value: activeModelResolved?.job_id ? normalizeLabel(activeModelResolved) : 'Select a run',
+      detail: activeModelResolved?.algorithm_display || activeModelResolved?.algorithm || 'No active model selected',
+    },
+    {
+      label: 'Validation Split',
+      value: formatSplitLabel(activeContext),
+      detail: activeSplitDetail,
+    },
+    {
+      label: 'Validation Rows',
+      value: activeHoldoutRows ? activeHoldoutRows.toLocaleString() : '-',
+      detail: activeTrainRows ? `Train ${activeTrainRows.toLocaleString()} rows` : 'Train rows not available',
+    },
+    {
+      label: 'Recommended Threshold',
+      value: activeThresholdText,
+      detail: staleWarningMessage
+        ? 'Awaiting rerun after upstream change'
+        : (activeContext.testEventRatePct != null ? `Event rate ${pct(activeContext.testEventRatePct, 1)}` : 'Event rate not available'),
+    },
+  ];
 
   return (
-    <Stack spacing={2.5} sx={{ bgcolor: V.canvas, p: 0.5 }}>
-      <DarkHeader
-        title="Stage 8 - Validation and Threshold Tuning"
-        subtitle={headerSubtitle}
-        right={loadingRuns ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : null}
-      />
+    <Stack spacing={2} sx={{ bgcolor: V.canvas, p: 0.25 }}>
+      <SectionCard sx={{ bgcolor: V.paper }}>
+        <Stack spacing={2}>
+          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ lg: 'center' }}>
+            <Box>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: V.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                Validation Context
+              </Typography>
+              <Typography sx={{ fontSize: 12.25, color: V.textMuted, mt: 0.45, maxWidth: 760, lineHeight: 1.6 }}>
+                Holdout split, validation rows, and the active cut-off for the selected model.
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              {loadingRuns || loadingDetails ? <CircularProgress size={18} sx={{ color: V.orange }} /> : null}
+              {activeModelResolved?.job_id && (
+                <MetricChip label={normalizeLabel(activeModelResolved)} tone="default" />
+              )}
+              {activeModelResolved?.algorithm
+                && String(activeModelResolved.algorithm_display || activeModelResolved.algorithm).toLowerCase()
+                  !== String(normalizeLabel(activeModelResolved)).toLowerCase() && (
+                <MetricChip label={activeModelResolved.algorithm_display || activeModelResolved.algorithm} tone="default" />
+              )}
+              {formatSplitLabel(activeContext) && (
+                <MetricChip label={formatSplitLabel(activeContext)} tone="default" />
+              )}
+            </Stack>
+          </Stack>
 
-      {error && <Alert severity="error" sx={{ borderRadius: 2 }}>{error}</Alert>}
-      {actionsDisabled && <Alert severity="warning" sx={{ borderRadius: 2 }}>{gatingMessage}</Alert>}
+          <Box
+            sx={{
+              display: 'grid',
+              gap: 1.25,
+              gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' },
+            }}
+          >
+            {headerCards.map((card) => (
+              <Paper
+                key={card.label}
+                variant="outlined"
+                sx={{
+                  p: 1.2,
+                  borderRadius: 0,
+                  borderColor: V.border,
+                  bgcolor: V.panelAlt,
+                }}
+              >
+                <Typography sx={{ fontSize: 10.25, color: V.textMuted, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+                  {card.label}
+                </Typography>
+                <Typography sx={{ fontSize: 17, fontWeight: 800, color: V.text, mt: 0.45 }}>
+                  {card.value}
+                </Typography>
+                <Typography sx={{ fontSize: 11, color: V.textMuted, mt: 0.45, minHeight: 34 }}>
+                  {card.detail}
+                </Typography>
+              </Paper>
+            ))}
+          </Box>
+        </Stack>
+      </SectionCard>
+
+      {error && <Alert severity="error" sx={{ borderRadius: 0 }}>{error}</Alert>}
+      {actionsDisabled && <Alert severity="warning" sx={{ borderRadius: 0 }}>{gatingMessage}</Alert>}
 
       {!effectiveJobId && !loadingRuns && runs.length === 0 && (
-        <Alert severity="warning" sx={{ borderRadius: 2 }}>
+        <Alert severity="warning" sx={{ borderRadius: 0 }}>
           Train at least one model in Stage 6 before running validation.
         </Alert>
       )}
 
-      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', borderColor: V.border }}>
+      <Paper variant="outlined" sx={{ borderRadius: 0, overflow: 'hidden', borderColor: V.border }}>
         <Tabs
           value={activeTab}
           onChange={(_, v) => setActiveTab(v)}
           sx={{
-            bgcolor: '#F8FAFC',
+            bgcolor: V.paper,
             borderBottom: `1px solid ${V.border}`,
-            '& .MuiTab-root': { textTransform: 'none', fontSize: 13, fontWeight: 700 },
+            minHeight: 54,
+            '& .MuiTab-root': {
+              textTransform: 'none',
+              fontSize: 13,
+              fontWeight: 700,
+              minHeight: 54,
+              color: V.textMuted,
+            },
             '& .Mui-selected': { color: V.orange },
             '& .MuiTabs-indicator': { bgcolor: V.orange, height: 3 },
           }}
         >
-          {tabs.map((tab) => (
-            <Tab key={tab.id} label={tab.label} />
+          {tabs.map((tab, idx) => (
+            <Tab
+              key={tab.id}
+              label={(
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <span>{tab.label}</span>
+                  {completedTabIndexes.has(idx) && (
+                    <CheckCircle sx={{ fontSize: 14, color: V.good }} />
+                  )}
+                </Stack>
+              )}
+            />
           ))}
         </Tabs>
       </Paper>
@@ -209,7 +483,7 @@ const ModelValidationScreen = ({
           <OverviewTab
             summary={summary}
             runs={runs}
-            activeModel={activeModel}
+            activeModel={activeModelResolved}
             onPromoteChampion={handlePromoteChampion}
             persona={persona}
             actionsDisabled={actionsDisabled}
@@ -217,24 +491,40 @@ const ModelValidationScreen = ({
         )}
 
         {activeTab === 1 && (
-          <ComparisonTab
-            runs={runs}
-            selectedJobIds={selectedJobIds}
-            onSelectJobIds={setSelectedJobIds}
-            compareData={compareData}
-            loading={compareLoading}
-            onCompare={loadCompare}
-            onPromoteChampion={handlePromoteChampion}
-            onArchive={handleArchive}
-            onBulkLabel={handleBulkLabel}
-            actionsDisabled={actionsDisabled}
-          />
+          <Stack spacing={1.25}>
+            {!hasComparisonSelection && (
+              <Alert
+                severity="info"
+                sx={{ borderRadius: 0 }}
+                action={typeof onTrainAnotherModel === 'function' ? (
+                  <Button color="inherit" size="small" onClick={onTrainAnotherModel} sx={{ textTransform: 'none', fontWeight: 700 }}>
+                    Train another model
+                  </Button>
+                ) : undefined}
+              >
+                Validation is running in single-model mode. Review the active model now, then train another only if you want a side-by-side comparison later.
+              </Alert>
+            )}
+            <ComparisonTab
+              runs={runs}
+              selectedJobIds={selectedJobIds}
+              onSelectJobIds={handleSelectJobIds}
+              compareData={comparisonRuns}
+              loading={hasComparisonSelection ? compareLoading : false}
+              onCompare={loadCompare}
+              onPromoteChampion={handlePromoteChampion}
+              onArchive={handleArchive}
+              onBulkLabel={handleBulkLabel}
+              actionsDisabled={actionsDisabled}
+            />
+          </Stack>
         )}
 
         {activeTab === 2 && (
           <ThresholdTuningTab
             jobId={effectiveJobId}
             runs={runs}
+            activeModel={activeModelResolved}
             onJobChange={setCurrentJobId}
             onValidationComplete={onValidationComplete}
             actionsDisabled={actionsDisabled}
@@ -246,21 +536,61 @@ const ModelValidationScreen = ({
           <OOTValidationTab
             runs={runs}
             defaultJobId={effectiveJobId}
+            defaultThreshold={validationReport?.selected_threshold ?? activeModelResolved?.selected_threshold ?? activeModelResolved?.metrics?.optimal_threshold ?? null}
+            result={ootResult}
+            onResultChange={setOotResult}
             actionsDisabled={actionsDisabled}
             actionsMessage={gatingMessage}
           />
         )}
 
         {activeTab === 4 && (
-          <StabilityRisksTab compareData={compareData} />
+          <StabilityRisksTab compareData={comparisonRuns} />
+        )}
+
+        {activeTab === 5 && (
+          <ValidationSummaryTab
+            activeModel={activeModelResolved}
+            comparisonRuns={comparisonRuns}
+            validationReport={validationReport}
+            ootResult={ootResult}
+            onValidationComplete={onValidationComplete}
+            actionsDisabled={actionsDisabled}
+            actionsMessage={gatingMessage}
+          />
         )}
       </Box>
 
-      <SectionCard>
-        <Typography sx={{ fontSize: 11.5, color: V.textMuted }}>
-          This workbench helps you compare models, tune thresholds, and communicate risk tradeoffs to business stakeholders.
-        </Typography>
-      </SectionCard>
+      <Paper variant="outlined" sx={{ borderRadius: 0, borderColor: V.border, bgcolor: V.paper, p: 1.5 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2} justifyContent="space-between" alignItems={{ md: 'center' }}>
+          <Typography sx={{ fontSize: 11.5, color: V.textMuted }}>
+            {validationReport?.selected_threshold != null
+              ? `Validation threshold ${Number(validationReport.selected_threshold).toFixed(2)} is locked and will flow into Model Release.`
+              : 'Run threshold tuning to lock the validation threshold before moving into Model Release.'}
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {typeof onTrainAnotherModel === 'function' ? (
+              <Button
+                variant="outlined"
+                onClick={onTrainAnotherModel}
+                sx={{ textTransform: 'none', borderRadius: 0, borderColor: V.border, color: V.textMuted, fontWeight: 700 }}
+              >
+                Back to Model Training
+              </Button>
+            ) : null}
+            {typeof onContinueToRelease === 'function' ? (
+              <Button
+                variant="contained"
+                onClick={onContinueToRelease}
+                disabled={actionsDisabled || !(validationReport?.selected_threshold != null || validationReport?.optimal_threshold != null)}
+                sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', borderRadius: 0, fontWeight: 700 }}
+              >
+                Continue to Model Release
+              </Button>
+            ) : null}
+          </Stack>
+        </Stack>
+      </Paper>
     </Stack>
   );
 };

@@ -4,6 +4,22 @@ import { fmt, safe } from './utils';
 import JoinDagSimple from './JoinDagSimple';
 import AdvancedTechnical from './AdvancedTechnical';
 
+const metricTileStyle = {
+  border: `1px solid ${T.border}`,
+  borderRadius: 12,
+  padding: '8px 10px',
+  background: '#f8fafc',
+};
+
+const chipStyle = {
+  border: `1px solid ${T.border}`,
+  borderRadius: 999,
+  padding: '5px 9px',
+  background: '#fff',
+  fontSize: 10.5,
+  color: T.text,
+};
+
 const normalizeImpact = (previewImpact, fallbackImpact, anchorType) => {
   const fromPreview = Array.isArray(previewImpact) ? previewImpact : [];
   if (fromPreview.length) {
@@ -20,6 +36,10 @@ const normalizeImpact = (previewImpact, fallbackImpact, anchorType) => {
       rows_after: Number(row.rows_after || 0),
       coverage_pct: Number(row.coverage_pct || 0),
       null_impact_pct: Number(row.null_impact_pct || 0),
+      duplication_factor: Number(row.duplication_factor || ((Number(row.rows_before || 0) > 0)
+        ? Number(row.rows_after || 0) / Number(row.rows_before || 1)
+        : 1)),
+      cardinality: row.cardinality || '',
     }));
   }
 
@@ -37,6 +57,10 @@ const normalizeImpact = (previewImpact, fallbackImpact, anchorType) => {
     rows_after: Number(row.after_rows || 0),
     coverage_pct: Number(row.coverage_pct || 0),
     null_impact_pct: Number(row.null_impact_pct || 0),
+    duplication_factor: Number(row.duplication_factor || ((Number(row.before_rows || 0) > 0)
+      ? Number(row.after_rows || 0) / Number(row.before_rows || 1)
+      : 1)),
+    cardinality: row.cardinality || '',
   }));
 };
 
@@ -70,6 +94,8 @@ const StepPreviewBuild = ({
   previewLoading,
   onBuild,
   building,
+  canContinue = false,
+  onContinue,
   error,
   buildLog,
   advancedOpen,
@@ -115,10 +141,18 @@ const StepPreviewBuild = ({
   const afterJoinRows = Number(joinNarratives[joinNarratives.length - 1]?.rows_after || startRows);
   const labelledRows = Number(resolvedLabelSummary?.n_labelled || estimatedOutputRows || afterJoinRows);
   const excludedRows = Math.max(0, afterJoinRows - labelledRows);
+  const fanOutJoinCount = joinNarratives.filter((step) => (
+    Number(step.duplication_factor || 1) > 1.02
+    || String(step.cardinality || '').toLowerCase().includes('many')
+  )).length;
+  const highestDuplication = joinNarratives.reduce(
+    (max, step) => Math.max(max, Number(step.duplication_factor || 1)),
+    1,
+  );
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ ...cardStyle, padding: 8 }}>
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ ...cardStyle, padding: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: T.text, marginBottom: 8 }}>What will be built</div>
         <div style={{ display: 'grid', gap: 6 }}>
           {summaryLines.map((line) => (
@@ -127,32 +161,59 @@ const StepPreviewBuild = ({
         </div>
       </div>
 
-      <div style={{ ...cardStyle, padding: 8 }}>
+      <div style={{ ...cardStyle, padding: 12 }}>
         <div style={{ fontSize: 12.5, fontWeight: 800, color: T.text, marginBottom: 8 }}>
           Row journey in plain English
         </div>
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
-          <div style={{ ...cardStyle, padding: 8, background: T.orangeSoft, borderColor: T.orange }}>
+          <div style={{ ...metricTileStyle, background: T.orangeSoft, borderColor: T.orange }}>
             <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: T.muted, fontWeight: 700 }}>Start</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{fmt(startRows)}</div>
             <div style={{ fontSize: 11, color: T.text }}>{anchorType || 'alerts'} anchor rows</div>
           </div>
-          <div style={{ ...cardStyle, padding: 8 }}>
+          <div style={{ ...metricTileStyle }}>
             <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: T.muted, fontWeight: 700 }}>After joins</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{fmt(afterJoinRows)}</div>
             <div style={{ fontSize: 11, color: T.text }}>Rows mostly unchanged, columns added</div>
           </div>
-          <div style={{ ...cardStyle, padding: 8, background: T.goodSoft, borderColor: '#86efac' }}>
+          <div style={{ ...metricTileStyle, background: T.goodSoft, borderColor: '#86efac' }}>
             <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: T.muted, fontWeight: 700 }}>Labeled output</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{fmt(labelledRows)}</div>
             <div style={{ fontSize: 11, color: T.text }}>{fmt(excludedRows)} rows excluded as unlabeled/open</div>
           </div>
         </div>
 
-        <div style={{ ...cardStyle, marginTop: 8, padding: 8, background: '#f8fafc' }}>
+        <div style={{ ...metricTileStyle, marginTop: 8 }}>
           <div style={{ fontSize: 11.5, color: T.text }}>
             Why {fmt(startRows)} and {fmt(datasets.find((d) => safe(d.dataset_type).includes('transaction'))?.row_count || 0)} can end near {fmt(labelledRows)}:
             transaction rows are squeezed first, joins add features not rows, and label eligibility filters the final supervised set.
+          </div>
+        </div>
+      </div>
+
+      <div style={{ ...cardStyle, padding: 12 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: T.text, marginBottom: 8 }}>
+          Join safety checks
+        </div>
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+          <div style={{ ...metricTileStyle }}>
+            <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: T.muted, fontWeight: 700 }}>Join steps</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{fmt(joinNarratives.length)}</div>
+            <div style={{ fontSize: 11, color: T.text }}>Applied one source at a time from the chosen join map</div>
+          </div>
+          <div style={{ ...metricTileStyle, background: fanOutJoinCount > 0 ? T.warnSoft : T.goodSoft, borderColor: fanOutJoinCount > 0 ? '#fcd34d' : '#86efac' }}>
+            <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: T.muted, fontWeight: 700 }}>Row explosion risk</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{fanOutJoinCount > 0 ? 'Review needed' : 'Controlled'}</div>
+            <div style={{ fontSize: 11, color: T.text }}>
+              {fanOutJoinCount > 0
+                ? `${fmt(fanOutJoinCount)} join${fanOutJoinCount === 1 ? '' : 's'} still look like 1:many or many:many paths.`
+                : 'Current plan keeps the master grain stable before training.'}
+            </div>
+          </div>
+          <div style={{ ...metricTileStyle }}>
+            <div style={{ fontSize: 10.5, textTransform: 'uppercase', color: T.muted, fontWeight: 700 }}>Largest row multiplier</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{highestDuplication.toFixed(2)}x</div>
+            <div style={{ fontSize: 11, color: T.text }}>Anything far above 1.00x should be squeezed or reviewed before build</div>
           </div>
         </div>
       </div>
@@ -164,7 +225,7 @@ const StepPreviewBuild = ({
         masterRows={estimatedOutputRows}
       />
 
-      <div style={{ ...cardStyle, padding: 8 }}>
+      <div style={{ ...cardStyle, padding: 12 }}>
         <div style={{ fontSize: 12.5, fontWeight: 800, color: T.text, marginBottom: 8 }}>
           Join-by-join breakdown (before vs after)
         </div>
@@ -175,7 +236,7 @@ const StepPreviewBuild = ({
 
         <div style={{ display: 'grid', gap: 8 }}>
           {joinNarratives.map((step) => (
-            <div key={`join_story_${step.step}_${step.source}`} style={{ ...cardStyle, padding: 9, background: '#fff' }}>
+            <div key={`join_story_${step.step}_${step.source}`} style={{ padding: 10, background: '#fff', borderRadius: 14, border: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>
                   Step {step.step}: join {step.source} on {step.join_key}
@@ -186,15 +247,15 @@ const StepPreviewBuild = ({
               </div>
 
               <div style={{ display: 'grid', gap: 8, marginTop: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
-                <div style={{ ...cardStyle, padding: '6px 8px', background: '#f8fafc' }}>
+                <div style={metricTileStyle}>
                   <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Rows before</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>{fmt(step.rows_before)}</div>
                 </div>
-                <div style={{ ...cardStyle, padding: '6px 8px', background: '#f8fafc' }}>
+                <div style={metricTileStyle}>
                   <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Matched</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>{fmt(step.matched_rows)}</div>
                 </div>
-                <div style={{ ...cardStyle, padding: '6px 8px', background: '#f8fafc' }}>
+                <div style={metricTileStyle}>
                   <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Rows after</div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>{fmt(step.rows_after)}</div>
                 </div>
@@ -203,13 +264,13 @@ const StepPreviewBuild = ({
               <div style={{ marginTop: 8, fontSize: 11.5, color: T.text }}>{step.story}</div>
 
               <div style={{ display: 'grid', gap: 8, marginTop: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
-                <div style={{ ...cardStyle, padding: 8 }}>
+                <div style={{ ...metricTileStyle, padding: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 6 }}>
                     Source table columns
                   </div>
-                  <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {step.source_preview_columns.length > 0 ? step.source_preview_columns.map((col) => (
-                      <div key={`${step.source}_src_${col}`} style={{ ...cardStyle, padding: '4px 6px', background: '#fff', fontSize: 10.5, color: T.text }}>
+                      <div key={`${step.source}_src_${col}`} style={chipStyle}>
                         {col}
                       </div>
                     )) : (
@@ -218,13 +279,13 @@ const StepPreviewBuild = ({
                   </div>
                 </div>
 
-                <div style={{ ...cardStyle, padding: 8 }}>
+                <div style={{ ...metricTileStyle, padding: 10 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 6 }}>
                     Columns added to master dataset
                   </div>
-                  <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {step.added_columns.length > 0 ? step.added_columns.map((col) => (
-                      <div key={`${step.source}_add_${col}`} style={{ ...cardStyle, padding: '4px 6px', background: '#fff', fontSize: 10.5, color: T.text }}>
+                      <div key={`${step.source}_add_${col}`} style={chipStyle}>
                         {col}
                       </div>
                     )) : (
@@ -243,7 +304,7 @@ const StepPreviewBuild = ({
         </div>
       </div>
 
-      <div style={{ ...cardStyle, padding: 8 }}>
+      <div style={{ ...cardStyle, padding: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>Master dataset preview (first 12 rows)</div>
           <button type="button" style={buttonStyle('secondary', previewLoading)} onClick={onRefreshPreview} disabled={previewLoading}>
@@ -301,22 +362,22 @@ const StepPreviewBuild = ({
         </div>
       </div>
 
-      <div style={{ ...cardStyle, padding: 8 }}>
+      <div style={{ ...cardStyle, padding: 12 }}>
         <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text, marginBottom: 6 }}>Label distribution</div>
         <div style={{ fontSize: 12, color: T.text }}>
           Positives: <strong>{fmt(labelStats.positive)}</strong> | Negatives: <strong>{fmt(labelStats.negative)}</strong>
         </div>
       </div>
 
-      <div style={{ ...cardStyle, padding: 8 }}>
-        <button
-          type="button"
-          style={buttonStyle('primary', building)}
-          disabled={building}
-          onClick={onBuild}
-        >
-          {building ? 'Building...' : 'Build Master Dataset'}
-        </button>
+      <div style={{ ...cardStyle, padding: 12 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: T.text, marginBottom: 6 }}>Build status</div>
+        <div style={{ fontSize: 11.5, color: T.text }}>
+          {building
+            ? 'Building the master dataset now. The footer action is locked until the run finishes.'
+            : canContinue
+              ? 'The build is current. Use the footer action to continue to the target step.'
+              : 'Use the single footer action to build this master dataset after the join checks look right.'}
+        </div>
 
         {error && (
           <div style={{ ...cardStyle, marginTop: 10, padding: 10, background: T.badSoft, borderColor: '#fecaca', color: '#991b1b', fontSize: 12 }}>

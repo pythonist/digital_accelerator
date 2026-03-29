@@ -205,6 +205,14 @@ def _fetch_case_metadata(case_id: str, cursor, anchor_date: datetime) -> Dict[st
             if k in col_map: return f'c.{col_map[k]}'
         return "NULL"
 
+    def parse_int(value):
+        try:
+            if value is None or str(value).strip() == "":
+                return 0
+            return int(float(value))
+        except Exception:
+            return 0
+
     query = f"""
     SELECT 
         c.{case_col} as case_id,
@@ -212,7 +220,9 @@ def _fetch_case_metadata(case_id: str, cursor, anchor_date: datetime) -> Dict[st
         {get_col(['alert_date', 'alertdate', 'date', 'created_at'])} as alert_date,
         {get_col(['customer_id', 'customerid'])} as customer_id,
         {get_col(['customer_name', 'customername'])} as customer_name,
-        {get_col(['risk_rating', 'risk_level', 'risk'])} as risk_rating
+        {get_col(['customer_risk_rating', 'risk_rating', 'risk_level', 'risk'])} as risk_rating,
+        {get_col(['prior_alerts_count', 'previous_alerts_count', 'prev_alerts'])} as prev_alerts,
+        {get_col(['prior_case_count', 'previous_sars_count', 'prev_sars', 'linked_cases_count'])} as prev_sars
     FROM cases c
     WHERE c.{case_col} = ?
     """
@@ -233,8 +243,8 @@ def _fetch_case_metadata(case_id: str, cursor, anchor_date: datetime) -> Dict[st
         'customer_id': row_dict.get('customer_id') or 'Unspecified',
         'customer_name': row_dict.get('customer_name') or 'Unknown Entity',
         'risk_rating': _parse_risk_level(row_dict.get('risk_rating')),
-        'prev_alerts': 0,
-        'prev_sars': 0
+        'prev_alerts': parse_int(row_dict.get('prev_alerts')),
+        'prev_sars': parse_int(row_dict.get('prev_sars'))
     }
 
 def _default_metadata(case_id, anchor_date):

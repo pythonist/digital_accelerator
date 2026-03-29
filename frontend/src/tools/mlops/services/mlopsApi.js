@@ -16,9 +16,13 @@ import apiClient from '@services/api';
 const mlopsApi = {
 
   // ── Dataset management ──────────────────────────────────────────────────────
-  uploadDataset: async (datasetType, file) => {
+  uploadDataset: async (datasetType, file, options = {}) => {
     const formData = new FormData();
     formData.append('file', file);
+    const pipelineId = Number(options?.pipeline_id || 0);
+    if (Number.isFinite(pipelineId) && pipelineId > 0) {
+      formData.append('pipeline_id', String(pipelineId));
+    }
     return apiClient.postForm(`/api/mlops/upload/${encodeURIComponent(String(datasetType))}`, formData);
   },
   listDatasets: async (params = {}) => {
@@ -226,6 +230,11 @@ const mlopsApi = {
     return apiClient.get(`/api/mlops/pipeline/${pipelineId}`);
   },
 
+  /** Rename one saved pipeline without creating a duplicate. */
+  pipelineRename: async (pipelineId, name) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/rename`, { name });
+  },
+
   /** Save lightweight screen state for autosave and resume. */
   pipelineSaveScreenState: async (pipelineId, payload) => {
     return apiClient.post(`/api/mlops/pipeline/${pipelineId}/screen-state`, payload);
@@ -426,6 +435,21 @@ const mlopsApi = {
     return apiClient.post('/api/model-training/validation/compare', payload);
   },
 
+  /** Compact validation visuals for score distribution and richer dashboards. */
+  validationDetail: async (jobId, params = {}) => {
+    return apiClient.get(`/api/model-training/validation/detail/${jobId}`, params);
+  },
+
+  /** Deterministic-first validation explanation with optional local LLM rewrite. */
+  validationExplain: async (payload) => {
+    return apiClient.post('/api/model-training/validation/explain', payload);
+  },
+
+  /** Business-first release summary with optional local LLM rewrite. */
+  releaseBusinessSummary: async (payload) => {
+    return apiClient.post('/api/model-training/release/business-summary', payload);
+  },
+
   /** List all training runs (optionally filtered by dataset_id). */
   listTrainingRuns: async (params = {}) => {
     return apiClient.get('/api/model-training/runs', params);
@@ -502,13 +526,18 @@ const mlopsApi = {
    * Deploy a trained model.
    * Response now includes grain, hml_high_threshold, hml_low_threshold, id_column.
    */
-  deployModel: async (jobId, threshold) => {
-    return apiClient.post('/api/model-training/deploy', { job_id: jobId, threshold });
+  deployModel: async (jobId, threshold, extras = {}) => {
+    return apiClient.post('/api/model-training/deploy', { job_id: jobId, threshold, ...extras });
   },
 
   /** Current active deployment for this environment. */
   getActiveDeployment: async () => {
     return apiClient.get('/api/model-training/deployments/active');
+  },
+
+  /** Deployment version history for this environment. */
+  listDeploymentHistory: async () => {
+    return apiClient.get('/api/model-training/deployments/history');
   },
 
   /** Swap active deployment to a new model run. */
@@ -568,11 +597,26 @@ const mlopsApi = {
   publishToSentinel: async (payload = {}) => {
     return apiClient.publishFccBatch(payload);
   },
+  importSentinelPublishedRun: async (payload = {}) => {
+    return apiClient.importFccPublishedRun(payload);
+  },
   listScoredBatches: async (params = {}) => {
     return apiClient.listFccScoredBatches(params);
   },
   listSentinelPublishedRuns: async (params = {}) => {
     return apiClient.listFccPublishedRuns(params);
+  },
+  getWorkflowSession: async (params = {}) => {
+    return apiClient.getFccWorkflowSession(params);
+  },
+  saveWorkflowSession: async (payload = {}) => {
+    return apiClient.saveFccWorkflowSession(payload);
+  },
+  deleteWorkflowSession: async (sessionId) => {
+    return apiClient.deleteFccWorkflowSession(sessionId);
+  },
+  handoffToSentinel: async (payload = {}) => {
+    return apiClient.handoffFccToSentinel(payload);
   },
   liveSimulate: async (payload) => {
     return apiClient.post('/api/deployment-dashboard/live-simulate', payload);

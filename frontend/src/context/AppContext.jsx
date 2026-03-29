@@ -1,6 +1,12 @@
 // src/context/AppContext.jsx
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import apiClient from "@services/api";
+import {
+  clearShellSelection,
+  persistShellSelection,
+  readInitialActiveEnv,
+  readInitialActiveTool,
+} from '../utils/navigationPersistence';
 
 const AppContext = createContext();
 
@@ -22,10 +28,10 @@ export const AppProvider = ({ children }) => {
   const [error, setError] = useState(null);
 
   // ==================== ENVIRONMENT & TOOL ====================
-  const [activeEnv, setActiveEnvState] = useState(null);
+  const [activeEnv, setActiveEnvState] = useState(() => readInitialActiveEnv());
   const [activeBankName, setActiveBankName] = useState('Default');
   const [activeBankLogo, setActiveBankLogo] = useState(null);
-  const [activeTool, setActiveTool] = useState(null);
+  const [activeTool, setActiveTool] = useState(() => readInitialActiveTool());
   const [isSystemLoading, setIsSystemLoading] = useState(false);
   const [availableEnvironments, setAvailableEnvironments] = useState([]);
   
@@ -191,14 +197,12 @@ export const AppProvider = ({ children }) => {
     } catch(e) {}
   }, []);
 
-  const loadCaseList = useCallback(async () => {
-    if (caseList.length > 0) return; 
+  const loadCaseList = useCallback(async (force = false) => {
+    if (!force && caseList.length > 0) return; 
     setLoadingCaseList(true);
     try {
-      const data = await apiClient.post('/api/v2/db/query-table', {
-        table: 'cases', page: 1, rowsPerPage: 5000
-      });
-      setCaseList(data.data || []);
+      const data = await apiClient.get('/api/v2/case-list');
+      setCaseList(Array.isArray(data) ? data : []);
     } catch (err) {} 
     finally { setLoadingCaseList(false); }
   }, [caseList.length]);
@@ -228,7 +232,9 @@ export const AppProvider = ({ children }) => {
   }, [isAuthenticated, tenantId, loadAvailableEnvironments, fetchModels]);
 
   useEffect(() => {
-    if (activeEnv) {
+    if (isAuthLoading) return;
+
+    if (activeEnv && isAuthenticated) {
       apiClient.setActiveEnv(activeEnv);
       checkEnvironmentReadiness();
       loadCaseScope();
@@ -239,7 +245,11 @@ export const AppProvider = ({ children }) => {
       resetCaseScope();
       resetPriorityBuckets();
     }
-  }, [activeEnv, checkEnvironmentReadiness, loadCaseScope, loadPriorityBuckets]);
+  }, [activeEnv, isAuthenticated, isAuthLoading, checkEnvironmentReadiness, loadCaseScope, loadPriorityBuckets]);
+
+  useEffect(() => {
+    persistShellSelection({ activeEnv, activeTool });
+  }, [activeEnv, activeTool]);
 
   const setActiveEnv = (envId) => {
     setActiveEnvState(envId);
@@ -263,6 +273,7 @@ export const AppProvider = ({ children }) => {
     try { await apiClient.post('/api/logout', {}); } catch (err) {} 
     finally {
       localStorage.removeItem('auth_token');
+      clearShellSelection();
       setIsAuthenticated(false); 
       setUsername('');
       setTenantId(null);
@@ -293,6 +304,8 @@ export const AppProvider = ({ children }) => {
       
       if (res.success) {
         await loadCaseScope();
+        await loadCaseList(true);
+        await loadPriorityBuckets();
         return { success: true };
       }
       return { success: false, error: res.error };
@@ -410,6 +423,7 @@ export const AppProvider = ({ children }) => {
     setDbStats(null);
     resetCaseScope();
     resetPriorityBuckets();
+    clearShellSelection();
   };
 
   const loadCasePack = async (caseId) => {

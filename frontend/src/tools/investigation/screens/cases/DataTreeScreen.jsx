@@ -13,6 +13,7 @@ import EvidenceSummaryPanel from './components/EvidenceSummaryPanel';
 import EvidenceTreeView from './components/EvidenceTreeView';
 import EvidenceDetailsPanel from './components/EvidenceDetailsPanel';
 import { calculateEvidenceMetrics } from './utils/evidenceCalculations';
+import { mergeCaseResolutionModule } from '../../utils/caseResolutionStore';
 
 const DataTreeScreen = () => {
   const [searchId, setSearchId] = useState('');
@@ -112,6 +113,16 @@ const DataTreeScreen = () => {
   }, []);
 
   const evidenceMetrics = calculateEvidenceMetrics(treeData, reviewedNodes);
+
+  useEffect(() => {
+    if (!searchId || !treeData) return;
+    mergeCaseResolutionModule(searchId, 'lineage', {
+      tree_data: treeData,
+      evidence_summary: evidenceMetrics || null,
+      reviewed_nodes: Array.from(reviewedNodes || []),
+      flagged_nodes: Array.from(flaggedNodes || []),
+    });
+  }, [searchId, treeData, evidenceMetrics, reviewedNodes, flaggedNodes]);
 
   const selectedCase = useMemo(() => {
     const id = String(searchId || '');

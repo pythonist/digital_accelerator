@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Box, Alert } from '@mui/material';
 import { useAppContext } from '@context/AppContext';
 import { CalibrationProvider, useCalibration } from './context/CalibrationContext';
 import MainLayout from './layout/Mainlayout';
+import usePersistedWorkbenchScreen from '../../hooks/usePersistedWorkbenchScreen';
 
 // ✅ NEW: Import the Step 0 Orchestrator from your new folder
 import Step0DataFoundation from './screens/Step0_DataFoundation';
@@ -88,7 +89,7 @@ const CalibrationRouter = ({ activeScreen, setActiveScreen }) => {
 
 const CalibrationPlatform = () => {
   const { activeEnv, username } = useAppContext();
-  const [activeScreen, setActiveScreen] = useState('scenario_catalog'); 
+  const [activeScreen, setActiveScreen] = usePersistedWorkbenchScreen('calibration', 'scenario_catalog');
 
   if (!activeEnv) {
     return (

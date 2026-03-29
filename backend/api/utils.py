@@ -1,7 +1,7 @@
 # api/utils.py
 from functools import wraps
 
-from flask import jsonify
+from flask import jsonify, request
 
 from api.services import services
 
@@ -9,6 +9,28 @@ from api.services import services
 def handle_errors(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
+        requested_env = request.args.get("env_id") or request.headers.get("X-Environment-ID")
+        requested_tenant = (
+            getattr(request, "tenant_id", None)
+            or request.headers.get("X-Tenant-ID")
+            or (services.metadata_manager.active_tenant if services.metadata_manager else None)
+            or "default"
+        )
+        needs_binding = bool(
+            requested_env and (
+                not services.investigation_db
+                or not services.metadata_manager
+                or services.metadata_manager.active_env != requested_env
+                or services.metadata_manager.active_tenant != requested_tenant
+            )
+        )
+
+        if needs_binding:
+            try:
+                services.bind_environment_context(str(requested_env), str(requested_tenant))
+            except Exception:
+                pass
+
         if not services.investigation_db:
             if services.metadata_manager and services.metadata_manager.active_env:
                 print("Warning: DB missing but environment is active. Attempting restore...")

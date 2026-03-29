@@ -19,8 +19,8 @@ export const T = {
   blue: FCC_THEME.info,
   blueSoft: FCC_THEME.infoBg,
   chip: FCC_THEME.panelMuted,
-  shadow: FCC_THEME.shadowSm,
-  radius: 4,
+  shadow: '0 14px 36px rgba(15, 23, 42, 0.06)',
+  radius: 14,
 };
 
 export const cardStyle = {
@@ -32,7 +32,7 @@ export const cardStyle = {
 
 export const buttonStyle = (kind = 'secondary', disabled = false) => {
   const base = {
-    borderRadius: 0,
+    borderRadius: 999,
     fontSize: 13,
     fontWeight: 700,
     padding: '9px 14px',
@@ -59,7 +59,7 @@ export const buttonStyle = (kind = 'secondary', disabled = false) => {
 export const inputStyle = {
   width: '100%',
   border: `1px solid ${T.borderStrong}`,
-  borderRadius: 0,
+  borderRadius: 12,
   padding: '9px 11px',
   fontSize: 13,
   color: T.text,

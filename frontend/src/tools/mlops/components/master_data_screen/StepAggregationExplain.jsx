@@ -2,9 +2,16 @@ import React, { useMemo } from 'react';
 import { T, cardStyle, buttonStyle } from './theme';
 import { fmt, safe, TXN_AGG_FEATURES } from './utils';
 
+const metricTileStyle = {
+  border: `1px solid ${T.border}`,
+  borderRadius: 12,
+  padding: 8,
+  background: '#f8fafc',
+};
+
 const tableWrapStyle = {
   ...cardStyle,
-  padding: 8,
+  padding: 10,
   background: '#fff',
   display: 'grid',
   gap: 6,
@@ -134,8 +141,8 @@ const StepAggregationExplain = ({
   }
 
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
-      <div style={{ ...cardStyle, padding: 8, background: T.orangeSoft, borderColor: T.orange }}>
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ ...cardStyle, padding: 12, background: T.orangeSoft, borderColor: T.orange }}>
         <div style={{ fontSize: 12.5, fontWeight: 800, color: T.orange }}>
           Transaction aggregation view
         </div>
@@ -158,39 +165,39 @@ const StepAggregationExplain = ({
       </div>
 
       {content.map((item) => (
-        <div key={`agg_${item.key}`} style={{ ...cardStyle, padding: 8, display: 'grid', gap: 8 }}>
+        <div key={`agg_${item.key}`} style={{ ...cardStyle, padding: 12, display: 'grid', gap: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: T.text }}>
             {item.tableName}: before and after squeeze
           </div>
 
           <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
-            <div style={{ ...cardStyle, padding: 7, background: T.warnSoft, borderColor: '#fcd34d' }}>
+            <div style={{ ...metricTileStyle, background: T.warnSoft, borderColor: '#fcd34d' }}>
               <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Raw rows</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>{fmt(item.rowsBefore)}</div>
             </div>
-            <div style={{ ...cardStyle, padding: 7, background: T.goodSoft, borderColor: '#86efac' }}>
+            <div style={{ ...metricTileStyle, background: T.goodSoft, borderColor: '#86efac' }}>
               <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>After grouping by {item.joinKey}</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>{fmt(item.rowsAfter)}</div>
             </div>
-            <div style={{ ...cardStyle, padding: 7, background: '#f8fafc' }}>
+            <div style={metricTileStyle}>
               <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Compression</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>{item.compression > 0 ? `${item.compression.toFixed(1)}x` : '-'}</div>
             </div>
-            <div style={{ ...cardStyle, padding: 7, background: '#fff' }}>
+            <div style={{ ...metricTileStyle, background: '#fff' }}>
               <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>After join at anchor grain</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>{fmt(item.joinedRows)}</div>
             </div>
-            <div style={{ ...cardStyle, padding: 7, background: '#fff' }}>
+            <div style={{ ...metricTileStyle, background: '#fff' }}>
               <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Final labeled rows</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>{fmt(item.finalRows)}</div>
             </div>
-            <div style={{ ...cardStyle, padding: 7, background: '#fff' }}>
+            <div style={{ ...metricTileStyle, background: '#fff' }}>
               <div style={{ fontSize: 10, color: T.muted, textTransform: 'uppercase' }}>Rows excluded later</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>{fmt(item.removedRows)}</div>
             </div>
           </div>
 
-          <div style={{ ...cardStyle, padding: 8, background: '#f8fafc' }}>
+          <div style={{ ...metricTileStyle, padding: 10 }}>
             <div style={{ fontSize: 11.5, color: T.text }}>
               Why this happens: {fmt(item.rowsBefore)} transaction rows are summarized to {fmt(item.rowsAfter)} {item.joinKey}-level rows.
               Joining this to {anchorType || 'alerts'} keeps about {fmt(item.joinedRows)} rows because each anchor row stays one row.
@@ -219,4 +226,3 @@ const StepAggregationExplain = ({
 };
 
 export default StepAggregationExplain;
-

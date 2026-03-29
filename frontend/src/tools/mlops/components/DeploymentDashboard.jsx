@@ -25,6 +25,7 @@
 import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -65,6 +66,7 @@ import {
   QueryStats,
   Refresh,
   Shield,
+  TableChart,
   Timeline,
   WarningAmber,
 } from '@mui/icons-material';
@@ -85,6 +87,8 @@ import {
 } from 'recharts';
 import mlopsApi from '../services/mlopsApi';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
+import { useAppContext } from '../../../context/AppContext';
+import { persistFccSentinelHandoff } from '../../../utils/fccSentinelHandoff';
 
 // â”€â”€ Design tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
@@ -108,6 +112,14 @@ const D = {
   canvas:      '#f5f6f8',
 };
 
+const DEPLOYMENT_TAB = {
+  LIVE: 0,
+  MONITORING: 1,
+  DRIFT: 2,
+  LEDGER: 3,
+  LINEAGE: 4,
+};
+
 // â”€â”€ Tiny helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const EMPTY_VALUE = '-';
 const fmt = (n, options = { maximumFractionDigits: 0 }) => {
@@ -129,8 +141,11 @@ const unwrap = (res) => {
 };
 
 const runDisplayLabel = (run = {}) => {
+  const label = String(run?.label || '').trim();
   const algo = String(run?.algorithm_display || run?.algorithm || '').replace(/_/g, ' ');
   const shortId = String(run?.job_id || '').slice(0, 8);
+  if (label && shortId) return `${label} (${shortId})`;
+  if (label) return label;
   if (algo && shortId) return `${algo} (${shortId})`;
   if (algo) return algo;
   if (shortId) return shortId;
@@ -141,6 +156,12 @@ const num = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+const titleCaseKey = (value) => String(value || '')
+  .replace(/_/g, ' ')
+  .replace(/\b\w/g, (m) => m.toUpperCase());
+
+const runQualityFlags = (run = {}) => Array.isArray(run?.quality_flags) ? run.quality_flags : [];
 
 const deriveEventLossFromRunMeta = (runMeta = {}) => {
   const metrics = runMeta?.metrics || runMeta?.results?.metrics || {};
@@ -642,6 +663,102 @@ const InvestigatorQueueTable = ({ rows = [] }) => (
   </Box>
 );
 
+const PreviewTable = ({
+  columns = [],
+  rows = [],
+  emptyMessage = 'No rows available.',
+}) => {
+  const renderValue = (column, value) => {
+    if (value == null || value === '') return EMPTY_VALUE;
+    const columnKey = String(column || '').toLowerCase();
+    if (columnKey === 'decision') {
+      const isEscalated = String(value).toLowerCase() === 'escalated';
+      return (
+        <Chip
+          label={isEscalated ? 'Escalated' : 'Suppressed'}
+          size="small"
+          sx={{
+            height: 20,
+            fontSize: 10,
+            fontWeight: 700,
+            bgcolor: isEscalated ? D.redLight : D.greenLight,
+            color: isEscalated ? D.red : D.green,
+          }}
+        />
+      );
+    }
+    if (columnKey === 'queue_target') {
+      return (
+        <Chip
+          label={String(value).replace(/_/g, ' ')}
+          size="small"
+          variant="outlined"
+          sx={{ height: 20, fontSize: 10 }}
+        />
+      );
+    }
+    if (columnKey.includes('score') || columnKey.includes('threshold')) {
+      return dec(value, columnKey.includes('threshold') ? 2 : 4);
+    }
+    if (columnKey.includes('amount')) {
+      return fmt(value, { maximumFractionDigits: 2 });
+    }
+    if (columnKey.includes('date') || columnKey.endsWith('_at')) {
+      return String(value).slice(0, 19).replace('T', ' ');
+    }
+    if (typeof value === 'number') {
+      return Number.isInteger(value) ? fmt(value) : dec(value, 2);
+    }
+    return String(value);
+  };
+
+  return (
+    <Box sx={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr>
+            {(columns || []).map((column) => (
+              <th
+                key={column}
+                style={{
+                  textAlign: 'left',
+                  padding: '6px 8px',
+                  borderBottom: `1px solid ${D.border}`,
+                  fontSize: 10,
+                  color: D.muted,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {titleCaseKey(column)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {(rows || []).map((row, index) => (
+            <tr key={`preview-${index}`} style={{ borderBottom: `1px solid ${D.borderSoft}` }}>
+              {(columns || []).map((column) => (
+                <td key={`${index}-${column}`} style={{ padding: '6px 8px', color: D.text, whiteSpace: 'nowrap' }}>
+                  {renderValue(column, row?.[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {(!rows || rows.length === 0) && (
+            <tr>
+              <td colSpan={Math.max(columns.length, 1)} style={{ padding: 18, textAlign: 'center', color: D.muted }}>
+                {emptyMessage}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </Box>
+  );
+};
+
 const ScoreBatchDialog = ({
   open,
   onClose,
@@ -749,12 +866,23 @@ const ScoreBatchDialog = ({
 const DeploymentDashboard = ({
   persona = 'business',
   activeModelRun,
+  activePipelineId = null,
+  activePipelineName = '',
+  savedDashboardState = null,
   validationReport,
   registryEntry,
   onBack,
   actionsDisabled = false,
   actionsMessage = '',
 }) => {
+  const navigate = useNavigate();
+  const {
+    activeEnv,
+    loadCaseList,
+    refreshPriorityBuckets,
+    setActiveTool,
+    setCaseScopeRemote,
+  } = useAppContext();
   const propDeploymentId = registryEntry?.deployment_id || '';
   const propRunId = activeModelRun?.job_id || registryEntry?.job_id || '';
   const propThreshold = Number(
@@ -771,6 +899,12 @@ const DeploymentDashboard = ({
     || 'alert',
   ).toLowerCase() === 'case' ? 'case' : 'alert';
   const gatingMessage = actionsMessage || 'Deployment actions are blocked because this run is outdated. Rerun the upstream stages first.';
+  const savedRunId = String(savedDashboardState?.run_id || '').trim();
+  const savedDeploymentId = String(savedDashboardState?.deployment_id || '').trim();
+  const savedThreshold = Number(savedDashboardState?.threshold ?? propThreshold ?? 0.5);
+  const hasSavedPipelineBinding = Boolean(
+    activePipelineId && (savedRunId || savedDeploymentId || savedDashboardState?.simulation_result),
+  );
 
   const [activeDeployment, setActiveDeployment] = useState(() => (
     propDeploymentId
@@ -781,13 +915,25 @@ const DeploymentDashboard = ({
         grain: propGrain,
         stage: registryEntry?.stage || 'DEPLOYED',
       }
+      : savedDeploymentId
+        ? {
+          deployment_id: savedDeploymentId,
+          job_id: savedRunId,
+          threshold: savedThreshold,
+          grain: propGrain,
+          stage: 'PIPELINE_SAVED',
+        }
       : null
   ));
   const [runOptions, setRunOptions] = useState([]);
   const [runOptionsLoading, setRunOptionsLoading] = useState(false);
   const [runOptionsError, setRunOptionsError] = useState(null);
-  const [selectedRunId, setSelectedRunId] = useState(propRunId || '');
-  const [selectedThreshold, setSelectedThreshold] = useState(propThreshold);
+  const [selectedRunId, setSelectedRunId] = useState(
+    propRunId || savedRunId,
+  );
+  const [selectedThreshold, setSelectedThreshold] = useState(
+    propDeploymentId ? propThreshold : savedThreshold,
+  );
   const [switchingDeployment, setSwitchingDeployment] = useState(false);
   const [switchError, setSwitchError] = useState(null);
   const [bootstrapping, setBootstrapping] = useState(true);
@@ -814,7 +960,7 @@ const DeploymentDashboard = ({
   );
 
   // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(DEPLOYMENT_TAB.LIVE);
   const [kpiSummary, setKpiSummary]       = useState(null);
   const [drift, setDrift]               = useState(null);
   const [alertVsCase, setAlertVsCase]   = useState(null);
@@ -824,6 +970,7 @@ const DeploymentDashboard = ({
   const [errors, setErrors]             = useState({});
   const [scoreBatchOpen, setScoreBatchOpen] = useState(false);
   const [publishingToSentinel, setPublishingToSentinel] = useState(false);
+  const [openingSentinel, setOpeningSentinel] = useState(false);
   const [publishNotice, setPublishNotice] = useState(null);
   const [ledgerFilter, setLedgerFilter] = useState({ entity_type: modelGrain, decision: '' });
   const [inferRaw, setInferRaw] = useState(
@@ -851,7 +998,11 @@ const DeploymentDashboard = ({
     stream_interval_sec: 4,
     compare_runs: '',
   });
-  const [simResult, setSimResult] = useState(null);
+  const [simResult, setSimResult] = useState(() => (
+    savedDashboardState?.simulation_result && typeof savedDashboardState.simulation_result === 'object'
+      ? savedDashboardState.simulation_result
+      : null
+  ));
   const [simLoading, setSimLoading] = useState(false);
   const [simError, setSimError] = useState(null);
   const [simProgressIndex, setSimProgressIndex] = useState(0);
@@ -911,12 +1062,12 @@ const DeploymentDashboard = ({
 
         if (activeRes.status === 'fulfilled') {
           const active = unwrap(activeRes.value);
-          if (active?.deployment_id) {
+          if (active?.deployment_id && !hasSavedPipelineBinding) {
             setActiveDeployment(active);
             setSelectedRunId(String(active.job_id || ''));
             setSelectedThreshold(Number(active.threshold ?? propThreshold ?? 0.5));
           }
-        } else if (!propDeploymentId) {
+        } else if (!propDeploymentId && !hasSavedPipelineBinding) {
           setRunOptionsError((prev) => prev || 'No active deployment found. Select a model run and activate deployment.');
         }
       } finally {
@@ -927,13 +1078,35 @@ const DeploymentDashboard = ({
       }
     })();
     return () => { alive = false; };
-  }, [propDeploymentId, propThreshold]);
+  }, [hasSavedPipelineBinding, propDeploymentId, propThreshold]);
 
   useEffect(() => {
     if (!selectedRunId && activeDeployment?.job_id) {
       setSelectedRunId(String(activeDeployment.job_id));
     }
   }, [selectedRunId, activeDeployment?.job_id]);
+
+  useEffect(() => {
+    if (!selectedRunId && savedRunId) {
+      setSelectedRunId(savedRunId);
+    }
+  }, [savedRunId, selectedRunId]);
+
+  useEffect(() => {
+    if (!savedDeploymentId || propDeploymentId) return;
+    setActiveDeployment((prev) => {
+      if (prev?.deployment_id === savedDeploymentId && prev?.job_id === savedRunId) {
+        return prev;
+      }
+      return {
+        deployment_id: savedDeploymentId,
+        job_id: savedRunId,
+        threshold: savedThreshold,
+        grain: propGrain,
+        stage: 'PIPELINE_SAVED',
+      };
+    });
+  }, [propDeploymentId, propGrain, savedDeploymentId, savedRunId, savedThreshold]);
 
   useEffect(() => {
     if (!selectedRunId && runOptions.length > 0) {
@@ -945,6 +1118,50 @@ const DeploymentDashboard = ({
     if (activeDeployment?.threshold == null) return;
     setSelectedThreshold(Number(activeDeployment.threshold));
   }, [activeDeployment?.threshold]);
+
+  useEffect(() => {
+    const savedSimulation = savedDashboardState?.simulation_result;
+    if (!savedSimulation || typeof savedSimulation !== 'object') return;
+    const currentBatchId = String(simResult?.scoring?.batch_id || '').trim();
+    const savedBatchId = String(savedSimulation?.scoring?.batch_id || '').trim();
+    if (currentBatchId && savedBatchId && currentBatchId === savedBatchId) return;
+    if (simResult && !savedBatchId) return;
+    setSimResult(savedSimulation);
+  }, [savedDashboardState?.simulation_result, simResult]);
+
+  useEffect(() => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!Number.isFinite(pipelineId) || pipelineId <= 0) return undefined;
+    if (!runId && !deploymentId && !simResult) return undefined;
+
+    const timer = setTimeout(() => {
+      mlopsApi.pipelineSaveScreenState(pipelineId, {
+        screen: 'dashboard',
+        state: {
+          pipeline_id: activePipelineId || null,
+          pipeline_name: activePipelineName || '',
+          run_id: runId || null,
+          deployment_id: deploymentId || null,
+          threshold,
+          batch_id: simResult?.scoring?.batch_id || null,
+          publish_id: simResult?.publish_id || savedDashboardState?.publish_id || null,
+          publish_label: simResult?.publish_label || savedDashboardState?.publish_label || null,
+          simulation_result: simResult || null,
+        },
+      }).catch(() => {});
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [
+    activePipelineId,
+    activePipelineName,
+    deploymentId,
+    runId,
+    threshold,
+    simResult,
+    savedDashboardState?.publish_id,
+    savedDashboardState?.publish_label,
+  ]);
 
   useEffect(() => {
     setLedgerFilter((prev) => ({ ...prev, entity_type: modelGrain }));
@@ -1106,6 +1323,9 @@ const DeploymentDashboard = ({
     batchSizeOverride = null,
     compareRunIdsOverride = null,
     seedOverride = null,
+    simulationModeOverride = null,
+    persistToLedgerOverride = null,
+    autoOptimizeThresholdOverride = null,
   } = {}) => {
     const compareRunIds = Array.isArray(compareRunIdsOverride)
       ? compareRunIdsOverride
@@ -1116,10 +1336,16 @@ const DeploymentDashboard = ({
     const res = await mlopsApi.liveSimulate({
       deployment_id: deploymentId,
       run_id: runId,
+      pipeline_id: activePipelineId,
+      pipeline_name: activePipelineName,
       threshold,
-      simulation_mode: simConfig.simulation_mode,
-      persist_to_ledger: !!simConfig.persist_to_ledger,
-      auto_optimize_threshold: !!simConfig.auto_optimize_threshold,
+      simulation_mode: simulationModeOverride || simConfig.simulation_mode,
+      persist_to_ledger: persistToLedgerOverride == null
+        ? !!simConfig.persist_to_ledger
+        : !!persistToLedgerOverride,
+      auto_optimize_threshold: autoOptimizeThresholdOverride == null
+        ? !!simConfig.auto_optimize_threshold
+        : !!autoOptimizeThresholdOverride,
       max_event_loss_pct: Number(simConfig.max_event_loss_pct || 5),
       scenario: simConfig.scenario,
       batch_size: Number((batchSizeOverride ?? simConfig.batch_size) || 20),
@@ -1127,7 +1353,7 @@ const DeploymentDashboard = ({
       ...(seedOverride != null ? { seed: seedOverride } : {}),
     });
     return unwrap(res);
-  }, [deploymentId, runId, threshold, simConfig]);
+  }, [activePipelineId, activePipelineName, deploymentId, runId, threshold, simConfig]);
 
   const runLiveSimulation = useCallback(async () => {
     if (!deploymentId || !runId) return;
@@ -1204,8 +1430,8 @@ const DeploymentDashboard = ({
         }
       }
       await Promise.all([fetchKpis(), fetchDrift(), fetchAlertVsCase()]);
-      if (tab === 2) await fetchLedger();
-      if (tab === 4) await fetchLineage();
+      if (tab === DEPLOYMENT_TAB.LEDGER) await fetchLedger();
+      if (tab === DEPLOYMENT_TAB.LINEAGE) await fetchLineage();
     } catch (e) {
       setSwitchError(e?.response?.data?.error || e?.message || 'Failed to activate selected model deployment');
     } finally {
@@ -1235,11 +1461,11 @@ const DeploymentDashboard = ({
   }, [fetchKpis, fetchDrift, fetchAlertVsCase]);
 
   useEffect(() => {
-    if (tab === 2) fetchLedger();
+    if (tab === DEPLOYMENT_TAB.LEDGER) fetchLedger();
   }, [tab, fetchLedger]);
 
   useEffect(() => {
-    if (tab === 4) fetchLineage();
+    if (tab === DEPLOYMENT_TAB.LINEAGE) fetchLineage();
   }, [tab, fetchLineage]);
 
   useEffect(() => {
@@ -1249,8 +1475,8 @@ const DeploymentDashboard = ({
       fetchKpis();
       fetchDrift();
       fetchAlertVsCase();
-      if (tab === 2) fetchLedger();
-      if (tab === 4) fetchLineage();
+      if (tab === DEPLOYMENT_TAB.LEDGER) fetchLedger();
+      if (tab === DEPLOYMENT_TAB.LINEAGE) fetchLineage();
     }, intervalMs);
     return () => clearInterval(timer);
   }, [
@@ -1289,7 +1515,7 @@ const DeploymentDashboard = ({
           fetchKpis();
           fetchDrift();
           fetchAlertVsCase();
-          if (tab === 2) fetchLedger();
+          if (tab === DEPLOYMENT_TAB.LEDGER) fetchLedger();
         }
       } catch (e) {
         if (!cancelled) {
@@ -1331,6 +1557,7 @@ const DeploymentDashboard = ({
   const totalSuppressed = kpiSummary?.total_suppressed ?? grainRow?.suppressed ?? null;
   const totalScored = kpiSummary?.total_scored ?? grainRow?.total ?? null;
   const totalEscalated = kpiSummary?.total_escalated ?? grainRow?.escalated ?? null;
+  const productionReady = Number(totalScored || 0) > 0;
   const overallSupprRate = kpiSummary?.suppression_rate_pct != null
     ? Number(kpiSummary.suppression_rate_pct)
     : ((totalScored != null && totalScored > 0 && totalSuppressed != null)
@@ -1371,15 +1598,123 @@ const DeploymentDashboard = ({
   const effectiveSimFlow = simBatchHistory.length > 0 ? simBatchHistory : simFlow;
   const effectiveLiveQueue = streamQueueRows.length > 0 ? streamQueueRows : liveQueue;
   const streamSummary = simBatchHistory.length > 0 ? simBatchHistory[simBatchHistory.length - 1] : null;
+  const simHealth = simResult?.simulation_health || null;
+  const simHealthFlags = Array.isArray(simHealth?.flags) ? simHealth.flags : [];
+  const simLeakageFeatures = Array.isArray(simHealth?.leakage_features) ? simHealth.leakage_features : [];
+  const simPreviewTables = simResult?.preview_tables || {};
+  const simMasterPreview = simPreviewTables?.master_data || { columns: [], rows: [] };
+  const simPreparedPreview = simPreviewTables?.prepared_features || { columns: [], rows: [] };
+  const simPredictionPreview = simPreviewTables?.prediction_output || { columns: [], rows: [] };
+  const simRetainedPreview = simPreviewTables?.retained_queue || { columns: [], rows: [] };
+  const simSuppressedPreview = simPreviewTables?.suppressed_queue || { columns: [], rows: [] };
+  const liveRunModeLabel = streamingActive ? 'Continuous stream' : 'Single batch';
+  const effectiveLiveGenerated = streamSummary?.ingested ?? simResult?.scoring?.total ?? null;
+  const effectiveLiveSuppressed = streamSummary?.suppressed ?? simResult?.scoring?.suppressed ?? null;
+  const effectiveLiveEscalated = streamSummary?.escalated ?? simResult?.scoring?.escalated ?? null;
+  const effectiveLiveSuppressionRate = streamSummary
+    ? (num(streamSummary.ingested) > 0 ? (100 * num(streamSummary.suppressed)) / num(streamSummary.ingested) : null)
+    : simResult?.scoring?.suppression_rate;
+  const liveDecisionFlow = useMemo(() => ([
+    {
+      key: 'generated',
+      title: 'Incoming alert-like batch',
+      detail: 'Synthetic unseen records generated inside FCC to mimic fresh operational volume.',
+      count: effectiveLiveGenerated,
+      value: fmt(effectiveLiveGenerated),
+      tone: D.blue,
+      sub: simResult?.source?.dataset || 'synthetic source',
+    },
+    {
+      key: 'scored',
+      title: 'Scored by FCC model',
+      detail: 'Records aligned to the trained feature layout and scored at the approved operating threshold.',
+      count: streamSummary?.predicted ?? simResult?.scoring?.total ?? effectiveLiveGenerated,
+      value: fmt(streamSummary?.predicted ?? simResult?.scoring?.total ?? effectiveLiveGenerated),
+      tone: '#5b21b6',
+      sub: `Threshold ${dec(simThresholdApplied, 2)}`,
+    },
+    {
+      key: 'suppressed',
+      title: 'Suppressed in FCC',
+      detail: 'Lower-signal alerts stopped before investigator review to reduce false-positive workload.',
+      count: effectiveLiveSuppressed,
+      value: fmt(effectiveLiveSuppressed),
+      tone: D.green,
+      sub: effectiveLiveSuppressionRate == null ? 'Suppression pending' : pct(effectiveLiveSuppressionRate),
+    },
+    {
+      key: 'retained',
+      title: 'Retained for Sentinel',
+      detail: 'Higher-risk alerts or cases preserved for downstream investigation in Sentinel.',
+      count: effectiveLiveEscalated,
+      value: fmt(effectiveLiveEscalated),
+      tone: D.orange,
+      sub: effectiveLiveEscalated > 0 ? 'Ready for handoff' : 'No retained queue yet',
+    },
+  ]), [
+    effectiveLiveEscalated,
+    effectiveLiveGenerated,
+    effectiveLiveSuppressed,
+    effectiveLiveSuppressionRate,
+    simResult?.scoring?.total,
+    simResult?.source?.dataset,
+    simThresholdApplied,
+    streamSummary?.predicted,
+  ]);
+  const liveDecisionBars = useMemo(() => (
+    liveDecisionFlow.map((item) => ({
+      stage: item.title.replace(' alert-like batch', ''),
+      count: num(item.count, 0),
+      fill: item.tone,
+    }))
+  ), [liveDecisionFlow]);
+  const deploymentTabMeta = useMemo(() => ([
+    {
+      key: DEPLOYMENT_TAB.LIVE,
+      title: 'Live Simulation',
+      subtitle: 'Simulate new unseen alert-like batches, score them in FCC, suppress low-signal volume, and show what reaches Sentinel.',
+    },
+    {
+      key: DEPLOYMENT_TAB.MONITORING,
+      title: 'Deployment Monitoring',
+      subtitle: 'Track business-facing operational KPIs after scoring has happened and understand ongoing analyst workload reduction.',
+    },
+    {
+      key: DEPLOYMENT_TAB.DRIFT,
+      title: 'Drift & Trends',
+      subtitle: 'Watch for changes in incoming alert behavior, score distributions, and suppression patterns over time.',
+    },
+    {
+      key: DEPLOYMENT_TAB.LEDGER,
+      title: 'Suppression Ledger',
+      subtitle: 'Review the detailed audit trail of which entities were scored, suppressed, retained, and why.',
+    },
+    {
+      key: DEPLOYMENT_TAB.LINEAGE,
+      title: 'Model Lineage',
+      subtitle: 'Trace which training run, validation threshold, preprocessing logic, and deployment record produced the live outcome.',
+    },
+  ]), []);
+  const activeTabMeta = deploymentTabMeta.find((item) => item.key === tab) || deploymentTabMeta[0];
+  const selectedRunFlags = runQualityFlags(selectedRunMeta);
+  const selectedRunLeakage = Array.isArray(selectedRunMeta?.leakage_features) ? selectedRunMeta.leakage_features : [];
+  const recommendedDemoRun = useMemo(
+    () => (runOptions || []).find((run) => !runQualityFlags(run).includes('label_leakage_features_present')) || null,
+    [runOptions],
+  );
 
-  const publishRetainedQueue = async () => {
+  const publishRetainedQueue = useCallback(async ({ batchId = null, publishLabel = null } = {}) => {
     if (!deploymentId || !runId) return;
     setPublishingToSentinel(true);
     setPublishNotice(null);
     try {
       const res = await mlopsApi.publishToSentinel({
+        ...(batchId ? { batch_id: batchId } : {}),
         deployment_id: deploymentId,
         run_id: runId,
+        ...(activePipelineId ? { pipeline_id: activePipelineId } : {}),
+        ...(activePipelineName ? { pipeline_name: activePipelineName } : {}),
+        ...(publishLabel ? { publish_label: publishLabel } : {}),
       });
       const body = unwrap(res);
       const payload = body?.publish || body || {};
@@ -1387,57 +1722,130 @@ const DeploymentDashboard = ({
         severity: 'success',
         message: `Published ${fmt(payload?.published_rows)} retained ${grainLabel.toLowerCase()} records to Sentinel package ${String(payload?.publish_id || '').slice(0, 12)}.`,
       });
+      return payload;
     } catch (err) {
       setPublishNotice({
         severity: 'error',
         message: err?.message || 'Failed to publish retained FCC queue to Sentinel.',
       });
+      throw err;
     } finally {
       setPublishingToSentinel(false);
     }
-  };
+  }, [activePipelineId, activePipelineName, deploymentId, grainLabel, runId]);
+
+  const openSentinelCaseManager = useCallback(async () => {
+    if (!deploymentId || !runId) return;
+    if (actionsDisabled) {
+      setPublishNotice({
+        severity: 'warning',
+        message: gatingMessage,
+      });
+      return;
+    }
+
+    setOpeningSentinel(true);
+    setPublishNotice(null);
+
+    try {
+      const handoffRes = await mlopsApi.handoffToSentinel({
+        deployment_id: deploymentId,
+        run_id: runId,
+        threshold,
+        simulation_mode: 'synthetic_pipeline',
+        persist_to_ledger: true,
+        scenario: simConfig.scenario,
+        batch_size: Number(simConfig.batch_size || 20),
+        compare_run_ids: [],
+        seed: Date.now() % 1000000,
+        pipeline_id: activePipelineId || undefined,
+        pipeline_name: activePipelineName || undefined,
+        preferred_screen: 'casepack',
+        merge_existing: true,
+        rerank_after_import: true,
+        force_refresh: false,
+      });
+      const handoffBody = unwrap(handoffRes);
+      const handoffPayload = handoffBody?.handoff || handoffBody?.workflow_session?.handoff_summary || {};
+      const workflowSession = handoffBody?.workflow_session || null;
+      const simulation = handoffBody?.simulation || null;
+      if (simulation) {
+        setSimResult(simulation);
+        appendStreamBatch(simulation);
+      }
+      await Promise.all([fetchKpis(), fetchDrift(), fetchAlertVsCase(), fetchLedger(), loadCaseList(true), refreshPriorityBuckets()]);
+
+      persistFccSentinelHandoff({
+        ...handoffPayload,
+        preferred_screen: handoffPayload?.preferred_screen || 'casepack',
+        pipeline_id: handoffPayload?.pipeline_id ?? activePipelineId ?? null,
+        pipeline_name: handoffPayload?.pipeline_name ?? activePipelineName ?? null,
+        run_id: handoffPayload?.run_id ?? runId,
+        deployment_id: handoffPayload?.deployment_id ?? deploymentId,
+        workflow_session_id: workflowSession?.session_id || handoffPayload?.workflow_session_id || null,
+      });
+
+      setPublishNotice({
+        severity: 'success',
+        message: handoffBody?.reused
+          ? `Reopened Sentinel from saved FCC handoff ${String(handoffPayload?.publish_id || '').slice(0, 12)}.`
+          : `Opened Sentinel with ${fmt(handoffPayload?.imported_case_count)} retained ${grainLabel.toLowerCase()} records from FCC package ${String(handoffPayload?.publish_id || '').slice(0, 12)}.`,
+      });
+
+      setActiveTool('investigation');
+      navigate('/investigation');
+    } catch (err) {
+      setPublishNotice({
+        severity: 'error',
+        message: err?.message || 'Failed to open Sentinel with FCC retained cases.',
+      });
+    } finally {
+      setOpeningSentinel(false);
+    }
+  }, [
+    actionsDisabled,
+    activeEnv,
+    activePipelineId,
+    activePipelineName,
+    appendStreamBatch,
+    deploymentId,
+    fetchAlertVsCase,
+    fetchDrift,
+    fetchKpis,
+    fetchLedger,
+    gatingMessage,
+    loadCaseList,
+    navigate,
+    refreshPriorityBuckets,
+    runId,
+    simConfig.scenario,
+    setActiveTool,
+    simConfig.batch_size,
+    threshold,
+  ]);
 
   // â”€â”€ Download report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const downloadReport = () => {
-    const reasonCounts = {};
-    (ledger?.rows || []).forEach((row) => {
-      const key = String(row.reason_code || 'Unspecified');
-      reasonCounts[key] = (reasonCounts[key] || 0) + 1;
-    });
-    const topReasons = Object.entries(reasonCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10)
-      .map(([reason, count]) => ({ reason, count }));
-
-    const report = {
-      generated_at: new Date().toISOString(),
-      deployment_id: deploymentId,
-      run_id: runId,
-      threshold,
-      model_metrics: metrics,
-      alert_vs_case: alertVsCase,
-      drift: drift,
-      live_simulation: simResult,
-      business_summary: {
-        total_scored: totalScored,
-        total_suppressed: totalSuppressed,
-        total_escalated: totalEscalated,
-        suppression_rate_pct: overallSupprRate == null ? null : Number(dec(overallSupprRate, 1)),
-        latest_event_loss_pct: latestEventLoss ?? null,
-        estimated_review_hours_saved: estimatedHoursSaved == null ? null : Number(dec(estimatedHoursSaved, 2)),
-      },
-      top_suppression_reasons: topReasons,
-      narrative: [
-        `The deployed model suppressed ${fmt(totalSuppressed)} of ${fmt(totalScored)} scored entities.`,
-        `Overall suppression rate is ${pct(overallSupprRate)} at threshold ${dec(threshold, 2)}.`,
-        `Latest observed event loss is ${pct(latestEventLoss)}.`,
-      ],
-    };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = `deployment_report_${deploymentId.slice(0, 8)}.json`;
-    a.click(); URL.revokeObjectURL(url);
+  const downloadReport = async () => {
+    if (!runId) return;
+    try {
+      const blob = await mlopsApi.downloadReportPdf({
+        run_id: runId,
+        pipeline_id: activePipelineId || undefined,
+        strict_min_pages: true,
+        audience: 'technical',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${(activePipelineName || 'fcc_workbench').replace(/[^a-zA-Z0-9_-]+/g, '_')}_fcc_report.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPublishNotice({
+        severity: 'error',
+        message: err?.message || 'Failed to download the FCC report.',
+      });
+    }
   };
 
   // â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1464,10 +1872,17 @@ const DeploymentDashboard = ({
             </Typography>
             <Typography sx={{ fontSize: 11, color: D.muted }}>
               {deploymentId
-                ? `Deployment ${deploymentId.slice(0, 12)}... - Threshold ${dec(threshold, 2)}`
+                ? `${activePipelineName ? `${activePipelineName} | ` : ''}Deployment ${deploymentId.slice(0, 12)}... - Threshold ${dec(threshold, 2)}`
                 : 'No active deployment selected'}
             </Typography>
           </Box>
+          {activePipelineName ? (
+            <Chip
+              label={`Pipeline ${activePipelineName}`}
+              size="small"
+              sx={{ bgcolor: D.blueLight, color: D.blue, border: `1px solid ${D.border}` }}
+            />
+          ) : null}
           <Chip
             label={String(activeDeployment?.status || activeDeployment?.stage || registryEntry?.stage || 'DEPLOYED').toUpperCase()}
             size="small"
@@ -1535,6 +1950,16 @@ const DeploymentDashboard = ({
             sx={{ textTransform: 'none', fontSize: 12 }}
           >
             {publishingToSentinel ? 'Publishing...' : 'Send To Sentinel'}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={openingSentinel ? <CircularProgress size={14} color="inherit" /> : <ArrowForward sx={{ fontSize: 15 }} />}
+            onClick={openSentinelCaseManager}
+            disabled={openingSentinel || publishingToSentinel || actionsDisabled || canDisable(!deploymentId || !runId)}
+            sx={{ bgcolor: D.blue, '&:hover': { bgcolor: '#1e40af' }, textTransform: 'none', fontSize: 12, fontWeight: 700 }}
+          >
+            {openingSentinel ? 'Opening Sentinel...' : 'Open Case Manager Sentinel'}
           </Button>
           <Button
             size="small"
@@ -1622,10 +2047,37 @@ const DeploymentDashboard = ({
             {bootstrapping && <Skeleton height={22} />}
             {runOptionsError && <Alert severity="warning">{runOptionsError}</Alert>}
             {switchError && <Alert severity="error">{switchError}</Alert>}
+            {selectedRunFlags.includes('label_leakage_features_present') && (
+              <Alert
+                severity="warning"
+                sx={{ borderRadius: 2 }}
+                action={recommendedDemoRun ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => {
+                      setSelectedRunId(String(recommendedDemoRun.job_id || ''));
+                      setSelectedThreshold(Number(
+                        recommendedDemoRun.selected_threshold
+                        ?? recommendedDemoRun.optimal_threshold
+                        ?? threshold
+                        ?? 0.5,
+                      ));
+                    }}
+                  >
+                    Use Demo-Safe Suggestion
+                  </Button>
+                ) : undefined}
+              >
+                The selected run uses label-like training features{selectedRunLeakage.length > 0 ? ` (${selectedRunLeakage.join(', ')})` : ''},
+                so unseen-batch simulation metrics are not trustworthy for a business demo.
+                {recommendedDemoRun ? ` Suggested run: ${runDisplayLabel(recommendedDemoRun)}.` : ''}
+              </Alert>
+            )}
             <Alert severity="info" sx={{ borderRadius: 2 }}>
-              <strong>Deployment Monitoring</strong> shows production-scored rows only.
-              <strong> Live Pipeline</strong> is an unseen-batch simulation sandbox and does not alter production unless
-              <strong> Persist to ledger</strong> is enabled.
+              <strong>Live Simulation</strong> is the primary FCC deployment sandbox for client demos and unseen-batch testing.
+              <strong> Deployment Monitoring</strong> stays focused on production-style KPI tracking after scoring has happened, and
+              <strong> Persist to ledger</strong> controls whether simulated retained rows are written into the operational ledger.
             </Alert>
           </Stack>
         </Paper>
@@ -1657,26 +2109,26 @@ const DeploymentDashboard = ({
         <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
           <StatCard
             icon={NotificationsOff}
-            label="Total Suppressed"
-            value={fmt(totalSuppressed)}
-            sub={`of ${fmt(totalScored)} scored`}
+            label="Production Suppressed"
+            value={productionReady ? fmt(totalSuppressed) : '-'}
+            sub={productionReady ? `of ${fmt(totalScored)} scored` : 'No production-scored rows yet'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
             tooltip={`${grainLabel} entities the model decided not to escalate`}
           />
           <StatCard
             icon={Shield}
-            label="Overall Suppression Rate"
-            value={pct(overallSupprRate)}
-            sub={`${grainLabel.toLowerCase()}-grain model`}
+            label="Production Suppression Rate"
+            value={productionReady ? pct(overallSupprRate) : '-'}
+            sub={productionReady ? `${grainLabel.toLowerCase()}-grain model` : 'Run the live simulation tab for unseen-batch scoring'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
           />
           <StatCard
             icon={modelGrain === 'case' ? Gavel : Notifications}
-            label={`${grainLabel} Suppression`}
-            value={pct(kpiSummary?.suppression_rate_pct ?? grainRow?.suppression_rate)}
-            sub={`${fmt(kpiSummary?.total_suppressed ?? grainRow?.suppressed)} ${modelGrain === 'case' ? 'cases' : 'alerts'} suppressed`}
+            label={`Production ${grainLabel} Suppression`}
+            value={productionReady ? pct(kpiSummary?.suppression_rate_pct ?? grainRow?.suppression_rate) : '-'}
+            sub={productionReady ? `${fmt(kpiSummary?.total_suppressed ?? grainRow?.suppressed)} ${modelGrain === 'case' ? 'cases' : 'alerts'} suppressed` : 'Production view only'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
           />
@@ -1698,11 +2150,11 @@ const DeploymentDashboard = ({
           />
           <StatCard
             icon={QueryStats}
-            label="Event Loss %"
-            value={pct(latestEventLoss)}
-            sub="missed true SARs (latest week)"
+            label="Latest Production Event Loss"
+            value={productionReady ? pct(latestEventLoss) : '-'}
+            sub={productionReady ? 'missed true SARs (latest week)' : 'Shown when production-scored outcomes exist'}
             tone={
-              (latestEventLoss == null)
+              (!productionReady || latestEventLoss == null)
                 ? 'warn'
                 : ((latestEventLoss ?? 0) <= 5 ? 'good' : 'bad')
             }
@@ -1721,15 +2173,42 @@ const DeploymentDashboard = ({
           TabIndicatorProps={{ style: { backgroundColor: D.orange } }}
           sx={{ '& .MuiTab-root': { fontSize: 12, textTransform: 'none', minHeight: 42, fontWeight: 600 } }}
         >
+          <Tab label="Live Simulation" icon={<CloudDone sx={{ fontSize: 15 }} />} iconPosition="start" />
           <Tab label="Deployment Monitoring" icon={<Shield sx={{ fontSize: 15 }} />} iconPosition="start" />
           <Tab label="Drift & Trends" icon={<Timeline sx={{ fontSize: 15 }} />} iconPosition="start" />
           <Tab label="Suppression Ledger" icon={<Assessment sx={{ fontSize: 15 }} />} iconPosition="start" />
-          <Tab label="Live Simulation" icon={<CloudDone sx={{ fontSize: 15 }} />} iconPosition="start" />
           <Tab label="Model Lineage" icon={<AccountTree sx={{ fontSize: 15 }} />} iconPosition="start" />
         </Tabs>
       </Box>
 
       <Box sx={{ px: 3, py: 2.5 }}>
+        <Paper
+          variant="outlined"
+          sx={{
+            mb: 2,
+            p: 1.5,
+            borderRadius: 2,
+            borderColor: D.border,
+            bgcolor: '#ffffffcc',
+          }}
+        >
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ md: 'center' }}>
+            <Box>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: D.text }}>
+                {activeTabMeta?.title}
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: D.muted, mt: 0.25 }}>
+                {activeTabMeta?.subtitle}
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Chip size="small" label={`Deployment ${deploymentId ? String(deploymentId).slice(0, 12) : 'not active'}`} sx={{ bgcolor: '#fff', border: `1px solid ${D.border}` }} />
+              <Chip size="small" label={`Model ${runDisplayLabel(selectedRunMeta || activeModelRun || {})}`} sx={{ bgcolor: '#fff', border: `1px solid ${D.border}` }} />
+              <Chip size="small" label={`Approved threshold ${dec(threshold, 2)}`} sx={{ bgcolor: D.orangeLight, color: D.orange, border: `1px solid #fdba74` }} />
+            </Stack>
+          </Stack>
+        </Paper>
+
         {!deploymentId && (
           <Alert severity="warning" sx={{ mb: 2 }}>
             No active deployment is selected. Choose a model run above and click <strong>Activate Deployment</strong> to start monitoring.
@@ -1737,7 +2216,7 @@ const DeploymentDashboard = ({
         )}
 
         {/* â”€â”€ Tab 0: Business Overview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        {tab === 0 && (
+        {tab === DEPLOYMENT_TAB.MONITORING && (
           <Stack spacing={2.5}>
             {errors.avc && <Alert severity="warning">{errors.avc}</Alert>}
             {!loading.avc && Number(totalScored || 0) === 0 && (
@@ -1844,12 +2323,12 @@ const DeploymentDashboard = ({
               <Stack direction="row" spacing={1.5} mt={1.5} flexWrap="wrap" useFlexGap>
                 <Box sx={{ px: 1.5, py: 0.75, bgcolor: '#fff', borderRadius: 1.5, border: `1px solid ${D.border}`, borderLeft: `3px solid ${D.green}` }}>
                   <Typography sx={{ fontSize: 11.5, color: D.text, fontWeight: 700 }}>
-                    Score &lt; {dec(threshold, 2)} -> SUPPRESSED (no review)
+                    Score &lt; {dec(threshold, 2)} then SUPPRESSED (no review)
                   </Typography>
                 </Box>
                 <Box sx={{ px: 1.5, py: 0.75, bgcolor: '#fff', borderRadius: 1.5, border: `1px solid ${D.border}`, borderLeft: `3px solid ${D.red}` }}>
                   <Typography sx={{ fontSize: 11.5, color: D.text, fontWeight: 700 }}>
-                    Score >= {dec(threshold, 2)} -> ESCALATED (analyst reviews)
+                    Score {'>='} {dec(threshold, 2)} then ESCALATED (analyst reviews)
                   </Typography>
                 </Box>
               </Stack>
@@ -1858,7 +2337,7 @@ const DeploymentDashboard = ({
         )}
 
         {/* â”€â”€ Tab 1: Drift & Trends â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        {tab === 1 && (
+        {tab === DEPLOYMENT_TAB.DRIFT && (
           <Stack spacing={2.5}>
             {errors.drift && <Alert severity="error">{errors.drift}</Alert>}
 
@@ -1987,7 +2466,7 @@ const DeploymentDashboard = ({
         )}
 
         {/* â”€â”€ Tab 2: Suppression Ledger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
-        {tab === 2 && (
+        {tab === DEPLOYMENT_TAB.LEDGER && (
           <Stack spacing={2}>
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }} justifyContent="space-between">
@@ -2056,68 +2535,80 @@ const DeploymentDashboard = ({
         )}
 
         {/* Live Pipeline */}
-        {tab === 3 && (
+        {tab === DEPLOYMENT_TAB.LIVE && (
           <Stack spacing={2}>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2.5,
+                borderRadius: 3,
+                borderColor: D.border,
+                bgcolor: '#ffffffcc',
+                boxShadow: '0 12px 28px rgba(15, 23, 42, 0.04)',
+              }}
+            >
+              <Stack spacing={1.75}>
+                <SectionHead
+                  icon={CloudDone}
+                  title="Live Simulation"
+                  sub="Simulate how newly arriving alert-like FCC records would be scored, suppressed, and handed to Sentinel before investigator review."
+                />
+                <Typography sx={{ fontSize: 12, color: D.text, lineHeight: 1.75 }}>
+                  This operating view tells the post-training story of the FCC Workbench. Because real-time client traffic is not available yet,
+                  the workbench generates synthetic unseen batches, scores them with the deployed false-positive suppression model inside FCC,
+                  suppresses likely low-value alerts, and passes the retained queue to Sentinel for investigator review.
+                </Typography>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                  <Chip size="small" label={`Pipeline ${activePipelineName || 'FCC simulation'}`} sx={{ bgcolor: '#fff', border: `1px solid ${D.border}` }} />
+                  <Chip size="small" label={`Model ${runDisplayLabel(selectedRunMeta || activeModelRun || {})}`} sx={{ bgcolor: '#fff', border: `1px solid ${D.border}` }} />
+                  <Chip size="small" label={`Approved threshold ${dec(simThresholdApplied, 2)}`} sx={{ bgcolor: D.orangeLight, color: D.orange, border: `1px solid #fdba74` }} />
+                  <Chip size="small" label={`Run mode ${liveRunModeLabel}`} sx={{ bgcolor: D.blueLight, color: D.blue, border: `1px solid #bfdbfe` }} />
+                  <Chip size="small" label={simPersistedToLedger ? 'Ledger persistence ON' : 'Ledger persistence OFF'} sx={{ bgcolor: simPersistedToLedger ? '#fff7ed' : '#fff', color: simPersistedToLedger ? D.amber : D.text, border: `1px solid ${simPersistedToLedger ? '#fdba74' : D.border}` }} />
+                </Stack>
+              </Stack>
+            </Paper>
+
             <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
               <SectionHead
-                icon={CloudDone}
-                title="Live Pipeline Simulation"
-                sub="Unseen production batch: source ingest -> transformations -> prediction -> investigator queue"
+                icon={Timeline}
+                title="Simulation Controls"
+                sub="Choose how synthetic unseen volume should be generated, then run a single batch or a continuous stream."
               />
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} useFlexGap alignItems={{ md: 'center' }}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gap: 1.25,
+                  gridTemplateColumns: { xs: '1fr', lg: '1.4fr 0.9fr 0.9fr 1fr 1fr auto auto' },
+                  alignItems: 'start',
+                }}
+              >
                 <Select
                   size="small"
                   value={simConfig.simulation_mode}
                   onChange={(e) => setSimConfig((p) => ({ ...p, simulation_mode: e.target.value }))}
-                  sx={{ minWidth: 250 }}
+                  sx={{ minWidth: 240 }}
                 >
-                  <MenuItem value="synthetic_pipeline">Synthetic Full Pipeline (recommended)</MenuItem>
-                  <MenuItem value="source_batch">Raw Source Batch (legacy)</MenuItem>
+                  <MenuItem value="synthetic_pipeline">Synthetic full pipeline (recommended)</MenuItem>
+                  <MenuItem value="source_batch">Raw source batch (legacy)</MenuItem>
                 </Select>
-                <Select
-                  size="small"
-                  value={simConfig.auto_optimize_threshold ? 'yes' : 'no'}
-                  onChange={(e) => setSimConfig((p) => ({ ...p, auto_optimize_threshold: e.target.value === 'yes' }))}
-                  sx={{ minWidth: 170 }}
-                >
-                  <MenuItem value="yes">Auto threshold: ON</MenuItem>
-                  <MenuItem value="no">Auto threshold: OFF</MenuItem>
-                </Select>
-                <Select
-                  size="small"
-                  value={simConfig.persist_to_ledger ? 'yes' : 'no'}
-                  onChange={(e) => setSimConfig((p) => ({ ...p, persist_to_ledger: e.target.value === 'yes' }))}
-                  sx={{ minWidth: 190 }}
-                >
-                  <MenuItem value="no">Persist to ledger: OFF</MenuItem>
-                  <MenuItem value="yes">Persist to ledger: ON</MenuItem>
-                </Select>
-                <TextField
-                  size="small"
-                  type="number"
-                  label="Max event loss %"
-                  value={simConfig.max_event_loss_pct}
-                  onChange={(e) => setSimConfig((p) => ({ ...p, max_event_loss_pct: e.target.value }))}
-                  sx={{ width: 150 }}
-                />
                 <Select
                   size="small"
                   value={simConfig.scenario}
                   onChange={(e) => setSimConfig((p) => ({ ...p, scenario: e.target.value }))}
-                  sx={{ minWidth: 160 }}
+                  sx={{ minWidth: 150 }}
                 >
-                  <MenuItem value="steady">Steady</MenuItem>
-                  <MenuItem value="noisy">Noisy</MenuItem>
-                  <MenuItem value="drifted">Drifted</MenuItem>
-                  <MenuItem value="bad_data">Bad Data</MenuItem>
+                  <MenuItem value="steady">Steady flow</MenuItem>
+                  <MenuItem value="noisy">Noisy alert mix</MenuItem>
+                  <MenuItem value="drifted">Shifted behavior</MenuItem>
+                  <MenuItem value="bad_data">Data quality stress</MenuItem>
                 </Select>
                 <TextField
                   size="small"
                   type="number"
-                  label="Batch size"
+                  label="Rows to generate"
                   value={simConfig.batch_size}
                   onChange={(e) => setSimConfig((p) => ({ ...p, batch_size: e.target.value }))}
-                  sx={{ width: 140 }}
+                  sx={{ minWidth: 130 }}
                 />
                 <TextField
                   size="small"
@@ -2125,23 +2616,24 @@ const DeploymentDashboard = ({
                   label="Stream interval (sec)"
                   value={simConfig.stream_interval_sec}
                   onChange={(e) => setSimConfig((p) => ({ ...p, stream_interval_sec: e.target.value }))}
-                  sx={{ width: 160 }}
+                  sx={{ minWidth: 150 }}
                 />
                 <TextField
                   size="small"
-                  label="Compare run IDs (comma separated)"
+                  label="Compare to previous runs"
+                  placeholder="Optional run IDs"
                   value={simConfig.compare_runs}
                   onChange={(e) => setSimConfig((p) => ({ ...p, compare_runs: e.target.value }))}
-                  sx={{ minWidth: 320, flex: 1 }}
+                  sx={{ minWidth: 220 }}
                 />
                 <Button
                   size="small"
                   variant="contained"
                   onClick={runLiveSimulation}
                   disabled={actionsDisabled || canDisable(!runId || !deploymentId || simLoading)}
-                  sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, height: 36 }}
+                  sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, height: 36, minWidth: 140 }}
                 >
-                  {simLoading ? 'Running...' : 'Run Simulation'}
+                  {simLoading ? 'Running...' : 'Run single batch'}
                 </Button>
                 <Button
                   size="small"
@@ -2162,19 +2654,47 @@ const DeploymentDashboard = ({
                     textTransform: 'none',
                     fontWeight: 700,
                     height: 36,
+                    minWidth: 150,
                     borderColor: D.border,
                     color: streamingActive ? D.text : '#fff',
                     bgcolor: streamingActive ? '#fff' : D.blue,
                     '&:hover': streamingActive ? { borderColor: D.blue, bgcolor: D.blueLight } : { bgcolor: '#1e40af' },
                   }}
                 >
-                  {streamingActive ? 'Stop Live Stream' : 'Start Live Stream'}
+                  {streamingActive ? 'Stop live stream' : 'Start live stream'}
                 </Button>
+              </Box>
+              <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.25} useFlexGap mt={1.25}>
+                <Select
+                  size="small"
+                  value={simConfig.persist_to_ledger ? 'yes' : 'no'}
+                  onChange={(e) => setSimConfig((p) => ({ ...p, persist_to_ledger: e.target.value === 'yes' }))}
+                  sx={{ minWidth: 220 }}
+                >
+                  <MenuItem value="no">Do not persist simulation to ledger</MenuItem>
+                  <MenuItem value="yes">Persist retained queue to ledger</MenuItem>
+                </Select>
+                <Select
+                  size="small"
+                  value={simConfig.auto_optimize_threshold ? 'yes' : 'no'}
+                  onChange={(e) => setSimConfig((p) => ({ ...p, auto_optimize_threshold: e.target.value === 'yes' }))}
+                  sx={{ minWidth: 190 }}
+                >
+                  <MenuItem value="yes">Use policy-guided threshold assist</MenuItem>
+                  <MenuItem value="no">Use approved threshold only</MenuItem>
+                </Select>
+                <TextField
+                  size="small"
+                  type="number"
+                  label="Policy cap for comparison (advanced)"
+                  value={simConfig.max_event_loss_pct}
+                  onChange={(e) => setSimConfig((p) => ({ ...p, max_event_loss_pct: e.target.value }))}
+                  sx={{ width: 240 }}
+                  helperText="Used only when threshold assist is enabled."
+                />
               </Stack>
               <Alert severity="info" sx={{ mt: 1.25 }}>
-                This tab is a live-simulation sandbox. Start Live Stream to generate a fresh micro-batch every few seconds.
-                Each cycle scores new unseen alerts, updates the live flow, and optionally writes to the production ledger if
-                <strong> Persist to ledger</strong> is enabled.
+                Use <strong>Run single batch</strong> for a demo snapshot, or <strong>Start live stream</strong> to generate recurring micro-batches and watch the operational flow update over time.
               </Alert>
               {streamingActive && (
                 <Alert severity="success" sx={{ mt: 1.25 }}>
@@ -2187,17 +2707,13 @@ const DeploymentDashboard = ({
 
             <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
               <SectionHead
-                icon={Timeline}
-                title="Pipeline Overview"
-                sub={
-                  simResult?.simulation_mode === 'synthetic_pipeline'
-                    ? `Synthetic customers/accounts/transactions/alerts/cases -> master -> ${modelGrain} scoring`
-                    : 'Clear monitor summary of latest live batch'
-                }
+                icon={Shield}
+                title="This Run Summary"
+                sub="Business-readable outcome from the current unseen batch or live stream."
               />
               {!simResult && !simLoading && (
                 <Alert severity="info" sx={{ mb: 1.25 }}>
-                  No simulation has been run yet. Configure parameters above and click <strong>Run Simulation</strong>.
+                  No simulation has been run yet. Configure the generation settings above, then run a batch to preview how FCC would reduce false-positive workload before Sentinel review.
                 </Alert>
               )}
               {simLoading && (
@@ -2205,100 +2721,251 @@ const DeploymentDashboard = ({
                   Backend progress: {simProgressSteps[simProgressIndex] || 'Running simulation'}
                 </Alert>
               )}
-              <LiveStageStrip
-                stages={
-                  simResult?.pipeline_stages
-                  || (simLoading
-                    ? simProgressSteps.map((s, idx) => ({
-                      stage: s,
-                      status: idx < simProgressIndex ? 'done' : idx === simProgressIndex ? 'running' : 'pending',
-                      detail: idx === simProgressIndex ? 'processing...' : '',
-                    }))
-                    : [])
-                }
-              />
+              <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
+                <StatCard label="Rows generated" value={fmt(effectiveLiveGenerated)} sub={simResult?.source?.dataset || 'synthetic unseen batch'} tone="default" loading={simLoading && !simResult} />
+                <StatCard label="Rows scored" value={fmt(streamSummary?.predicted ?? simResult?.scoring?.total)} sub={`${grainLabel} scoring inside FCC`} tone="default" loading={simLoading} />
+                <StatCard label="Suppressed alerts" value={fmt(effectiveLiveSuppressed)} sub="low-signal volume stopped in FCC" tone="good" loading={simLoading} />
+                <StatCard label="Retained for Sentinel" value={fmt(effectiveLiveEscalated)} sub="queue handed to investigators" tone={effectiveLiveEscalated > 0 ? 'warn' : 'default'} loading={simLoading} />
+                <StatCard label="Suppression rate" value={pct(effectiveLiveSuppressionRate)} sub="false-positive workload reduced" tone="default" loading={simLoading} />
+                <StatCard label="Threshold used" value={dec(simThresholdApplied, 2)} sub={simThresholdAuto ? `assisted from ${dec(simThresholdRequested, 2)}` : 'approved operating threshold'} tone="default" loading={simLoading} />
+                <StatCard label="Run mode" value={liveRunModeLabel} sub={streamingActive ? `${fmt(simBatchHistory.length)} batches generated` : 'single-run preview'} tone="blue" loading={simLoading && !simResult} />
+                <StatCard label="Known event loss" value={pct(streamSummary?.cumulative_event_loss_pct ?? simEventLossValue)} sub={simEventLossDefined ? `${fmt(simPositiveRows)} known positives observed` : 'awaiting labelled positives'} tone={simHealth?.status === 'error' ? 'warn' : (!simEventLossDefined ? 'warn' : (((streamSummary?.cumulative_event_loss_pct ?? simEventLossValue) ?? 0) <= 5 ? 'good' : 'bad'))} loading={simLoading} />
+              </Stack>
               {simResult?.threshold_optimization && (
                 <Typography sx={{ mt: 1.25, fontSize: 11.5, color: D.muted }}>
                   {simResult.threshold_optimization.feasible
-                    ? `Auto-threshold selected ${dec(simThresholdApplied, 2)} to maximize suppression under event-loss cap ${dec(simResult.threshold_optimization.max_event_loss_pct, 2)}%.`
-                    : `No feasible threshold met the event-loss cap ${dec(simResult.threshold_optimization.max_event_loss_pct, 2)}%. Showing minimum-loss threshold ${dec(simThresholdApplied, 2)}.`}
+                    ? `Threshold assist selected ${dec(simThresholdApplied, 2)} to maximize suppression while staying within the policy cap of ${dec(simResult.threshold_optimization.max_event_loss_pct, 2)}%.`
+                    : `No feasible operating point met the policy cap of ${dec(simResult.threshold_optimization.max_event_loss_pct, 2)}%. The dashboard is showing the minimum-loss fallback threshold ${dec(simThresholdApplied, 2)}.`}
                 </Typography>
               )}
-              <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap mt={1.5}>
-                <StatCard
-                  label="Live Batches"
-                  value={fmt(streamSummary?.tick)}
-                  sub={streamingActive ? 'continuous micro-batch stream active' : 'single-run mode'}
-                  tone={streamingActive ? 'blue' : 'default'}
-                  loading={simLoading && !simResult}
-                />
-                <StatCard
-                  label="Rows Scored"
-                  value={fmt(streamSummary?.cumulative_ingested ?? simResult?.scoring?.total)}
-                  sub={
-                    streamSummary
-                      ? `${fmt(streamSummary.ingested)} in latest batch | Source: ${simResult?.source?.dataset || '-'}`
-                      : `Source: ${simResult?.source?.dataset || '-'}`
-                  }
-                  tone="default"
-                  loading={simLoading}
-                />
-                <StatCard
-                  label="Suppression Rate"
-                  value={pct(
-                    streamSummary
-                      ? ((100 * num(streamSummary.cumulative_suppressed)) / Math.max(num(streamSummary.cumulative_ingested), 1))
-                      : simResult?.scoring?.suppression_rate,
+              {simHealth && simHealth?.messages?.length > 0 && (
+                <Alert severity={simHealth.status === 'error' ? 'error' : 'warning'} sx={{ mt: 1.25, borderRadius: 2 }}>
+                  <strong>
+                    {simHealth.status === 'error' ? 'Selected run is not demo-safe on unseen data.' : 'Simulation completed with quality warnings.'}
+                  </strong>{' '}
+                  {simHealth.messages[0]}
+                  {simLeakageFeatures.length > 0 ? ` Leakage features detected: ${simLeakageFeatures.join(', ')}.` : ''}
+                </Alert>
+              )}
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={ArrowForward}
+                title="FCC Decision Flow"
+                sub="Operational path from incoming unseen batch to FCC suppression and Sentinel handoff."
+              />
+              <Box sx={{ display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', xl: '1.35fr 0.9fr' } }}>
+                <Box>
+                  <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' } }}>
+                    {liveDecisionFlow.map((item, idx) => (
+                      <Box
+                        key={item.key}
+                        sx={{
+                          p: 1.6,
+                          borderRadius: 2,
+                          border: `1px solid ${D.border}`,
+                          bgcolor: '#fff',
+                          boxShadow: '0 8px 18px rgba(15, 23, 42, 0.03)',
+                        }}
+                      >
+                        <Typography sx={{ fontSize: 10, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55 }}>
+                          Step {idx + 1}
+                        </Typography>
+                        <Typography sx={{ fontSize: 13, fontWeight: 800, color: D.text, mt: 0.35 }}>
+                          {item.title}
+                        </Typography>
+                        <Typography sx={{ fontSize: 24, fontWeight: 800, color: item.tone, mt: 0.75 }}>
+                          {item.value}
+                        </Typography>
+                        <Typography sx={{ fontSize: 11, color: D.muted, mt: 0.3 }}>
+                          {item.sub}
+                        </Typography>
+                        <Typography sx={{ fontSize: 11.25, color: D.text, mt: 0.9, lineHeight: 1.55 }}>
+                          {item.detail}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                  <Box sx={{ mt: 1.5 }}>
+                    <LiveStageStrip
+                      stages={
+                        simResult?.pipeline_stages
+                        || (simLoading
+                          ? simProgressSteps.map((s, idx) => ({
+                            stage: s,
+                            status: idx < simProgressIndex ? 'done' : idx === simProgressIndex ? 'running' : 'pending',
+                            detail: idx === simProgressIndex ? 'processing...' : '',
+                          }))
+                          : [])
+                      }
+                    />
+                  </Box>
+                </Box>
+                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: D.border }}>
+                  <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55, mb: 0.75 }}>
+                    Current batch shape
+                  </Typography>
+                  {simLoading ? (
+                    <Skeleton height={260} />
+                  ) : (
+                    <ResponsiveContainer width="100%" height={260}>
+                      <ReBarChart data={liveDecisionBars} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="stage" tick={{ fontSize: 10 }} interval={0} angle={-10} textAnchor="end" height={50} />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <RTooltip />
+                        <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                          {liveDecisionBars.map((row) => (
+                            <Cell key={row.stage} fill={row.fill} />
+                          ))}
+                        </Bar>
+                      </ReBarChart>
+                    </ResponsiveContainer>
                   )}
-                  sub={
-                    simThresholdAuto
-                      ? `${fmt(streamSummary?.cumulative_suppressed ?? simResult?.scoring?.suppressed)} suppressed @ ${dec(simThresholdApplied, 2)} (auto from ${dec(simThresholdRequested, 2)})`
-                      : `${fmt(streamSummary?.cumulative_suppressed ?? simResult?.scoring?.suppressed)} suppressed @ ${dec(simThresholdApplied, 2)}`
-                  }
-                  tone="default"
-                  loading={simLoading}
-                />
-                <StatCard
-                  label="Label Coverage"
-                  value={simLabelledRows == null ? '-' : fmt(simLabelledRows)}
-                  sub={
-                    simExcludedRows == null
-                      ? 'rows with known outcomes'
-                      : `${fmt(simExcludedRows)} excluded (OPEN/no-case)`
-                  }
-                  tone="default"
-                  loading={simLoading}
-                />
-                <StatCard
-                  label="Event Loss %"
-                  value={pct(streamSummary?.cumulative_event_loss_pct ?? simEventLossValue)}
-                  sub={
-                    simEventLossBasis === 'case_outcome_labels'
-                      ? (
-                        simEventLossDefined
-                          ? `${fmt(simPositiveRows)} known positives (CASE_STATUS-based)`
-                          : 'insufficient labelled positives for event-loss'
-                      )
-                      : 'estimated outcome on unseen batch'
-                    }
-                  tone={!simEventLossDefined ? 'warn' : (((streamSummary?.cumulative_event_loss_pct ?? simEventLossValue) ?? 0) <= 5 ? 'good' : 'bad')}
-                  loading={simLoading}
-                />
-                <StatCard
-                  label="Ledger Write"
-                  value={simPersistedToLedger ? 'ON' : 'OFF'}
-                  sub={simPersistedToLedger ? 'simulation rows appended' : 'simulation only (no writes)'}
-                  tone={simPersistedToLedger ? 'warn' : 'good'}
-                  loading={simLoading}
-                />
-                <StatCard
-                  label="Drift PSI"
-                  value={simResult?.drift_snapshot?.psi == null ? '-' : dec(simResult?.drift_snapshot?.psi, 4)}
-                  sub="distribution shift vs recent scored baseline"
-                  tone={(simResult?.drift_snapshot?.psi ?? 0) <= 0.2 ? 'default' : 'warn'}
-                  loading={simLoading}
-                />
-              </Stack>
+                </Paper>
+              </Box>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={Notifications}
+                title="Sentinel Handoff"
+                sub="Show what FCC sent forward, what investigators will see next, and whether the run was persisted for audit."
+              />
+              <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', xl: '0.95fr 1.3fr' } }}>
+                <Stack spacing={1.25}>
+                  <Box sx={{ p: 1.6, borderRadius: 2, border: `1px solid ${D.border}`, bgcolor: '#fff' }}>
+                    <Typography sx={{ fontSize: 10, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55 }}>
+                      What Sentinel receives
+                    </Typography>
+                    <Typography sx={{ fontSize: 22, fontWeight: 800, color: D.orange, mt: 0.45 }}>
+                      {fmt(effectiveLiveEscalated)}
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: D.text, lineHeight: 1.6, mt: 0.65 }}>
+                      Retained {grainLabel.toLowerCase()} records leave FCC and become the investigator-facing queue in Sentinel. Suppressed rows remain inside FCC and do not reach case management.
+                    </Typography>
+                  </Box>
+                  <Box sx={{ p: 1.6, borderRadius: 2, border: `1px solid ${D.border}`, bgcolor: '#fff' }}>
+                    <Typography sx={{ fontSize: 10, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55 }}>
+                      Operational write-back
+                    </Typography>
+                    <Typography sx={{ fontSize: 22, fontWeight: 800, color: simPersistedToLedger ? D.amber : D.green, mt: 0.45 }}>
+                      {simPersistedToLedger ? 'Persisted' : 'Simulation only'}
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: D.text, lineHeight: 1.6, mt: 0.65 }}>
+                      {simPersistedToLedger
+                        ? 'Retained rows were appended to the suppression ledger so the run can be audited later.'
+                        : 'No production-style write occurred. This keeps the run safe for demos and scenario walkthroughs.'}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => publishRetainedQueue({ publishLabel: 'live_simulation' })}
+                      disabled={actionsDisabled || canDisable(!deploymentId || !runId || publishingToSentinel || effectiveLiveEscalated <= 0)}
+                      sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700 }}
+                    >
+                      {publishingToSentinel ? 'Sending...' : 'Send retained queue to Sentinel'}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={openSentinelCaseManager}
+                      disabled={actionsDisabled || canDisable(!deploymentId || !runId || openingSentinel)}
+                      sx={{ textTransform: 'none', fontWeight: 700, borderColor: D.blue, color: D.blue }}
+                    >
+                      {openingSentinel ? 'Opening...' : 'Open Sentinel case manager'}
+                    </Button>
+                  </Stack>
+                  {publishNotice && <Alert severity={publishNotice.severity}>{publishNotice.message}</Alert>}
+                </Stack>
+                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: D.border }}>
+                  <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55, mb: 1 }}>
+                    Retained queue preview
+                  </Typography>
+                  <InvestigatorQueueTable rows={effectiveLiveQueue} />
+                </Paper>
+              </Box>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={Assessment}
+                title="Detailed Evidence"
+                sub="Use the preview tables below when you need to explain how the unseen batch was built, scored, retained, or suppressed."
+              />
+              <Typography sx={{ fontSize: 11.5, color: D.muted }}>
+                Start with the run summary and FCC decision flow for business conversations, then use the detailed tables below for walkthroughs, evidence, and audit support.
+              </Typography>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={Notifications}
+                title="Step 1. Synthetic Master Data"
+                sub="FCC creates the business-facing synthetic master records that mimic alert, customer, account, and case context"
+              />
+              <PreviewTable
+                columns={simMasterPreview.columns || []}
+                rows={simMasterPreview.rows || []}
+                emptyMessage="Run simulation to generate synthetic FCC master data."
+              />
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={TableChart}
+                title="Step 2. Model-Ready FCC Features"
+                sub="The master data is then prepared with the same model-aligned preprocessing and feature layout used during FCC training"
+              />
+              <PreviewTable
+                columns={simPreparedPreview.columns || []}
+                rows={simPreparedPreview.rows || []}
+                emptyMessage="Run simulation to preview the model-ready FCC feature set."
+              />
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={QueryStats}
+                title="Step 3. FCC Prediction Output"
+                sub="The generated unseen FCC rows after model scoring, thresholding, and final FCC decision"
+              />
+              <PreviewTable
+                columns={simPredictionPreview.columns || []}
+                rows={simPredictionPreview.rows || []}
+                emptyMessage="Run simulation to view scored prediction output."
+              />
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={ArrowForward}
+                title="Step 4. Retained Queue For Sentinel"
+                sub="Only the rows not suppressed by FCC flow downstream to Sentinel"
+              />
+              <PreviewTable
+                columns={simRetainedPreview.columns || []}
+                rows={simRetainedPreview.rows || []}
+                emptyMessage={simResult
+                  ? 'This simulation retained no rows for Sentinel. Review the model health warning above before demoing the handoff.'
+                  : 'Run simulation to preview the Sentinel handoff queue.'}
+              />
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
+                icon={NotificationsOff}
+                title="Stopped In FCC"
+                sub="These rows were stopped in FCC and do not flow to Sentinel"
+              />
+              <PreviewTable
+                columns={simSuppressedPreview.columns || []}
+                rows={simSuppressedPreview.rows || []}
+                emptyMessage="Run simulation to inspect suppressed FCC rows."
+              />
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
@@ -2309,6 +2976,11 @@ const DeploymentDashboard = ({
               />
               {simLoading ? (
                 <Skeleton height={240} />
+              ) : simHealth?.status === 'error' ? (
+                <Alert severity="warning">
+                  OOT validation is intentionally de-emphasized for this run because the unseen-batch scoring health check failed.
+                  {simLeakageFeatures.length > 0 ? ` Leakage features detected: ${simLeakageFeatures.join(', ')}.` : ''}
+                </Alert>
               ) : simHasOOT ? (
                 <Stack spacing={1.75}>
                   <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
@@ -2382,6 +3054,17 @@ const DeploymentDashboard = ({
 
             <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
               <SectionHead
+                icon={Timeline}
+                title="Historical Comparison & Diagnostics"
+                sub="Use these views to compare batches over time, review stream stability, and diagnose operational behavior."
+              />
+              <Typography sx={{ fontSize: 11.5, color: D.muted }}>
+                The micro-batch chart below becomes meaningful once multiple batches have been generated. For a single batch, use the FCC decision flow view above because it shows the current operational split more clearly.
+              </Typography>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+              <SectionHead
                 icon={BarChart}
                 title="Live Flow Stream"
                 sub="Micro-batch view of ingest -> transform -> predict -> queue"
@@ -2397,11 +3080,11 @@ const DeploymentDashboard = ({
                       <YAxis tick={{ fontSize: 10 }} />
                       <RTooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="cumulative_ingested" name="Ingested" stroke={D.blue} strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="cumulative_transformed" name="Transformed" stroke="#0f766e" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="cumulative_predicted" name="Predicted" stroke="#7c3aed" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="cumulative_escalated" name="Escalated" stroke={D.orange} strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="cumulative_suppressed" name="Suppressed" stroke={D.green} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="cumulative_ingested" name="Ingested" stroke={D.blue} strokeWidth={2.6} dot={effectiveSimFlow.length <= 8} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="cumulative_transformed" name="Transformed" stroke="#0f766e" strokeWidth={2.6} dot={effectiveSimFlow.length <= 8} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="cumulative_predicted" name="Predicted" stroke="#7c3aed" strokeWidth={2.6} dot={effectiveSimFlow.length <= 8} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="cumulative_escalated" name="Escalated" stroke={D.orange} strokeWidth={2.6} dot={effectiveSimFlow.length <= 8} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="cumulative_suppressed" name="Suppressed" stroke={D.green} strokeWidth={2.6} dot={effectiveSimFlow.length <= 8} activeDot={{ r: 5 }} />
                     </LineChart>
                   </ResponsiveContainer>
 
@@ -2457,8 +3140,8 @@ const DeploymentDashboard = ({
             <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
               <SectionHead
                 icon={Assessment}
-                title="Investigator Queue Preview"
-                sub="Alert/case IDs, model, threshold, score, decision and reason"
+                title="Detailed Investigator Queue Evidence"
+                sub="Full row-level alert/case preview with model, threshold, score, decision, and reason"
               />
               <InvestigatorQueueTable rows={effectiveLiveQueue} />
             </Paper>
@@ -2518,7 +3201,7 @@ const DeploymentDashboard = ({
           </Stack>
         )}
 
-        {tab === 4 && (
+        {tab === DEPLOYMENT_TAB.LINEAGE && (
           <Stack spacing={2.5}>
             {errors.lineage && <Alert severity="error">{errors.lineage}</Alert>}
 

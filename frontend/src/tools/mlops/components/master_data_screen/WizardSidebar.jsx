@@ -41,9 +41,10 @@ const WizardSidebar = ({ steps, currentStepId, completedSteps, skipRollup }) => 
                 fontSize: 9,
                 color: '#fff',
                 flexShrink: 0,
+                fontWeight: 800,
               }}
             >
-              {status === 'completed' ? 'OK' : status === 'current' ? String(idx + 1) : ''}
+              {status === 'completed' ? '✓' : status === 'current' ? String(idx + 1) : ''}
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 11.5, fontWeight: 700, color: status === 'current' ? T.orange : T.text }}>

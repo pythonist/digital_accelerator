@@ -1,14 +1,16 @@
 // frontend/src/App.jsx
-import React, { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from "@context/AppContext";
 import { ScaleLoader } from 'react-spinners';
 import { PageTransition } from "./components/LoadingAnimations";
+import { persistLastRoute, readLastRoute } from './utils/navigationPersistence';
 
 const LoginScreen = lazy(() => import("@screens/auth/LoginScreen"));
 const RegisterScreen = lazy(() => import("@screens/auth/RegisterScreen"));
 const AdminDashboard = lazy(() => import("@screens/admin/AdminDashboard"));
 const EnvironmentSelectScreen = lazy(() => import("@screens/admin/EnvironmentSelectScreen"));
+const EnvironmentModuleTransitionScreen = lazy(() => import("@screens/admin/EnvironmentModuleTransitionScreen"));
 const ToolSelectScreen = lazy(() => import("@screens/admin/ToolSelectScreen"));
 
 const InvestigationPlatform = lazy(() => import("@tools/investigation/InvestigationPlatform"));
@@ -16,6 +18,23 @@ const CalibrationPlatform = lazy(() => import("@tools/calibration/CalibrationPla
 const MulePlatform = lazy(() => import("@tools/mule_detection/MulePlatform"));
 const BTSYPlatform = lazy(() => import("@tools/btsy/BTSYPlatform"));
 const MLOpsPlatform = lazy(() => import("@tools/mlops/MLOpsPlatform"));
+
+const RESTORE_ENTRY_PATHS = new Set(['/', '/tools', '/environments']);
+const TOOL_ROUTE_PREFIXES = [
+  ['/investigation', 'investigation'],
+  ['/calibration', 'calibration'],
+  ['/mule', 'mule_detection'],
+  ['/btsy', 'btsy'],
+  ['/mlops', 'mlops'],
+];
+
+const resolveToolKeyFromPath = (pathname = '') => {
+  const match = TOOL_ROUTE_PREFIXES.find(([prefix]) => pathname.startsWith(prefix));
+  return match ? match[1] : null;
+};
+
+const shouldPersistRoute = (pathname = '') =>
+  Boolean(pathname) && !['/login', '/register', '/environments', '/tools-transition'].includes(pathname);
 
 const RouteLoader = () => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-slate-100">
@@ -42,6 +61,58 @@ const RouteLoader = () => (
 const RouteSuspense = ({ children }) => (
   <Suspense fallback={<RouteLoader />}>{children}</Suspense>
 );
+
+const NavigationStateManager = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { activeEnv, isAuthenticated, isAuthLoading, setActiveTool, username } = useAppContext();
+  const restoredScopeRef = useRef('');
+  const scopeKey = useMemo(
+    () => `${username || 'anonymous'}::${activeEnv || 'default'}`,
+    [activeEnv, username]
+  );
+
+  useEffect(() => {
+    const derivedTool = resolveToolKeyFromPath(location.pathname);
+    if (!derivedTool) return;
+
+    setActiveTool((previousTool) => (previousTool === derivedTool ? previousTool : derivedTool));
+  }, [location.pathname, setActiveTool]);
+
+  useEffect(() => {
+    if (isAuthLoading || !isAuthenticated || !activeEnv) return;
+    if (!shouldPersistRoute(location.pathname)) return;
+
+    const fullPath = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+    persistLastRoute({ username, envId: activeEnv }, fullPath);
+  }, [
+    activeEnv,
+    isAuthenticated,
+    isAuthLoading,
+    location.hash,
+    location.pathname,
+    location.search,
+    username,
+  ]);
+
+  useEffect(() => {
+    if (isAuthLoading || !isAuthenticated || !activeEnv) return;
+    if (restoredScopeRef.current === scopeKey) return;
+
+    if (!RESTORE_ENTRY_PATHS.has(location.pathname)) {
+      restoredScopeRef.current = scopeKey;
+      return;
+    }
+
+    restoredScopeRef.current = scopeKey;
+    const rememberedRoute = readLastRoute({ username, envId: activeEnv });
+    if (!rememberedRoute || rememberedRoute === location.pathname) return;
+
+    navigate(rememberedRoute, { replace: true });
+  }, [activeEnv, isAuthenticated, isAuthLoading, location.pathname, navigate, scopeKey, username]);
+
+  return null;
+};
 
 // --- MAIN LAYOUT ---
 const MainLayout = () => {
@@ -123,6 +194,7 @@ const AppRoutes = () => {
         />
 
         <Route path="/environments" element={<RouteSuspense><EnvironmentSelectScreen /></RouteSuspense>} />
+        <Route path="/tools-transition" element={<RouteSuspense><EnvironmentModuleTransitionScreen /></RouteSuspense>} />
         <Route path="/tools" element={<RouteSuspense><ToolSelectScreen /></RouteSuspense>} />
 
         {/* Tool Platforms */}
@@ -145,6 +217,7 @@ const AppRoutes = () => {
 const App = () => {
   return (
     <BrowserRouter>
+      <NavigationStateManager />
       <AppRoutes />
     </BrowserRouter>
   );

@@ -19,8 +19,8 @@ export const StatCard = ({ label, value, sub, tone = 'default', accent = V.orang
     <Paper
       variant="outlined"
       sx={{
-        p: 1.25,
-        borderRadius: 2,
+        p: 1.1,
+        borderRadius: 0,
         minWidth: 145,
         borderColor: accent,
         flex: '1 1 145px',
@@ -48,7 +48,7 @@ export const RingGauge = ({ label, value, max = 1, format = (v) => fmt(v, 3), to
   }, [pctValue]);
 
   return (
-    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, minWidth: 160 }}>
+    <Paper variant="outlined" sx={{ p: 1.35, borderRadius: 0, minWidth: 160 }}>
       <Stack direction="row" alignItems="center" spacing={1.5}>
         <Box sx={{ position: 'relative', display: 'inline-flex' }}>
           <CircularProgress
@@ -119,24 +119,91 @@ export const MetricChip = ({ label, tone = 'default' }) => {
   );
 };
 
-export const ConfusionMatrixGrid = ({ cm }) => {
+export const ConfusionMatrixGrid = ({ cm, business = false, compact = false, title = '' }) => {
   const tn = Number(cm?.[0]?.[0] ?? 0);
   const fp = Number(cm?.[0]?.[1] ?? 0);
   const fn = Number(cm?.[1]?.[0] ?? 0);
   const tp = Number(cm?.[1]?.[1] ?? 0);
-  const cell = (value, label, bg) => (
-    <Box sx={{ p: 1.2, border: `1px solid ${V.border}`, borderRadius: 1.2, bgcolor: bg }}>
-      <Typography sx={{ fontSize: 10, color: V.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</Typography>
-      <Typography sx={{ fontSize: 20, fontWeight: 800, color: V.text }}>{value.toLocaleString()}</Typography>
-    </Box>
-  );
+  const cells = business
+    ? [
+        {
+          key: 'tn',
+          value: tn,
+          bg: '#F8FAFC',
+          title: 'Actually low risk and predicted low risk',
+          code: 'True Negative',
+          note: 'These are the alerts the model safely set aside, which is where workload relief comes from.',
+        },
+        {
+          key: 'fp',
+          value: fp,
+          bg: '#FFF7ED',
+          title: 'Actually low risk but predicted escalate',
+          code: 'False Positive',
+          note: 'These create extra analyst work because the model kept alerts that later looked non-suspicious.',
+        },
+        {
+          key: 'fn',
+          value: fn,
+          bg: '#FEF2F2',
+          title: 'Actually suspicious but predicted low risk',
+          code: 'False Negative',
+          note: 'These are the missed suspicious cases and represent the main residual risk in suppression.',
+        },
+        {
+          key: 'tp',
+          value: tp,
+          bg: '#ECFDF3',
+          title: 'Actually suspicious and predicted escalate',
+          code: 'True Positive',
+          note: 'These are the suspicious cases the model correctly kept visible for investigators.',
+        },
+      ]
+    : [
+        { key: 'tn', value: tn, bg: '#F8FAFC', title: 'TN', code: '', note: '' },
+        { key: 'fp', value: fp, bg: '#FFF7ED', title: 'FP', code: '', note: '' },
+        { key: 'fn', value: fn, bg: '#FEF2F2', title: 'FN', code: '', note: '' },
+        { key: 'tp', value: tp, bg: '#ECFDF3', title: 'TP', code: '', note: '' },
+      ];
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
-      {cell(tn, 'TN', '#F8FAFC')}
-      {cell(fp, 'FP', '#FFF7ED')}
-      {cell(fn, 'FN', '#FEF2F2')}
-      {cell(tp, 'TP', '#ECFDF3')}
-    </Box>
+    <Stack spacing={1}>
+      {business && title ? (
+        <Typography sx={{ fontSize: compact ? 11 : 11.5, color: V.textMuted }}>
+          {title}
+        </Typography>
+      ) : null}
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: compact ? 0.9 : 1.1 }}>
+        {cells.map((cell) => (
+          <Box
+            key={cell.key}
+            sx={{
+              p: compact ? 1 : 1.2,
+              border: `1px solid ${V.border}`,
+              borderRadius: 0,
+              bgcolor: cell.bg,
+              minHeight: compact ? 108 : 124,
+            }}
+          >
+            <Typography sx={{ fontSize: compact ? 10.25 : 10.5, fontWeight: 700, color: V.text }}>
+              {cell.title}
+            </Typography>
+            {cell.code ? (
+              <Typography sx={{ fontSize: 10, color: V.textMuted, mt: 0.2 }}>
+                ({cell.code})
+              </Typography>
+            ) : null}
+            <Typography sx={{ fontSize: compact ? 22 : 24, fontWeight: 800, color: V.text, mt: 0.7 }}>
+              {cell.value.toLocaleString()}
+            </Typography>
+            {cell.note ? (
+              <Typography sx={{ fontSize: compact ? 10.25 : 10.5, color: V.textMuted, mt: 0.55, lineHeight: 1.45 }}>
+                {cell.note}
+              </Typography>
+            ) : null}
+          </Box>
+        ))}
+      </Box>
+    </Stack>
   );
 };
 
@@ -174,7 +241,7 @@ export const HealthScore = ({ value }) => {
   const tone = pctValue >= 80 ? 'good' : pctValue >= 60 ? 'warn' : 'bad';
   const color = tone === 'good' ? V.good : tone === 'warn' ? V.warn : V.bad;
   return (
-    <Box sx={{ p: 1, borderRadius: 2, border: `1px solid ${V.border}`, minWidth: 120 }}>
+    <Box sx={{ p: 1, borderRadius: 0, border: `1px solid ${V.border}`, minWidth: 120 }}>
       <Typography sx={{ fontSize: 10.5, color: V.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Health</Typography>
       <Typography sx={{ fontSize: 18, fontWeight: 800, color }}>{num(pctValue, 0)}%</Typography>
     </Box>
@@ -271,7 +338,7 @@ export const MetricPill = ({ label, value }) => (
 );
 
 export const NarrativeBox = ({ title, text }) => (
-  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: '#FBFBFD' }}>
+  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, bgcolor: '#FBFBFD' }}>
     <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: V.text }}>{title}</Typography>
     <Typography sx={{ fontSize: 11.5, color: V.textMuted, mt: 0.5 }}>{text}</Typography>
   </Paper>
@@ -357,8 +424,18 @@ export const FaintNote = ({ text }) => (
   <Typography sx={{ fontSize: 11, color: V.textDim }}>{text}</Typography>
 );
 
-export const SectionCard = ({ children }) => (
-  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: V.paper }}>
+export const SectionCard = ({ children, sx = {} }) => (
+  <Paper
+    variant="outlined"
+    sx={{
+      p: 1.9,
+      borderRadius: 0,
+      bgcolor: V.paper,
+      borderColor: V.border,
+      boxShadow: V.shadowSm,
+      ...sx,
+    }}
+  >
     {children}
   </Paper>
 );
@@ -366,8 +443,8 @@ export const SectionCard = ({ children }) => (
 export const DarkHeader = ({ title, subtitle, right }) => (
   <Box
     sx={{
-      p: 2.5,
-      borderRadius: 2,
+      p: 2,
+      borderRadius: 0,
       color: '#fff',
       background: `linear-gradient(90deg, ${V.slateDark}, ${V.slateMid})`,
       boxShadow: `inset 0 -2px 0 ${V.orange}`,

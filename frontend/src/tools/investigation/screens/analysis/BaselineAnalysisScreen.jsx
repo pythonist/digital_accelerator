@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppContext } from "@context/AppContext";
 import apiClient from "@services/api";
 import { formatNumber, toNumber } from "@investigation/utils/format";
+import { mergeCaseResolutionModule } from '../../utils/caseResolutionStore';
 
 import PageContainer from "@investigation-layout/PageContainer";
 import {
@@ -58,12 +59,25 @@ const BaselineAnalysisScreen = () => {
       if (res.error) throw new Error(res.error);
       
       setResults(res);
+      mergeCaseResolutionModule(selectedCaseId, 'baseline', {
+        analysis_mode: analysisMode,
+        deviations: Array.isArray(res?.deviations) ? res.deviations.slice(0, 12) : [],
+        deviation_score: res?.deviation_score,
+        deviation_level: res?.deviation_level,
+        baseline_summary: res?.baseline_summary || null,
+        current_summary: res?.current_summary || null,
+        insights: Array.isArray(res?.insights) ? res.insights.slice(0, 8) : [],
+        customer_id: res?.customer_id || null,
+      });
       
       if (res.customer_id) {
         try {
           const historyRes = await apiClient.get(`/api/v2/analysis/baseline/customer-history/${res.customer_id}`);
           if (historyRes.history) {
             setCustomerHistory(historyRes.history);
+            mergeCaseResolutionModule(selectedCaseId, 'baseline', {
+              customer_history: Array.isArray(historyRes.history) ? historyRes.history.slice(0, 12) : [],
+            });
           }
         } catch (e) {
           console.warn('Historical data fetch failed silently:', e);

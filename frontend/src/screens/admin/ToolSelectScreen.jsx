@@ -48,7 +48,6 @@ const ToolSelectScreen = () => {
     username,
     userRole,
     datasetLoaded,
-    refreshSystemState,
   } = useAppContext();
 
   const isAdmin = userRole === 'TENANT_ADMIN';
@@ -57,10 +56,8 @@ const ToolSelectScreen = () => {
   useEffect(() => {
     if (!activeEnv) {
       navigate('/environments');
-      return;
     }
-    refreshSystemState();
-  }, [activeEnv, navigate, refreshSystemState]);
+  }, [activeEnv, navigate]);
 
   const tools = useMemo(() => ([
     {

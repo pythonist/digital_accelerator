@@ -84,16 +84,55 @@ def _get_xy_cols(body: dict) -> tuple[str, str]:
     return str(x_col).strip(), str(y_col).strip()
 
 
+def _dataset_from_inline_body(body: dict):
+    dataset = body.get("dataset")
+    if not isinstance(dataset, dict):
+        return None
+    file_path = (
+        dataset.get("file_path")
+        or dataset.get("path")
+        or dataset.get("source_path")
+        or ""
+    )
+    if not str(file_path or "").strip():
+        return None
+    columns = dataset.get("columns")
+    if not isinstance(columns, list):
+        columns = []
+    return {
+        "dataset_id": dataset.get("dataset_id") or dataset.get("id") or body.get("dataset_id"),
+        "dataset_type": dataset.get("dataset_type") or dataset.get("type") or "inline_dataset",
+        "name": dataset.get("name") or dataset.get("dataset_name") or Path(file_path).stem,
+        "filename": dataset.get("filename") or Path(file_path).name,
+        "file_path": str(file_path),
+        "rows": dataset.get("rows"),
+        "columns": columns,
+    }
+
+
 def _require_dataset(body: dict):
     """Resolve + return dataset dict from request body."""
     tenant_id, env_id = _get_env_ids()
     env_root  = _resolve_env_path(env_id, tenant_id)
     mlops_svc = _get_mlops_service(env_root)
     did       = int(body.get("dataset_id") or 0)
-    dataset   = mlops_svc.get_dataset(tenant_id, env_id, did)
-    if not dataset:
-        raise ValueError("Dataset not found")
-    return dataset
+    dataset = None
+    if did:
+        try:
+            dataset = mlops_svc.get_dataset(tenant_id, env_id, did)
+        except Exception:
+            dataset = None
+        if not dataset:
+            try:
+                dataset = mlops_svc.get_dataset(did)
+            except Exception:
+                dataset = None
+    if dataset:
+        return dataset
+    inline_dataset = _dataset_from_inline_body(body)
+    if inline_dataset:
+        return inline_dataset
+    raise ValueError("Dataset not found")
 
 
 def _ok(data: dict, code: int = 200):

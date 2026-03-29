@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fcc-workbench
+spec:
+  rules:
+    - host: fcc-workbench.example.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fcc-workbench
+                port:
+                  number: 80

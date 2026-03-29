@@ -1,6 +1,11 @@
 // frontend/src/screens/cases/CasePackViewer.jsx
 import React, { useState, useEffect, useMemo } from 'react';
 import apiClient from "@services/api";
+import {
+  mergeFccSentinelHandoff,
+  readFccSentinelHandoff,
+} from '../../../../utils/fccSentinelHandoff';
+import { mergeCaseResolutionModule } from '../../utils/caseResolutionStore';
 
 // ✅ Correct Layout Import
 import PageContainer from "@investigation-layout/PageContainer";
@@ -170,6 +175,17 @@ const CasePackViewer = () => {
 
   useEffect(() => { fetchCases(); }, []);
 
+  useEffect(() => {
+    const selectedStillVisible = cases.some((item) => item.case_id === selectedCase);
+    if (cases.length > 0 && (!selectedCase || !selectedStillVisible)) {
+      const restoredCaseId = String(readFccSentinelHandoff()?.selected_case_id || '').trim();
+      const restoredVisibleCase = restoredCaseId
+        ? cases.find((item) => String(item.case_id) === restoredCaseId)
+        : null;
+      loadCase((restoredVisibleCase || cases[0]).case_id);
+    }
+  }, [cases, selectedCase]);
+
   const fetchCases = async () => {
     try {
       const res = await apiClient.get('/api/v2/case-list');
@@ -189,6 +205,19 @@ const CasePackViewer = () => {
         setCasePack(res);
         setSelectedCase(caseId);
         setNotes("");
+        mergeFccSentinelHandoff({
+          selected_case_id: caseId,
+          preferred_screen: 'casepack',
+        });
+        mergeCaseResolutionModule(caseId, 'case_pack', {
+          risk_score: res?.risk_score,
+          alerts: Array.isArray(res?.alerts) ? res.alerts.slice(0, 20) : [],
+          ledger: Array.isArray(res?.ledger) ? res.ledger.slice(0, 20) : [],
+          typology_flags: res?.typology_flags || {},
+          link_analysis: res?.link_analysis || null,
+          network_profile: res?.network_profile || null,
+          financial_profile: res?.financial_profile || null,
+        });
       }
     } catch (e) { alert("Failed to load case data."); }
     finally { setLoading(false); }

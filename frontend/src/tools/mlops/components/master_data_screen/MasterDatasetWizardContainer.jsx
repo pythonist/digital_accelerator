@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogTitle, IconButton } from '@mui/material';
 import { Close } from '@mui/icons-material';
 import mlopsApi from '../../services/mlopsApi';
-import ScreenPipelineRail from '../ScreenPipelineRail';
 
 import { T, buttonStyle, cardStyle } from './theme';
 import WizardSidebar from './WizardSidebar';
@@ -92,9 +91,12 @@ const MasterDatasetWizardContainer = ({
   datasets,
   masterDataset,
   onBuildComplete,
+  onStepAdvance,
+  onStepBack,
   activePipelineId = null,
-  activePipelineName = '',
   onPipelineActivated,
+  initialCurrentStepId = 'base',
+  onCurrentStepChange,
 }) => {
   const [grain, setGrain] = useState('alert');
   const [anchorType, setAnchorType] = useState('');
@@ -120,17 +122,29 @@ const MasterDatasetWizardContainer = ({
   const [aggregationByTable, setAggregationByTable] = useState({});
   const [aggregationLoading, setAggregationLoading] = useState(false);
 
-  const [currentStepId, setCurrentStepId] = useState('base');
+  const [currentStepId, setCurrentStepId] = useState(initialCurrentStepId || 'base');
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1600);
+  const [buildReadyForContinue, setBuildReadyForContinue] = useState(Boolean(masterDataset?.dataset_id));
+  const [builtConfigFingerprint, setBuiltConfigFingerprint] = useState('');
   const rootRef = useRef(null);
 
   const datasetTypeOptions = useMemo(
     () => datasets.map((d) => d.dataset_type).filter(Boolean),
     [datasets],
   );
+
+  useEffect(() => {
+    const next = String(initialCurrentStepId || 'base').trim().toLowerCase();
+    if (!next) return;
+    setCurrentStepId((prev) => (prev === next ? prev : next));
+  }, [initialCurrentStepId]);
+
+  useEffect(() => {
+    onCurrentStepChange?.(currentStepId);
+  }, [currentStepId, onCurrentStepChange]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -338,6 +352,47 @@ const MasterDatasetWizardContainer = ({
       .filter((j) => j.left && j.right && j.key),
     [activeJoins],
   );
+
+  const masterPipelineState = useMemo(() => ({
+    grain,
+    anchorType,
+    outputName,
+    builtMasterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
+    outputDatasetId: Number(masterDataset?.dataset_id || 0) || null,
+    joins,
+    enabledTables: Array.from(enabledTables),
+    rollupConfirmed,
+    transforms,
+    strMode,
+    replacementLabelColumn,
+    dataset_ids: datasets.map((d) => d.dataset_id),
+    currentStepId,
+    status: buildReadyForContinue ? 'completed' : 'draft',
+  }), [
+    grain,
+    anchorType,
+    outputName,
+    masterDataset?.dataset_id,
+    joins,
+    enabledTables,
+    rollupConfirmed,
+    transforms,
+    strMode,
+    replacementLabelColumn,
+    datasets,
+    currentStepId,
+    buildReadyForContinue,
+  ]);
+
+  const buildFingerprint = useMemo(() => JSON.stringify({
+    anchorType,
+    enabledTables: Array.from(enabledTables).sort(),
+    selectedJoinKeys,
+    outputName,
+    transforms,
+    strMode,
+    replacementLabelColumn,
+  }), [anchorType, enabledTables, selectedJoinKeys, outputName, transforms, strMode, replacementLabelColumn]);
 
   const replacementOptions = useMemo(() => {
     const anchor = findDatasetByType(datasets, anchorType);
@@ -581,6 +636,7 @@ const MasterDatasetWizardContainer = ({
     if (!datasets.length) return;
     setBuilding(true);
     setError(null);
+    setBuildReadyForContinue(false);
     setBuildLog([
       'Validating join plan',
       `Anchor grain: ${grain}`,
@@ -602,12 +658,38 @@ const MasterDatasetWizardContainer = ({
       });
       const data = res?.data || res;
       const built = data?.dataset || data;
+      const builtDatasetId = Number(built?.dataset_id || 0) || null;
+      const nextMasterState = {
+        ...masterPipelineState,
+        builtMasterDatasetId: builtDatasetId,
+        outputDatasetId: builtDatasetId,
+        currentStepId: 'preview',
+        status: 'completed',
+      };
       if (built?.dataset_id) {
         setBuildLog((prev) => [...prev, `Build completed: ${built.dataset_type}`]);
+        setBuiltConfigFingerprint(buildFingerprint);
+        setBuildReadyForContinue(true);
       } else {
         setBuildLog((prev) => [...prev, 'Build completed']);
       }
-      onBuildComplete?.();
+      await onBuildComplete?.(built);
+      const pipelineId = Number(activePipelineId || 0);
+      if (pipelineId > 0) {
+        try {
+          const saved = await mlopsApi.pipelineSaveScreenState(pipelineId, {
+            screen: 'master',
+            state: nextMasterState,
+          });
+          const payload = saved?.data || saved;
+          if (payload?.pipeline_id) {
+            onPipelineActivated?.(payload);
+          }
+        } catch (screenStateError) {
+          const saveMsg = screenStateError?.message || 'Master build saved, but progress refresh did not complete.';
+          setBuildLog((prev) => [...prev, `Pipeline state warning: ${saveMsg}`]);
+        }
+      }
     } catch (e) {
       const msg = e?.response?.data?.error || e?.message || 'Master dataset build failed';
       setError(msg);
@@ -615,7 +697,7 @@ const MasterDatasetWizardContainer = ({
     } finally {
       setBuilding(false);
     }
-  }, [datasets, outputName, selectedJoinKeys, onBuildComplete, grain, strMode, replacementLabelColumn, anchorType, transforms]);
+  }, [datasets, outputName, selectedJoinKeys, onBuildComplete, grain, strMode, replacementLabelColumn, anchorType, transforms, activePipelineId, buildFingerprint, masterPipelineState, onPipelineActivated]);
 
   const updateTransform = useCallback((id, patch) => {
     setTransforms((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -727,113 +809,18 @@ const MasterDatasetWizardContainer = ({
     if (idx > 0) setCurrentStepId(effectiveSteps[idx - 1].id);
   }, [effectiveSteps, currentStepId]);
 
-  const masterPipelineState = useMemo(() => ({
-    grain,
-    anchorType,
-    outputName,
-    builtMasterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
-    joins,
-    enabledTables: Array.from(enabledTables),
-    rollupConfirmed,
-    transforms,
-    strMode,
-    replacementLabelColumn,
-    dataset_ids: datasets.map((d) => d.dataset_id),
-    currentStepId,
-  }), [
-    grain,
-    anchorType,
-    outputName,
-    masterDataset?.dataset_id,
-    joins,
-    enabledTables,
-    rollupConfirmed,
-    transforms,
-    strMode,
-    replacementLabelColumn,
-    datasets,
-    currentStepId,
-  ]);
+  useEffect(() => {
+    if (!masterDataset?.dataset_id) return;
+    setBuiltConfigFingerprint((prev) => prev || buildFingerprint);
+  }, [masterDataset?.dataset_id, buildFingerprint]);
 
-  const masterSummaryItems = useMemo(() => ([
-    `Anchor: ${anchorType || '-'}`,
-    `Grain: ${grain}`,
-    `Enabled tables: ${enabledTables.size}`,
-    `Active joins: ${activeJoins.length}`,
-    `STR policy: ${strMode}`,
-  ]), [anchorType, grain, enabledTables.size, activeJoins.length, strMode]);
-
-  const handleLoadMasterPipeline = useCallback((state, pipeline) => {
-    if (!state || typeof state !== 'object') return;
-    if (state.grain) setGrain(state.grain);
-    if (state.anchorType) setAnchorType(state.anchorType);
-    if (state.outputName) setOutputName(safe(state.outputName).replace(/[^a-z0-9_-]/g, '_'));
-    if (state.strMode) setStrMode(state.strMode);
-    setReplacementLabelColumn(state.replacementLabelColumn || '');
-    if (typeof state.rollupConfirmed === 'boolean') setRollupConfirmed(state.rollupConfirmed);
-    if (state.currentStepId) setCurrentStepId(state.currentStepId);
-
-    if (Array.isArray(state.transforms)) {
-      const loadedTransforms = state.transforms.map((t, idx) => ({
-        id: t.id || `t_loaded_${Date.now()}_${idx}`,
-        type: t.type || 'drop_high_nulls',
-        config: t.config || {},
-      }));
-      setTransforms(loadedTransforms);
+  useEffect(() => {
+    if (!builtConfigFingerprint) {
+      setBuildReadyForContinue(Boolean(masterDataset?.dataset_id));
+      return;
     }
-
-    if (Array.isArray(state.joins)) {
-      const loadedJoins = state.joins.map((j, idx) => {
-        const left = j.left || datasetTypeOptions[0] || '';
-        const right = j.right || datasetTypeOptions[1] || datasetTypeOptions[0] || '';
-        const leftDs = findDatasetByType(datasets, left);
-        const rightDs = findDatasetByType(datasets, right);
-        const keyOptions = sharedKeys(leftDs, rightDs);
-        const key = keyOptions.includes(j.key) ? j.key : (j.key || keyOptions[0] || 'account_id');
-        return {
-          id: j.id || makeJoinId(left, right, key, `__loaded_${idx}`),
-          left,
-          right,
-          key,
-          key_options: keyOptions,
-          join_type: j.join_type || 'left',
-          matched_rows: Number(j.matched_rows || 0),
-          enabled: j.enabled !== false,
-        };
-      });
-      setJoins(loadedJoins);
-    }
-
-    if (Array.isArray(state.enabledTables)) {
-      setEnabledTables(new Set(state.enabledTables.map((t) => safe(t)).filter(Boolean)));
-    }
-    if (pipeline?.name) {
-      setBuildLog((prev) => [...prev, `Pipeline loaded: ${pipeline.name}`]);
-    }
-  }, [datasets, datasetTypeOptions]);
-
-  const buildMasterSavePayload = useCallback(({ name, currentState, datasetId, persona: actor }) => ({
-    name,
-    dataset_id: Number(datasetId || 0),
-    grain: currentState.grain || 'alert',
-    anchor_dataset_id: currentState.anchorType
-      ? (findDatasetByType(datasets, currentState.anchorType)?.dataset_id || null)
-      : null,
-    dataset_ids: currentState.dataset_ids || datasets.map((d) => d.dataset_id),
-    joins: Array.isArray(currentState.joins) ? currentState.joins : [],
-    transforms: Array.isArray(currentState.transforms) ? currentState.transforms : [],
-    str_config: {
-      policy: currentState.strMode || 'detect',
-      replacement_label_column: currentState.replacementLabelColumn || null,
-    },
-    output_name: currentState.outputName || 'master_dataset',
-    created_by_persona: actor || 'technical',
-    steps: [{
-      type: 'screen_state',
-      screen: 'master',
-      state: currentState,
-    }],
-  }), [datasets]);
+    setBuildReadyForContinue(buildFingerprint === builtConfigFingerprint);
+  }, [buildFingerprint, builtConfigFingerprint, masterDataset?.dataset_id]);
 
   const summaryLines = useMemo(() => {
     const selectedTableSet = new Set(Array.from(enabledTables));
@@ -877,6 +864,9 @@ const MasterDatasetWizardContainer = ({
           datasets={datasets}
           anchorRows={Number(rowImpact.anchorRows || 0)}
           anchorType={anchorType}
+          activeJoins={activeJoins}
+          rowImpact={rowImpact}
+          hasFanOutJoins={hasFanOutJoins}
         />
       );
     }
@@ -949,6 +939,8 @@ const MasterDatasetWizardContainer = ({
         previewLoading={previewLoading}
         onBuild={handleBuild}
         building={building}
+        canContinue={buildReadyForContinue}
+        onContinue={() => onStepAdvance?.('target')}
         error={error}
         buildLog={buildLog}
         advancedOpen={advancedOpen}
@@ -961,6 +953,14 @@ const MasterDatasetWizardContainer = ({
   };
 
   const currentMeta = STEP_DEFS.find((s) => s.id === currentStepId) || STEP_DEFS[0];
+  const isPreviewStep = currentStepId === 'preview';
+  const handlePreviewNext = useCallback(() => {
+    if (buildReadyForContinue) {
+      onStepAdvance?.('target');
+      return;
+    }
+    handleBuild();
+  }, [buildReadyForContinue, handleBuild, onStepAdvance]);
 
   const layoutMode = containerWidth >= 980 ? 'two' : 'one';
 
@@ -985,27 +985,35 @@ const MasterDatasetWizardContainer = ({
   );
 
   const stepNode = (
-    <StepShell
-      title={currentMeta.title}
-      purpose={currentMeta.subtitle}
-      onBack={goBack}
-      onNext={goNext}
-      canBack={effectiveSteps.findIndex((s) => s.id === currentStepId) > 0}
-      canNext={canContinue}
-      nextLabel={currentStepId === 'labels' ? 'Continue to Preview' : 'Continue'}
-      hideNext={currentStepId === 'preview'}
-      headerActions={(
-        <button
-          type="button"
-          style={buttonStyle('secondary', false)}
-          onClick={() => setInspectorOpen(true)}
-        >
-          Open builder details
-        </button>
-      )}
-    >
-      {renderStepContent()}
-    </StepShell>
+    <div style={{ display: 'grid', gap: 10 }}>
+      <StepShell
+        title={currentMeta.title}
+        purpose={currentMeta.subtitle}
+        onBack={goBack}
+        onNext={isPreviewStep ? handlePreviewNext : goNext}
+        canBack={effectiveSteps.findIndex((s) => s.id === currentStepId) > 0}
+        canNext={isPreviewStep ? !building : canContinue}
+        nextLabel={
+          isPreviewStep
+            ? (buildReadyForContinue ? 'Continue to Target Variable' : (building ? 'Building...' : 'Build Master Dataset'))
+            : currentStepId === 'labels'
+              ? 'Continue to Preview'
+              : 'Continue'
+        }
+        hideNext={false}
+        headerActions={(
+          <button
+            type="button"
+            style={buttonStyle('secondary', false)}
+            onClick={() => setInspectorOpen(true)}
+          >
+            Open full view
+          </button>
+        )}
+      >
+        {renderStepContent()}
+      </StepShell>
+    </div>
   );
 
   const rightRailNode = (
@@ -1032,27 +1040,13 @@ const MasterDatasetWizardContainer = ({
         rollupTables={rollupTables}
       />
 
-      <ScreenPipelineRail
-        screenKey="master"
-        screenLabel="Master Dataset"
-        persona={persona}
-        datasetId={anchorDataset?.dataset_id || masterDataset?.dataset_id || null}
-        currentState={masterPipelineState}
-        onLoadState={handleLoadMasterPipeline}
-        buildSavePayload={buildMasterSavePayload}
-        summaryItems={masterSummaryItems}
-        activePipelineId={activePipelineId}
-        activePipelineName={activePipelineName}
-        onPipelineActivated={onPipelineActivated}
-        sticky={false}
-      />
     </div>
   );
 
   if (layoutMode === 'two') {
     return (
       <>
-        <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 8, alignItems: 'start', overflowX: 'hidden', gridTemplateColumns: 'minmax(220px, 240px) minmax(0, 1fr)' }}>
+        <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 12, alignItems: 'start', overflowX: 'auto', gridTemplateColumns: 'minmax(190px, 210px) minmax(0, 1fr)' }}>
           <div style={{ minWidth: 0, minHeight: 0 }}>{sidebarNode}</div>
           <div style={{ minWidth: 0, minHeight: 0, display: 'grid', gap: 8 }}>
             <div style={{ minWidth: 0, minHeight: 0 }}>{stepNode}</div>
@@ -1074,9 +1068,9 @@ const MasterDatasetWizardContainer = ({
         >
           <DialogTitle sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
             <div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset builder details</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset full view</div>
               <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
-                Review join impact, build guidance, and saved master dataset plans without crowding the main workflow screen.
+                Open a wider workspace for join impact, build guidance, and saved master dataset plans.
               </div>
             </div>
             <IconButton onClick={() => setInspectorOpen(false)} size="small" sx={{ borderRadius: 0, border: `1px solid ${T.border}` }}>
@@ -1093,7 +1087,7 @@ const MasterDatasetWizardContainer = ({
 
   return (
     <>
-      <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 8, overflowX: 'hidden' }}>
+      <div ref={rootRef} style={{ display: 'grid', width: '100%', height: '100%', minHeight: 0, minWidth: 0, gap: 10, overflowX: 'auto' }}>
         {sidebarNode}
         {stepNode}
       </div>
@@ -1113,9 +1107,9 @@ const MasterDatasetWizardContainer = ({
       >
         <DialogTitle sx={{ px: 2.25, py: 1.5, borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset builder details</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset full view</div>
             <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
-              Review join impact, build guidance, and saved master dataset plans without crowding the main workflow screen.
+              Open a wider workspace for join impact, build guidance, and saved master dataset plans.
             </div>
           </div>
           <IconButton onClick={() => setInspectorOpen(false)} size="small" sx={{ borderRadius: 0, border: `1px solid ${T.border}` }}>

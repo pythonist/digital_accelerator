@@ -2,6 +2,10 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const TRACE_API_PREFIXES = ['/api/mlops', '/api/eda', '/api/model-training', '/api/deployment-dashboard'];
+const TRACE_API_CALLS = Boolean(import.meta.env.DEV);
+
+const shouldTraceApi = (url = '') => TRACE_API_CALLS && TRACE_API_PREFIXES.some((prefix) => String(url || '').startsWith(prefix));
 
 class APIClient {
   constructor() {
@@ -28,13 +32,28 @@ class APIClient {
         if (!config.params.env_id) config.params.env_id = activeEnv;
       }
 
+      if (shouldTraceApi(config.url)) {
+        console.debug('[API START]', (config.method || 'get').toUpperCase(), config.url, {
+          params: config.params || {},
+          env: activeEnv || null,
+        });
+      }
+
       return config;
     });
 
     // Response interceptor for auth errors
     this.client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        if (shouldTraceApi(response?.config?.url)) {
+          console.debug('[API DONE]', (response?.config?.method || 'get').toUpperCase(), response?.config?.url, response?.status);
+        }
+        return response;
+      },
       (error) => {
+        if (shouldTraceApi(error?.config?.url)) {
+          console.error('[API FAIL]', (error?.config?.method || 'get').toUpperCase(), error?.config?.url, error?.message);
+        }
         if (error.response?.status === 401) {
           localStorage.removeItem('auth_token');
           window.location.href = '/login';
@@ -122,6 +141,15 @@ class APIClient {
     }
   }
 
+  async patch(url, data = {}) {
+    try {
+      const response = await this.client.patch(url, data);
+      return response.data;
+    } catch (error) {
+      throw this._handleError(error);
+    }
+  }
+
   async delete(url) {
     try {
       const response = await this.client.delete(url);
@@ -203,6 +231,105 @@ class APIClient {
     return this.get(`/api/v2/case/${caseId}/facts`);
   }
 
+  async getCaseResolutionSupportFile(caseId) {
+    return this.get(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/support-file`);
+  }
+
+  async saveCaseResolutionSupportFile(caseId, supportFile) {
+    return this.post(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/support-file`, {
+      support_file: supportFile,
+    });
+  }
+
+  async generateCaseResolutionInvestigationSummary(caseId, supportFile, model = null) {
+    const payload = {
+      support_file: supportFile,
+      model,
+    };
+    try {
+      const response = await this.client.post(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/investigation-summary`, payload);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 405) {
+        const retry = await this.client.post(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/generate-investigation-summary`, payload);
+        return retry.data;
+      }
+      throw this._handleError(error);
+    }
+  }
+
+  async getExecutiveIntelligenceSummary(params = {}) {
+    return this.get('/api/v2/executive-summary', params || {});
+  }
+
+  async getExecutiveGraphFlowPayload(params = {}) {
+    return this.get('/api/v2/executive-summary/graph-flow', params || {});
+  }
+
+  async generateCaseResolutionSarDraft(caseId, supportFile, model = null) {
+    const payload = {
+      support_file: supportFile,
+      model,
+    };
+    try {
+      const response = await this.client.post(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/sar-draft`, payload);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 405) {
+        const retry = await this.client.post(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/draft-sar`, payload);
+        return retry.data;
+      }
+      throw this._handleError(error);
+    }
+  }
+
+  async analyzeNetworkIntelligence(caseId, filters = {}) {
+    return this.post('/api/v2/analysis/network-intelligence/analyze', {
+      case_id: caseId,
+      filters,
+    });
+  }
+
+  async getSavedNetworkIntelligence(caseId) {
+    return this.get(`/api/v2/analysis/network-intelligence/${encodeURIComponent(caseId)}`);
+  }
+
+  async saveNetworkIntelligence(caseId, payload, includeInReport = true) {
+    return this.post('/api/v2/analysis/network-intelligence/save', {
+      case_id: caseId,
+      payload,
+      include_in_report: includeInReport,
+    });
+  }
+
+  async getTypologyGuide() {
+    return this.get('/api/v2/typology/guide');
+  }
+
+  async analyzeTypologyIntelligence(caseId, options = {}) {
+    return this.post('/api/v2/typology/analyze', {
+      case_id: caseId,
+      options,
+    });
+  }
+
+  async getSavedTypologyAssessment(caseId) {
+    return this.get(`/api/v2/typology/${encodeURIComponent(caseId)}`);
+  }
+
+  async saveTypologyAssessment(caseId, payload, includeInReport = true, generatedBy = 'analyst') {
+    return this.post('/api/v2/typology/save', {
+      case_id: caseId,
+      payload,
+      include_in_report: includeInReport,
+      generated_by: generatedBy,
+    });
+  }
+
+  async getTypologyAssessmentHistory(caseId, params = {}) {
+    return this.get(`/api/v2/typology/history/${encodeURIComponent(caseId)}`, params);
+  }
+
   async getRankedCases() {
     return this.get('/api/v2/cases/ranked');
   }
@@ -225,6 +352,130 @@ class APIClient {
 
   async importFccPublishedRun(payload = {}) {
     return this.post('/api/v2/fcc-bridge/import', payload);
+  }
+
+  async getFccWorkflowSession(params = {}) {
+    return this.get('/api/v2/fcc-workflow/session', params);
+  }
+
+  async saveFccWorkflowSession(payload = {}) {
+    return this.post('/api/v2/fcc-workflow/session', payload);
+  }
+
+  async deleteFccWorkflowSession(sessionId) {
+    return this.delete(`/api/v2/fcc-workflow/session/${sessionId}`);
+  }
+
+  async handoffFccToSentinel(payload = {}) {
+    return this.post('/api/deployment-dashboard/handoff-sentinel', payload);
+  }
+
+  async getCaseQueue(params = {}) {
+    return this.get('/api/v2/case-queue', params);
+  }
+
+  async getCaseQueueDetail(caseId) {
+    return this.get(`/api/v2/case-queue/${encodeURIComponent(caseId)}`);
+  }
+
+  async updateCaseQueueStatus(caseId, payload = {}) {
+    return this.patch(`/api/v2/case-queue/${encodeURIComponent(caseId)}/status`, payload);
+  }
+
+  async updateCaseQueueStatusBatch(payload = {}) {
+    return this.post('/api/v2/case-queue/batch/status', payload);
+  }
+
+  async assignCaseQueueOwner(caseId, payload = {}) {
+    return this.patch(`/api/v2/case-queue/${encodeURIComponent(caseId)}/assign`, payload);
+  }
+
+  async previewEscalation(payload = {}) {
+    return this.post('/api/v2/escalations/preview', payload);
+  }
+
+  async escalateSingleCase(payload = {}) {
+    return this.post('/api/v2/escalations/single', payload);
+  }
+
+  async escalateCaseBatch(payload = {}) {
+    return this.post('/api/v2/escalations/batch', payload);
+  }
+
+  async getEscalationHistory(params = {}) {
+    return this.get('/api/v2/escalations/history', params);
+  }
+
+  async getCaseRetrievalGuide() {
+    return this.get('/api/v2/case-retrieval/guide');
+  }
+
+  async getCaseRetrievalIndexStatus() {
+    return this.get('/api/v2/case-retrieval/index-status');
+  }
+
+  async rebuildCaseRetrievalIndex(payload = {}) {
+    return this.post('/api/v2/case-retrieval/rebuild-index', payload);
+  }
+
+  async retrieveSimilarCases(payload = {}) {
+    return this.post('/api/v2/case-retrieval/similar', payload);
+  }
+
+  async compareRetrievedCases(payload = {}) {
+    return this.post('/api/v2/case-retrieval/compare', payload);
+  }
+
+  async getMailRecipients(params = {}) {
+    return this.get('/api/v2/mail-config/recipients', params);
+  }
+
+  async createMailRecipient(payload = {}) {
+    return this.post('/api/v2/mail-config/recipients', payload);
+  }
+
+  async updateMailRecipient(recipientId, payload = {}) {
+    return this.put(`/api/v2/mail-config/recipients/${recipientId}`, payload);
+  }
+
+  async getMailRoutingRules() {
+    return this.get('/api/v2/mail-config/rules');
+  }
+
+  async createMailRoutingRule(payload = {}) {
+    return this.post('/api/v2/mail-config/rules', payload);
+  }
+
+  async getMailTemplates() {
+    return this.get('/api/v2/mail-config/templates');
+  }
+
+  async createMailTemplate(payload = {}) {
+    return this.post('/api/v2/mail-config/templates', payload);
+  }
+
+  async testMailConfiguration(payload = {}) {
+    return this.post('/api/v2/mail-config/test-mail', payload);
+  }
+
+  async generateCaseReport(payload = {}) {
+    return this.post('/api/v2/reports/generate', payload);
+  }
+
+  async generateBatchCaseReports(payload = {}) {
+    return this.post('/api/v2/reports/generate-batch', payload);
+  }
+
+  async getCaseReports(caseId, params = {}) {
+    return this.get(`/api/v2/reports/${encodeURIComponent(caseId)}`, params);
+  }
+
+  async getCaseReportHistory(params = {}) {
+    return this.get('/api/v2/reports/history', params);
+  }
+
+  async downloadCaseReport(reportId) {
+    return this.downloadBlob(`/api/v2/reports/download/${encodeURIComponent(reportId)}`);
   }
 
   // ==================== MULE DETECTION ====================

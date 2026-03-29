@@ -259,6 +259,44 @@ class ServiceContainer:
 
         raise FileNotFoundError(f"Database not found for env: {env_id}")
 
+    def bind_environment_context(self, env_id: str, tenant_id: str) -> DatabaseManager:
+        """Bind request-scoped investigation services without relying on legacy env folders."""
+        tenant = str(tenant_id or "").strip() or "default"
+        db = self.get_investigation_db(env_id, tenant)
+
+        self.investigation_db = db
+        self.investigation_db.init_schema()
+
+        if self.metadata_manager:
+            self.metadata_manager.active_env = env_id
+            self.metadata_manager.active_tenant = tenant
+
+        self.calibration_db = DatabaseManager(CALIBRATION_DB_PATH)
+
+        if DataIngestionService:
+            self.data_ingestion = DataIngestionService(self.investigation_db)
+        if UniversalRuleEngine:
+            self.rule_engine = UniversalRuleEngine(self.investigation_db)
+        if TypologyService:
+            self.typology_detector = TypologyService(self.investigation_db)
+        if DataCleaningService:
+            self.data_cleaning = DataCleaningService(self.investigation_db)
+        if AIMasterBuilder:
+            self.ai_builder = AIMasterBuilder(self.investigation_db)
+        if SmartMergeService:
+            ollama = self.ollama_wrapper if self.ollama_wrapper else None
+            self.smart_merge_service = SmartMergeService(
+                self.investigation_db, ollama
+            )
+        if CasePackGenerator:
+            self.case_pack_generator = CasePackGenerator(self.investigation_db)
+        if BaselineEngine:
+            self.baseline_engine = BaselineEngine(self.investigation_db)
+        if FocusEngine:
+            self.focus_engine = FocusEngine(self.investigation_db)
+
+        return self.investigation_db
+
     # ---------------------------------------------------
     # STATELESS INGESTION FACTORY (FIXES UPLOAD BUG)
     # ---------------------------------------------------

@@ -12,10 +12,10 @@ import {
   Box, Paper, Typography, Button, Stack, Tabs, Tab,
   IconButton, Alert, Divider, Chip, LinearProgress,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  CircularProgress, Tooltip, Grid, TextField, Select, MenuItem,
-  FormControl, InputLabel, List, ListItem, ListItemButton, 
+  CircularProgress, Tooltip, Grid,
+  FormControl, List, ListItem, ListItemButton, 
   ListItemText, ListItemIcon, Dialog, DialogTitle, DialogContent, 
-  DialogContentText, DialogActions, Snackbar, FormControlLabel, Switch
+  DialogContentText, DialogActions, Snackbar
 } from '@mui/material';
 
 // Icons
@@ -35,7 +35,7 @@ import {
   TableChart as TableIcon,
   DeleteForever as PurgeIcon,
   Bolt, Add, Search, Science, Save, Visibility, Code, Dns, 
-  Link as LinkIcon, VpnKey, History as HistoryIcon
+  VpnKey, History as HistoryIcon
 } from '@mui/icons-material';
 
 const DataLoadScreen = ({ setActiveScreen }) => {
@@ -78,24 +78,6 @@ const DataLoadScreen = ({ setActiveScreen }) => {
       await fetchStats(); 
     } catch (err) {
       console.warn("Status update warning:", err);
-    }
-  };
-
-  const handleImportCompletion = async ({
-    message = 'FCC package imported successfully.',
-    importedIntoActiveEnv = false,
-  } = {}) => {
-    try {
-      if (importedIntoActiveEnv) {
-        setDatasetLoaded(true);
-        await checkDatasetStatus();
-        await loadCaseList();
-        await fetchStats();
-      }
-      setSnackbar({ open: true, message, severity: 'success' });
-    } catch (err) {
-      console.warn("Import refresh warning:", err);
-      setSnackbar({ open: true, message, severity: 'success' });
     }
   };
 
@@ -159,12 +141,6 @@ const DataLoadScreen = ({ setActiveScreen }) => {
                 label="SQL Connectors" 
                 sx={{ minHeight: 48, fontWeight: 'bold', fontSize: '0.85rem', textTransform: 'none' }} 
             />
-            <Tab
-                icon={<LinkIcon fontSize="small" />}
-                iconPosition="start"
-                label="FCC Bridge"
-                sx={{ minHeight: 48, fontWeight: 'bold', fontSize: '0.85rem', textTransform: 'none', ml: 2 }}
-            />
           </Tabs>
         </Box>
 
@@ -196,11 +172,6 @@ const DataLoadScreen = ({ setActiveScreen }) => {
             <ConnectorManagerPanel onSyncComplete={handleCompletion} />
           )}
 
-          {activeIngestTab === 2 && (
-            <Box sx={{ flex: 1, overflowY: 'auto', p: 3 }}>
-              <FccPublishedRunsPanel onImportComplete={handleImportCompletion} />
-            </Box>
-          )}
         </Box>
       </Box>
     </PageContainer>
@@ -921,330 +892,5 @@ const EmptyState = () => (
     <Typography variant="body2">Select a connector from the list or create a new one.</Typography>
   </Box>
 );
-
-const FccPublishedRunsPanel = ({ onImportComplete }) => {
-  const { activeEnv, availableEnvironments, loadAvailableEnvironments, userRole } = useAppContext();
-  const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([]);
-  const [error, setError] = useState(null);
-  const [importingId, setImportingId] = useState('');
-  const [targetMode, setTargetMode] = useState(userRole === 'TENANT_ADMIN' ? 'new' : 'existing');
-  const [targetEnvId, setTargetEnvId] = useState('');
-  const [newEnvName, setNewEnvName] = useState('');
-  const [replaceExisting, setReplaceExisting] = useState(false);
-
-  const canCreateEnvironment = userRole === 'TENANT_ADMIN';
-  const environmentOptions = Array.isArray(availableEnvironments)
-    ? [...availableEnvironments].filter(Boolean).sort((left, right) => String(left).localeCompare(String(right)))
-    : [];
-
-  useEffect(() => {
-    loadAvailableEnvironments();
-  }, [loadAvailableEnvironments]);
-
-  useEffect(() => {
-    if (!canCreateEnvironment && targetMode === 'new') {
-      setTargetMode('existing');
-    }
-  }, [canCreateEnvironment, targetMode]);
-
-  useEffect(() => {
-    if (canCreateEnvironment && targetMode !== 'new' && !targetEnvId) {
-      setTargetMode('new');
-    }
-  }, [canCreateEnvironment, targetEnvId, targetMode]);
-
-  useEffect(() => {
-    if (!canCreateEnvironment || newEnvName.trim()) {
-      return;
-    }
-    const baseName = String(activeEnv || 'sentinel')
-      .replace(/[^a-zA-Z0-9_-]+/g, '_')
-      .replace(/^_+|_+$/g, '') || 'sentinel';
-    const suffix = String(Date.now()).slice(-4);
-    setNewEnvName(`${baseName}_fcc_bridge_${suffix}`);
-  }, [activeEnv, canCreateEnvironment, newEnvName]);
-
-  const loadPublishedRuns = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiClient.listFccPublishedRuns();
-      setRows(res?.published || []);
-    } catch (err) {
-      setError(err.message || 'Failed to load FCC bridge packages.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadPublishedRuns();
-  }, []);
-
-  const resolveTargetEnvId = () => {
-    if (targetMode === 'new') {
-      return String(newEnvName || '').trim();
-    }
-    return String(targetEnvId || '').trim();
-  };
-
-  const ensureTargetEnvironment = async (candidateEnvId) => {
-    const envName = String(candidateEnvId || '').trim();
-    if (!envName) {
-      throw new Error('Choose a target Sentinel workspace before importing.');
-    }
-    if (targetMode !== 'new') {
-      return envName;
-    }
-    if (!canCreateEnvironment) {
-      throw new Error('Only tenant administrators can create a fresh Sentinel workspace.');
-    }
-    if (environmentOptions.includes(envName)) {
-      return envName;
-    }
-    await apiClient.post('/api/v2/env/create', { name: envName });
-    await loadAvailableEnvironments();
-    return envName;
-  };
-
-  const handleImport = async (publishId) => {
-    setImportingId(String(publishId || ''));
-    setError(null);
-    try {
-      const requestedTargetEnv = resolveTargetEnvId();
-      const ensuredTargetEnv = await ensureTargetEnvironment(requestedTargetEnv);
-      const res = await apiClient.importFccPublishedRun({
-        publish_id: publishId,
-        target_env_id: ensuredTargetEnv,
-        replace_existing: targetMode === 'existing' ? replaceExisting : false,
-        rerank_after_import: true,
-      });
-      const imported = res?.import || {};
-      const importedTargetEnv = String(imported.target_env_id || ensuredTargetEnv || '').trim();
-      const importedIntoActiveEnv = Boolean(importedTargetEnv && activeEnv && importedTargetEnv === String(activeEnv));
-      const packageLabel = String(imported.publish_id || publishId).slice(0, 12);
-      const successMessage = importedIntoActiveEnv
-        ? `Imported FCC package ${packageLabel} into the active Sentinel workspace.`
-        : `Imported FCC package ${packageLabel} into workspace ${importedTargetEnv}. Switch to that workspace to start investigation.`;
-      await onImportComplete(
-        { message: successMessage, importedIntoActiveEnv },
-      );
-      await loadAvailableEnvironments();
-      await loadPublishedRuns();
-    } catch (err) {
-      setError(err.message || 'Failed to import FCC bridge package.');
-    } finally {
-      setImportingId('');
-    }
-  };
-
-  const selectedTargetEnv = resolveTargetEnvId();
-  const importDestinationReady = Boolean(selectedTargetEnv);
-  const isCurrentWorkspaceSelected = targetMode === 'existing' && Boolean(targetEnvId) && String(targetEnvId) === String(activeEnv || '');
-
-  return (
-    <Stack spacing={3} sx={{ maxWidth: 1040 }}>
-      <Alert severity="info" variant="outlined">
-        Import a retained FCC queue into Sentinel. Recommended path: send it into a fresh investigation workspace so the current analyst queue stays untouched.
-      </Alert>
-
-      <Box display="flex" justifyContent="space-between" alignItems="center">
-        <Box>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>FCC Published Runs</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Use this when FCC has already scored a batch and you want Sentinel to investigate only the retained queue.
-          </Typography>
-        </Box>
-        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadPublishedRuns} disabled={loading}>
-          Refresh
-        </Button>
-      </Box>
-
-      <Paper variant="outlined" sx={{ borderRadius: 2, p: 3 }}>
-        <Stack spacing={2.5}>
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-              Import Destination
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Packages are read from the current workspace and then copied into the Sentinel workspace you choose below.
-            </Typography>
-          </Box>
-
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
-            <Chip
-              label={`Current workspace: ${activeEnv || 'Not selected'}`}
-              variant="outlined"
-              size="small"
-            />
-            <Chip
-              label={`Destination: ${selectedTargetEnv || 'Choose workspace'}`}
-              color={selectedTargetEnv ? 'primary' : 'default'}
-              variant={selectedTargetEnv ? 'filled' : 'outlined'}
-              size="small"
-            />
-          </Stack>
-
-          <FormControl fullWidth size="small">
-            <InputLabel id="fcc-bridge-destination-mode-label">Destination type</InputLabel>
-            <Select
-              labelId="fcc-bridge-destination-mode-label"
-              label="Destination type"
-              value={targetMode}
-              onChange={(event) => {
-                setTargetMode(event.target.value);
-                setReplaceExisting(false);
-              }}
-            >
-              <MenuItem value="new" disabled={!canCreateEnvironment}>
-                Create fresh workspace (recommended)
-              </MenuItem>
-              <MenuItem value="existing">Use existing workspace</MenuItem>
-            </Select>
-          </FormControl>
-
-          {targetMode === 'new' ? (
-            <TextField
-              fullWidth
-              size="small"
-              label="New Sentinel workspace name"
-              value={newEnvName}
-              onChange={(event) => setNewEnvName(event.target.value)}
-              disabled={!canCreateEnvironment}
-              helperText={
-                canCreateEnvironment
-                  ? 'This workspace will be created automatically when you import the FCC package.'
-                  : 'Tenant administrator access is required to create a fresh investigation workspace.'
-              }
-            />
-          ) : (
-            <Stack spacing={1.25}>
-              <FormControl fullWidth size="small">
-                <InputLabel id="fcc-bridge-target-env-label">Target workspace</InputLabel>
-                <Select
-                  labelId="fcc-bridge-target-env-label"
-                  label="Target workspace"
-                  value={targetEnvId}
-                  onChange={(event) => setTargetEnvId(event.target.value)}
-                >
-                  <MenuItem value="">
-                    <em>Select a workspace</em>
-                  </MenuItem>
-                  {environmentOptions.map((envName) => (
-                    <MenuItem key={envName} value={envName}>
-                      {envName}
-                      {envName === activeEnv ? ' (Active)' : ''}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={replaceExisting}
-                    onChange={(event) => setReplaceExisting(event.target.checked)}
-                  />
-                }
-                label="Replace investigation data in the selected workspace"
-              />
-              <Typography variant="caption" color="text.secondary">
-                Leave replacement off to protect an existing workspace. Use a fresh workspace whenever possible.
-              </Typography>
-            </Stack>
-          )}
-
-          {!canCreateEnvironment && targetMode === 'existing' && environmentOptions.length === 0 && (
-            <Alert severity="warning" variant="outlined">
-              No Sentinel workspaces are available yet. Ask a tenant administrator to create one before importing an FCC package.
-            </Alert>
-          )}
-
-          {isCurrentWorkspaceSelected && !replaceExisting && (
-            <Alert severity="warning" variant="outlined">
-              You selected the active Sentinel workspace. Keep this safe by switching to a fresh workspace, or explicitly enable replacement if you want to overwrite the current investigation data.
-            </Alert>
-          )}
-        </Stack>
-      </Paper>
-
-      {error && <Alert severity="error">{error}</Alert>}
-
-      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
-        {loading ? (
-          <Box sx={{ p: 5, display: 'flex', justifyContent: 'center' }}>
-            <CircularProgress size={28} />
-          </Box>
-        ) : rows.length === 0 ? (
-          <Box sx={{ p: 4 }}>
-            <Typography variant="body2" color="text.secondary">
-              No FCC bridge packages are available yet. Publish a retained batch from the FCC Deployment Dashboard first.
-            </Typography>
-          </Box>
-        ) : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Publish</TableCell>
-                  <TableCell>Run</TableCell>
-                  <TableCell align="right">Rows</TableCell>
-                  <TableCell align="right">Threshold</TableCell>
-                  <TableCell>Published</TableCell>
-                  <TableCell align="right">Action</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.publish_id} hover>
-                    <TableCell>
-                      <Stack spacing={0.25}>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {row.publish_label || row.publish_id}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {String(row.publish_id || '').slice(0, 12)}
-                        </Typography>
-                      </Stack>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{String(row.run_id || '').slice(0, 12) || 'N/A'}</Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Chip label={Number(row.published_rows || 0).toLocaleString()} size="small" />
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2">
-                        {row.threshold == null ? '-' : Number(row.threshold).toFixed(2)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{row.published_at || '-'}</Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Button
-                        variant="contained"
-                        size="small"
-                        onClick={() => handleImport(row.publish_id)}
-                        disabled={importingId === row.publish_id || !importDestinationReady}
-                      >
-                        {importingId === row.publish_id
-                          ? 'Importing...'
-                          : importDestinationReady
-                            ? 'Import To Selected Workspace'
-                            : 'Choose Destination'}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </Paper>
-    </Stack>
-  );
-};
 
 export default DataLoadScreen;

@@ -14,8 +14,65 @@ import duckdb
 import numpy as np
 import pandas as pd
 from api.tools.mlops.duckdb_manager import get_connection
+from api.tools.mlops.path_utils import resolve_data_file_path
+from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_json_loads(raw: Any, fallback: Any):
+    if raw in (None, ""):
+        return fallback
+    try:
+        return json.loads(raw)
+    except Exception:
+        return fallback
+
+
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_optional_text(value: Any) -> Optional[str]:
+    text = _normalize_text(value)
+    return text or None
+
+
+def _json_safe_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(item) for item in value]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        try:
+            value = value.item()
+        except Exception:
+            value = str(value)
+    if isinstance(value, (pd.Timestamp, datetime)):
+        try:
+            return "" if pd.isna(value) else value.isoformat()
+        except Exception:
+            return str(value)
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+    return value
+
+
+def _merge_state_dicts(base: Any, patch: Any) -> Any:
+    if not isinstance(base, dict) or not isinstance(patch, dict):
+        return patch if patch is not None else base
+    merged = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_state_dicts(merged.get(key), value)
+        else:
+            merged[key] = value
+    return merged
 
 
 # High-cardinality event datasets should be aggregated before entity-key joins
@@ -61,18 +118,46 @@ _MASTER_SUBSTEP_LABELS = {
 }
 
 _TARGET_SUBSTEP_LABELS = {
-    0: "Select Outcome",
-    1: "Define Rules",
-    2: "Preview Mapping",
+    0: "Choose Outcome",
+    1: "Create Outcome",
+    2: "Field Guide",
+}
+
+_EDA_SUBSTEP_LABELS = {
+    "dashboard": "Dashboard",
+    "imbalance": "Alert Imbalance",
+    "riskscore": "Risk Score",
+    "rules": "Rule Intelligence",
+    "entity": "Entity Risk",
+    "behaviour": "Behavioural Patterns",
+    "compliance": "Compliance Enrichment",
+    "columns": "Column Explorer",
+    "quality": "Data Quality",
+    "corr": "Correlation",
+    "drivers": "Drivers",
+    "advanced": "Advanced EDA",
+    "insights": "Insights",
+    "explorer": "Explorer",
 }
 
 _PREPROCESS_SUBSTEP_LABELS = {
     0: "Plan",
     1: "Builder",
     2: "Engineer",
-    3: "Select",
+    3: "Feature Review",
     4: "Preview",
     5: "Run",
+}
+
+_MODEL_SUBSTEP_LABELS = {
+    0: "Configure",
+    1: "Check",
+    2: "Train",
+    3: "Evaluate",
+    4: "Business Understanding",
+    5: "Compare",
+    6: "Scoring Ledger",
+    7: "Run Report",
 }
 
 _VALIDATION_SUBSTEP_LABELS = {
@@ -81,6 +166,7 @@ _VALIDATION_SUBSTEP_LABELS = {
     2: "Threshold Tuning",
     3: "OOT Validation",
     4: "Stability and Risks",
+    5: "Summary",
 }
 
 _PROGRESS_STAGE_ORDER = (
@@ -412,6 +498,114 @@ def _progress_stale_summary(steps: List[Dict]) -> Dict[str, Any]:
     }
 
 
+def _extract_nested_identifier(state: Any, keys: Tuple[str, ...]) -> str:
+    if not isinstance(state, dict):
+        return ""
+    for key in keys:
+        value = _normalize_text(state.get(key))
+        if value:
+            return value
+    for nested_key in ("entry", "active_model_run", "registry_entry", "validation_report", "model", "run"):
+        nested = state.get(nested_key)
+        value = _extract_nested_identifier(nested, keys)
+        if value:
+            return value
+    return ""
+
+
+def _screen_job_id(screen_states: Dict[str, Dict], screen_key: str) -> str:
+    state = screen_states.get(str(screen_key or "").strip().lower()) or {}
+    return _extract_nested_identifier(state, ("job_id", "run_id"))
+
+
+def _screen_deployment_id(screen_states: Dict[str, Dict], screen_key: str) -> str:
+    state = screen_states.get(str(screen_key or "").strip().lower()) or {}
+    return _extract_nested_identifier(state, ("deployment_id",))
+
+
+def _reconcile_dependency_state_steps(steps: List[Dict]) -> Tuple[List[Dict], bool]:
+    if not isinstance(steps, list) or not steps:
+        return steps, False
+
+    screen_states = _screen_state_map(steps or [])
+    dependency_state = _dependency_state_payload(steps or [])
+    stale_steps = dict(dependency_state.get("stale_steps") or {})
+    if not stale_steps:
+        return steps, False
+
+    model_job_id = _screen_job_id(screen_states, "model")
+    validation_job_id = _screen_job_id(screen_states, "validation")
+    registry_job_id = _screen_job_id(screen_states, "registry")
+    registry_deployment_id = _screen_deployment_id(screen_states, "registry")
+    ready_deployment_id = _screen_deployment_id(screen_states, "ready")
+
+    cleared_steps: set[str] = set()
+    if model_job_id and validation_job_id and model_job_id == validation_job_id:
+        cleared_steps.add("validation")
+        if not registry_job_id:
+            cleared_steps.add("reports")
+    if model_job_id and registry_job_id and model_job_id == registry_job_id:
+        cleared_steps.update({"registry", "ready", "dashboard", "reports"})
+        if not validation_job_id or validation_job_id == model_job_id:
+            cleared_steps.add("validation")
+    if registry_deployment_id or ready_deployment_id:
+        cleared_steps.update({"ready", "dashboard", "reports"})
+        if model_job_id and validation_job_id and model_job_id == validation_job_id:
+            cleared_steps.add("validation")
+
+    if not cleared_steps:
+        return steps, False
+
+    next_stale_steps = {
+        str(step_id): value
+        for step_id, value in stale_steps.items()
+        if _normalize_text(step_id).lower() not in cleared_steps
+    }
+    next_latest_change = dependency_state.get("latest_change") if isinstance(dependency_state.get("latest_change"), dict) else {}
+    if next_latest_change:
+        impacted_steps = [
+            str(step_id).strip().lower()
+            for step_id in (next_latest_change.get("impacted_steps") or [])
+            if _normalize_text(step_id).lower() not in cleared_steps
+        ]
+        if impacted_steps:
+            next_latest_change = {
+                **next_latest_change,
+                "impacted_steps": impacted_steps,
+            }
+        else:
+            next_latest_change = {}
+
+    next_dependency_state = {
+        **dependency_state,
+        "stale_steps": next_stale_steps,
+        "latest_change": next_latest_change if next_stale_steps else {},
+    }
+
+    next_steps: List[Dict] = []
+    replaced = False
+    for step in steps:
+        if (
+            str(step.get("type") or "").strip().lower() == "screen_state"
+            and str(step.get("screen") or "").strip().lower() == "workbench_dependencies"
+        ):
+            next_steps.append({
+                "type": "screen_state",
+                "screen": "workbench_dependencies",
+                "state": next_dependency_state,
+            })
+            replaced = True
+            continue
+        next_steps.append(step)
+    if not replaced:
+        next_steps.append({
+            "type": "screen_state",
+            "screen": "workbench_dependencies",
+            "state": next_dependency_state,
+        })
+    return next_steps, True
+
+
 def _derive_substep(screen_key: str, screen_states: Dict[str, Dict]) -> Tuple[str, str]:
     screen = str(screen_key or "").strip().lower()
     state = screen_states.get(screen) or {}
@@ -423,11 +617,21 @@ def _derive_substep(screen_key: str, screen_states: Dict[str, Dict]) -> Tuple[st
         if raw is None:
             return "", ""
         return str(raw), _TARGET_SUBSTEP_LABELS.get(raw, f"Tab {raw + 1}")
+    if screen == "eda":
+        raw = str(state.get("activeTab") or state.get("tab") or "").strip().lower()
+        if not raw:
+            return "", ""
+        return raw, _EDA_SUBSTEP_LABELS.get(raw, raw.replace("_", " ").title())
     if screen == "preprocess":
         raw = _coerce_int(state.get("activeTab") if "activeTab" in state else state.get("tab"))
         if raw is None:
             return "", ""
         return str(raw), _PREPROCESS_SUBSTEP_LABELS.get(raw, f"Tab {raw + 1}")
+    if screen == "model":
+        raw = _coerce_int(state.get("activeTab"))
+        if raw is None:
+            return "", ""
+        return str(raw), _MODEL_SUBSTEP_LABELS.get(raw, f"Tab {raw + 1}")
     if screen == "validation":
         raw = _coerce_int(state.get("activeTab"))
         if raw is None:
@@ -523,6 +727,57 @@ def _progress_summary_from_steps(steps: List[Dict], status: Optional[str] = None
     }
 
 
+_INVESTIGATION_STEP_LABELS = {
+    "priority": "Priority Inbox",
+    "casepack": "Case Pack",
+    "investigate": "Case Investigation",
+    "datatree": "Data Tree",
+    "compare": "Compare Cases",
+    "chat": "Copilot",
+    "graph": "Graph Analysis",
+    "rules": "Rule Intelligence",
+    "typology": "Typology Analysis",
+    "baseline": "Baseline Analysis",
+    "vector": "Vector Search",
+    "audit": "Audit Trail",
+}
+
+
+def _workflow_workspace_label(module_name: Optional[str]) -> str:
+    key = str(module_name or "").strip().lower()
+    if key in {"investigation", "sentinel"}:
+        return "Sentinel"
+    return "FCC"
+
+
+def _workflow_workspace_step_label(module_name: Optional[str], step_name: Optional[str]) -> str:
+    normalized = str(step_name or "").strip().lower()
+    if not normalized:
+        return ""
+    if normalized == "data_upload":
+        normalized = "data"
+    if str(module_name or "").strip().lower() in {"investigation", "sentinel"}:
+        return _INVESTIGATION_STEP_LABELS.get(normalized, normalized.replace("_", " ").title())
+    return _PIPELINE_STEP_LABELS.get(normalized, normalized.replace("_", " ").title())
+
+
+def _workflow_case_ids(case_scope: Any, handoff_summary: Any) -> List[str]:
+    case_scope_dict = case_scope if isinstance(case_scope, dict) else {}
+    handoff_dict = handoff_summary if isinstance(handoff_summary, dict) else {}
+    raw_values = case_scope_dict.get("case_ids") or handoff_dict.get("imported_case_ids") or []
+    out: List[str] = []
+    seen = set()
+    for value in raw_values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 class MLOpsWorkbenchService:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -534,6 +789,8 @@ class MLOpsWorkbenchService:
           if True:
             conn.execute("CREATE SEQUENCE IF NOT EXISTS mlops_dataset_seq START 1")
             conn.execute("CREATE SEQUENCE IF NOT EXISTS mlops_snapshot_seq START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS mlops_step_event_seq START 1")
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS mlops_asset_link_seq START 1")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS mlops_dataset_registry (
@@ -602,6 +859,68 @@ class MLOpsWorkbenchService:
                   dataset_id INTEGER,
                   name TEXT,
                   steps_json TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_workflow_sessions (
+                  session_id TEXT PRIMARY KEY,
+                  journey_key TEXT,
+                  tenant_id TEXT,
+                  env_id TEXT,
+                  pipeline_id BIGINT,
+                  pipeline_name TEXT,
+                  run_id TEXT,
+                  deployment_id TEXT,
+                  publish_id TEXT,
+                  current_module TEXT,
+                  current_step TEXT,
+                  current_state_json TEXT,
+                  last_stable_step TEXT,
+                  last_stable_state_json TEXT,
+                  case_scope_json TEXT,
+                  selected_case_id TEXT,
+                  handoff_summary_json TEXT,
+                  checkpoint_key TEXT,
+                  status TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_pipeline_step_events (
+                  event_id BIGINT PRIMARY KEY DEFAULT nextval('mlops_step_event_seq'),
+                  tenant_id TEXT,
+                  env_id TEXT,
+                  pipeline_id BIGINT,
+                  session_id TEXT,
+                  screen TEXT,
+                  step_id TEXT,
+                  event_type TEXT,
+                  status TEXT,
+                  checkpoint_key TEXT,
+                  state_json TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_pipeline_asset_links (
+                  link_id BIGINT PRIMARY KEY DEFAULT nextval('mlops_asset_link_seq'),
+                  tenant_id TEXT,
+                  env_id TEXT,
+                  pipeline_id BIGINT,
+                  asset_kind TEXT,
+                  asset_id TEXT,
+                  stage TEXT,
+                  relation TEXT,
+                  metadata_json TEXT,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -746,6 +1065,349 @@ class MLOpsWorkbenchService:
                 """
             )
 
+    def _model_training_db_path(self) -> Path:
+        return self._env_root() / "mlops" / "duckdb" / "model_training.duckdb"
+
+    def _normalize_pipeline_asset_id(self, value: Any, *, numeric: bool = False) -> Optional[str]:
+        if isinstance(value, bool):
+            return None
+        if value in (None, "", [], {}, ()):
+            return None
+        if numeric:
+            try:
+                number = int(value)
+            except Exception:
+                try:
+                    number = int(float(str(value).strip()))
+                except Exception:
+                    return None
+            return str(number) if number > 0 else None
+        text = str(value).strip()
+        if not text or text.lower() in {"none", "null", "nan"}:
+            return None
+        return text
+
+    def _upsert_pipeline_asset_link(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        asset_kind: str,
+        asset_id: Any,
+        *,
+        stage: str,
+        relation: str = "reference",
+        metadata: Optional[Dict[str, Any]] = None,
+        numeric: bool = False,
+    ) -> None:
+        asset_id_text = self._normalize_pipeline_asset_id(asset_id, numeric=numeric)
+        if not asset_id_text:
+            return
+        stage_key = _normalize_text(stage).lower() or "unknown"
+        relation_key = _normalize_text(relation).lower() or "reference"
+        kind_key = _normalize_text(asset_kind).lower()
+        if not kind_key:
+            return
+        metadata_json = json.dumps(metadata or {}, default=str)
+        row = conn.execute(
+            """
+            SELECT link_id
+            FROM mlops_pipeline_asset_links
+            WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+              AND asset_kind = ? AND asset_id = ? AND stage = ? AND relation = ?
+            LIMIT 1
+            """,
+            [tenant_id, env_id, int(pipeline_id), kind_key, asset_id_text, stage_key, relation_key],
+        ).fetchone()
+        if row:
+            conn.execute(
+                """
+                UPDATE mlops_pipeline_asset_links
+                SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE link_id = ?
+                """,
+                [metadata_json, int(row[0])],
+            )
+            return
+        conn.execute(
+            """
+            INSERT INTO mlops_pipeline_asset_links (
+              tenant_id, env_id, pipeline_id, asset_kind, asset_id, stage, relation, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [tenant_id, env_id, int(pipeline_id), kind_key, asset_id_text, stage_key, relation_key, metadata_json],
+        )
+
+    def _replace_pipeline_stage_asset_links(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        stage: str,
+        assets: List[Dict[str, Any]],
+    ) -> None:
+        stage_key = _normalize_text(stage).lower() or "unknown"
+        conn.execute(
+            """
+            DELETE FROM mlops_pipeline_asset_links
+            WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ? AND stage = ?
+            """,
+            [tenant_id, env_id, int(pipeline_id), stage_key],
+        )
+        for asset in assets or []:
+            if not isinstance(asset, dict):
+                continue
+            self._upsert_pipeline_asset_link(
+                conn,
+                tenant_id,
+                env_id,
+                int(pipeline_id),
+                str(asset.get("asset_kind") or ""),
+                asset.get("asset_id"),
+                stage=stage_key,
+                relation=str(asset.get("relation") or "reference"),
+                metadata=asset.get("metadata") if isinstance(asset.get("metadata"), dict) else {},
+                numeric=bool(asset.get("numeric")),
+            )
+
+    def _extract_pipeline_assets_from_state(self, stage: str, state: Any) -> List[Dict[str, Any]]:
+        stage_key = _normalize_text(stage).lower() or "unknown"
+        assets: List[Dict[str, Any]] = []
+        seen: set[Tuple[str, str, str]] = set()
+        dataset_scalar_keys = {
+            "dataset_id",
+            "masterdatasetid",
+            "builtmasterdatasetid",
+            "outputdatasetid",
+            "preprocesseddatasetid",
+            "master_dataset_id",
+            "preprocess_dataset_id",
+            "anchordatasetid",
+            "anchor_dataset_id",
+        }
+        dataset_array_keys = {"dataset_ids"}
+        run_keys = {"job_id", "model_job_id", "run_id", "report_run_id"}
+
+        def add(kind: str, raw_value: Any, relation: str, *, numeric: bool = False, metadata: Optional[Dict[str, Any]] = None) -> None:
+            asset_id = self._normalize_pipeline_asset_id(raw_value, numeric=numeric)
+            if not asset_id:
+                return
+            key = (_normalize_text(kind).lower(), asset_id, _normalize_text(relation).lower())
+            if key in seen:
+                return
+            seen.add(key)
+            assets.append(
+                {
+                    "asset_kind": key[0],
+                    "asset_id": asset_id,
+                    "relation": key[2],
+                    "metadata": metadata or {},
+                    "numeric": numeric,
+                }
+            )
+
+        def walk(obj: Any, parent_key: str = "") -> None:
+            if isinstance(obj, dict):
+                if parent_key in {"datasets", "master_dataset", "preprocess_dataset", "dataset"}:
+                    add("dataset", obj.get("dataset_id"), f"{stage_key}_{parent_key}", numeric=True)
+                if parent_key in {"active_model_run", "registry_entry", "validation_report"}:
+                    add("training_job", obj.get("job_id") or obj.get("run_id"), f"{stage_key}_{parent_key}_job")
+                    add("deployment", obj.get("deployment_id"), f"{stage_key}_{parent_key}_deployment")
+                for key, value in obj.items():
+                    lower_key = _normalize_text(key).lower()
+                    if lower_key in dataset_scalar_keys:
+                        add("dataset", value, f"{stage_key}_{lower_key}", numeric=True)
+                    elif lower_key in dataset_array_keys and isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                add("dataset", item.get("dataset_id"), f"{stage_key}_{lower_key}", numeric=True)
+                            else:
+                                add("dataset", item, f"{stage_key}_{lower_key}", numeric=True)
+                    elif lower_key in run_keys:
+                        add("training_job", value, f"{stage_key}_{lower_key}")
+                    elif lower_key == "deployment_id":
+                        add("deployment", value, f"{stage_key}_deployment")
+                    elif lower_key == "datasets" and isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                add("dataset", item.get("dataset_id"), f"{stage_key}_datasets", numeric=True)
+                    walk(value, lower_key)
+            elif isinstance(obj, list):
+                for item in obj:
+                    walk(item, parent_key)
+
+        walk(state, "")
+        return assets
+
+    def _pipeline_definition_assets(
+        self,
+        dataset_id: Optional[int],
+        anchor_dataset_id: Optional[int],
+        dataset_ids: Optional[List[int]],
+        output_dataset_id: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        assets: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def add_dataset(raw_id: Any, relation: str) -> None:
+            asset_id = self._normalize_pipeline_asset_id(raw_id, numeric=True)
+            if not asset_id:
+                return
+            key = f"dataset::{asset_id}::{relation}"
+            if key in seen:
+                return
+            seen.add(key)
+            assets.append(
+                {
+                    "asset_kind": "dataset",
+                    "asset_id": asset_id,
+                    "relation": relation,
+                    "metadata": {"stage": "pipeline_definition"},
+                    "numeric": True,
+                }
+            )
+
+        add_dataset(dataset_id, "primary_dataset")
+        add_dataset(anchor_dataset_id, "anchor_dataset")
+        for raw_id in dataset_ids or []:
+            add_dataset(raw_id, "selected_dataset")
+        add_dataset(output_dataset_id, "pipeline_output")
+        return assets
+
+    def _sync_pipeline_asset_links_for_pipeline(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_row: Dict[str, Any],
+        workflow_state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        pipeline_id = int(pipeline_row.get("pipeline_id") or 0)
+        if pipeline_id <= 0:
+            return
+        self._replace_pipeline_stage_asset_links(
+            conn,
+            tenant_id,
+            env_id,
+            pipeline_id,
+            "pipeline_definition",
+            self._pipeline_definition_assets(
+                pipeline_row.get("dataset_id"),
+                pipeline_row.get("anchor_dataset_id"),
+                pipeline_row.get("dataset_ids") if isinstance(pipeline_row.get("dataset_ids"), list) else [],
+                pipeline_row.get("output_dataset_id"),
+            ),
+        )
+        for step in pipeline_row.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            if _normalize_text(step.get("type")).lower() != "screen_state":
+                continue
+            screen = _normalize_text(step.get("screen")).lower()
+            if not screen:
+                continue
+            self._replace_pipeline_stage_asset_links(
+                conn,
+                tenant_id,
+                env_id,
+                pipeline_id,
+                screen,
+                self._extract_pipeline_assets_from_state(screen, step.get("state") if isinstance(step.get("state"), dict) else {}),
+            )
+        if isinstance(workflow_state, dict):
+            self._replace_pipeline_stage_asset_links(
+                conn,
+                tenant_id,
+                env_id,
+                pipeline_id,
+                "workflow_session",
+                self._extract_pipeline_assets_from_state("workflow_session", workflow_state),
+            )
+
+    def _backfill_pipeline_asset_links(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_ids: Optional[List[int]] = None,
+    ) -> None:
+        filters: List[str] = ["tenant_id = ?", "env_id = ?"]
+        values: List[Any] = [tenant_id, env_id]
+        pipeline_id_set = {
+            int(pid) for pid in (pipeline_ids or [])
+            if isinstance(pid, (int, float, str)) and str(pid).strip()
+        }
+        if pipeline_id_set:
+            placeholders = ",".join(["?"] * len(pipeline_id_set))
+            filters.append(f"pipeline_id IN ({placeholders})")
+            values.extend(sorted(pipeline_id_set))
+        rows = conn.execute(
+            f"""
+            SELECT pipeline_id, dataset_id, anchor_dataset_id, dataset_ids_json,
+                   output_dataset_id, steps_json
+            FROM mlops_pipelines
+            WHERE {' AND '.join(filters)}
+            """,
+            values,
+        ).fetchall()
+        workflow_rows = conn.execute(
+            """
+            SELECT pipeline_id, current_state_json, updated_at
+            FROM mlops_workflow_sessions
+            WHERE tenant_id = ? AND env_id = ? AND pipeline_id IS NOT NULL
+            ORDER BY updated_at DESC
+            """,
+            [tenant_id, env_id],
+        ).fetchall()
+        workflow_by_pipeline: Dict[int, Dict[str, Any]] = {}
+        for row in workflow_rows:
+            pid = int(row[0]) if row and row[0] is not None else 0
+            if pid <= 0 or pid in workflow_by_pipeline:
+                continue
+            workflow_by_pipeline[pid] = _safe_json_loads(row[1], {})
+        for row in rows:
+            pipeline_row = {
+                "pipeline_id": int(row[0]),
+                "dataset_id": int(row[1]) if row[1] is not None else None,
+                "anchor_dataset_id": int(row[2]) if row[2] is not None else None,
+                "dataset_ids": _safe_json_loads(row[3], []),
+                "output_dataset_id": int(row[4]) if row[4] is not None else None,
+                "steps": _safe_json_loads(row[5], []),
+            }
+            self._sync_pipeline_asset_links_for_pipeline(
+                conn,
+                tenant_id,
+                env_id,
+                pipeline_row,
+                workflow_state=workflow_by_pipeline.get(int(row[0])),
+            )
+
+    def _list_pipeline_asset_links(self, conn, tenant_id: str, env_id: str, pipeline_id: int) -> List[Dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT asset_kind, asset_id, stage, relation, metadata_json, created_at, updated_at
+            FROM mlops_pipeline_asset_links
+            WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+            ORDER BY stage, asset_kind, asset_id
+            """,
+            [tenant_id, env_id, int(pipeline_id)],
+        ).fetchall()
+        return [
+            {
+                "asset_kind": _normalize_text(row[0]).lower(),
+                "asset_id": _normalize_optional_text(row[1]),
+                "stage": _normalize_optional_text(row[2]),
+                "relation": _normalize_optional_text(row[3]),
+                "metadata": _safe_json_loads(row[4], {}),
+                "created_at": row[5].isoformat() if hasattr(row[5], "isoformat") else row[5],
+                "updated_at": row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
+            }
+            for row in rows
+        ]
+
     def _relation_expr(self, file_path: Path, sample_size: Optional[int] = None) -> str:
         resolved = self._resolve_file_path(file_path)
         # Use forward slashes for SQL path literals across platforms.
@@ -758,29 +1420,8 @@ class MLOpsWorkbenchService:
         return f"read_csv_auto('{p}')"
 
     def _resolve_file_path(self, file_path: Path) -> Path:
-        p = Path(file_path)
-        if p.is_absolute() and p.exists():
-            return p
-
-        candidates: List[Path] = []
-        if p.is_absolute():
-            candidates.append(p)
-        else:
-            backend_root = Path(__file__).resolve().parents[3]      # .../AI_AML_tool/backend
-            project_root = backend_root.parent                      # .../AI_AML_tool
-            workspace_root = project_root.parent                    # .../<workspace>
-            candidates.extend([
-                p,
-                Path.cwd() / p,
-                backend_root / p,
-                project_root / p,
-                workspace_root / p,
-            ])
-
-        for c in candidates:
-            if c.exists():
-                return c
-        return p
+        env_root = Path(self.db_path).resolve().parents[2]
+        return resolve_data_file_path(file_path, env_root=env_root)
 
     def _connect(self):
         # Deprecated: use get_connection(self.db_path) context manager instead
@@ -1681,6 +2322,16 @@ class MLOpsWorkbenchService:
         }
 
     def list_pipelines(self, tenant_id: str, env_id: str, dataset_id: Optional[int]) -> List[Dict]:
+        workflow_sessions = self._list_workflow_sessions(tenant_id, env_id)
+        workflow_by_pipeline: Dict[int, Dict[str, Any]] = {}
+        for session in workflow_sessions:
+            pipeline_id = session.get("pipeline_id")
+            if pipeline_id is None:
+                continue
+            pipeline_key = int(pipeline_id)
+            if pipeline_key not in workflow_by_pipeline:
+                workflow_by_pipeline[pipeline_key] = session
+
         with get_connection(self.db_path) as conn:
             if dataset_id is None:
                 rows = conn.execute(
@@ -1709,8 +2360,12 @@ class MLOpsWorkbenchService:
                     [tenant_id, env_id, int(dataset_id)],
                 ).fetchall()
         results: List[Dict[str, Any]] = []
+        healed_pipelines: List[Tuple[int, List[Dict[str, Any]]]] = []
         for r in rows:
             steps = json.loads(r[2] or "[]")
+            steps, healed = _reconcile_dependency_state_steps(steps)
+            if healed:
+                healed_pipelines.append((int(r[0]), steps))
             record = {
                 "pipeline_id": int(r[0]),
                 "run_ref": f"FCC-RUN-{int(r[0]):05d}",
@@ -1729,7 +2384,111 @@ class MLOpsWorkbenchService:
                 "schedule": json.loads(r[13] or "{}"),
             }
             record.update(_progress_summary_from_steps(steps, status=record["status"]))
-            results.append(record)
+            results.append(
+                self._apply_workflow_summary(
+                    record,
+                    workflow_by_pipeline.get(int(record["pipeline_id"])),
+                )
+            )
+        if healed_pipelines:
+            with get_connection(self.db_path) as conn:
+                for pipeline_id, healed_steps in healed_pipelines:
+                    conn.execute(
+                        """
+                        UPDATE mlops_pipelines
+                        SET steps_json = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                        """,
+                        [json.dumps(healed_steps, default=str), int(pipeline_id), tenant_id, env_id],
+                    )
+        if dataset_id is None:
+            valid_pipeline_ids = {
+                int(record.get("pipeline_id"))
+                for record in results
+                if record.get("pipeline_id") is not None
+            }
+            valid_pipeline_names = {
+                str(record.get("name") or "").strip().lower()
+                for record in results
+                if str(record.get("name") or "").strip()
+            }
+            orphan_session_ids: List[str] = []
+            trivial_session_ids: List[str] = []
+
+            def _session_pipeline_ref(session_record: Dict[str, Any]) -> Optional[int]:
+                candidates = [
+                    session_record.get("pipeline_id"),
+                    (session_record.get("current_state") or {}).get("pipeline_id") if isinstance(session_record.get("current_state"), dict) else None,
+                    (
+                        (session_record.get("current_state") or {}).get("mlops_state") or {}
+                    ).get("pipeline_id")
+                    if isinstance((session_record.get("current_state") or {}).get("mlops_state"), dict)
+                    else None,
+                    (
+                        (session_record.get("last_stable_state") or {}).get("mlops_state") or {}
+                    ).get("pipeline_id")
+                    if isinstance((session_record.get("last_stable_state") or {}).get("mlops_state"), dict)
+                    else None,
+                ]
+                for value in candidates:
+                    try:
+                        parsed = int(value)
+                        if parsed > 0:
+                            return parsed
+                    except Exception:
+                        continue
+                journey_key = str(session_record.get("journey_key") or "").strip().lower()
+                if journey_key.startswith("pipeline::"):
+                    try:
+                        parsed = int(journey_key.split("::", 1)[1])
+                        return parsed if parsed > 0 else None
+                    except Exception:
+                        return None
+                return None
+
+            seen_session_ids = {
+                str(record.get("workflow_session_id") or "").strip()
+                for record in results
+                if str(record.get("workflow_session_id") or "").strip()
+            }
+            for session in workflow_sessions:
+                session_id = str(session.get("session_id") or "").strip()
+                if not session_id or session_id in seen_session_ids:
+                    continue
+                session_pipeline_id = _session_pipeline_ref(session)
+                session_pipeline_name = str(session.get("pipeline_name") or "").strip().lower()
+                if session_pipeline_id is not None:
+                    if session_pipeline_id not in valid_pipeline_ids:
+                        orphan_session_ids.append(session_id)
+                    continue
+                if session_pipeline_name and session_pipeline_name in valid_pipeline_names:
+                    orphan_session_ids.append(session_id)
+                    continue
+                if not self._workflow_session_has_meaningful_state(session):
+                    trivial_session_ids.append(session_id)
+                    continue
+                results.append(self._workflow_session_manager_record(session))
+            cleanup_session_ids = orphan_session_ids + trivial_session_ids
+            if cleanup_session_ids:
+                placeholders = ",".join(["?"] * len(cleanup_session_ids))
+                with get_connection(self.db_path) as conn:
+                    conn.execute(
+                        f"""
+                        DELETE FROM mlops_workflow_sessions
+                        WHERE tenant_id = ? AND env_id = ? AND session_id IN ({placeholders})
+                        """,
+                        [tenant_id, env_id, *cleanup_session_ids],
+                    )
+        results.sort(
+            key=lambda record: str(
+                record.get("last_active_at")
+                or record.get("workflow_updated_at")
+                or record.get("updated_at")
+                or record.get("created_at")
+                or ""
+            ),
+            reverse=True,
+        )
         return results
 
     def save_pipeline(
@@ -1841,6 +2600,20 @@ class MLOpsWorkbenchService:
             except Exception:
                 pass  # version snapshot is best-effort
 
+            self._sync_pipeline_asset_links_for_pipeline(
+                conn,
+                tenant_id,
+                env_id,
+                {
+                    "pipeline_id": int(pipeline_id),
+                    "dataset_id": int(dataset_id) if dataset_id else None,
+                    "anchor_dataset_id": int(anchor_dataset_id) if anchor_dataset_id else None,
+                    "dataset_ids": list(dataset_ids or []),
+                    "output_dataset_id": None,
+                    "steps": list(steps or []),
+                },
+            )
+
         return {
             "pipeline_id": int(pipeline_id),
             "version": new_version,
@@ -1853,7 +2626,7 @@ class MLOpsWorkbenchService:
         with get_connection(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT pipeline_id, name, steps_json, grain, anchor_dataset_id,
+                SELECT pipeline_id, name, steps_json, dataset_id, grain, anchor_dataset_id,
                        dataset_ids_json, joins_json, transforms_json, str_config_json,
                        schedule_json, output_name, status, version,
                        created_by_persona, created_at, updated_at,
@@ -1863,31 +2636,765 @@ class MLOpsWorkbenchService:
                 """,
                 [int(pipeline_id), tenant_id, env_id],
             ).fetchone()
+            if row:
+                self._backfill_pipeline_asset_links(conn, tenant_id, env_id, [int(pipeline_id)])
+            event_rows = conn.execute(
+                """
+                SELECT event_id, session_id, screen, step_id, event_type, status,
+                       checkpoint_key, state_json, created_at
+                FROM mlops_pipeline_step_events
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                ORDER BY created_at DESC, event_id DESC
+                LIMIT 50
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            ).fetchall()
+            asset_link_rows = self._list_pipeline_asset_links(conn, tenant_id, env_id, int(pipeline_id)) if row else []
         if not row:
             raise ValueError(f"Pipeline {pipeline_id} not found")
+        healed_steps, healed = _reconcile_dependency_state_steps(json.loads(row[2] or "[]"))
+        if healed:
+            with get_connection(self.db_path) as conn:
+                conn.execute(
+                    """
+                    UPDATE mlops_pipelines
+                    SET steps_json = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                    """,
+                    [json.dumps(healed_steps, default=str), int(pipeline_id), tenant_id, env_id],
+                )
         result = {
             "pipeline_id": int(row[0]),
             "run_ref": f"FCC-RUN-{int(row[0]):05d}",
             "name": row[1],
-            "steps": json.loads(row[2] or "[]"),
-            "grain": row[3] or "transaction",
-            "anchor_dataset_id": int(row[4]) if row[4] is not None else None,
-            "dataset_ids": json.loads(row[5] or "[]"),
-            "joins": json.loads(row[6] or "[]"),
-            "transforms": json.loads(row[7] or "[]"),
-            "str_config": json.loads(row[8] or "{}"),
-            "schedule": json.loads(row[9] or "{}"),
-            "output_name": row[10] or "master_dataset",
-            "status": row[11] or "draft",
-            "version": int(row[12] or 1),
-            "created_by_persona": row[13] or "technical",
-            "created_at": row[14].isoformat() if hasattr(row[14], "isoformat") else row[14],
-            "updated_at": row[15].isoformat() if hasattr(row[15], "isoformat") else row[15],
-            "last_run_at": row[16].isoformat() if hasattr(row[16], "isoformat") else row[16],
-            "output_dataset_id": int(row[17]) if row[17] is not None else None,
+            "steps": healed_steps if healed else json.loads(row[2] or "[]"),
+            "dataset_id": int(row[3]) if row[3] is not None else None,
+            "grain": row[4] or "transaction",
+            "anchor_dataset_id": int(row[5]) if row[5] is not None else None,
+            "dataset_ids": json.loads(row[6] or "[]"),
+            "joins": json.loads(row[7] or "[]"),
+            "transforms": json.loads(row[8] or "[]"),
+            "str_config": json.loads(row[9] or "{}"),
+            "schedule": json.loads(row[10] or "{}"),
+            "output_name": row[11] or "master_dataset",
+            "status": row[12] or "draft",
+            "version": int(row[13] or 1),
+            "created_by_persona": row[14] or "technical",
+            "created_at": row[15].isoformat() if hasattr(row[15], "isoformat") else row[15],
+            "updated_at": row[16].isoformat() if hasattr(row[16], "isoformat") else row[16],
+            "last_run_at": row[17].isoformat() if hasattr(row[17], "isoformat") else row[17],
+            "output_dataset_id": int(row[18]) if row[18] is not None else None,
+            "step_events": [
+                {
+                    "event_id": int(event_row[0]),
+                    "session_id": _normalize_optional_text(event_row[1]),
+                    "screen": _normalize_optional_text(event_row[2]),
+                    "step_id": _normalize_optional_text(event_row[3]),
+                    "event_type": _normalize_optional_text(event_row[4]),
+                    "status": _normalize_optional_text(event_row[5]),
+                    "checkpoint_key": _normalize_optional_text(event_row[6]),
+                    "state": json.loads(event_row[7] or "{}"),
+                    "created_at": event_row[8].isoformat() if hasattr(event_row[8], "isoformat") else event_row[8],
+                }
+                for event_row in (event_rows or [])
+            ],
+            "asset_links": asset_link_rows,
         }
         result.update(_progress_summary_from_steps(result["steps"], status=result["status"]))
-        return result
+        workflow_session = self.get_workflow_session(tenant_id, env_id, pipeline_id=int(pipeline_id))
+        hydrated = self._apply_workflow_summary(result, workflow_session)
+        if workflow_session:
+            hydrated["workflow_session"] = workflow_session
+        return hydrated
+
+    def _list_workflow_sessions(self, tenant_id: str, env_id: str) -> List[Dict[str, Any]]:
+        try:
+            with get_connection(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT session_id, journey_key, tenant_id, env_id, pipeline_id, pipeline_name,
+                           run_id, deployment_id, publish_id, current_module, current_step,
+                           current_state_json, last_stable_step, last_stable_state_json,
+                           case_scope_json, selected_case_id, handoff_summary_json,
+                           checkpoint_key, status, created_at, updated_at
+                    FROM mlops_workflow_sessions
+                    WHERE tenant_id = ? AND env_id = ?
+                    ORDER BY updated_at DESC
+                    """,
+                    [tenant_id, env_id],
+                ).fetchall()
+        except Exception:
+            return []
+
+        sessions: List[Dict[str, Any]] = []
+        for row in rows:
+            session = self._normalize_workflow_session_row(row)
+            if session:
+                sessions.append(session)
+        return sessions
+
+    def _apply_workflow_summary(
+        self,
+        record: Dict[str, Any],
+        session: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        next_record = dict(record or {})
+        next_record.setdefault("workflow_session_id", None)
+        next_record.setdefault("workflow_status", next_record.get("run_status") or next_record.get("status"))
+        next_record.setdefault("current_module", "mlops")
+        next_record.setdefault("current_module_label", "FCC")
+        next_record.setdefault("current_workspace", "FCC")
+        next_record.setdefault("workspace_step", next_record.get("current_step"))
+        next_record.setdefault("workspace_step_label", next_record.get("current_step_label"))
+        next_record.setdefault("fcc_current_step", next_record.get("current_step"))
+        next_record.setdefault("fcc_current_step_label", next_record.get("current_step_label"))
+        next_record.setdefault("run_id", None)
+        next_record.setdefault("deployment_id", None)
+        next_record.setdefault("publish_id", None)
+        next_record.setdefault("selected_case_id", None)
+        next_record.setdefault("case_scope_count", 0)
+        next_record.setdefault("case_ids", [])
+        next_record.setdefault("last_checkpoint_key", None)
+        next_record.setdefault("workflow_updated_at", None)
+        next_record.setdefault("last_active_at", next_record.get("updated_at") or next_record.get("created_at"))
+        next_record.setdefault("created_by_label", next_record.get("created_by_persona") or "technical")
+        next_record["steps_completed_display"] = (
+            f"{int(next_record.get('completed_steps') or 0)}/{int(next_record.get('total_steps') or len(_PROGRESS_STAGE_ORDER))}"
+        )
+
+        if not session:
+            return next_record
+
+        current_state = session.get("current_state") if isinstance(session.get("current_state"), dict) else {}
+        last_stable_state = session.get("last_stable_state") if isinstance(session.get("last_stable_state"), dict) else {}
+        mlops_state = current_state.get("mlops_state") if isinstance(current_state.get("mlops_state"), dict) else {}
+        last_stable_mlops_state = (
+            last_stable_state.get("mlops_state")
+            if isinstance(last_stable_state.get("mlops_state"), dict)
+            else {}
+        )
+        handoff_summary = session.get("handoff_summary") if isinstance(session.get("handoff_summary"), dict) else {}
+        case_scope = session.get("case_scope") if isinstance(session.get("case_scope"), dict) else {}
+
+        current_module = session.get("current_module") or "mlops"
+        workspace_step = (
+            session.get("current_step")
+            or current_state.get("preferred_screen")
+            or mlops_state.get("current_step")
+            or next_record.get("current_step")
+        )
+        fcc_current_step = (
+            mlops_state.get("current_step")
+            or last_stable_mlops_state.get("current_step")
+            or next_record.get("current_step")
+        )
+        case_ids = _workflow_case_ids(case_scope, handoff_summary)
+
+        next_record.update(
+            {
+                "workflow_session_id": session.get("session_id"),
+                "workflow_status": session.get("status") or next_record.get("workflow_status"),
+                "current_module": current_module,
+                "current_module_label": _workflow_workspace_label(current_module),
+                "current_workspace": _workflow_workspace_label(current_module),
+                "workspace_step": workspace_step,
+                "workspace_step_label": _workflow_workspace_step_label(current_module, workspace_step)
+                or next_record.get("current_step_label"),
+                "fcc_current_step": fcc_current_step,
+                "fcc_current_step_label": _workflow_workspace_step_label("mlops", fcc_current_step)
+                or next_record.get("current_step_label"),
+                "run_id": session.get("run_id")
+                or mlops_state.get("run_id")
+                or handoff_summary.get("run_id")
+                or next_record.get("run_id"),
+                "deployment_id": session.get("deployment_id")
+                or mlops_state.get("deployment_id")
+                or handoff_summary.get("deployment_id")
+                or next_record.get("deployment_id"),
+                "publish_id": session.get("publish_id")
+                or handoff_summary.get("publish_id")
+                or next_record.get("publish_id"),
+                "selected_case_id": session.get("selected_case_id")
+                or handoff_summary.get("selected_case_id"),
+                "case_scope_count": len(case_ids),
+                "case_ids": case_ids,
+                "last_checkpoint_key": session.get("checkpoint_key"),
+                "workflow_updated_at": session.get("updated_at"),
+                "last_active_at": session.get("updated_at")
+                or next_record.get("updated_at")
+                or next_record.get("created_at"),
+            }
+        )
+        next_record["created_by_label"] = (
+            next_record.get("created_by_user")
+            or mlops_state.get("created_by_user")
+            or next_record.get("created_by_persona")
+            or "technical"
+        )
+        next_record["steps_completed_display"] = (
+            f"{int(next_record.get('completed_steps') or 0)}/{int(next_record.get('total_steps') or len(_PROGRESS_STAGE_ORDER))}"
+        )
+        return next_record
+
+    def _workflow_session_manager_record(self, session: Dict[str, Any]) -> Dict[str, Any]:
+        current_state = session.get("current_state") if isinstance(session.get("current_state"), dict) else {}
+        mlops_state = current_state.get("mlops_state") if isinstance(current_state.get("mlops_state"), dict) else {}
+        handoff_summary = session.get("handoff_summary") if isinstance(session.get("handoff_summary"), dict) else {}
+        pipeline_name = (
+            session.get("pipeline_name")
+            or mlops_state.get("pipeline_name")
+            or handoff_summary.get("pipeline_name")
+            or session.get("run_id")
+            or f"Workflow {str(session.get('session_id') or '')[:8]}"
+        )
+        dataset_id_raw = (
+            mlops_state.get("preprocess_dataset_id")
+            or mlops_state.get("master_dataset_id")
+            or handoff_summary.get("dataset_id")
+        )
+        try:
+            dataset_id = int(dataset_id_raw) if dataset_id_raw not in (None, "", []) else None
+        except Exception:
+            dataset_id = None
+
+        completed_steps = mlops_state.get("completed_steps")
+        total_steps = mlops_state.get("total_steps")
+        completion_pct = mlops_state.get("completion_pct")
+        current_step = (
+            session.get("current_step")
+            or current_state.get("preferred_screen")
+            or mlops_state.get("current_step")
+        )
+        current_step_label = (
+            _workflow_workspace_step_label(session.get("current_module"), current_step)
+            or mlops_state.get("current_step_label")
+            or _workflow_workspace_step_label("mlops", mlops_state.get("current_step"))
+        )
+
+        record = {
+            "manager_key": f"workflow::{session.get('session_id')}",
+            "pipeline_id": None,
+            "run_ref": session.get("run_id")
+            or session.get("publish_id")
+            or session.get("deployment_id")
+            or session.get("session_id"),
+            "name": pipeline_name,
+            "steps": [],
+            "created_at": session.get("created_at"),
+            "updated_at": session.get("updated_at"),
+            "status": session.get("status") or "draft",
+            "version": 1,
+            "last_run_at": session.get("updated_at"),
+            "output_dataset_id": None,
+            "dataset_id": dataset_id,
+            "grain": mlops_state.get("grain") or "transaction",
+            "created_by_persona": mlops_state.get("persona") or "technical",
+            "dataset_ids": [],
+            "schedule": {},
+            "completion_pct": completion_pct if completion_pct not in (None, "") else 0,
+            "completed_steps": int(completed_steps) if completed_steps not in (None, "") else 0,
+            "total_steps": int(total_steps) if total_steps not in (None, "") else len(_PROGRESS_STAGE_ORDER),
+            "current_step": current_step,
+            "current_step_label": current_step_label,
+            "run_status": session.get("status") or "draft",
+        }
+        return self._apply_workflow_summary(record, session)
+
+    def _workflow_session_has_meaningful_state(self, session: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(session, dict):
+            return False
+
+        def _positive_int(value: Any) -> bool:
+            try:
+                return int(value) > 0
+            except Exception:
+                return False
+
+        for key in ("pipeline_id", "run_id", "deployment_id", "publish_id", "selected_case_id"):
+            value = session.get(key)
+            if key == "pipeline_id":
+                if _positive_int(value):
+                    return True
+            elif _normalize_optional_text(value):
+                return True
+
+        checkpoint_key = _normalize_optional_text(session.get("checkpoint_key"))
+        if checkpoint_key and checkpoint_key != "FCC_SESSION_STARTED":
+            return True
+
+        status_text = _normalize_optional_text(session.get("status")) or ""
+        if status_text and status_text not in {"draft", "in_progress"}:
+            return True
+
+        for container in ("case_scope", "handoff_summary"):
+            value = session.get(container)
+            if isinstance(value, dict) and value:
+                return True
+
+        def _state_has_details(state: Any) -> bool:
+            if not isinstance(state, dict):
+                return False
+            mlops_state = state.get("mlops_state") if isinstance(state.get("mlops_state"), dict) else {}
+            for candidate in (state, mlops_state):
+                if not isinstance(candidate, dict):
+                    continue
+                if isinstance(candidate.get("datasets"), list) and candidate.get("datasets"):
+                    return True
+                if _positive_int(candidate.get("datasets_count")):
+                    return True
+                for numeric_key in (
+                    "master_dataset_id",
+                    "preprocess_dataset_id",
+                    "dataset_id",
+                    "completion_pct",
+                    "completed_steps",
+                ):
+                    if _positive_int(candidate.get(numeric_key)):
+                        return True
+                for text_key in (
+                    "target_column",
+                    "model_job_id",
+                    "validation_report_id",
+                    "registry_stage",
+                    "report_run_id",
+                    "checkpoint_key",
+                ):
+                    text_value = _normalize_optional_text(candidate.get(text_key))
+                    if text_value:
+                        if text_key != "checkpoint_key" or text_value != "FCC_SESSION_STARTED":
+                            return True
+                if bool(candidate.get("eda_completed")):
+                    return True
+                if isinstance(candidate.get("preprocess_steps"), list) and candidate.get("preprocess_steps"):
+                    return True
+                if isinstance(candidate.get("preprocess_plan"), list) and candidate.get("preprocess_plan"):
+                    return True
+                current_step = _normalize_optional_text(
+                    candidate.get("current_step") or candidate.get("preferred_screen")
+                )
+                if current_step and current_step not in {"data", "pipelines"}:
+                    return True
+                for object_key in ("master_dataset", "preprocess_dataset", "active_model_run", "validation_report", "registry_entry"):
+                    object_value = candidate.get(object_key)
+                    if isinstance(object_value, dict) and object_value:
+                        return True
+            return False
+
+        return _state_has_details(session.get("current_state")) or _state_has_details(session.get("last_stable_state"))
+
+    def _normalize_workflow_session_row(self, row) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        return {
+            "session_id": _normalize_text(row[0]),
+            "journey_key": _normalize_optional_text(row[1]),
+            "tenant_id": _normalize_optional_text(row[2]),
+            "env_id": _normalize_optional_text(row[3]),
+            "pipeline_id": int(row[4]) if row[4] is not None else None,
+            "pipeline_name": _normalize_optional_text(row[5]),
+            "run_id": _normalize_optional_text(row[6]),
+            "deployment_id": _normalize_optional_text(row[7]),
+            "publish_id": _normalize_optional_text(row[8]),
+            "current_module": _normalize_optional_text(row[9]),
+            "current_step": _normalize_optional_text(row[10]),
+            "current_state": _safe_json_loads(row[11], {}),
+            "last_stable_step": _normalize_optional_text(row[12]),
+            "last_stable_state": _safe_json_loads(row[13], {}),
+            "case_scope": _safe_json_loads(row[14], {}),
+            "selected_case_id": _normalize_optional_text(row[15]),
+            "handoff_summary": _safe_json_loads(row[16], {}),
+            "checkpoint_key": _normalize_optional_text(row[17]),
+            "status": _normalize_optional_text(row[18]) or "draft",
+            "created_at": row[19].isoformat() if hasattr(row[19], "isoformat") else row[19],
+            "updated_at": row[20].isoformat() if hasattr(row[20], "isoformat") else row[20],
+        }
+
+    def _derive_workflow_journey_key(
+        self,
+        *,
+        pipeline_id: Optional[int] = None,
+        run_id: Optional[str] = None,
+        deployment_id: Optional[str] = None,
+        publish_id: Optional[str] = None,
+    ) -> str:
+        if run_id:
+            return f"run::{run_id}"
+        if publish_id:
+            return f"publish::{publish_id}"
+        if deployment_id:
+            return f"deployment::{deployment_id}"
+        if pipeline_id is not None:
+            return f"pipeline::{int(pipeline_id)}"
+        return f"session::{uuid.uuid4().hex[:12]}"
+
+    def get_workflow_session(
+        self,
+        tenant_id: str,
+        env_id: str,
+        *,
+        session_id: Optional[str] = None,
+        pipeline_id: Optional[int] = None,
+        run_id: Optional[str] = None,
+        deployment_id: Optional[str] = None,
+        publish_id: Optional[str] = None,
+        current_module: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        filters = ["tenant_id = ?", "env_id = ?"]
+        values: List[Any] = [tenant_id, env_id]
+
+        session_id_text = _normalize_optional_text(session_id)
+        run_id_text = _normalize_optional_text(run_id)
+        deployment_id_text = _normalize_optional_text(deployment_id)
+        publish_id_text = _normalize_optional_text(publish_id)
+        current_module_text = _normalize_optional_text(current_module)
+
+        if session_id_text:
+            filters.append("session_id = ?")
+            values.append(session_id_text)
+        elif publish_id_text:
+            filters.append("publish_id = ?")
+            values.append(publish_id_text)
+        elif run_id_text:
+            filters.append("run_id = ?")
+            values.append(run_id_text)
+        elif deployment_id_text:
+            filters.append("deployment_id = ?")
+            values.append(deployment_id_text)
+        elif pipeline_id is not None:
+            filters.append("pipeline_id = ?")
+            values.append(int(pipeline_id))
+
+        if current_module_text:
+            filters.append("current_module = ?")
+            values.append(current_module_text)
+
+        where_clause = " AND ".join(filters)
+        with get_connection(self.db_path) as conn:
+            row = conn.execute(
+                f"""
+                SELECT session_id, journey_key, tenant_id, env_id, pipeline_id, pipeline_name,
+                       run_id, deployment_id, publish_id, current_module, current_step,
+                       current_state_json, last_stable_step, last_stable_state_json,
+                       case_scope_json, selected_case_id, handoff_summary_json,
+                       checkpoint_key, status, created_at, updated_at
+                FROM mlops_workflow_sessions
+                WHERE {where_clause}
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                values,
+            ).fetchone()
+        return self._normalize_workflow_session_row(row)
+
+    def save_workflow_session(
+        self,
+        tenant_id: str,
+        env_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        body = dict(payload or {})
+        current_state_patch = body.get("current_state")
+        last_stable_state_patch = body.get("last_stable_state")
+        handoff_summary_patch = body.get("handoff_summary")
+        case_scope_patch = body.get("case_scope")
+        mark_current_stable = bool(body.get("mark_current_stable"))
+
+        pipeline_id_explicit = "pipeline_id" in body
+        pipeline_name_explicit = "pipeline_name" in body
+        run_id_explicit = "run_id" in body
+        deployment_id_explicit = "deployment_id" in body
+        publish_id_explicit = "publish_id" in body
+        current_step_explicit = "current_step" in body
+
+        pipeline_id_raw = body.get("pipeline_id")
+        pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        lookup_session_id = _normalize_optional_text(body.get("session_id"))
+        lookup_run_id = _normalize_optional_text(body.get("run_id"))
+        lookup_deployment_id = _normalize_optional_text(body.get("deployment_id"))
+        lookup_publish_id = _normalize_optional_text(body.get("publish_id"))
+        should_lookup_existing = any([
+            lookup_session_id,
+            pipeline_id is not None,
+            lookup_run_id,
+            lookup_deployment_id,
+            lookup_publish_id,
+        ])
+        session = (
+            self.get_workflow_session(
+                tenant_id,
+                env_id,
+                session_id=lookup_session_id,
+                pipeline_id=pipeline_id,
+                run_id=lookup_run_id,
+                deployment_id=lookup_deployment_id,
+                publish_id=lookup_publish_id,
+            )
+            if should_lookup_existing
+            else None
+        ) or {}
+
+        if lookup_session_id and not session.get("session_id"):
+            raise ValueError(f"Workflow session {lookup_session_id} not found")
+
+        if not pipeline_id_explicit:
+            session_pipeline_id = session.get("pipeline_id")
+            pipeline_id = int(session_pipeline_id) if session_pipeline_id not in (None, "", []) else None
+
+        session_id = _normalize_optional_text(body.get("session_id")) or session.get("session_id") or f"WFS-{uuid.uuid4().hex[:12]}"
+        pipeline_name = (
+            _normalize_optional_text(body.get("pipeline_name"))
+            if pipeline_name_explicit
+            else session.get("pipeline_name")
+        )
+        run_id = (
+            _normalize_optional_text(body.get("run_id"))
+            if run_id_explicit
+            else session.get("run_id")
+        )
+        deployment_id = (
+            _normalize_optional_text(body.get("deployment_id"))
+            if deployment_id_explicit
+            else session.get("deployment_id")
+        )
+        publish_id = (
+            _normalize_optional_text(body.get("publish_id"))
+            if publish_id_explicit
+            else session.get("publish_id")
+        )
+        current_module = _normalize_optional_text(body.get("current_module")) or session.get("current_module") or "mlops"
+        current_step = (
+            _normalize_optional_text(body.get("current_step"))
+            if current_step_explicit
+            else session.get("current_step")
+        )
+        selected_case_id = _normalize_optional_text(body.get("selected_case_id")) or session.get("selected_case_id")
+        checkpoint_key = _normalize_optional_text(body.get("checkpoint_key")) or session.get("checkpoint_key")
+        status = _normalize_optional_text(body.get("status")) or session.get("status") or "draft"
+
+        if pipeline_id is None and pipeline_id_explicit and not pipeline_name_explicit:
+            pipeline_name = None
+
+        if pipeline_id is not None:
+            with get_connection(self.db_path) as conn:
+                pipeline_row = conn.execute(
+                    """
+                    SELECT pipeline_id, name
+                    FROM mlops_pipelines
+                    WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                    """,
+                    [int(pipeline_id), tenant_id, env_id],
+                ).fetchone()
+            if not pipeline_row:
+                raise ValueError(f"Pipeline {pipeline_id} not found")
+            if not pipeline_name:
+                pipeline_name = _normalize_optional_text(pipeline_row[1])
+
+        current_state = _merge_state_dicts(session.get("current_state") or {}, current_state_patch or {})
+        handoff_summary = _merge_state_dicts(session.get("handoff_summary") or {}, handoff_summary_patch or {})
+        case_scope = _merge_state_dicts(session.get("case_scope") or {}, case_scope_patch or {})
+
+        last_stable_step = session.get("last_stable_step")
+        last_stable_state = session.get("last_stable_state") or {}
+        if isinstance(last_stable_state_patch, dict):
+            last_stable_state = _merge_state_dicts(last_stable_state, last_stable_state_patch)
+            last_stable_step = _normalize_optional_text(body.get("last_stable_step")) or last_stable_step or current_step
+        if mark_current_stable:
+            last_stable_step = _normalize_optional_text(body.get("last_stable_step")) or current_step or last_stable_step
+            last_stable_state = _merge_state_dicts(last_stable_state, current_state)
+            if checkpoint_key and "checkpoint_key" not in last_stable_state:
+                last_stable_state["checkpoint_key"] = checkpoint_key
+
+        if isinstance(current_state, dict):
+            current_state["pipeline_id"] = pipeline_id
+            current_state["pipeline_name"] = pipeline_name
+            current_state["run_id"] = run_id
+            current_state["deployment_id"] = deployment_id
+            current_state["publish_id"] = publish_id
+            current_state["selected_case_id"] = selected_case_id
+            current_state["preferred_screen"] = current_step
+
+        journey_key = self._derive_workflow_journey_key(
+            pipeline_id=pipeline_id,
+            run_id=run_id,
+            deployment_id=deployment_id,
+            publish_id=publish_id,
+        )
+
+        candidate_session = {
+            "session_id": session.get("session_id") or session_id,
+            "pipeline_id": pipeline_id,
+            "pipeline_name": pipeline_name,
+            "run_id": run_id,
+            "deployment_id": deployment_id,
+            "publish_id": publish_id,
+            "current_module": current_module,
+            "current_step": current_step,
+            "current_state": current_state if isinstance(current_state, dict) else {},
+            "last_stable_step": last_stable_step,
+            "last_stable_state": last_stable_state if isinstance(last_stable_state, dict) else {},
+            "case_scope": case_scope if isinstance(case_scope, dict) else {},
+            "selected_case_id": selected_case_id,
+            "handoff_summary": handoff_summary if isinstance(handoff_summary, dict) else {},
+            "checkpoint_key": checkpoint_key,
+            "status": status,
+        }
+        if not session.get("session_id") and pipeline_id is None and not self._workflow_session_has_meaningful_state(candidate_session):
+            return {
+                "session_id": None,
+                "pipeline_id": None,
+                "pipeline_name": pipeline_name,
+                "status": status,
+                "skipped": True,
+                "reason": "empty_draft_session",
+            }
+
+        with get_connection(self.db_path) as conn:
+            created_row = conn.execute(
+                "SELECT created_at FROM mlops_workflow_sessions WHERE session_id = ?",
+                [session_id],
+            ).fetchone()
+            created_at_value = created_row[0] if created_row else None
+            if created_at_value is not None:
+                conn.execute(
+                    "DELETE FROM mlops_workflow_sessions WHERE session_id = ?",
+                    [session_id],
+                )
+            conn.execute(
+                """
+                INSERT INTO mlops_workflow_sessions (
+                  session_id, journey_key, tenant_id, env_id, pipeline_id, pipeline_name,
+                  run_id, deployment_id, publish_id, current_module, current_step,
+                  current_state_json, last_stable_step, last_stable_state_json,
+                  case_scope_json, selected_case_id, handoff_summary_json,
+                  checkpoint_key, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                [
+                    session_id,
+                    journey_key,
+                    tenant_id,
+                    env_id,
+                    pipeline_id,
+                    pipeline_name,
+                    run_id,
+                    deployment_id,
+                    publish_id,
+                    current_module,
+                    current_step,
+                    json.dumps(current_state or {}, default=str),
+                    last_stable_step,
+                    json.dumps(last_stable_state or {}, default=str),
+                    json.dumps(case_scope or {}, default=str),
+                    selected_case_id,
+                    json.dumps(handoff_summary or {}, default=str),
+                    checkpoint_key,
+                    status,
+                    created_at_value if created_at_value is not None else datetime.utcnow(),
+                ],
+            )
+            if pipeline_id is not None:
+                conn.execute(
+                    """
+                    DELETE FROM mlops_workflow_sessions
+                    WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ? AND current_module = ? AND session_id <> ?
+                    """,
+                    [tenant_id, env_id, int(pipeline_id), current_module, session_id],
+                )
+            conn.execute(
+                """
+                INSERT INTO mlops_pipeline_step_events (
+                  tenant_id, env_id, pipeline_id, session_id, screen, step_id,
+                  event_type, status, checkpoint_key, state_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id) if pipeline_id is not None else None,
+                    session_id,
+                    "workflow_session",
+                    current_step,
+                    "workflow_session_saved",
+                    status,
+                    checkpoint_key,
+                    json.dumps(
+                        {
+                            "pipeline_name": pipeline_name,
+                            "current_step": current_step,
+                            "current_state": current_state,
+                            "last_stable_step": last_stable_step,
+                            "last_stable_state": last_stable_state,
+                            "handoff_summary": handoff_summary,
+                            "case_scope": case_scope,
+                        },
+                        default=str,
+                    ),
+                ],
+            )
+            if pipeline_id is not None:
+                self._replace_pipeline_stage_asset_links(
+                    conn,
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id),
+                    "workflow_session",
+                    self._extract_pipeline_assets_from_state(
+                        "workflow_session",
+                        {
+                            "current_state": current_state if isinstance(current_state, dict) else {},
+                            "last_stable_state": last_stable_state if isinstance(last_stable_state, dict) else {},
+                            "handoff_summary": handoff_summary if isinstance(handoff_summary, dict) else {},
+                            "case_scope": case_scope if isinstance(case_scope, dict) else {},
+                            "run_id": run_id,
+                            "deployment_id": deployment_id,
+                        },
+                    ),
+                )
+
+        saved = self.get_workflow_session(tenant_id, env_id, session_id=session_id)
+        if not saved:
+            raise ValueError("Workflow session could not be saved")
+        return saved
+
+    def delete_workflow_session(
+        self,
+        tenant_id: str,
+        env_id: str,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        session_id_text = _normalize_optional_text(session_id)
+        if not session_id_text:
+            raise ValueError("session_id is required")
+
+        with get_connection(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, pipeline_id, pipeline_name, status
+                FROM mlops_workflow_sessions
+                WHERE session_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [session_id_text, tenant_id, env_id],
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Workflow session {session_id_text} not found")
+
+            conn.execute(
+                """
+                DELETE FROM mlops_workflow_sessions
+                WHERE session_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [session_id_text, tenant_id, env_id],
+            )
+
+        return {
+            "session_id": _normalize_text(row[0]),
+            "pipeline_id": int(row[1]) if row[1] is not None else None,
+            "pipeline_name": _normalize_optional_text(row[2]),
+            "status": _normalize_optional_text(row[3]) or "draft",
+            "deleted_session": True,
+        }
 
     def save_pipeline_screen_state(
         self,
@@ -1986,8 +3493,85 @@ class MLOpsWorkbenchService:
                 """,
                 [json.dumps(next_steps, default=str), int(pipeline_id), tenant_id, env_id],
             )
+            conn.execute(
+                """
+                INSERT INTO mlops_pipeline_step_events (
+                  tenant_id, env_id, pipeline_id, session_id, screen, step_id,
+                  event_type, status, checkpoint_key, state_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id),
+                    None,
+                    screen_key,
+                    stage_id or screen_key,
+                    "screen_state_saved",
+                    "saved",
+                    str(fingerprints.get(screen_key) or ""),
+                    json.dumps(
+                        {
+                            "screen": screen_key,
+                            "state": state if isinstance(state, dict) else {},
+                            "stale_steps": stale_steps,
+                            "latest_change": latest_change,
+                        },
+                        default=str,
+                    ),
+                ],
+            )
+            self._replace_pipeline_stage_asset_links(
+                conn,
+                tenant_id,
+                env_id,
+                int(pipeline_id),
+                screen_key,
+                self._extract_pipeline_assets_from_state(
+                    screen_key,
+                    state if isinstance(state, dict) else {},
+                ),
+            )
 
         return self.load_pipeline(tenant_id, env_id, int(pipeline_id))
+
+    def attach_pipeline_asset(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        asset_kind: str,
+        asset_id: Any,
+        stage: str,
+        relation: str = "reference",
+        metadata: Optional[Dict[str, Any]] = None,
+        numeric: bool = False,
+    ) -> None:
+        with get_connection(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT pipeline_id
+                FROM mlops_pipelines
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [int(pipeline_id), tenant_id, env_id],
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Pipeline {pipeline_id} not found")
+            self._upsert_pipeline_asset_link(
+                conn,
+                tenant_id,
+                env_id,
+                int(pipeline_id),
+                asset_kind,
+                asset_id,
+                stage=stage,
+                relation=relation,
+                metadata=metadata or {},
+                numeric=numeric,
+            )
 
     def list_pipeline_versions(self, tenant_id: str, env_id: str, pipeline_id: int) -> List[Dict]:
         """Return all saved version snapshots for one pipeline."""
@@ -2013,6 +3597,63 @@ class MLOpsWorkbenchService:
             for r in rows
         ]
 
+    def rename_pipeline(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        new_name: str,
+    ) -> Dict[str, Any]:
+        pid = int(pipeline_id)
+        next_name = _normalize_text(new_name)
+        if not next_name:
+            raise ValueError("Pipeline name is required")
+
+        with get_connection(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT pipeline_id, name
+                FROM mlops_pipelines
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Pipeline {pid} not found")
+
+            duplicate = conn.execute(
+                """
+                SELECT pipeline_id
+                FROM mlops_pipelines
+                WHERE tenant_id = ? AND env_id = ? AND lower(name) = lower(?) AND pipeline_id <> ?
+                LIMIT 1
+                """,
+                [tenant_id, env_id, next_name, pid],
+            ).fetchone()
+            if duplicate:
+                raise ValueError(f'A pipeline named "{next_name}" already exists')
+
+            conn.execute(
+                """
+                UPDATE mlops_pipelines
+                SET name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [next_name, pid, tenant_id, env_id],
+            )
+            conn.execute(
+                """
+                UPDATE mlops_workflow_sessions
+                SET pipeline_name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [next_name, pid, tenant_id, env_id],
+            )
+
+        renamed = self.load_pipeline(tenant_id, env_id, pid)
+        renamed["previous_name"] = _normalize_optional_text(row[1])
+        return renamed
+
     def schedule_pipeline(self, tenant_id: str, env_id: str, pipeline_id: int, schedule: Dict) -> Dict:
         """Persist schedule settings for a pipeline."""
         schedule_json = json.dumps(schedule or {}, default=str)
@@ -2037,25 +3678,10 @@ class MLOpsWorkbenchService:
         delete_files: bool = True,
     ) -> Dict[str, Any]:
         """
-        Delete one saved pipeline and optional generated artefacts.
-
-        Artefacts are inferred from:
-        - pipeline.output_dataset_id
-        - pipeline run output_dataset_id values
-        - known screen_state dataset id keys in steps_json
+        Delete one saved pipeline and, when requested, any assets linked
+        exclusively to that pipeline.
         """
         pid = int(pipeline_id)
-
-        artifact_dataset_types = {
-            "master_dataset",
-            "master",
-            "preprocessed_dataset",
-            "preprocessed",
-            "model_output",
-            "model_dataset",
-            "scored_dataset",
-            "feature_store",
-        }
 
         def _to_id(value: Any) -> Optional[int]:
             try:
@@ -2064,13 +3690,35 @@ class MLOpsWorkbenchService:
             except Exception:
                 return None
 
-        deleted_artifacts: List[Dict[str, Any]] = []
-        deleted_files: List[str] = []
+        deleted_datasets: List[Dict[str, Any]] = []
+        deleted_training_jobs: List[Dict[str, Any]] = []
+        deleted_reports: List[Dict[str, Any]] = []
+        deleted_deployments: List[Dict[str, Any]] = []
+        deleted_files: set[str] = set()
+        deleted_pipeline_asset_link_count = 0
+
+        def _safe_delete_file(raw_path: Any) -> None:
+            if not delete_files or not raw_path:
+                return
+            try:
+                resolved = self._resolve_file_path(Path(str(raw_path)))
+            except Exception:
+                resolved = Path(str(raw_path))
+            try:
+                if resolved.exists() and resolved.is_file():
+                    resolved.unlink()
+                    deleted_files.add(str(resolved))
+            except Exception:
+                return
+
+        model_training_db = self._model_training_db_path()
 
         with get_connection(self.db_path) as conn:
+            self._backfill_pipeline_asset_links(conn, tenant_id, env_id)
             row = conn.execute(
                 """
-                SELECT pipeline_id, name, steps_json, output_dataset_id
+                SELECT pipeline_id, name, steps_json, output_dataset_id,
+                       dataset_id, anchor_dataset_id, dataset_ids_json
                 FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -2082,13 +3730,51 @@ class MLOpsWorkbenchService:
             pipeline_name = str(row[1] or f"Pipeline {pid}")
             steps = json.loads(row[2] or "[]")
 
-            candidate_dataset_ids: set[int] = set()
-            forced_dataset_ids: set[int] = set()
+            linked_assets = self._list_pipeline_asset_links(conn, tenant_id, env_id, pid)
+
+            def _other_pipeline_link_count(asset_kind: str, asset_id: str) -> int:
+                count_row = conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT pipeline_id)
+                    FROM mlops_pipeline_asset_links
+                    WHERE tenant_id = ? AND env_id = ? AND asset_kind = ? AND asset_id = ? AND pipeline_id <> ?
+                    """,
+                    [tenant_id, env_id, str(asset_kind), str(asset_id), pid],
+                ).fetchone()
+                return int(count_row[0] or 0) if count_row else 0
+
+            candidate_dataset_ids: set[int] = {
+                int(asset["asset_id"])
+                for asset in linked_assets
+                if asset.get("asset_kind") == "dataset" and _to_id(asset.get("asset_id"))
+            }
+            training_job_ids: set[str] = {
+                str(asset["asset_id"])
+                for asset in linked_assets
+                if asset.get("asset_kind") == "training_job" and _normalize_text(asset.get("asset_id"))
+            }
+            report_ids: set[str] = {
+                str(asset["asset_id"])
+                for asset in linked_assets
+                if asset.get("asset_kind") == "run_report" and _normalize_text(asset.get("asset_id"))
+            }
+            deployment_ids: set[str] = {
+                str(asset["asset_id"])
+                for asset in linked_assets
+                if asset.get("asset_kind") == "deployment" and _normalize_text(asset.get("asset_id"))
+            }
 
             pipeline_output_id = _to_id(row[3])
             if pipeline_output_id:
                 candidate_dataset_ids.add(pipeline_output_id)
-                forced_dataset_ids.add(pipeline_output_id)
+            for legacy_id in (row[4], row[5]):
+                next_id = _to_id(legacy_id)
+                if next_id:
+                    candidate_dataset_ids.add(next_id)
+            for raw_id in _safe_json_loads(row[6], []):
+                next_id = _to_id(raw_id)
+                if next_id:
+                    candidate_dataset_ids.add(next_id)
 
             run_rows = conn.execute(
                 """
@@ -2102,7 +3788,6 @@ class MLOpsWorkbenchService:
                 run_ds_id = _to_id(run_row[0] if run_row else None)
                 if run_ds_id:
                     candidate_dataset_ids.add(run_ds_id)
-                    forced_dataset_ids.add(run_ds_id)
 
             if isinstance(steps, list):
                 for step in steps:
@@ -2115,6 +3800,68 @@ class MLOpsWorkbenchService:
                         sid = _to_id(state.get(key))
                         if sid:
                             candidate_dataset_ids.add(sid)
+                    for key in ("job_id", "run_id", "modelRunId", "activeRunId", "selectedRunId"):
+                        run_value = _normalize_optional_text(state.get(key))
+                        if run_value:
+                            training_job_ids.add(run_value)
+
+            if delete_artifacts and training_job_ids:
+                training_job_list = sorted(training_job_ids)
+                if model_training_db.exists():
+                    try:
+                        with get_connection(str(model_training_db)) as model_conn:
+                            placeholders = ",".join(["?"] * len(training_job_list))
+                            job_rows = model_conn.execute(
+                                f"""
+                                SELECT job_id, artifact_path
+                                FROM model_training_runs
+                                WHERE tenant_id = ? AND env_id = ? AND job_id IN ({placeholders})
+                                """,
+                                [tenant_id, env_id, *training_job_list],
+                            ).fetchall()
+                            job_artifacts = {str(job_id): artifact_path for job_id, artifact_path in (job_rows or [])}
+                            for job_id in training_job_list:
+                                if _other_pipeline_link_count("training_job", job_id) > 0:
+                                    continue
+                                model_conn.execute(
+                                    """
+                                    DELETE FROM model_registry
+                                    WHERE tenant_id = ? AND env_id = ? AND job_id = ?
+                                    """,
+                                    [tenant_id, env_id, job_id],
+                                )
+                                model_conn.execute(
+                                    """
+                                    DELETE FROM model_training_runs
+                                    WHERE tenant_id = ? AND env_id = ? AND job_id = ?
+                                    """,
+                                    [tenant_id, env_id, job_id],
+                                )
+                                deleted_training_jobs.append({"job_id": job_id})
+                                _safe_delete_file(job_artifacts.get(job_id))
+                    except Exception:
+                        pass
+                for job_id in training_job_list:
+                    if _other_pipeline_link_count("training_job", job_id) > 0:
+                        continue
+                    conn.execute(
+                        """
+                        DELETE FROM mlops_model_runs
+                        WHERE tenant_id = ? AND env_id = ? AND run_id = ?
+                        """,
+                        [tenant_id, env_id, job_id],
+                    )
+                    report_rows = conn.execute(
+                        """
+                        SELECT report_id
+                        FROM mlops_run_reports
+                        WHERE tenant_id = ? AND env_id = ? AND run_id = ?
+                        """,
+                        [tenant_id, env_id, job_id],
+                    ).fetchall()
+                    for report_row in report_rows or []:
+                        if report_row and report_row[0]:
+                            report_ids.add(str(report_row[0]))
 
             if delete_artifacts and candidate_dataset_ids:
                 id_list = sorted(candidate_dataset_ids)
@@ -2132,9 +3879,7 @@ class MLOpsWorkbenchService:
                     ds_id = int(ds_row[0])
                     ds_type = str(ds_row[1] or "").strip().lower()
                     ds_path = ds_row[2]
-                    is_forced = ds_id in forced_dataset_ids
-                    is_artifact_type = ds_type in artifact_dataset_types
-                    if not (is_forced or is_artifact_type):
+                    if _other_pipeline_link_count("dataset", str(ds_id)) > 0:
                         continue
 
                     conn.execute(
@@ -2144,19 +3889,69 @@ class MLOpsWorkbenchService:
                         """,
                         [ds_id, tenant_id, env_id],
                     )
-                    deleted_artifacts.append({
+                    conn.execute(
+                        """
+                        DELETE FROM mlops_targets
+                        WHERE tenant_id = ? AND env_id = ? AND dataset_id = ?
+                        """,
+                        [tenant_id, env_id, ds_id],
+                    )
+                    deleted_datasets.append({
                         "dataset_id": ds_id,
                         "dataset_type": ds_type,
                     })
+                    _safe_delete_file(ds_path)
 
-                    if delete_files and ds_path:
-                        try:
-                            resolved = self._resolve_file_path(Path(str(ds_path)))
-                            if resolved.exists() and resolved.is_file():
-                                resolved.unlink()
-                                deleted_files.append(str(resolved))
-                        except Exception:
-                            continue
+            if delete_artifacts and report_ids:
+                for report_id in sorted(report_ids):
+                    if _other_pipeline_link_count("run_report", report_id) > 0:
+                        continue
+                    report_row = conn.execute(
+                        """
+                        SELECT report_id, run_id
+                        FROM mlops_run_reports
+                        WHERE tenant_id = ? AND env_id = ? AND report_id = ?
+                        """,
+                        [tenant_id, env_id, report_id],
+                    ).fetchone()
+                    if not report_row:
+                        continue
+                    conn.execute(
+                        """
+                        DELETE FROM mlops_run_reports
+                        WHERE tenant_id = ? AND env_id = ? AND report_id = ?
+                        """,
+                        [tenant_id, env_id, report_id],
+                    )
+                    deleted_reports.append({
+                        "report_id": str(report_row[0]),
+                        "run_id": _normalize_optional_text(report_row[1]),
+                    })
+
+            if delete_artifacts and deployment_ids:
+                for deployment_id in sorted(deployment_ids):
+                    if _other_pipeline_link_count("deployment", deployment_id) > 0:
+                        continue
+                    dep_row = conn.execute(
+                        """
+                        SELECT deployment_id, bundle_path, model_card_path
+                        FROM mlops_deployments
+                        WHERE tenant_id = ? AND env_id = ? AND deployment_id = ?
+                        """,
+                        [tenant_id, env_id, deployment_id],
+                    ).fetchone()
+                    if not dep_row:
+                        continue
+                    conn.execute(
+                        """
+                        DELETE FROM mlops_deployments
+                        WHERE tenant_id = ? AND env_id = ? AND deployment_id = ?
+                        """,
+                        [tenant_id, env_id, deployment_id],
+                    )
+                    deleted_deployments.append({"deployment_id": str(dep_row[0])})
+                    _safe_delete_file(dep_row[1])
+                    _safe_delete_file(dep_row[2])
 
             runs_count = conn.execute(
                 """
@@ -2170,6 +3965,30 @@ class MLOpsWorkbenchService:
                 """
                 SELECT COUNT(*)
                 FROM mlops_pipeline_versions
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            ).fetchone()
+            workflow_sessions_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM mlops_workflow_sessions
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            ).fetchone()
+            step_events_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM mlops_pipeline_step_events
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            ).fetchone()
+            asset_links_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM mlops_pipeline_asset_links
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
                 [pid, tenant_id, env_id],
@@ -2191,6 +4010,28 @@ class MLOpsWorkbenchService:
             )
             conn.execute(
                 """
+                DELETE FROM mlops_workflow_sessions
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            )
+            conn.execute(
+                """
+                DELETE FROM mlops_pipeline_step_events
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            )
+            conn.execute(
+                """
+                DELETE FROM mlops_pipeline_asset_links
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            )
+            deleted_pipeline_asset_link_count = int((asset_links_count[0] or 0) if asset_links_count else 0)
+            conn.execute(
+                """
                 DELETE FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -2203,12 +4044,23 @@ class MLOpsWorkbenchService:
             "deleted_pipeline": True,
             "delete_artifacts": bool(delete_artifacts),
             "delete_files": bool(delete_files),
-            "deleted_artifacts_count": int(len(deleted_artifacts)),
-            "deleted_artifacts": deleted_artifacts,
+            "deleted_artifacts_count": int(len(deleted_datasets)),
+            "deleted_artifacts": deleted_datasets,
+            "deleted_datasets_count": int(len(deleted_datasets)),
+            "deleted_datasets": deleted_datasets,
+            "deleted_training_jobs_count": int(len(deleted_training_jobs)),
+            "deleted_training_jobs": deleted_training_jobs,
+            "deleted_reports_count": int(len(deleted_reports)),
+            "deleted_reports": deleted_reports,
+            "deleted_deployments_count": int(len(deleted_deployments)),
+            "deleted_deployments": deleted_deployments,
             "deleted_files_count": int(len(deleted_files)),
-            "deleted_files": deleted_files,
+            "deleted_files": sorted(deleted_files),
             "deleted_runs_count": int((runs_count[0] or 0) if runs_count else 0),
             "deleted_versions_count": int((versions_count[0] or 0) if versions_count else 0),
+            "deleted_workflow_sessions_count": int((workflow_sessions_count[0] or 0) if workflow_sessions_count else 0),
+            "deleted_step_events_count": int((step_events_count[0] or 0) if step_events_count else 0),
+            "deleted_pipeline_asset_links_count": int(deleted_pipeline_asset_link_count),
         }
 
     def run_pipeline_async(
@@ -2358,6 +4210,19 @@ class MLOpsWorkbenchService:
                         """,
                         [int(output_dataset_id) if output_dataset_id else None, int(pipeline_id)],
                     )
+                    if output_dataset_id:
+                        self._upsert_pipeline_asset_link(
+                            conn,
+                            tenant_id,
+                            env_id,
+                            int(pipeline_id),
+                            "dataset",
+                            output_dataset_id,
+                            stage="pipeline_run",
+                            relation="pipeline_output",
+                            metadata={"run_id": run_id},
+                            numeric=True,
+                        )
 
             except Exception as exc:
                 import traceback
@@ -2468,12 +4333,13 @@ class MLOpsWorkbenchService:
 
         results = []
         for r in rows:
+            resolved_file_path = self._resolve_file_path(Path(r[3]))
             results.append(
                 {
                     "dataset_id": int(r[0]),
                     "dataset_type": r[1],
                     "filename": r[2],
-                    "file_path": r[3],
+                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[3]),
                     "row_count": int(r[4] or 0),
                     "columns": json.loads(r[5] or "[]"),
                     "column_types": json.loads(r[6] or "{}"),
@@ -2502,6 +4368,16 @@ class MLOpsWorkbenchService:
                     """,
                     [int(dataset_id), tenant_id, env_id],
                 ).fetchone()
+                if not row:
+                    row = conn.execute(
+                        """
+                        SELECT dataset_id, tenant_id, env_id, dataset_type, filename, file_path, row_count,
+                               columns_json, column_types_json, created_at, updated_at
+                        FROM mlops_dataset_registry
+                        WHERE dataset_id = ?
+                        """,
+                        [int(dataset_id)],
+                    ).fetchone()
             else:
                 row = conn.execute(
                     """
@@ -2514,13 +4390,14 @@ class MLOpsWorkbenchService:
                 ).fetchone()
         if not row:
             raise ValueError("dataset not found")
+        resolved_file_path = self._resolve_file_path(Path(row[5]))
         return {
             "dataset_id": int(row[0]),
             "tenant_id": row[1],
             "env_id": row[2],
             "dataset_type": row[3],
             "filename": row[4],
-            "file_path": row[5],
+            "file_path": str(resolved_file_path if resolved_file_path.exists() else row[5]),
             "row_count": int(row[6] or 0),
             "columns": json.loads(row[7] or "[]"),
             "column_types": json.loads(row[8] or "{}"),
@@ -2614,6 +4491,13 @@ class MLOpsWorkbenchService:
                 """,
                 [int(dataset_id), tenant_id, env_id],
             )
+            conn.execute(
+                """
+                DELETE FROM mlops_pipeline_asset_links
+                WHERE tenant_id = ? AND env_id = ? AND asset_kind = 'dataset' AND asset_id = ?
+                """,
+                [tenant_id, env_id, str(int(dataset_id))],
+            )
 
     def reset_workspace(self, tenant_id: str, env_id: str, delete_files: bool = False) -> Dict[str, Any]:
         """
@@ -2625,7 +4509,13 @@ class MLOpsWorkbenchService:
             "mlops_snapshots",
             "mlops_targets",
             "mlops_pipelines",
+            "mlops_pipeline_versions",
+            "mlops_pipeline_runs",
+            "mlops_workflow_sessions",
+            "mlops_pipeline_step_events",
+            "mlops_pipeline_asset_links",
             "mlops_model_runs",
+            "mlops_run_reports",
             "mlops_deployments",
         ]
         deleted_rows: Dict[str, int] = {}
@@ -4102,12 +5992,12 @@ class MLOpsWorkbenchService:
             output_rows=int(df.shape[0]),
             output_columns=int(df.shape[1]),
         )
-        return {
+        return _json_safe_value({
             "row_count": int(df.shape[0]),
             "columns": list(df.columns),
-            "preview": df.head(25).fillna("").to_dict(orient="records"),
+            "preview": df.head(25).to_dict(orient="records"),
             "trace": {"summary": summary, "steps": trace_steps},
-        }
+        })
 
     def run_preprocessing(self, dataset: Dict, steps: List[Dict], output_path: Path, target_column: Optional[str] = None) -> Dict:
         rel = self._relation_expr(Path(dataset["file_path"]), sample_size=None)
@@ -4127,7 +6017,7 @@ class MLOpsWorkbenchService:
             output_rows=output_rows,
             output_columns=output_columns,
         )
-        return {
+        return _json_safe_value({
             "rows": output_rows,
             "path": str(output_path),
             "columns": list(df.columns),
@@ -4137,7 +6027,7 @@ class MLOpsWorkbenchService:
                 "dataset_type": str(dataset.get("dataset_type") or ""),
                 "target_column_preserved": bool(target_column and target_column in list(df.columns)),
             },
-        }
+        })
 
     def _find_col(self, df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         lookup = {str(c).lower(): c for c in df.columns}
@@ -6222,8 +8112,7 @@ class MLOpsWorkbenchService:
         if not artifact_path.exists():
             raise ValueError("Model artifact missing; retrain model run")
 
-        with open(artifact_path, "rb") as file:
-            model_bundle = pickle.load(file)
+        model_bundle = load_pickle_compat(artifact_path)
 
         safe_name = (deployment_name or f"deployment_{run_id}").strip().replace(" ", "_")
         bundle_path = self._deployment_dir() / f"{safe_name}.pkl"
@@ -6744,6 +8633,70 @@ class MLOpsWorkbenchService:
                 columns=legacy_cols,
             )
             if not legacy:
+                artifact_candidates = sorted(
+                    self._model_dir().glob(f"*{run_id}*.pkl"),
+                    key=lambda path: path.stat().st_mtime,
+                    reverse=True,
+                )
+                if not artifact_candidates:
+                    return None
+
+                artifact_path = artifact_candidates[0]
+                try:
+                    bundle = load_pickle_compat(artifact_path)
+                except Exception as exc:
+                    logger.warning("Report artifact fallback failed for run_id=%s: %s", run_id, exc)
+                    return None
+
+                if not isinstance(bundle, dict) or "model" not in bundle:
+                    return None
+
+                trained_at = bundle.get("trained_at")
+                if hasattr(trained_at, "isoformat"):
+                    trained_at = trained_at.isoformat()
+                elif trained_at is None:
+                    trained_at = datetime.utcfromtimestamp(artifact_path.stat().st_mtime).isoformat() + "Z"
+
+                feature_columns = [str(value) for value in list(bundle.get("feature_columns") or [])]
+                feature_diag = {
+                    "selected_feature_count": int(len(feature_columns)),
+                    "selected_features_preview": feature_columns[:25],
+                }
+                result_payload = {
+                    "grain": bundle.get("grain") or "alert",
+                    "id_column": bundle.get("id_column"),
+                    "target_column": bundle.get("target_column"),
+                    "selected_threshold": bundle.get("threshold"),
+                    "hml_high_threshold": bundle.get("hml_high_threshold"),
+                    "hml_low_threshold": bundle.get("hml_low_threshold"),
+                    "feature_columns": feature_columns,
+                    "trained_at": trained_at,
+                    "source": "artifact_model_dir_scan",
+                }
+                fallback_row = {
+                    "job_id": str(run_id),
+                    "run_id": str(run_id),
+                    "tenant_id": str(tenant_id),
+                    "env_id": str(env_id),
+                    "dataset_id": bundle.get("dataset_id"),
+                    "target_column": bundle.get("target_column"),
+                    "algorithm": bundle.get("algorithm") or type(bundle.get("model")).__name__,
+                    "metrics_json": json.dumps({}, default=str),
+                    "result_json": json.dumps(result_payload, default=str),
+                    "test_truth_json": json.dumps([], default=str),
+                    "test_prob_json": json.dumps([], default=str),
+                    "selected_threshold": bundle.get("threshold"),
+                    "artifact_path": str(artifact_path),
+                    "trained_at": trained_at,
+                    "updated_at": trained_at,
+                    "grain": bundle.get("grain") or "alert",
+                    "hml_high_threshold": bundle.get("hml_high_threshold"),
+                    "hml_low_threshold": bundle.get("hml_low_threshold"),
+                    "feature_diagnostics_json": json.dumps(feature_diag, default=str),
+                }
+                accepted = _accept_training_row(fallback_row, "model_dir:artifact_fallback")
+                if accepted is not None:
+                    return accepted
                 return None
 
             row_tenant = str(legacy.get("tenant_id") or "")
@@ -7954,6 +9907,46 @@ class MLOpsWorkbenchService:
         midpoint_threshold = self._report_float(midpoint_row.get("threshold"), 0.5)
         midpoint_suppression_pct = self._report_float(midpoint_row.get("suppression_pct"), 0.0)
         midpoint_event_loss_pct = self._report_float(midpoint_row.get("event_loss_pct"), 0.0)
+        threshold_band_min = 0.50
+        threshold_band_max = 0.60
+        deployable_rows = [
+            row for row in threshold_rows
+            if threshold_band_min <= self._report_float(row.get("threshold"), -1.0) <= threshold_band_max
+            and self._report_float(row.get("event_loss_pct"), 999.0) <= float(max_event_loss_limit)
+        ]
+        if not deployable_rows:
+            deployable_rows = [
+                row for row in threshold_rows
+                if threshold_band_min <= self._report_float(row.get("threshold"), -1.0) <= threshold_band_max
+            ]
+        deployable_row = (
+            max(
+                deployable_rows,
+                key=lambda r: (
+                    self._report_float(r.get("suppression_pct"), 0.0),
+                    -self._report_float(r.get("event_loss_pct"), 999.0),
+                ),
+            )
+            if deployable_rows
+            else (midpoint_row or recommended_row)
+        )
+        operating_threshold = self._report_float(deployable_row.get("threshold"), midpoint_threshold)
+        operating_suppression_pct = self._report_float(
+            self._report_pick_value(deployable_row.get("suppression_pct"), metric_suppression_pct, numeric=True, zero_means_missing=True, default=0.0),
+            0.0,
+        )
+        operating_event_loss_pct = self._report_float(
+            self._report_pick_value(deployable_row.get("event_loss_pct"), metric_event_loss_pct, numeric=True, zero_means_missing=True, default=0.0),
+            0.0,
+        )
+        operating_precision = self._report_float(
+            self._report_pick_value(deployable_row.get("precision"), metric_precision, numeric=True, zero_means_missing=True, default=0.0),
+            0.0,
+        )
+        operating_recall = self._report_float(
+            self._report_pick_value(deployable_row.get("recall"), metric_recall, numeric=True, zero_means_missing=True, default=0.0),
+            0.0,
+        )
 
         model_performance = {
             "algorithm": str(run.get("algorithm") or ""),
@@ -7992,27 +9985,30 @@ class MLOpsWorkbenchService:
 
         threshold_analysis = {
             "regulatory_limit_pct": round(float(max_event_loss_limit), 2),
+            "default_threshold": threshold_band_min,
+            "threshold_band_min": threshold_band_min,
+            "threshold_band_max": threshold_band_max,
             "configured_threshold": round(float(selected_threshold), 4),
-            "recommended_threshold": round(float(recommended_row.get("threshold", selected_threshold)), 4),
-            "recommended_suppression_pct": round(self._report_float(self._report_pick_value(recommended_row.get("suppression_pct"), metric_suppression_pct, numeric=True, zero_means_missing=True, default=0.0), 0.0), 2),
-            "recommended_event_loss_pct": round(self._report_float(self._report_pick_value(recommended_row.get("event_loss_pct"), metric_event_loss_pct, numeric=True, zero_means_missing=True, default=0.0), 0.0), 2),
-            "recommended_precision": round(self._report_float(self._report_pick_value(recommended_row.get("precision"), metric_precision, numeric=True, zero_means_missing=True, default=0.0), 0.0), 4),
-            "recommended_recall": round(self._report_float(self._report_pick_value(recommended_row.get("recall"), metric_recall, numeric=True, zero_means_missing=True, default=0.0), 0.0), 4),
-            "within_regulatory_limit": self._report_float(self._report_pick_value(recommended_row.get("event_loss_pct"), metric_event_loss_pct, numeric=True, zero_means_missing=True, default=0.0), 0.0) <= float(max_event_loss_limit),
+            "recommended_threshold": round(float(operating_threshold), 4),
+            "recommended_suppression_pct": round(float(operating_suppression_pct), 2),
+            "recommended_event_loss_pct": round(float(operating_event_loss_pct), 2),
+            "recommended_precision": round(float(operating_precision), 4),
+            "recommended_recall": round(float(operating_recall), 4),
+            "within_regulatory_limit": float(operating_event_loss_pct) <= float(max_event_loss_limit),
             "midpoint_threshold": round(float(midpoint_threshold), 4),
             "midpoint_suppression_pct": round(float(midpoint_suppression_pct), 2),
             "midpoint_event_loss_pct": round(float(midpoint_event_loss_pct), 2),
-            "recommendation_reason": str(recommended_row.get("selection_reason") or ""),
+            "recommendation_reason": str(deployable_row.get("selection_reason") or ""),
             "threshold_table": threshold_rows,
             "hml_tiers": hml_tiers,
         }
         threshold_analysis["business_threshold_explainer"] = (
-            "Threshold is an operating decision, not a universal default. "
-            "A score cut-off of 0.50 is only the midpoint of the score scale; it is not automatically the best boundary for AML alert handling because the score is chosen for workload and miss-risk trade-off, not because 0.50 is mathematically sacred. "
-            f"For this run, the configured threshold was {threshold_analysis['configured_threshold']:.2f}. "
-            f"The report recommends {threshold_analysis['recommended_threshold']:.2f} because it provides the strongest suppression while keeping Event Loss within "
+            f"FCC uses a business operating default of {threshold_analysis['default_threshold']:.2f} and only allows deployable thresholds between "
+            f"{threshold_analysis['threshold_band_min']:.2f} and {threshold_analysis['threshold_band_max']:.2f}. "
+            f"For this run, the saved configuration was {threshold_analysis['configured_threshold']:.2f}, and the report recommends "
+            f"{threshold_analysis['recommended_threshold']:.2f} inside the approved band because it provides the strongest suppression while keeping Event Loss within "
             f"{threshold_analysis['regulatory_limit_pct']:.1f}%. "
-            f"The nearest 0.50 operating point would give {threshold_analysis['midpoint_suppression_pct']:.2f}% suppression at "
+            f"The default 0.50 operating point would give {threshold_analysis['midpoint_suppression_pct']:.2f}% suppression at "
             f"{threshold_analysis['midpoint_event_loss_pct']:.2f}% Event Loss."
             + (
                 f" {threshold_analysis['recommendation_reason']}"
@@ -8025,8 +10021,8 @@ class MLOpsWorkbenchService:
         total_alerts = n_total if n_total > 0 else max(train_rows + test_rows, self._report_int(sum(d.get("row_count", 0) for d in dataset_rows), 0))
         alerts_suppressed = int(round(total_alerts * (recommended_suppression_pct / 100.0)))
         alerts_escalated = int(max(total_alerts - alerts_suppressed, 0))
-        sars_caught = self._report_int(recommended_row.get("tp"), cm.get("tp", 0))
-        sars_missed = self._report_int(recommended_row.get("fn"), cm.get("fn", 0))
+        sars_caught = self._report_int(deployable_row.get("tp"), cm.get("tp", 0))
+        sars_missed = self._report_int(deployable_row.get("fn"), cm.get("fn", 0))
         total_pos_eval = max(sars_caught + sars_missed, 1)
         event_loss_pct = round(float((sars_missed / total_pos_eval) * 100.0), 2)
 
@@ -8261,6 +10257,21 @@ class MLOpsWorkbenchService:
                     str(report["run_type"]),
                 ],
             )
+            if pipeline_id_int is not None:
+                self._upsert_pipeline_asset_link(
+                    conn,
+                    str(tenant_id),
+                    str(env_id),
+                    int(pipeline_id_int),
+                    "run_report",
+                    report.get("report_id"),
+                    stage="reports",
+                    relation="generated_report",
+                    metadata={
+                        "run_id": str(report.get("run_id") or ""),
+                        "run_type": str(report.get("run_type") or "pipeline"),
+                    },
+                )
 
         return report
 

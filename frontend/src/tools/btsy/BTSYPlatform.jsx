@@ -1,5 +1,5 @@
 // frontend/src/tools/btsy/BTSYPlatform.jsx
-import React, { useState } from 'react';
+import React from 'react';
 import { Box, Alert } from '@mui/material';
 import { useAppContext } from '@context/AppContext';
 import MainLayout from './layout/MainLayout';
@@ -18,6 +18,7 @@ import MissedSTRAnalysisWorkbench from './screens/validation/MissedSTRAnalysisWo
 import ScenarioInteractionAnalysisWorkbench from './screens/operations_intelligence/ScenarioInteractionAnalysisWorkbench';
 import AnalystWorkloadSimulationWorkbench from './screens/operations_intelligence/AnalystWorkloadSimulationWorkbench';
 import ScenarioWorkbenchScreen from './screens/scenarios/ScenarioWorkbenchScreen';
+import usePersistedWorkbenchScreen from '../../hooks/usePersistedWorkbenchScreen';
 
 // Placeholder screens for future development
 const PlaceholderScreen = ({ title }) => (
@@ -106,7 +107,7 @@ const BTSYRouterInner = ({ activeScreen, setActiveScreen }) => {
 
 const BTSYPlatform = () => {
   const { activeEnv } = useAppContext();
-  const [activeScreen, setActiveScreen] = useState('foundation');
+  const [activeScreen, setActiveScreen] = usePersistedWorkbenchScreen('btsy', 'foundation');
   
   // Auto-navigate if a hint is set
   React.useEffect(() => {

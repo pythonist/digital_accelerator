@@ -2,8 +2,9 @@ import os
 import sys
 import traceback
 import subprocess
+import time
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, g
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
@@ -45,6 +46,12 @@ from security.app_secrets import get_app_secret_key
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(BASE_DIR, "dist")
 MLOPS_ONLY_PROFILES = {"mlops", "mlops_only"}
+REQUEST_TRACE_PREFIXES = (
+    "/api/mlops",
+    "/api/eda",
+    "/api/model-training",
+    "/api/deployment-dashboard",
+)
 
 
 def _normalize_backend_profile(value):
@@ -134,10 +141,12 @@ def _register_blueprints(app: Flask, backend_profile: str):
     from api.routes.auth import auth_bp
     from api.routes.environment import env_bp
     from api.routes.audit import audit_bp
+    from api.routes.executive_summary import executive_summary_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api")
     app.register_blueprint(env_bp, url_prefix="/api/v2")
     app.register_blueprint(audit_bp, url_prefix="/api/v2")
+    app.register_blueprint(executive_summary_bp, url_prefix="/api/v2")
     status["core"] = True
 
     if _is_mlops_profile(backend_profile):
@@ -155,6 +164,9 @@ def _register_blueprints(app: Flask, backend_profile: str):
         from api.routes.compare import compare_bp
         from api.routes.analysis import analysis_bp
         from api.routes.cases import cases_bp
+        from api.routes.case_queue import case_queue_bp
+        from api.routes.case_retrieval import case_retrieval_bp
+        from api.routes.reports import reports_bp
         from api.routes.typology import typology_bp
         from api.routes.case_facts import case_facts_bp
         from api.routes.calibration import calibration_bp
@@ -172,6 +184,9 @@ def _register_blueprints(app: Flask, backend_profile: str):
         app.register_blueprint(compare_bp, url_prefix="/api/v2/compare")
         app.register_blueprint(analysis_bp, url_prefix="/api/v2/analysis")
         app.register_blueprint(cases_bp, url_prefix="/api/v2")
+        app.register_blueprint(case_queue_bp, url_prefix="/api/v2")
+        app.register_blueprint(case_retrieval_bp, url_prefix="/api/v2")
+        app.register_blueprint(reports_bp, url_prefix="/api/v2")
         app.register_blueprint(typology_bp, url_prefix="/api/v2")
         app.register_blueprint(case_facts_bp, url_prefix="/api/v2")
 
@@ -315,6 +330,28 @@ def create_app() -> Flask:
             return jsonify({"error": "Internal Server Error"}), 500
         return jsonify({"error": "Internal Server Error"}), 500
 
+    @app.before_request
+    def _trace_api_request_start():
+        path = str(request.path or "")
+        if not any(path.startswith(prefix) for prefix in REQUEST_TRACE_PREFIXES):
+            return None
+        g._request_trace_started_at = time.perf_counter()
+        print(f"[API START] {request.method} {path}")
+        return None
+
+    @app.after_request
+    def _trace_api_request_complete(response):
+        path = str(request.path or "")
+        if not any(path.startswith(prefix) for prefix in REQUEST_TRACE_PREFIXES):
+            return response
+        started_at = getattr(g, "_request_trace_started_at", None)
+        elapsed_ms = ((time.perf_counter() - started_at) * 1000.0) if started_at else None
+        if elapsed_ms is not None:
+            print(f"[API DONE]  {request.method} {path} -> {response.status_code} ({elapsed_ms:.1f} ms)")
+        else:
+            print(f"[API DONE]  {request.method} {path} -> {response.status_code}")
+        return response
+
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def serve_react_app(path):
@@ -328,6 +365,20 @@ def create_app() -> Flask:
     @app.route("/health")
     def health():
         return jsonify({"status": "healthy"})
+
+    @app.route("/ready")
+    def ready():
+        status_code = 200 if core_ok else 503
+        return (
+            jsonify(
+                {
+                    "status": "ready" if core_ok else "degraded",
+                    "profile": backend_profile,
+                    "active_env": getattr(services.metadata_manager, "active_env", None),
+                }
+            ),
+            status_code,
+        )
 
     @app.route("/health/deep")
     def health_deep():

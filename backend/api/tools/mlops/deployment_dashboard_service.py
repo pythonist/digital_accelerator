@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from api.tools.mlops.path_utils import resolve_mlops_data_dir
+from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 
 import numpy as np
 import pandas as pd
@@ -94,6 +95,17 @@ def _reason_code(score: float, threshold: float) -> str:
     if gap > 0.10:
         return "Below threshold — insufficient signal to escalate"
     return "Borderline — suppressed under current threshold setting"
+
+
+def _trapezoid_area(y_values: List[float], x_values: List[float]) -> float:
+    """NumPy-version-safe trapezoid integration."""
+    trapezoid_fn = getattr(np, "trapezoid", None)
+    if callable(trapezoid_fn):
+        return float(trapezoid_fn(y_values, x_values))
+    trapz_fn = getattr(np, "trapz", None)
+    if callable(trapz_fn):
+        return float(trapz_fn(y_values, x_values))
+    return 0.0
 
 
 class DeploymentDashboardService:
@@ -175,6 +187,70 @@ class DeploymentDashboardService:
                 pass
         return value
 
+    @staticmethod
+    def _detect_label_leakage_features(feature_columns: List[str]) -> List[str]:
+        suspicious: List[str] = []
+        exact_matches = {
+            "label",
+            "labels",
+            "actual_label",
+            "final_label",
+            "is_true_pos",
+            "target",
+            "target_label",
+            "str_label",
+            "ground_truth",
+        }
+        token_pattern = re.compile(r"(?:^|_)(label|target|truth)(?:$|_)")
+
+        for feat in feature_columns or []:
+            feat_s = str(feat or "").strip()
+            feat_l = feat_s.lower()
+            if not feat_s:
+                continue
+            if feat_l in exact_matches or token_pattern.search(feat_l):
+                suspicious.append(feat_s)
+        return sorted(set(suspicious))
+
+    def _preview_rows(
+        self,
+        df: pd.DataFrame,
+        preferred_columns: List[str],
+        *,
+        limit: int = 25,
+    ) -> Dict[str, Any]:
+        if df is None or df.empty:
+            return {"row_count": 0, "columns": [], "rows": []}
+
+        selected: List[str] = []
+        seen = set()
+        for col in preferred_columns or []:
+            col_s = str(col)
+            if col_s in df.columns and col_s not in seen:
+                selected.append(col_s)
+                seen.add(col_s)
+
+        if not selected:
+            selected = [str(c) for c in list(df.columns)[:10]]
+        elif len(selected) < 10:
+            for col in df.columns:
+                col_s = str(col)
+                if col_s in seen:
+                    continue
+                selected.append(col_s)
+                seen.add(col_s)
+                if len(selected) >= 10:
+                    break
+
+        records: List[Dict[str, Any]] = []
+        for raw in df.loc[:, selected].head(int(max(limit, 1))).to_dict(orient="records"):
+            records.append({str(k): self._json_safe(v) for k, v in raw.items()})
+        return {
+            "row_count": int(len(df)),
+            "columns": selected,
+            "rows": records,
+        }
+
     def _build_scored_batch_records(
         self,
         *,
@@ -220,6 +296,8 @@ class DeploymentDashboardService:
         persisted: Dict[str, Any],
         scored_records: List[Dict[str, Any]],
         feature_coverage: Optional[Dict[str, Any]] = None,
+        pipeline_id: Optional[str] = None,
+        pipeline_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         batch_dir = self._scored_batches_dir() / str(batch_id)
         batch_dir.mkdir(parents=True, exist_ok=True)
@@ -229,6 +307,8 @@ class DeploymentDashboardService:
             "deployment_id": str(deployment_id),
             "model_grain": str(model_grain),
             "threshold": float(threshold),
+            "pipeline_id": str(pipeline_id) if pipeline_id not in (None, "") else None,
+            "pipeline_name": str(pipeline_name) if pipeline_name not in (None, "") else None,
             "scored_at": persisted.get("scored_at"),
             "created_at": datetime.utcnow().isoformat() + "Z",
             "total": int(persisted.get("total") or 0),
@@ -255,8 +335,7 @@ class DeploymentDashboardService:
             raise FileNotFoundError(
                 f"No model artifact for run_id={run_id} in {self.model_dir}"
             )
-        with open(candidates[0], "rb") as f:
-            return pickle.load(f)
+        return load_pickle_compat(candidates[0])
 
     @staticmethod
     def _normalize_grain(value: Any) -> str:
@@ -480,6 +559,75 @@ class DeploymentDashboardService:
         stats["matched_feature_ratio"] = round(float(matched_total / max(len(feature_columns), 1)), 4)
         stats["feature_count"] = int(len(feature_columns))
         return out, stats
+
+    @staticmethod
+    def _normalize_scores(values: np.ndarray, floor: Optional[float] = None, ceiling: Optional[float] = None) -> np.ndarray:
+        arr = np.asarray(values, dtype=float).reshape(-1)
+        if arr.size == 0:
+            return arr
+        lo = float(np.min(arr) if floor is None else floor)
+        hi = float(np.max(arr) if ceiling is None else ceiling)
+        if not np.isfinite(lo):
+            lo = float(np.min(arr))
+        if not np.isfinite(hi):
+            hi = float(np.max(arr))
+        if hi <= lo:
+            return np.zeros(arr.shape[0], dtype=float)
+        out = (arr - lo) / (hi - lo)
+        return np.clip(out.astype(float), 0.0, 1.0)
+
+    def _prepare_model_input(
+        self,
+        bundle: Dict[str, Any],
+        X: pd.DataFrame,
+    ) -> Tuple[pd.DataFrame, np.ndarray]:
+        feature_columns = [str(col) for col in (bundle.get("feature_columns") or list(X.columns))]
+        X_df = X.loc[:, feature_columns].copy() if feature_columns else X.copy()
+        scaler = bundle.get("scaler")
+        if scaler is None:
+            return X_df, X_df.values.astype(float)
+        scaled = scaler.transform(X_df.values.astype(float))
+        scaled_df = pd.DataFrame(scaled, columns=feature_columns or list(X_df.columns), index=X_df.index)
+        return scaled_df, np.asarray(scaled, dtype=float)
+
+    def _predict_scores(
+        self,
+        bundle: Dict[str, Any],
+        X: pd.DataFrame,
+    ) -> np.ndarray:
+        model = bundle["model"]
+        algorithm = str(bundle.get("algorithm") or "").strip().lower()
+        X_model_df, X_model_arr = self._prepare_model_input(bundle, X)
+
+        if hasattr(model, "predict_proba"):
+            prob = np.asarray(model.predict_proba(X_model_df), dtype=float)
+            if prob.ndim == 1:
+                return self._normalize_scores(prob)
+            if prob.shape[1] >= 2:
+                return np.clip(prob[:, 1].astype(float), 0.0, 1.0)
+            return self._normalize_scores(prob[:, 0])
+
+        if hasattr(model, "decision_function"):
+            logits = np.asarray(model.decision_function(X_model_df), dtype=float).reshape(-1)
+            return 1.0 / (1.0 + np.exp(-logits))
+
+        if algorithm == "tabular_autoencoder" and hasattr(model, "predict"):
+            recon = np.asarray(model.predict(X_model_df), dtype=float)
+            if recon.ndim == 1:
+                recon = recon.reshape(-1, 1)
+            errors = np.mean(np.square(recon - X_model_arr), axis=1)
+            calibration = bundle.get("score_calibration") or {}
+            lower = calibration.get("reconstruction_error_min")
+            upper = calibration.get("reconstruction_error_max")
+            return self._normalize_scores(errors, lower, upper)
+
+        if hasattr(model, "predict"):
+            pred = np.asarray(model.predict(X_model_df), dtype=float).reshape(-1)
+            if pred.size and set(np.unique(np.round(pred, 6)).tolist()).issubset({0.0, 1.0}):
+                return np.clip(pred, 0.0, 1.0)
+            return self._normalize_scores(pred)
+
+        raise ValueError("Model artifact does not expose a supported scoring interface.")
 
     def _persist_scored_rows(
         self,
@@ -768,12 +916,12 @@ class DeploymentDashboardService:
         roc_points = sorted(roc_points, key=lambda r: (r["fpr"], r["tpr"]))
         pr_points = sorted(pr_points, key=lambda r: r["recall"])
         if len(roc_points) > 1:
-            roc_auc = float(np.trapz([p["tpr"] for p in roc_points], [p["fpr"] for p in roc_points]))
+            roc_auc = _trapezoid_area([p["tpr"] for p in roc_points], [p["fpr"] for p in roc_points])
             roc_auc = max(0.0, min(1.0, roc_auc))
         else:
             roc_auc = self._pairwise_auc(y_true, y_score)
         if len(pr_points) > 1:
-            pr_auc = float(np.trapz([p["precision"] for p in pr_points], [p["recall"] for p in pr_points]))
+            pr_auc = _trapezoid_area([p["precision"] for p in pr_points], [p["recall"] for p in pr_points])
             pr_auc = max(0.0, min(1.0, pr_auc))
         else:
             pr_auc = None
@@ -1153,7 +1301,7 @@ class DeploymentDashboardService:
         )
 
         master = alerts_df.merge(
-            cases_df[["ALERT_ID", "CASE_ID", "PRIORITY", "CASE_STATUS", "RESOLUTION_DAYS", "INVESTIGATOR_ID"]],
+            cases_df[["ALERT_ID", "CASE_ID", "PRIORITY", "CASE_STATUS", "RESOLUTION_DAYS", "INVESTIGATOR_ID", "CASE_OPEN_DATE"]],
             on="ALERT_ID",
             how="left",
         )
@@ -1214,6 +1362,189 @@ class DeploymentDashboardService:
 
         master = master.merge(txn_agg, on="ACCOUNT_ID", how="left")
 
+        master["CASE_OPEN_DATE"] = pd.to_datetime(master.get("CASE_OPEN_DATE"), errors="coerce")
+        master["OPEN_DATE"] = master["CASE_OPEN_DATE"].copy()
+
+        master["CASE_ID"] = master.get("CASE_ID", pd.Series(index=master.index, dtype="object")).astype("object")
+        master["CASE_STATUS"] = master.get("CASE_STATUS", pd.Series(index=master.index, dtype="object")).astype("object")
+        master["PRIORITY"] = master.get("PRIORITY", pd.Series(index=master.index, dtype="object")).astype("object")
+        master["INVESTIGATOR_ID"] = master.get("INVESTIGATOR_ID", pd.Series(index=master.index, dtype="object")).astype("object")
+
+        next_case_num = int(len(cases_df) + 1)
+
+        def _priority_from_risk(score: Any) -> str:
+            try:
+                score_f = float(score)
+            except Exception:
+                score_f = 0.0
+            if score_f >= 82:
+                return "HIGH"
+            if score_f >= 62:
+                return "MEDIUM"
+            return "LOW"
+
+        def _assign_case_rows(indices: List[int], statuses_to_apply: List[str]) -> None:
+            nonlocal next_case_num
+            if not indices:
+                return
+            for idx, status in zip(indices, statuses_to_apply):
+                case_id_val = str(master.at[idx, "CASE_ID"] or "").strip()
+                if not case_id_val or case_id_val.lower() == "nan":
+                    case_id_val = f"CASE{next_case_num:07d}"
+                    next_case_num += 1
+                    master.at[idx, "CASE_ID"] = case_id_val
+                master.at[idx, "CASE_STATUS"] = str(status)
+                master.at[idx, "PRIORITY"] = _priority_from_risk(master.at[idx, "RISK_SCORE"])
+                investigator_val = master.at[idx, "INVESTIGATOR_ID"]
+                if pd.isna(investigator_val) or not str(investigator_val).strip():
+                    investigator_val = rng.choice(["INV_01", "INV_02", "INV_03", "INV_04", "AUTO_SYS"])
+                master.at[idx, "INVESTIGATOR_ID"] = str(investigator_val)
+                resolution_val = master.at[idx, "RESOLUTION_DAYS"]
+                if pd.isna(resolution_val):
+                    resolution_val = int(rng.integers(2, 45))
+                master.at[idx, "RESOLUTION_DAYS"] = int(resolution_val)
+                open_date = pd.to_datetime(master.at[idx, "CASE_OPEN_DATE"], errors="coerce")
+                if pd.isna(open_date):
+                    open_date = pd.to_datetime(master.at[idx, "ALERT_DATE"], errors="coerce")
+                master.at[idx, "CASE_OPEN_DATE"] = open_date
+                master.at[idx, "OPEN_DATE"] = open_date
+
+        case_status_upper = master["CASE_STATUS"].astype(str).str.strip().str.upper()
+        positive_mask = case_status_upper.isin(["CLOSED_SAR_FILED", "SAR_FILED", "SAR FILED", "TRUE_POSITIVE"])
+        negative_mask = case_status_upper.isin(["CLOSED_FALSE_POSITIVE", "FALSE_POSITIVE", "CLOSED_MONITORING", "MONITORING"])
+
+        target_positive = max(6, int(round(len(master) * 0.10)))
+        target_negative = max(12, int(round(len(master) * 0.18)))
+        target_labelled = max(target_positive + target_negative, int(round(len(master) * 0.35)))
+
+        if int(positive_mask.sum()) < target_positive:
+            positive_candidates = (
+                master.assign(_risk_rank=pd.to_numeric(master["RISK_SCORE"], errors="coerce").fillna(0.0))
+                .loc[~positive_mask]
+                .sort_values("_risk_rank", ascending=False)
+                .index
+                .tolist()
+            )
+            needed = max(target_positive - int(positive_mask.sum()), 0)
+            _assign_case_rows(positive_candidates[:needed], ["CLOSED_SAR_FILED"] * needed)
+
+        case_status_upper = master["CASE_STATUS"].astype(str).str.strip().str.upper()
+        positive_mask = case_status_upper.isin(["CLOSED_SAR_FILED", "SAR_FILED", "SAR FILED", "TRUE_POSITIVE"])
+        negative_mask = case_status_upper.isin(["CLOSED_FALSE_POSITIVE", "FALSE_POSITIVE", "CLOSED_MONITORING", "MONITORING"])
+
+        if int(negative_mask.sum()) < target_negative:
+            negative_candidates = (
+                master.assign(_risk_rank=pd.to_numeric(master["RISK_SCORE"], errors="coerce").fillna(0.0))
+                .loc[~positive_mask & ~negative_mask]
+                .sort_values("_risk_rank", ascending=True)
+                .index
+                .tolist()
+            )
+            needed = max(target_negative - int(negative_mask.sum()), 0)
+            neg_statuses = [
+                "CLOSED_FALSE_POSITIVE" if i % 3 else "CLOSED_MONITORING"
+                for i in range(needed)
+            ]
+            _assign_case_rows(negative_candidates[:needed], neg_statuses)
+
+        case_status_upper = master["CASE_STATUS"].astype(str).str.strip().str.upper()
+        labelled_mask = case_status_upper.isin(
+            ["CLOSED_SAR_FILED", "SAR_FILED", "SAR FILED", "TRUE_POSITIVE", "CLOSED_FALSE_POSITIVE", "FALSE_POSITIVE", "CLOSED_MONITORING", "MONITORING"]
+        )
+        if int(labelled_mask.sum()) < target_labelled:
+            remaining_needed = max(target_labelled - int(labelled_mask.sum()), 0)
+            additional_candidates = (
+                master.assign(_risk_rank=pd.to_numeric(master["RISK_SCORE"], errors="coerce").fillna(0.0))
+                .loc[~labelled_mask]
+                .sort_values("_risk_rank", ascending=False)
+                .index
+                .tolist()
+            )
+            additional_statuses = [
+                "CLOSED_SAR_FILED" if i % 5 == 0 else ("CLOSED_MONITORING" if i % 2 == 0 else "CLOSED_FALSE_POSITIVE")
+                for i in range(remaining_needed)
+            ]
+            _assign_case_rows(additional_candidates[:remaining_needed], additional_statuses)
+
+        alert_date_series = pd.to_datetime(master["ALERT_DATE"], errors="coerce")
+        account_alert_counts = master.groupby("ACCOUNT_ID")["ALERT_ID"].transform("count").fillna(0).astype(int)
+        customer_linked_accounts = master.groupby("CUSTOMER_ID")["ACCOUNT_ID"].transform("nunique").fillna(1).astype(int)
+        customer_case_counts = master["CASE_ID"].astype(str).str.strip().replace({"nan": ""})
+        customer_case_counts = customer_case_counts.ne("").groupby(master["CUSTOMER_ID"]).transform("sum").fillna(0).astype(int)
+        account_type_upper = master["ACCOUNT_TYPE"].astype(str).str.upper()
+        nationality_upper = master["NATIONALITY"].astype(str).str.upper()
+        onboarding_upper = master["ONBOARDING_CHANNEL"].astype(str).str.upper()
+        risk_score_num = pd.to_numeric(master["RISK_SCORE"], errors="coerce").fillna(0.0)
+        customer_risk_num = pd.to_numeric(master["CUSTOMER_RISK_RATING"], errors="coerce").fillna(0.0)
+        current_balance_num = pd.to_numeric(master["CURRENT_BALANCE"], errors="coerce").fillna(0.0)
+        total_volume_num = pd.to_numeric(master["total_txn_volume"], errors="coerce").fillna(0.0)
+        kyc_days_num = pd.to_numeric(master["DAYS_SINCE_KYC"], errors="coerce").fillna(0.0)
+        kyc_pct_num = pd.to_numeric(master["KYC_COMPLETENESS_PCT"], errors="coerce").fillna(0.0)
+        is_shell = account_type_upper.eq("SHELL") | master["OCCUPATION"].astype(str).str.upper().eq("SHELL_CO")
+        is_high_risk_nat = nationality_upper.isin(high_risk_countries)
+
+        master["ACCT_ALERT_COUNT"] = account_alert_counts
+        master["ALERT_HOUR"] = alert_date_series.dt.hour.fillna(0).astype(int)
+        master["ALERT_IS_WEEKEND"] = alert_date_series.dt.dayofweek.fillna(0).astype(int).isin([5, 6]).astype(int)
+        master["ANALYST_RISK_SCORE"] = np.clip(
+            (risk_score_num * 0.52)
+            + (customer_risk_num * 4.0)
+            + (master["PEP_FLAG"].astype(float) * 10.0)
+            + (master["SANCTION_HIT"].astype(float) * 18.0)
+            + (master["ADVERSE_MEDIA_FLAG"].astype(float) * 7.0)
+            + rng.normal(0.0, 4.0, size=len(master)),
+            5.0,
+            99.0,
+        ).round(1)
+        master["DOCS_REQUESTED"] = ((risk_score_num >= 78) | (master["PEP_FLAG"] == 1) | (master["SANCTION_HIT"] == 1)).astype(int)
+        master["CUSTOMER_CONTACTED"] = ((master["DOCS_REQUESTED"] == 1) | (risk_score_num >= 72)).astype(int)
+        master["EDD_TRIGGERED"] = ((risk_score_num >= 82) | is_high_risk_nat | is_shell).astype(int)
+        master["LINKED_CASES_COUNT"] = customer_case_counts
+        master["EXPECTED_MONTHLY_TXN"] = np.clip((total_volume_num / 24.0) + rng.normal(0.0, 3500.0, size=len(master)), 500.0, None).round(2)
+        master["ACCOUNT_RISK_RATING"] = np.clip(
+            np.round(
+                (customer_risk_num * 0.75)
+                + np.where(account_type_upper.isin(["SHELL", "TRUST"]), 2.0, 0.0)
+                + np.where(master["ACCOUNT_STATUS"].astype(str).str.upper().eq("DORMANT"), 1.0, 0.0)
+            ),
+            1,
+            10,
+        ).astype(int)
+        master["NUM_LINKED_ACCOUNTS"] = customer_linked_accounts
+        master["DEBIT_CARD_ISSUED"] = account_type_upper.isin(["SAVINGS", "CURRENT", "SALARY", "NRO"]).astype(int)
+        master["INTERNET_BANKING"] = onboarding_upper.isin(["WEB", "MOBILE"]).astype(int)
+        master["YEARS_AS_CUSTOMER"] = np.clip((kyc_days_num / 365.0) + rng.normal(1.4, 0.45, size=len(master)), 0.25, 25.0).round(1)
+        master["NUM_PRODUCTS_HELD"] = np.clip(customer_linked_accounts + rng.integers(0, 3, size=len(master)), 1, 8).astype(int)
+        master["FATF_HIGH_RISK_NATIONALITY"] = is_high_risk_nat.astype(int)
+        master["KYC_REVIEW_OVERDUE"] = ((kyc_days_num > 365) | (kyc_pct_num < 70.0)).astype(int)
+        master["LAST_TRANSACTION_DAYS_AGO"] = np.clip(
+            (pd.Timestamp(datetime.utcnow()) - alert_date_series).dt.days.fillna(0),
+            0,
+            None,
+        ).astype(int)
+        master["CORRESPONDENT_BANK_FLAG"] = (
+            master["TXN_TYPE"].astype(str).str.upper().eq("SWIFT") & master["BENEFICIARY_COUNTRY"].astype(str).str.upper().isin(high_risk_countries)
+        ).astype(int)
+        master["SHELL_CO_INDICATOR"] = is_shell.astype(int)
+
+        cdd_tier = np.where(
+            (master["EDD_TRIGGERED"] == 1) | (master["KYC_REVIEW_OVERDUE"] == 1),
+            "ENHANCED",
+            np.where((customer_risk_num <= 3) & (master["PEP_FLAG"].astype(float) == 0) & (master["SANCTION_HIT"].astype(float) == 0), "SIMPLIFIED", "STANDARD"),
+        )
+        master["CDD_TIER"] = cdd_tier
+        master["CDD_TIER_ENHANCED"] = (master["CDD_TIER"] == "ENHANCED").astype(int)
+        master["CDD_TIER_SIMPLIFIED"] = (master["CDD_TIER"] == "SIMPLIFIED").astype(int)
+        master["CDD_TIER_STANDARD"] = (master["CDD_TIER"] == "STANDARD").astype(int)
+
+        for date_col in ("CASE_OPEN_DATE", "OPEN_DATE"):
+            date_series = pd.to_datetime(master[date_col], errors="coerce")
+            master[f"{date_col}_year"] = date_series.dt.year.fillna(0).astype(int)
+            master[f"{date_col}_month"] = date_series.dt.month.fillna(0).astype(int)
+            master[f"{date_col}_day"] = date_series.dt.day.fillna(0).astype(int)
+            master[f"{date_col}_dow"] = date_series.dt.dayofweek.fillna(0).astype(int)
+            master[f"{date_col}_hour"] = date_series.dt.hour.fillna(0).astype(int)
+
         numeric_fill = [
             "RISK_SCORE",
             "TXN_AMOUNT",
@@ -1234,6 +1565,39 @@ class DeploymentDashboardService:
             "swift_txn_count",
             "pct_high_risk_dest",
             "velocity_ratio",
+            "ACCT_ALERT_COUNT",
+            "ALERT_HOUR",
+            "ALERT_IS_WEEKEND",
+            "ANALYST_RISK_SCORE",
+            "DOCS_REQUESTED",
+            "CUSTOMER_CONTACTED",
+            "EDD_TRIGGERED",
+            "LINKED_CASES_COUNT",
+            "EXPECTED_MONTHLY_TXN",
+            "ACCOUNT_RISK_RATING",
+            "NUM_LINKED_ACCOUNTS",
+            "DEBIT_CARD_ISSUED",
+            "INTERNET_BANKING",
+            "YEARS_AS_CUSTOMER",
+            "NUM_PRODUCTS_HELD",
+            "FATF_HIGH_RISK_NATIONALITY",
+            "KYC_REVIEW_OVERDUE",
+            "LAST_TRANSACTION_DAYS_AGO",
+            "CORRESPONDENT_BANK_FLAG",
+            "SHELL_CO_INDICATOR",
+            "CDD_TIER_ENHANCED",
+            "CDD_TIER_SIMPLIFIED",
+            "CDD_TIER_STANDARD",
+            "CASE_OPEN_DATE_year",
+            "CASE_OPEN_DATE_month",
+            "CASE_OPEN_DATE_day",
+            "CASE_OPEN_DATE_dow",
+            "CASE_OPEN_DATE_hour",
+            "OPEN_DATE_year",
+            "OPEN_DATE_month",
+            "OPEN_DATE_day",
+            "OPEN_DATE_dow",
+            "OPEN_DATE_hour",
         ]
         for col in numeric_fill:
             if col in master.columns:
@@ -1285,7 +1649,7 @@ class DeploymentDashboardService:
             "accounts": int(len(accounts_df)),
             "transactions": int(len(transactions_df)),
             "alerts": int(len(alerts_df)),
-            "cases": int(len(cases_df)),
+            "cases": int(master["CASE_ID"].fillna("").astype(str).str.strip().replace({"nan": ""}).ne("").sum()),
             "master_rows": n_total,
         }
         return {
@@ -1542,7 +1906,7 @@ class DeploymentDashboardService:
         X, coverage = self._build_feature_matrix(df, feature_columns)
         X_arr = X.values.astype(float)
 
-        score = float(model.predict_proba(X_arr)[:, 1][0])
+        score = float(self._predict_scores(bundle, X)[0])
         decision = "escalated" if score >= float(threshold) else "suppressed"
 
         proxy = self._top_features(model, feature_columns, X_arr[0], n=max(top_n, 5))
@@ -1626,7 +1990,7 @@ class DeploymentDashboardService:
         X, coverage = self._build_feature_matrix(df, feature_columns)
         X_arr = X.values.astype(float)
 
-        scores = model.predict_proba(X_arr)[:, 1]
+        scores = self._predict_scores(bundle, X)
         decisions = ["escalated" if float(s) >= float(threshold) else "suppressed" for s in scores]
 
         persisted = self._persist_scored_rows(
@@ -1690,6 +2054,8 @@ class DeploymentDashboardService:
         auto_optimize_threshold: Optional[bool] = None,
         max_event_loss_pct: float = 5.0,
         persist_to_ledger: bool = False,
+        pipeline_id: Optional[str] = None,
+        pipeline_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Simulate production-style scoring on unseen / out-of-time data.
@@ -1766,6 +2132,7 @@ class DeploymentDashboardService:
         feature_columns: List[str] = bundle.get("feature_columns", [])
         if not feature_columns:
             raise ValueError("Model bundle missing feature_columns")
+        leakage_features = self._detect_label_leakage_features(feature_columns)
 
         # Enforce scoring scope by model grain.
         if model_grain == "case":
@@ -1802,8 +2169,13 @@ class DeploymentDashboardService:
 
         X_main, coverage = self._build_feature_matrix(batch_df, feature_columns)
         X_main_arr = X_main.values.astype(float)
-        scores = model.predict_proba(X_main_arr)[:, 1]
+        scores = self._predict_scores(bundle, X_main)
         entity_types, entity_ids = self._infer_entity_ids(batch_df, default_entity_type=model_grain)
+        score_min = float(np.min(scores)) if len(scores) else 0.0
+        score_max = float(np.max(scores)) if len(scores) else 0.0
+        score_std = float(np.std(scores)) if len(scores) else 0.0
+        unique_score_count = int(np.unique(np.round(scores, 8)).size) if len(scores) else 0
+        constant_scores = bool(unique_score_count <= 1 or score_std <= 1e-9)
 
         label_col = next(
             (c for c in batch_df.columns if str(c).strip().lower() in {"is_true_pos", "actual_label", "label"}),
@@ -1812,6 +2184,7 @@ class DeploymentDashboardService:
         threshold_requested = float(threshold)
         threshold_applied = float(threshold)
         threshold_optimization: Optional[Dict[str, Any]] = None
+        threshold_optimization_skipped_reason: Optional[str] = None
 
         if label_col is not None:
             actual_labels: List[Optional[int]] = []
@@ -1828,15 +2201,20 @@ class DeploymentDashboardService:
             label_basis = "case_outcome_labels"
 
             if optimize_threshold:
-                threshold_optimization = self._optimize_threshold_with_event_loss_cap(
-                    scores=scores,
-                    labels=actual_labels,
-                    max_event_loss_pct=float(max_event_loss_pct),
-                )
-                if threshold_optimization:
-                    threshold_applied = float(
-                        threshold_optimization.get("recommended_threshold", threshold_requested)
+                if leakage_features:
+                    threshold_optimization_skipped_reason = "label_leakage_features_present"
+                elif constant_scores:
+                    threshold_optimization_skipped_reason = "constant_scores_on_unseen_batch"
+                else:
+                    threshold_optimization = self._optimize_threshold_with_event_loss_cap(
+                        scores=scores,
+                        labels=actual_labels,
+                        max_event_loss_pct=float(max_event_loss_pct),
                     )
+                    if threshold_optimization:
+                        threshold_applied = float(
+                            threshold_optimization.get("recommended_threshold", threshold_requested)
+                        )
         else:
             threshold_applied = float(threshold_requested)
             decisions = [
@@ -1880,6 +2258,7 @@ class DeploymentDashboardService:
                 "threshold_auto_optimized": bool(
                     threshold_optimization is not None and optimize_threshold
                 ),
+                "threshold_optimization_skipped_reason": threshold_optimization_skipped_reason,
                 "model_grain": model_grain,
                 "mode": sim_mode,
                 "persisted_to_ledger": bool(persist_to_ledger),
@@ -1943,6 +2322,63 @@ class DeploymentDashboardService:
             }
 
         suppression_rate = persisted["suppression_rate"]
+        reason_codes = [str(row.get("reason_code") or "") for row in persisted["ledger_rows"]]
+
+        health_flags: List[str] = []
+        health_messages: List[str] = []
+        matched_ratio = float(coverage.get("matched_feature_ratio") or 0.0)
+        positive_rows = int(label_eval.get("positive_rows", 0))
+        if leakage_features:
+            health_flags.append("label_leakage_features_present")
+            health_messages.append(
+                "The selected model depends on label-like features that are not trustworthy at prediction time."
+            )
+        if constant_scores:
+            health_flags.append("constant_scores_on_unseen_batch")
+            health_messages.append(
+                "The model returned the same score for the entire unseen batch, so threshold optimization and downstream triage are not meaningful."
+            )
+        if matched_ratio < 0.75:
+            health_flags.append("low_feature_coverage")
+            health_messages.append(
+                f"Only {matched_ratio * 100:.1f}% of expected model features were matched from the unseen batch."
+            )
+        if positive_rows < 5:
+            health_flags.append("limited_known_positive_labels")
+            health_messages.append(
+                "Only a small number of known positive outcomes were available in the unseen batch, so validation metrics may be noisy."
+            )
+        if int(persisted["escalated"]) == 0:
+            health_flags.append("no_retained_cases_for_sentinel")
+            health_messages.append(
+                "No alerts were retained for Sentinel in this run, so the downstream case-manager handoff is empty."
+            )
+        health_status = (
+            "error"
+            if any(flag in {"label_leakage_features_present", "constant_scores_on_unseen_batch"} for flag in health_flags)
+            else ("warning" if health_flags else "healthy")
+        )
+
+        if persist_to_ledger:
+            scored_records = self._build_scored_batch_records(
+                records=batch_df.to_dict(orient="records"),
+                persisted_rows=persisted["ledger_rows"],
+                run_id=run_id,
+                deployment_id=deployment_id,
+                feature_coverage=coverage,
+            )
+            self._persist_scored_batch_package(
+                batch_id=str(persisted["batch_id"]),
+                run_id=run_id,
+                deployment_id=deployment_id,
+                model_grain=model_grain,
+                threshold=float(threshold_applied),
+                persisted=persisted,
+                scored_records=scored_records,
+                feature_coverage=coverage,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+            )
 
         alert_total = sum(1 for t in entity_types if t == "alert")
         case_total = sum(1 for t in entity_types if t == "case")
@@ -1978,7 +2414,7 @@ class DeploymentDashboardService:
                 if not cmp_features:
                     raise ValueError("model bundle missing feature_columns")
                 X_cmp, _ = self._build_feature_matrix(batch_df, cmp_features)
-                cmp_scores = cmp_model.predict_proba(X_cmp.values.astype(float))[:, 1]
+                cmp_scores = self._predict_scores(cmp_bundle, X_cmp)
                 cmp_decisions = [
                     "escalated" if float(s) >= float(threshold_applied) else "suppressed"
                     for s in cmp_scores
@@ -2022,6 +2458,114 @@ class DeploymentDashboardService:
                     "scored_at": row["scored_at"],
                 }
             )
+
+        scored_preview_df = batch_df.copy()
+        scored_preview_df["model_score"] = [round(float(s), 6) for s in scores]
+        scored_preview_df["decision"] = decisions
+        scored_preview_df["threshold"] = float(threshold_applied)
+        scored_preview_df["actual_label"] = [None if v is None else int(v) for v in actual_labels]
+        scored_preview_df["reason_code"] = reason_codes
+        scored_preview_df["queue_target"] = np.where(
+            scored_preview_df["decision"].astype(str).str.lower().eq("escalated"),
+            "sentinel_case_manager",
+            "suppressed_in_fcc",
+        )
+        master_data_preview = self._preview_rows(
+            batch_df,
+            [
+                "entity_id",
+                "CUSTOMER_ID",
+                "ACCOUNT_ID",
+                "ALERT_ID",
+                "CASE_ID",
+                "RULE_TRIGGERED",
+                "RISK_SCORE",
+                "TXN_AMOUNT",
+                "BENEFICIARY_COUNTRY",
+                "CHANNEL",
+                "CASE_STATUS",
+                "IS_TRUE_POS",
+            ],
+            limit=30,
+        )
+        prepared_feature_columns = [col for col in feature_columns if col in X_main.columns][:10]
+        prepared_preview_df = pd.concat(
+            [
+                batch_df[[col for col in ["entity_id", "alert_id", "case_id"] if col in batch_df.columns]].reset_index(drop=True),
+                X_main.loc[:, prepared_feature_columns].reset_index(drop=True),
+            ],
+            axis=1,
+        )
+        prepared_feature_preview = self._preview_rows(
+            prepared_preview_df,
+            list(prepared_preview_df.columns),
+            limit=30,
+        )
+        unseen_input_preview = self._preview_rows(
+            batch_df,
+            [
+                "entity_id",
+                "alert_id",
+                "case_id",
+                "RULE_TRIGGERED",
+                "RISK_SCORE",
+                "TXN_AMOUNT",
+                "BENEFICIARY_COUNTRY",
+                "CHANNEL",
+                "CASE_STATUS",
+                "IS_TRUE_POS",
+            ],
+            limit=30,
+        )
+        prediction_output_preview = self._preview_rows(
+            scored_preview_df,
+            [
+                "entity_id",
+                "alert_id",
+                "case_id",
+                "RISK_SCORE",
+                "TXN_AMOUNT",
+                "CASE_STATUS",
+                "actual_label",
+                "model_score",
+                "threshold",
+                "decision",
+                "reason_code",
+                "queue_target",
+            ],
+            limit=40,
+        )
+        retained_queue_preview = self._preview_rows(
+            scored_preview_df.loc[scored_preview_df["decision"].astype(str).str.lower().eq("escalated")].reset_index(drop=True),
+            [
+                "entity_id",
+                "alert_id",
+                "case_id",
+                "RISK_SCORE",
+                "TXN_AMOUNT",
+                "model_score",
+                "threshold",
+                "decision",
+                "reason_code",
+                "queue_target",
+            ],
+            limit=30,
+        )
+        suppressed_queue_preview = self._preview_rows(
+            scored_preview_df.loc[scored_preview_df["decision"].astype(str).str.lower().eq("suppressed")].reset_index(drop=True),
+            [
+                "entity_id",
+                "alert_id",
+                "case_id",
+                "RISK_SCORE",
+                "TXN_AMOUNT",
+                "model_score",
+                "threshold",
+                "decision",
+                "reason_code",
+            ],
+            limit=30,
+        )
 
         flow_stream: List[Dict[str, Any]] = []
         stream_chunk = int(max(80, min(500, len(scores) // 8 if len(scores) > 0 else 80)))
@@ -2184,6 +2728,8 @@ class DeploymentDashboardService:
             "model_grain": model_grain,
             "scenario": scenario_name,
             "seed": sim_seed,
+            "pipeline_id": str(pipeline_id) if pipeline_id not in (None, "") else None,
+            "pipeline_name": str(pipeline_name) if pipeline_name not in (None, "") else None,
             "persisted_to_ledger": bool(persist_to_ledger),
             "source": {
                 "dataset": source_name,
@@ -2197,6 +2743,7 @@ class DeploymentDashboardService:
                 "feature_coverage": coverage,
             },
             "scoring": {
+                "batch_id": str(persisted["batch_id"]),
                 "run_id": run_id,
                 "threshold": float(threshold_applied),
                 "threshold_requested": float(threshold_requested),
@@ -2219,11 +2766,17 @@ class DeploymentDashboardService:
                 "oot_recall": oot_validation.get("recall"),
                 "oot_f1": oot_validation.get("f1"),
                 "avg_score": round(float(np.mean(scores)) if len(scores) else 0.0, 6),
+                "score_min": round(float(score_min), 6),
+                "score_max": round(float(score_max), 6),
+                "score_std": round(float(score_std), 6),
+                "unique_score_count": int(unique_score_count),
                 "alert_total": int(alert_total),
                 "case_total": int(case_total),
                 "alert_suppressed": int(alert_suppressed),
                 "case_suppressed": int(case_suppressed),
                 "persisted_to_ledger": bool(persist_to_ledger),
+                "quality_flags": health_flags,
+                "leakage_features": leakage_features,
             },
             "label_summary": label_summary,
             "oot_validation": oot_validation,
@@ -2233,6 +2786,27 @@ class DeploymentDashboardService:
             "flow_stream": flow_stream,
             "investigator_queue": investigator_queue[:150],
             "ledger_preview": persisted["ledger_rows"][:60],
+            "simulation_health": {
+                "status": health_status,
+                "flags": health_flags,
+                "messages": health_messages,
+                "leakage_features": leakage_features,
+                "matched_feature_ratio": matched_ratio,
+                "score_min": round(float(score_min), 6),
+                "score_max": round(float(score_max), 6),
+                "score_std": round(float(score_std), 6),
+                "unique_score_count": int(unique_score_count),
+                "retained_rows": int(persisted["escalated"]),
+                "suppressed_rows": int(persisted["suppressed"]),
+            },
+            "preview_tables": {
+                "master_data": master_data_preview,
+                "prepared_features": prepared_feature_preview,
+                "unseen_input": unseen_input_preview,
+                "prediction_output": prediction_output_preview,
+                "retained_queue": retained_queue_preview,
+                "suppressed_queue": suppressed_queue_preview,
+            },
             "pipeline_stages": stage_rows,
         }
 

@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppContext } from "@context/AppContext";
 import apiClient from "@services/api";
+import { mergeFccSentinelHandoff, readFccSentinelHandoff } from '../../../../utils/fccSentinelHandoff';
 
 // ✅ Import Layout Components
 // import PageContainer from "@investigation/components/PageContainer"; 
@@ -97,6 +98,7 @@ const CaseInvestigationScreen = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     risk: true,
     alerts: true,
@@ -107,10 +109,35 @@ const CaseInvestigationScreen = () => {
   const [showManual, setShowManual] = useState(false);
   
   const chatEndRef = useRef(null);
+  const workflowSessionRef = useRef(null);
   const displayCases = getFilteredCaseList();
+  const activeHandoff = readFccSentinelHandoff();
 
   useEffect(() => {
     if (!caseList || caseList.length === 0) loadCaseList();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    apiClient.getFccWorkflowSession()
+      .then((res) => {
+        const session = res?.session || null;
+        if (!active || !session) return;
+        workflowSessionRef.current = session;
+        const restoredCaseId = String(
+          session?.selected_case_id
+          || session?.current_state?.selected_case_id
+          || session?.handoff_summary?.selected_case_id
+          || ''
+        ).trim();
+        if (restoredCaseId) {
+          setSelectedCaseId((prev) => prev || restoredCaseId);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   const getCaseId = (c) => c.case_id || c.caseid || c.Case_ID || c.id;
@@ -120,6 +147,38 @@ const CaseInvestigationScreen = () => {
     setLoading(true);
     setMessages([]);
     setFacts(null);
+    mergeFccSentinelHandoff({
+      selected_case_id: id,
+      preferred_screen: 'investigate',
+    });
+
+    apiClient.saveFccWorkflowSession({
+      session_id: workflowSessionRef.current?.session_id || activeHandoff?.workflow_session_id || undefined,
+      pipeline_id: activeHandoff?.pipeline_id || undefined,
+      pipeline_name: activeHandoff?.pipeline_name || undefined,
+      run_id: activeHandoff?.run_id || undefined,
+      deployment_id: activeHandoff?.deployment_id || undefined,
+      publish_id: activeHandoff?.publish_id || undefined,
+      current_module: 'investigation',
+      current_step: 'investigate',
+      current_state: {
+        preferred_screen: 'investigate',
+        selected_case_id: id,
+      },
+      selected_case_id: id,
+      handoff_summary: activeHandoff || undefined,
+      mark_current_stable: true,
+      status: 'sentinel_ready',
+    }).then((res) => {
+      workflowSessionRef.current = res?.session || workflowSessionRef.current;
+      if (res?.session?.session_id) {
+        mergeFccSentinelHandoff({
+          workflow_session_id: res.session.session_id,
+          selected_case_id: id,
+          preferred_screen: 'investigate',
+        });
+      }
+    }).catch(() => {});
     
     try {
       const res = await apiClient.get(`/api/v2/case/${id}/facts`);
@@ -181,6 +240,53 @@ const CaseInvestigationScreen = () => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  const handleExportReport = async () => {
+    setExportingReport(true);
+    try {
+      const handoff = readFccSentinelHandoff();
+      const blob = await apiClient.post(
+        '/api/v2/case-report/handoff/pdf',
+        {
+          handoff: handoff || {},
+          audience: 'technical',
+          strict_min_pages: true,
+        },
+        { responseType: 'blob' },
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${String(handoff?.pipeline_name || selectedCaseId || 'sentinel_handoff').replace(/[^a-zA-Z0-9_-]+/g, '_')}_sentinel_report.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        role: 'error',
+        content: `Report export failed: ${err.message}`,
+        timestamp: new Date()
+      }]);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!displayCases || displayCases.length === 0) return;
+    const selectedStillVisible = displayCases.some((item) => getCaseId(item) === selectedCaseId);
+    if (selectedCaseId && selectedStillVisible) return;
+    const restoredCaseId = String(
+      workflowSessionRef.current?.selected_case_id
+      || workflowSessionRef.current?.current_state?.selected_case_id
+      || activeHandoff?.selected_case_id
+      || ''
+    ).trim();
+    const preferredVisibleCase = restoredCaseId
+      ? displayCases.find((item) => getCaseId(item) === restoredCaseId)
+      : null;
+    const nextCaseId = getCaseId(preferredVisibleCase || displayCases[0]);
+    if (nextCaseId) handleCaseSelect(nextCaseId);
+  }, [displayCases, selectedCaseId]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -234,10 +340,11 @@ const CaseInvestigationScreen = () => {
                       disableElevation 
                       color="primary" 
                       startIcon={<FileTextIcon />}
-                      disabled={!facts}
+                      disabled={exportingReport || !facts}
+                      onClick={handleExportReport}
                       sx={{ fontWeight: '600' }}
                       >
-                      Export Report
+                      {exportingReport ? 'Preparing Report...' : 'Export Report'}
                       </Button>
                   </Stack>
                   }
@@ -296,7 +403,9 @@ const CaseInvestigationScreen = () => {
                   }}
                 >
                   <Typography variant="caption" fontWeight="bold" color="primary.main" display="block">
-                    {caseScope.value}
+                    {activeHandoff?.pipeline_name
+                      ? `FCC retained queue from ${activeHandoff.pipeline_name}`
+                      : 'Scoped FCC/Sentinel case queue'}
                   </Typography>
                   <Typography variant="caption" color="primary.dark">
                     {caseScope.caseCount} cases in scope

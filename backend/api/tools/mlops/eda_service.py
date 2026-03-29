@@ -22,6 +22,7 @@ Covers:
 from __future__ import annotations
 
 import math
+import re
 import warnings
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ AML_TIMESTAMP_PATTERNS = [
 FEATURE_SELECTION_FILTER_TECHNIQUES = [
     {"id": "leakage_name_scan", "label": "Leakage Name Scan", "family": "Leakage", "scope": "filter", "roles": ["all"], "description": "Flags columns whose names indicate post-event or outcome leakage."},
     {"id": "leakage_target_corr", "label": "Leakage Target Correlation", "family": "Leakage", "scope": "filter", "roles": ["numeric", "binary"], "description": "Flags near-perfect numeric correlations against the target."},
+    {"id": "vif_multicollinearity", "label": "Variance Inflation Factor", "family": "Multicollinearity", "scope": "filter", "roles": ["numeric", "binary"], "description": "Flags columns that are overly explained by other predictors."},
     {"id": "variance_threshold", "label": "Variance Threshold", "family": "Unsupervised", "scope": "filter", "roles": ["numeric", "binary"], "description": "Removes near-constant numeric columns."},
     {"id": "mean_abs_deviation", "label": "Mean Absolute Deviation", "family": "Unsupervised", "scope": "filter", "roles": ["numeric", "binary"], "description": "Finds low-spread columns even when variance is small."},
     {"id": "dispersion_ratio", "label": "Dispersion Ratio", "family": "Unsupervised", "scope": "filter", "roles": ["numeric", "binary"], "description": "Checks whether values move enough relative to their magnitude."},
@@ -86,6 +88,81 @@ LEAKAGE_NAME_KEYWORDS = [
     "sar", "str", "suspicious", "fraud", "investigation", "case_status",
     "resolution", "filed", "outcome", "label", "true_pos", "final_label",
 ]
+
+DIRECT_LEAKAGE_PATTERNS = {
+    "label",
+    "target",
+    "final_label",
+    "case_label",
+    "str_label",
+    "sar_label",
+    "is_true_pos",
+    "tp_from_str",
+    "true_positive",
+    "ground_truth",
+    "actual_label",
+}
+
+TARGET_PROXY_PATTERNS = {
+    "prior_sar_rate",
+    "prior_str_rate",
+    "sar_rate",
+    "str_rate",
+    "case_outcome",
+    "case_disposition",
+    "outcome_flag",
+}
+
+POST_OUTCOME_PATTERNS = {
+    "case_status",
+    "resolution",
+    "resolution_days",
+    "closed_by",
+    "filed",
+    "investigation",
+    "review_outcome",
+    "analyst_risk_score",
+    "docs_requested",
+    "customer_contacted",
+    "edd_triggered",
+    "investigator",
+    "linked_cases_count",
+}
+
+FUTURE_INFORMATION_PATTERNS = {
+    "future",
+    "next_",
+    "post_",
+    "days_to",
+    "resolution_days",
+    "close_date",
+    "closed_date",
+    "filed_date",
+}
+
+FEATURE_FAMILY_PATTERNS = [
+    ("transaction_behavior", ("txn", "amount", "volume", "count", "velocity", "balance", "ratio")),
+    ("risk_controls", ("risk", "score", "profile", "flag", "pep", "sanction", "watchlist")),
+    ("customer_context", ("customer", "party", "counterparty", "account", "segment", "kyc")),
+    ("time_behavior", ("date", "time", "hour", "day", "month", "recency", "age")),
+    ("network_case_context", ("case", "link", "network", "rule", "alert")),
+]
+
+GOVERNANCE_DECISION_ORDER = {
+    "approved": 0,
+    "needs_review": 1,
+    "blocked_leakage": 2,
+    "blocked_post_outcome": 3,
+    "weak_redundant": 4,
+}
+
+GOVERNANCE_BUCKET_LABELS = {
+    "approved": "Approved Operational Features",
+    "needs_review": "Needs Review",
+    "blocked_leakage": "Leakage / Target Proxy Blocked",
+    "blocked_post_outcome": "Post-Outcome / Future Information Blocked",
+    "weak_redundant": "Redundant / Weak Features",
+}
 
 HIGH_CARDINALITY_THRESHOLD = 0.95   # > 95% unique → likely ID column
 LOW_CARDINALITY_THRESHOLD  = 50     # ≤ 50 unique values → categorical
@@ -245,6 +322,95 @@ def _prepare_categorical_series(series: pd.Series, max_categories: int = 25) -> 
         return cleaned
     top_values = set(cleaned.value_counts().head(max_categories - 1).index.tolist())
     return cleaned.where(cleaned.isin(top_values), "__OTHER__")
+
+
+def _normalize_feature_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+
+
+def _feature_family(name: str) -> str:
+    normalized = _normalize_feature_token(name)
+    for family, tokens in FEATURE_FAMILY_PATTERNS:
+        if any(token in normalized for token in tokens):
+            return family
+    return "general_context"
+
+
+def _timing_classification(name: str) -> tuple[str, list[str]]:
+    normalized = _normalize_feature_token(name)
+    flags: list[str] = []
+
+    if normalized in DIRECT_LEAKAGE_PATTERNS or any(pattern in normalized for pattern in DIRECT_LEAKAGE_PATTERNS):
+        flags.append("direct_target_leakage")
+        return "direct_target_proxy", flags
+
+    if normalized in TARGET_PROXY_PATTERNS or any(pattern in normalized for pattern in TARGET_PROXY_PATTERNS):
+        flags.append("target_proxy_risk")
+        return "target_proxy_history", flags
+
+    if normalized in POST_OUTCOME_PATTERNS or any(pattern in normalized for pattern in POST_OUTCOME_PATTERNS):
+        flags.append("post_outcome")
+        if "analyst" in normalized or "investigator" in normalized or "contacted" in normalized or "requested" in normalized:
+            flags.append("analyst_action")
+        return "post_investigation", flags
+
+    if any(pattern in normalized for pattern in FUTURE_INFORMATION_PATTERNS):
+        flags.append("future_information")
+        return "future_information", flags
+
+    return "decision_time_assumed", flags
+
+
+def _vif_rows(
+    df: pd.DataFrame,
+    columns: list[str],
+    max_features: int = 40,
+) -> list[dict[str, Any]]:
+    numeric_cols: list[str] = []
+    for col in columns:
+        if col not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        if int(numeric.notna().sum()) < 25:
+            continue
+        if float(numeric.var()) <= 1e-12:
+            continue
+        numeric_cols.append(col)
+
+    if len(numeric_cols) < 2:
+        return []
+
+    selected_cols = numeric_cols[:max_features]
+    frame = df[selected_cols].apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    frame = frame.fillna(frame.median(numeric_only=True)).fillna(0.0)
+    values = frame.to_numpy(dtype=float)
+    if values.ndim != 2 or values.shape[1] < 2:
+        return []
+
+    means = np.nanmean(values, axis=0)
+    stds = np.nanstd(values, axis=0)
+    stds = np.where(stds <= 1e-12, 1.0, stds)
+    scaled = (values - means) / stds
+    corr = np.corrcoef(scaled, rowvar=False)
+    if np.ndim(corr) != 2:
+        return []
+    corr = np.nan_to_num(corr, nan=0.0, posinf=0.0, neginf=0.0)
+    np.fill_diagonal(corr, 1.0)
+    inv_corr = np.linalg.pinv(corr)
+    diag = np.diag(inv_corr)
+
+    rows: list[dict[str, Any]] = []
+    for idx, col in enumerate(selected_cols):
+        vif_value = _safe_float(diag[idx], 6)
+        if vif_value is None:
+            continue
+        rows.append({
+            "feature": col,
+            "score": float(vif_value),
+            "reason": f"Variance inflation factor {float(vif_value):.2f}",
+        })
+    rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
+    return rows
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1585,6 +1751,49 @@ class EDAService:
             "message": "Pairwise Pearson correlation filter.",
         }
 
+        vif_scored_rows = _vif_rows(
+            df,
+            [
+                item["name"]
+                for item in numeric_inventory
+                if item.get("name") in feature_columns
+            ],
+            max_features=min(max(len(numeric_inventory), 2), 40),
+        )
+        vif_threshold = 5.0
+        vif_warning_threshold = 10.0
+        vif_rows = []
+        for row in vif_scored_rows:
+            meta = inventory_lookup.get(str(row.get("feature") or ""), {})
+            score = float(row.get("score") or 0.0)
+            if score < vif_threshold:
+                continue
+            vif_rows.append({
+                "feature": row.get("feature"),
+                "score": score,
+                "role": meta.get("role"),
+                "dtype": meta.get("dtype"),
+                "missing_pct": meta.get("missing_pct"),
+                "sample_values": meta.get("sample_values", []),
+                "risk_level": "critical" if score >= vif_warning_threshold else "high",
+                "reason": (
+                    f"VIF {score:.2f} suggests severe multicollinearity"
+                    if score >= vif_warning_threshold
+                    else f"VIF {score:.2f} suggests multicollinearity review"
+                ),
+            })
+        technique_results["vif_multicollinearity"] = {
+            "technique_id": "vif_multicollinearity",
+            "scope": "filter",
+            "rows": vif_rows,
+            "scored_rows": vif_scored_rows,
+            "selected_count": len(vif_rows),
+            "suggested_drop": [row["feature"] for row in vif_rows],
+            "threshold": vif_threshold,
+            "warning_threshold": vif_warning_threshold,
+            "message": "Variance inflation factor scan for multicollinearity.",
+        }
+
         score_feature_rows = target_result.get("features", []) if target_result else []
         for tech in FEATURE_SELECTION_SCORE_TECHNIQUES:
             tech_id = tech["id"]
@@ -1638,6 +1847,268 @@ class EDAService:
         elif FEATURE_SELECTION_LIBRARY:
             default_technique_id = str(FEATURE_SELECTION_LIBRARY[0]["id"])
 
+        leakage_name_set = {str(row.get("feature")) for row in leak_name_rows if row.get("feature")}
+        leakage_target_set = {str(row.get("feature")) for row in leak_corr_rows if row.get("feature")}
+        low_variance_set = {str(row.get("feature")) for row in variance_rows if row.get("feature")}
+        low_mad_set = {str(row.get("feature")) for row in mad_rows if row.get("feature")}
+        low_dispersion_set = {str(row.get("feature")) for row in dispersion_rows if row.get("feature")}
+        redundancy_set = {str(row.get("feature")) for row in corr_rows if row.get("feature")}
+        redundancy_partners = {
+            str(row.get("feature")): list(row.get("partners") or [])
+            for row in corr_rows
+            if row.get("feature")
+        }
+        vif_map = {
+            str(row.get("feature")): float(row.get("score") or 0.0)
+            for row in vif_scored_rows
+            if row.get("feature")
+        }
+
+        ranked_scores = [feature_signal(column) for column in feature_columns if feature_signal(column) >= 0]
+        min_score = min(ranked_scores) if ranked_scores else 0.0
+        max_score = max(ranked_scores) if ranked_scores else 0.0
+        score_range = max_score - min_score
+
+        governance_profiles: list[dict[str, Any]] = []
+        decision_buckets = {key: [] for key in GOVERNANCE_BUCKET_LABELS}
+        approved_feature_set: list[dict[str, Any]] = []
+        excluded_feature_set: list[dict[str, Any]] = []
+
+        for item in inventory:
+            feature = str(item.get("name") or "")
+            if not feature or item.get("is_id"):
+                continue
+
+            normalized = _normalize_feature_token(feature)
+            timing_class, timing_flags = _timing_classification(feature)
+            raw_score = feature_signal(feature) if target_result else None
+            score_norm = None
+            if raw_score is not None and raw_score >= 0:
+                score_norm = 1.0 if score_range <= 0 else max(0.0, min(1.0, (raw_score - min_score) / score_range))
+            feature_meta = feature_lookup.get(feature, {})
+            primary_rank = int(feature_meta.get("rank") or 0) if feature_meta else 0
+            missing_pct = float(item.get("missing_pct") or 0.0)
+            vif_value = float(vif_map.get(feature) or 0.0)
+            direct_leakage = normalized in DIRECT_LEAKAGE_PATTERNS or "direct_target_leakage" in timing_flags
+            target_proxy = normalized in TARGET_PROXY_PATTERNS or "target_proxy_risk" in timing_flags
+            leakage_flag = feature in leakage_name_set or feature in leakage_target_set
+            post_outcome = timing_class == "post_investigation"
+            future_info = timing_class == "future_information"
+            analyst_action = "analyst_action" in timing_flags
+            not_available = timing_class != "decision_time_assumed"
+            low_variance = feature in low_variance_set or feature in low_mad_set or feature in low_dispersion_set
+            redundant = feature in redundancy_set
+            weak_signal = bool(target_result) and score_norm is not None and score_norm < 0.18
+            strong_signal = bool(target_result) and (
+                (score_norm is not None and score_norm >= 0.58)
+                or (primary_rank > 0 and primary_rank <= max(int(top_n or 20), 10))
+            )
+
+            issue_flags: list[str] = []
+            if direct_leakage:
+                issue_flags.append("Direct target leakage")
+            if target_proxy:
+                issue_flags.append("Target proxy risk")
+            if post_outcome:
+                issue_flags.append("Post-outcome field")
+            if future_info:
+                issue_flags.append("Future information")
+            if analyst_action:
+                issue_flags.append("Analyst action / investigation step")
+            if redundant:
+                issue_flags.append("Redundant with another feature")
+            if vif_value >= vif_threshold:
+                issue_flags.append(f"High VIF ({vif_value:.2f})")
+            if low_variance:
+                issue_flags.append("Low variation")
+            if missing_pct >= 0.35:
+                issue_flags.append("High missingness")
+            if weak_signal:
+                issue_flags.append("Weak supervised signal")
+
+            if direct_leakage or (target_proxy and leakage_flag):
+                decision_key = "blocked_leakage"
+                reason = "This field is too close to the answer or derived from the target outcome."
+            elif post_outcome or future_info or analyst_action or target_proxy:
+                decision_key = "blocked_post_outcome"
+                reason = "This field is not reliably available at alert-decision time or depends on later investigation activity."
+            elif redundant or low_variance or weak_signal or missing_pct >= 0.35 or vif_value >= vif_warning_threshold:
+                decision_key = "weak_redundant"
+                if redundant or vif_value >= vif_threshold:
+                    reason = "This field overlaps heavily with other features and is a weak governance choice for training."
+                else:
+                    reason = "This field looks weak or unstable in the current sample and is excluded by default."
+            elif strong_signal or not target_result:
+                decision_key = "approved"
+                reason = "This field looks operationally safe and useful enough to flow into model training."
+            else:
+                decision_key = "needs_review"
+                reason = "This field is not clearly unsafe, but it still needs a human review before approval."
+
+            partner_list = redundancy_partners.get(feature) or []
+            partner_text = ", ".join(
+                f"{str(partner.get('feature') or '')} ({float(partner.get('correlation') or 0.0):.2f})"
+                for partner in partner_list[:3]
+                if partner.get("feature")
+            )
+            family = _feature_family(feature)
+            evidence = []
+            if target_result:
+                if raw_score is not None and raw_score >= 0:
+                    evidence.append(f"Primary supervised score = {raw_score:.6f}")
+                else:
+                    evidence.append("No supervised score is available for this field in the current target setup.")
+            else:
+                evidence.append("Target column is not set yet, so supervised usefulness cannot be estimated.")
+            if issue_flags:
+                evidence.extend(issue_flags[:4])
+            if partner_text:
+                evidence.append(f"Most similar retained features: {partner_text}")
+            if missing_pct > 0:
+                evidence.append(f"Missingness = {missing_pct * 100:.1f}%")
+
+            business_explanation = reason
+            if decision_key == "approved":
+                business_explanation = (
+                    "Safe to use at alert time and helpful for separating low-value reviews from riskier cases."
+                )
+            elif decision_key == "needs_review":
+                business_explanation = (
+                    "Potentially useful, but the team should confirm it is available at decision time and not unfairly close to the answer."
+                )
+            elif decision_key == "blocked_leakage":
+                business_explanation = (
+                    "Too close to the answer. Using it would make the model look unrealistically strong and untrustworthy in production."
+                )
+            elif decision_key == "blocked_post_outcome":
+                business_explanation = (
+                    "Known only after investigation or later in the workflow, so it is not fair to use when deciding which alerts to suppress."
+                )
+            elif decision_key == "weak_redundant":
+                business_explanation = (
+                    "Does not add enough stable value on top of other fields, so it is excluded from the governed feature set."
+                )
+
+            technical_explanation = "; ".join(evidence) if evidence else reason
+            profile = {
+                "feature": feature,
+                "normalized_name": normalized,
+                "role": item.get("role"),
+                "dtype": item.get("dtype"),
+                "feature_family": family,
+                "decision": decision_key,
+                "decision_label": GOVERNANCE_BUCKET_LABELS[decision_key],
+                "decision_reason": reason,
+                "selected_for_training": decision_key == "approved",
+                "needs_override_for_training": decision_key != "approved",
+                "available_at_decision_time": not not_available,
+                "timing_classification": timing_class,
+                "missing_pct": missing_pct,
+                "distinct_count": int(item.get("distinct_count") or 0),
+                "sample_values": item.get("sample_values", []),
+                "top_categories": item.get("top_categories", []),
+                "primary_score": _safe_float(raw_score, 6) if raw_score is not None and raw_score >= 0 else None,
+                "score_norm": _safe_float(score_norm, 6) if score_norm is not None else None,
+                "rank_position": primary_rank or None,
+                "information_gain": feature_meta.get("information_gain"),
+                "information_value": feature_meta.get("information_value"),
+                "iv_strength": feature_meta.get("iv_strength"),
+                "vif": _safe_float(vif_value, 6) if vif_value else None,
+                "max_partner_correlation": _safe_float(max((float(p.get("correlation") or 0.0) for p in partner_list), default=0.0), 6) if partner_list else None,
+                "firewall_flags": sorted(set(issue_flags + timing_flags)),
+                "direct_target_leakage": direct_leakage,
+                "target_proxy_risk": target_proxy or leakage_flag,
+                "post_outcome_risk": post_outcome,
+                "future_information_risk": future_info,
+                "analyst_action_risk": analyst_action,
+                "redundant_risk": redundant,
+                "weak_signal_risk": weak_signal,
+                "low_variance_risk": low_variance,
+                "business_explanation": business_explanation,
+                "technical_explanation": technical_explanation,
+                "evidence": evidence,
+            }
+            governance_profiles.append(profile)
+            decision_buckets[decision_key].append(profile)
+            if decision_key == "approved":
+                approved_feature_set.append({
+                    "feature": feature,
+                    "feature_family": family,
+                    "approval_reason": reason,
+                })
+            else:
+                excluded_feature_set.append({
+                    "feature": feature,
+                    "feature_family": family,
+                    "exclusion_reason": reason,
+                    "decision": decision_key,
+                })
+
+        governance_profiles.sort(
+            key=lambda item: (
+                GOVERNANCE_DECISION_ORDER.get(str(item.get("decision") or ""), 99),
+                -float(item.get("score_norm") or 0.0),
+                float(item.get("missing_pct") or 0.0),
+                str(item.get("feature") or ""),
+            )
+        )
+
+        firewall_checks = [
+            {
+                "id": "direct_target_leakage",
+                "label": "Direct target leakage",
+                "count": sum(1 for item in governance_profiles if item.get("direct_target_leakage")),
+                "examples": [item.get("feature") for item in governance_profiles if item.get("direct_target_leakage")][:6],
+                "description": "Fields that directly encode the label or the answer.",
+            },
+            {
+                "id": "target_proxy_risk",
+                "label": "Target proxy risk",
+                "count": sum(1 for item in governance_profiles if item.get("target_proxy_risk")),
+                "examples": [item.get("feature") for item in governance_profiles if item.get("target_proxy_risk")][:6],
+                "description": "Outcome-linked history or proxy logic such as prior SAR / STR rates.",
+            },
+            {
+                "id": "post_outcome_risk",
+                "label": "Post-investigation fields",
+                "count": sum(1 for item in governance_profiles if item.get("post_outcome_risk")),
+                "examples": [item.get("feature") for item in governance_profiles if item.get("post_outcome_risk")][:6],
+                "description": "Fields that are only known after analysts or investigators act.",
+            },
+            {
+                "id": "future_information_risk",
+                "label": "Future information",
+                "count": sum(1 for item in governance_profiles if item.get("future_information_risk")),
+                "examples": [item.get("feature") for item in governance_profiles if item.get("future_information_risk")][:6],
+                "description": "Fields that describe what happened later, not at decision time.",
+            },
+            {
+                "id": "analyst_action_risk",
+                "label": "Analyst action dependence",
+                "count": sum(1 for item in governance_profiles if item.get("analyst_action_risk")),
+                "examples": [item.get("feature") for item in governance_profiles if item.get("analyst_action_risk")][:6],
+                "description": "Fields such as analyst risk score, docs requested, customer contacted, or EDD triggered.",
+            },
+            {
+                "id": "multicollinearity_risk",
+                "label": "Multicollinearity / redundancy",
+                "count": sum(1 for item in governance_profiles if item.get("redundant_risk") or (float(item.get("vif") or 0.0) >= vif_threshold)),
+                "examples": [item.get("feature") for item in governance_profiles if item.get("redundant_risk") or (float(item.get("vif") or 0.0) >= vif_threshold)][:6],
+                "description": "Columns that repeat one another and can distort stability or interpretation.",
+            },
+        ]
+
+        business_summary = (
+            f"{len(approved_feature_set)} features are approved for training. "
+            f"{len(decision_buckets['blocked_leakage']) + len(decision_buckets['blocked_post_outcome'])} fields are blocked because they are too close to the answer or only known later. "
+            f"{len(decision_buckets['needs_review'])} fields still need review, and {len(decision_buckets['weak_redundant'])} are excluded as weak or redundant."
+        )
+        technical_summary = (
+            "Governance combines leakage name scans, target-correlation checks, timing availability rules, "
+            f"variance filters, correlation filters, and VIF>{vif_threshold:.1f} multicollinearity screening. "
+            "High predictive power alone does not approve a feature."
+        )
+
         return {
             "target_column": target_col,
             "rows_analyzed": int(len(df)),
@@ -1654,9 +2125,41 @@ class EDAService:
                 "mad_threshold": effective_mad_threshold,
                 "dispersion_threshold": effective_dispersion_threshold,
                 "corr_threshold": float(corr_threshold),
+                "vif_threshold": float(vif_threshold),
+                "vif_warning_threshold": float(vif_warning_threshold),
                 "top_n": int(top_n or 20),
             },
             "ranked_feature_count": len(score_feature_rows),
+            "governance_profiles": governance_profiles,
+            "governance_summary": {
+                "business_summary": business_summary,
+                "technical_summary": technical_summary,
+                "counts": {
+                    "total_features": len(governance_profiles),
+                    "approved": len(decision_buckets["approved"]),
+                    "needs_review": len(decision_buckets["needs_review"]),
+                    "blocked_leakage": len(decision_buckets["blocked_leakage"]),
+                    "blocked_post_outcome": len(decision_buckets["blocked_post_outcome"]),
+                    "weak_redundant": len(decision_buckets["weak_redundant"]),
+                },
+            },
+            "decision_buckets": {
+                key: {
+                    "label": GOVERNANCE_BUCKET_LABELS[key],
+                    "count": len(value),
+                    "features": [item.get("feature") for item in value],
+                }
+                for key, value in decision_buckets.items()
+            },
+            "firewall": {
+                "checks": firewall_checks,
+                "blocked_count": len(decision_buckets["blocked_leakage"]) + len(decision_buckets["blocked_post_outcome"]),
+                "review_count": len(decision_buckets["needs_review"]),
+            },
+            "approved_feature_set": approved_feature_set,
+            "excluded_feature_set": excluded_feature_set,
+            "default_training_columns": [item["feature"] for item in approved_feature_set],
+            "default_excluded_columns": [item["feature"] for item in excluded_feature_set],
         }
 
     def _compute_iv(self, x: pd.Series, y: pd.Series, bins: int | None, is_cat: bool) -> tuple[float, list]:

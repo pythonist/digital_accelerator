@@ -8,9 +8,11 @@ import {
   Dashboard,
   Description,
   Explore,
+  FactCheck,
   History,
   Hub,
   Inbox,
+  Link,
   MenuBook,
   Psychology,
   Search,
@@ -39,6 +41,13 @@ export const getInvestigationNavigationSections = (hasData = false) => ([
     ],
   },
   {
+    key: 'FCC_BRIDGE',
+    label: 'FCC Bridge',
+    items: [
+      { id: 'fcc_bridge', label: 'Published Runs', icon: Link },
+    ],
+  },
+  {
     key: 'PRIORITY_QUEUE',
     label: 'Priority Queue',
     items: [
@@ -52,7 +61,7 @@ export const getInvestigationNavigationSections = (hasData = false) => ([
       { id: 'casepack', label: 'Case Packs', icon: Description, disabled: !hasData },
       { id: 'investigate', label: 'Copilot Investigation', icon: Search, disabled: !hasData },
       { id: 'tree', label: 'Lineage Explorer', icon: AccountTree, disabled: !hasData },
-      { id: 'compare', label: 'Compare', icon: ContentCopy, disabled: !hasData },
+      { id: 'retrieval_compare', label: 'Case Retrieval', icon: ContentCopy, disabled: !hasData },
       { id: 'chat', label: 'AI Assistant', icon: Chat },
     ],
   },
@@ -60,11 +69,22 @@ export const getInvestigationNavigationSections = (hasData = false) => ([
     key: 'ANALYSIS',
     label: 'Analysis',
     items: [
-      { id: 'graph', label: 'Graph Analysis', icon: AccountTree, disabled: !hasData },
+      { id: 'graph', label: 'Network Intelligence', icon: AccountTree, disabled: !hasData },
       { id: 'rules', label: 'Rule Engine', icon: MenuBook, disabled: !hasData },
-      { id: 'typology', label: 'Typology', icon: Warning, disabled: !hasData },
+      { id: 'typology', label: 'Typology Intelligence', icon: Warning, disabled: !hasData },
       { id: 'baseline', label: 'Baseline', icon: TrendingUp, disabled: !hasData },
-      { id: 'vector', label: 'Vector Search', icon: Psychology, disabled: !hasData },
+    ],
+  },
+  {
+    key: 'RESOLUTION',
+    label: 'Resolution',
+    items: [
+      { id: 'resolution', label: 'Case Resolution', icon: FactCheck, disabled: !hasData },
+      { id: 'case_queue', label: 'Case Queue', icon: Inbox, disabled: !hasData },
+      { id: 'case_reports', label: 'Generate Report', icon: Description, disabled: !hasData },
+      { id: 'report_history', label: 'Report History', icon: History, disabled: !hasData },
+      { id: 'mail_config', label: 'Mail Configuration', icon: Settings, disabled: !hasData },
+      { id: 'escalation_history', label: 'Escalation History', icon: History, disabled: !hasData },
     ],
   },
   {
@@ -72,7 +92,7 @@ export const getInvestigationNavigationSections = (hasData = false) => ([
     label: 'System',
     items: [
       { id: 'audit', label: 'Audit Trail', icon: Security },
-      { id: 'env_manager', label: 'Environments', icon: Settings },
+      { id: 'settings', label: 'Settings', icon: Settings },
     ],
   },
 ]);

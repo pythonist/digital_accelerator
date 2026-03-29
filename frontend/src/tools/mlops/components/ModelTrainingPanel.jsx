@@ -37,6 +37,7 @@ import React, {
 } from 'react';
 import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Divider,
+  Dialog, DialogContent, DialogTitle,
   IconButton, LinearProgress, Paper, Slider, Stack,
   Tab, Tabs, TextField, Tooltip, Typography,
   ToggleButton, ToggleButtonGroup,
@@ -92,6 +93,9 @@ const T = {
   lowLight:    '#f9fafb',
   lowBorder:   '#e5e7eb',
 };
+const DEPLOY_THRESHOLD_MIN = 0.5;
+const DEPLOY_THRESHOLD_MAX = 0.6;
+const DEFAULT_BUSINESS_THRESHOLD = 0.5;
 
 // ── Enterprise Algorithm Palette ──────────────────────────────────────────────
 const ALGO_COLOURS = {
@@ -110,9 +114,15 @@ const ALGO_COLOURS = {
   soft_voting_ensemble:   { accent: T.orange, tag: 'Hybrid Ensemble'  },
   stacking_ensemble:      { accent: T.orange, tag: 'Stacked Ensemble' },
   kmeans:                 { accent: T.orange, tag: 'Clustering'       },
+  gaussian_mixture:       { accent: T.orange, tag: 'Soft Clusters'    },
+  agglomerative_clustering:{ accent: T.orange, tag: 'Hierarchy'       },
   dbscan:                 { accent: T.orange, tag: 'Density'          },
   isolation_forest:       { accent: T.orange, tag: 'Anomaly'          },
+  local_outlier_factor:   { accent: T.orange, tag: 'Neighbour Outlier'},
+  one_class_svm:          { accent: T.orange, tag: 'Boundary Anomaly' },
   mlp_classifier:         { accent: T.orange, tag: 'Neural Network'   },
+  deep_mlp_classifier:    { accent: T.orange, tag: 'Deep Network'     },
+  tabular_autoencoder:    { accent: T.orange, tag: 'Autoencoder'      },
 };
 
 // ── Algorithm internals metadata ──────────────────────────────────────────────
@@ -132,9 +142,15 @@ const ALGO_VIZ = {
   soft_voting_ensemble:   { vizType: 'feature_importance', vizLabel: 'Ensemble Importances', description: 'Weighted soft-vote across AML base models for robust suppression ranking.' },
   stacking_ensemble:      { vizType: 'feature_importance', vizLabel: 'Stacked Meta Model',   description: 'Meta learner combines multiple base model outputs for stronger ranking stability.' },
   kmeans:                 { vizType: 'projection',        vizLabel: 'Cluster Projection',    description: '2D projection of cluster membership and separation.' },
+  gaussian_mixture:       { vizType: 'projection',        vizLabel: 'Mixture Projection',    description: 'Soft cluster membership across behavior segments with overlap-aware boundaries.' },
+  agglomerative_clustering:{ vizType: 'projection',       vizLabel: 'Hierarchy Projection',  description: 'Bottom-up cluster structure projected into analyst-friendly segments.' },
   dbscan:                 { vizType: 'projection',        vizLabel: 'Density Map',           description: 'Highlights dense pockets and noise points in 2D space.' },
   isolation_forest:       { vizType: 'projection',        vizLabel: 'Anomaly Projection',    description: 'Shows anomaly scoring and extreme outlier pockets.' },
+  local_outlier_factor:   { vizType: 'projection',        vizLabel: 'Local Outlier Map',     description: 'Scores records by local neighborhood isolation and highlights sparse behavior.' },
+  one_class_svm:          { vizType: 'projection',        vizLabel: 'Boundary Anomaly Map',  description: 'Learns the normal frontier and shows which records fall outside it.' },
   mlp_classifier:         { vizType: 'learning_curve',    vizLabel: 'Training Curves',       description: 'Loss and validation traces for the neural network.' },
+  deep_mlp_classifier:    { vizType: 'learning_curve',    vizLabel: 'Deep Network Curves',   description: 'Three-layer neural training curves for nonlinear alert scoring.' },
+  tabular_autoencoder:    { vizType: 'learning_curve',    vizLabel: 'Reconstruction Curves', description: 'Autoencoder learning trace and reconstruction-error behavior for unseen anomaly capture.' },
 };
 
 // ── Algorithm Definitions ─────────────────────────────────────────────────────
@@ -395,6 +411,26 @@ const UNSUPERVISED_ALGORITHMS = [
     ],
   },
   {
+    id: 'gaussian_mixture', label: 'Gaussian Mixture', icon: Analytics,
+    bizDesc: 'Builds soft behavior segments when alert patterns overlap instead of falling into hard buckets.',
+    techDesc: 'Probabilistic mixture model with soft cluster membership and overlap-aware scoring.',
+    speed: 'Fast',
+    params: [
+      { key: 'n_components', label: 'Components', type: 'slider', min: 2, max: 12, step: 1, default: 4, tip: 'Number of latent behavioral groups to discover.' },
+      { key: 'covariance_type', label: 'Covariance', type: 'toggle', options: ['full', 'diag', 'tied'], default: 'full', tip: 'full captures richer cluster shape; diag is lighter and faster.' },
+    ],
+  },
+  {
+    id: 'agglomerative_clustering', label: 'Agglomerative Clustering', icon: AccountTree,
+    bizDesc: 'Creates investigator-friendly hierarchy from broad groups down to fine-grained typologies.',
+    techDesc: 'Bottom-up hierarchical clustering with centroid handoff for holdout scoring.',
+    speed: 'Medium',
+    params: [
+      { key: 'n_clusters', label: 'Clusters', type: 'slider', min: 2, max: 10, step: 1, default: 4, tip: 'Final number of hierarchy groups to expose in the workbench.' },
+      { key: 'linkage', label: 'Linkage', type: 'toggle', options: ['ward', 'average', 'complete'], default: 'ward', tip: 'ward favors compact clusters; complete favors separation.' },
+    ],
+  },
+  {
     id: 'dbscan', label: 'DBSCAN', icon: Hub,
     bizDesc: 'Finds dense clusters and isolates sparse unusual behavior as noise.',
     techDesc: 'Density-based clustering that marks sparse regions as outliers.',
@@ -414,6 +450,26 @@ const UNSUPERVISED_ALGORITHMS = [
       { key: 'contamination_pct', label: 'Expected Anomaly %', type: 'slider', min: 1, max: 20, step: 1, default: 5, tip: 'Expected share of anomalous records.' },
     ],
   },
+  {
+    id: 'local_outlier_factor', label: 'Local Outlier Factor', icon: AutoGraph,
+    bizDesc: 'Finds records that look abnormal only within their local peer group, which is useful for subtle AML outliers.',
+    techDesc: 'Neighborhood-density anomaly detector with novelty scoring for unseen holdout data.',
+    speed: 'Medium',
+    params: [
+      { key: 'n_neighbors', label: 'Neighbours', type: 'slider', min: 5, max: 60, step: 1, default: 20, tip: 'Defines the local peer group used to judge density anomalies.' },
+      { key: 'contamination_pct', label: 'Expected Anomaly %', type: 'slider', min: 1, max: 20, step: 1, default: 5, tip: 'Estimated portion of unusual records in the sample.' },
+    ],
+  },
+  {
+    id: 'one_class_svm', label: 'One-Class SVM', icon: ScatterPlot,
+    bizDesc: 'Learns the boundary of normal activity and flags rows that sit outside the learned frontier.',
+    techDesc: 'Kernel-based novelty detector useful when suspicious behavior is rare but structurally distinct.',
+    speed: 'Slow',
+    params: [
+      { key: 'nu', label: 'Expected Outlier Share', type: 'slider', min: 0.01, max: 0.3, step: 0.01, default: 0.08, tip: 'Upper bound on the fraction of outliers and lower bound on support vectors.' },
+      { key: 'kernel', label: 'Kernel', type: 'toggle', options: ['rbf', 'sigmoid'], default: 'rbf', tip: 'rbf is the default choice for nonlinear anomaly boundaries.' },
+    ],
+  },
 ];
 
 const DEEP_LEARNING_METHODS = [
@@ -426,6 +482,29 @@ const DEEP_LEARNING_METHODS = [
       { key: 'hidden_layer_1', label: 'Hidden Layer 1', type: 'slider', min: 16, max: 256, step: 16, default: 64, tip: 'Units in the first hidden layer.' },
       { key: 'hidden_layer_2', label: 'Hidden Layer 2', type: 'slider', min: 8, max: 128, step: 8, default: 32, tip: 'Units in the second hidden layer.' },
       { key: 'max_iter', label: 'Epochs', type: 'slider', min: 30, max: 250, step: 10, default: 120, tip: 'Maximum training epochs before early stop.' },
+    ],
+  },
+  {
+    id: 'deep_mlp_classifier', label: 'Deep MLP', icon: Layers,
+    bizDesc: 'A deeper tabular neural network for harder nonlinear relationships across customer, account, and alert features.',
+    techDesc: 'Three-hidden-layer feed-forward network with early stopping for richer feature interactions.',
+    speed: 'Medium',
+    params: [
+      { key: 'hidden_layer_1', label: 'Hidden Layer 1', type: 'slider', min: 32, max: 256, step: 16, default: 128, tip: 'Width of the first dense layer.' },
+      { key: 'hidden_layer_2', label: 'Hidden Layer 2', type: 'slider', min: 16, max: 192, step: 16, default: 64, tip: 'Width of the second dense layer.' },
+      { key: 'hidden_layer_3', label: 'Hidden Layer 3', type: 'slider', min: 8, max: 128, step: 8, default: 32, tip: 'Width of the third dense layer.' },
+      { key: 'max_iter', label: 'Epochs', type: 'slider', min: 40, max: 300, step: 10, default: 180, tip: 'Maximum number of training epochs before early stop.' },
+    ],
+  },
+  {
+    id: 'tabular_autoencoder', label: 'Tabular Autoencoder', icon: Hub,
+    bizDesc: 'Learns a compact latent view of normal behavior and highlights high-reconstruction-error records as unusual.',
+    techDesc: 'Encoder-decoder neural architecture for anomaly-style scoring on wide AML feature tables.',
+    speed: 'Medium',
+    params: [
+      { key: 'encoder_width', label: 'Encoder Width', type: 'slider', min: 32, max: 256, step: 16, default: 96, tip: 'Width of the encoder and decoder outer layers.' },
+      { key: 'latent_dim', label: 'Latent Dimension', type: 'slider', min: 4, max: 64, step: 4, default: 24, tip: 'Compressed latent representation size.' },
+      { key: 'max_iter', label: 'Epochs', type: 'slider', min: 40, max: 300, step: 10, default: 180, tip: 'Maximum reconstruction training epochs before early stop.' },
     ],
   },
 ];
@@ -443,6 +522,36 @@ const modeForAlgorithm = (algorithm) => {
 const resolveAlgorithmLabelStatic = (algoIdOrLabel) => {
   const algoId = String(algoIdOrLabel || '').trim();
   return TRAINING_LIBRARY.find((algo) => algo.id === algoId)?.label || algoIdOrLabel || 'Model';
+};
+
+const MODE_GUIDE = {
+  supervised: {
+    title: 'Supervised decisioning',
+    objective: 'Learn from historical investigator outcomes so FCC can suppress false positives while retaining real suspicious cases.',
+    output: 'You get workload reduction, event-loss controls, an explainability view, and a deployable scoring model.',
+    visual: 'Business users see model quality, threshold trade-off, and an interpretable decision path.',
+    bankValue: 'Reduces analyst effort while preserving suspicious-case capture under governance limits.',
+  },
+  unsupervised: {
+    title: 'Unsupervised discovery',
+    objective: 'Segment alerts into meaningful behavior groups and isolate unusual patterns when labels are incomplete or evolving.',
+    output: 'You get cluster maps, anomaly watchlists, and typology discovery for downstream investigation design.',
+    visual: 'Business users see cluster structure, density pockets, and unusual populations worth a new rule or case lens.',
+    bankValue: 'Helps uncover emerging AML behaviors before enough labelled outcomes exist for classic supervision.',
+  },
+  deep_learning: {
+    title: 'Deep learning scoring',
+    objective: 'Use neural architectures when the relationship across customer, account, transaction, and alert signals is too nonlinear for simpler models.',
+    output: 'You get neural training evidence, network topology, and stronger representation learning for difficult patterns.',
+    visual: 'Business users see the network shape, the learning curve, and how model quality stabilizes over training.',
+    bankValue: 'Improves detection on richer tabular signals while still fitting into the same governed FCC journey.',
+  },
+};
+
+const MODE_SHORTLIST = {
+  supervised: ['random_forest', 'xgboost', 'decision_tree', 'logistic_regression'],
+  unsupervised: ['kmeans', 'gaussian_mixture', 'isolation_forest', 'one_class_svm'],
+  deep_learning: ['mlp_classifier', 'deep_mlp_classifier', 'tabular_autoencoder'],
 };
 
 const DAG_STAGES = [
@@ -1446,6 +1555,288 @@ const MetricBox = ({ label, value, sub, emphasis = false }) => (
   </Paper>
 );
 
+const PreviewDataTable = ({ title, preview, tone = 'default' }) => {
+  const columns = preview?.columns || [];
+  const rows = preview?.rows || [];
+  const toneBg = tone === 'technical' ? '#f8fafc' : '#fffaf5';
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1.5, bgcolor: toneBg }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+          <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary }}>{title}</Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography sx={{ fontSize: 10.5, color: T.textDim }}>
+              {(preview?.row_count ?? 0).toLocaleString()} rows | {(preview?.column_count ?? 0).toLocaleString()} cols
+            </Typography>
+            {!!columns.length && (
+              <Button size="small" variant="text" startIcon={<VisibilityOutlined sx={{ fontSize: 14 }} />} onClick={() => setExpanded(true)} sx={{ textTransform: 'none', minWidth: 0, px: 0.5, color: T.orange }}>
+                Expand
+              </Button>
+            )}
+          </Stack>
+        </Stack>
+        {!columns.length ? (
+          <Typography sx={{ fontSize: 11.5, color: T.textDim }}>No preview available.</Typography>
+        ) : (
+          <Box
+            sx={{
+              overflowX: 'auto',
+              overflowY: 'auto',
+              maxHeight: 360,
+              border: `1px solid ${T.border}`,
+              borderRadius: 1.25,
+              bgcolor: 'white',
+              '&::-webkit-scrollbar': { height: 10, width: 10 },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: 999 },
+              '&::-webkit-scrollbar-track': { backgroundColor: '#f8fafc' },
+            }}
+          >
+            <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+              <thead>
+                <tr style={{ background: '#f8fafc' }}>
+                  {columns.map((column) => (
+                    <th key={column} style={{ position: 'sticky', top: 0, zIndex: 1, padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, borderBottom: `1px solid ${T.border}`, whiteSpace: 'nowrap', background: '#f8fafc' }}>
+                      {column}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={`${title}-${idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    {columns.map((column) => (
+                      <td key={`${title}-${idx}-${column}`} style={{ padding: '6px 8px', color: T.textPrimary, fontFamily: typeof row?.[column] === 'number' ? T.mono : 'inherit', whiteSpace: 'nowrap' }}>
+                        {row?.[column] == null ? '-' : String(row[column])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Box>
+        )}
+        {(preview?.truncated_rows || preview?.truncated_columns) && (
+          <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 1 }}>
+            The card preview is intentionally trimmed for readability. Use Expand to inspect the full preview slice returned to this screen.
+          </Typography>
+        )}
+      </Paper>
+      <Dialog open={expanded} onClose={() => setExpanded(false)} fullWidth maxWidth="xl">
+        <DialogTitle sx={{ pb: 1 }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between">
+            <Box>
+              <Typography sx={{ fontSize: 16, fontWeight: 800, color: T.textPrimary }}>{title}</Typography>
+              <Typography sx={{ fontSize: 11.5, color: T.textDim, mt: 0.35 }}>
+                {(preview?.row_count ?? 0).toLocaleString()} rows | {(preview?.column_count ?? 0).toLocaleString()} columns in the loaded preview payload
+              </Typography>
+            </Box>
+            <IconButton size="small" onClick={() => setExpanded(false)}><Close /></IconButton>
+          </Stack>
+        </DialogTitle>
+        <DialogContent sx={{ pt: 0 }}>
+          <Box
+            sx={{
+              overflowX: 'auto',
+              overflowY: 'auto',
+              maxHeight: '72vh',
+              border: `1px solid ${T.border}`,
+              borderRadius: 1.25,
+              bgcolor: 'white',
+              '&::-webkit-scrollbar': { height: 10, width: 10 },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: 999 },
+              '&::-webkit-scrollbar-track': { backgroundColor: '#f8fafc' },
+            }}
+          >
+            <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: '#f8fafc' }}>
+                  {columns.map((column) => (
+                    <th key={`${title}-expanded-${column}`} style={{ position: 'sticky', top: 0, zIndex: 1, padding: '8px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 700, color: T.textMuted, borderBottom: `1px solid ${T.border}`, whiteSpace: 'nowrap', background: '#f8fafc' }}>
+                      {column}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={`${title}-expanded-row-${idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    {columns.map((column) => (
+                      <td key={`${title}-expanded-${idx}-${column}`} style={{ padding: '8px 10px', color: T.textPrimary, fontFamily: typeof row?.[column] === 'number' ? T.mono : 'inherit', whiteSpace: 'nowrap' }}>
+                        {row?.[column] == null ? '-' : String(row[column])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Box>
+          {(preview?.truncated_rows || preview?.truncated_columns) && (
+            <Typography sx={{ fontSize: 11, color: T.textDim, mt: 1.25 }}>
+              This expanded view still reflects the preview payload returned to the check screen, not the full dataset file.
+            </Typography>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+};
+
+const FeatureInventoryTable = ({ title, items = [], maxRows = null, maxHeight = 360 }) => {
+  const shouldLimit = Number.isFinite(maxRows) && maxRows > 0;
+  const rows = shouldLimit ? items.slice(0, maxRows) : items;
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1.5 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+        <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary }}>{title}</Typography>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography sx={{ fontSize: 10.5, color: T.textDim }}>{items.length.toLocaleString()} columns</Typography>
+          {!!items.length && (
+            <Button size="small" variant="text" startIcon={<VisibilityOutlined sx={{ fontSize: 14 }} />} onClick={() => setExpanded(true)} sx={{ textTransform: 'none', minWidth: 0, px: 0.5, color: T.orange }}>
+              Expand
+            </Button>
+          )}
+        </Stack>
+      </Stack>
+      {!rows.length ? (
+        <Typography sx={{ fontSize: 11.5, color: T.textDim }}>None.</Typography>
+      ) : (
+        <Box
+          sx={{
+            overflowX: 'auto',
+            overflowY: 'auto',
+            maxHeight,
+            border: `1px solid ${T.border}`,
+            borderRadius: 1.25,
+            bgcolor: 'white',
+            '&::-webkit-scrollbar': { height: 10, width: 10 },
+            '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: 999 },
+            '&::-webkit-scrollbar-track': { backgroundColor: '#f8fafc' },
+          }}
+        >
+          <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['Column', 'Reason'].map((header) => (
+                  <th key={header} style={{ position: 'sticky', top: 0, zIndex: 1, padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, borderBottom: `1px solid ${T.border}`, background: '#f8fafc', whiteSpace: 'nowrap' }}>
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((item, idx) => (
+                <tr key={`${title}-${idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: '6px 8px', color: T.textPrimary, fontFamily: T.mono }}>{item?.column || '-'}</td>
+                  <td style={{ padding: '6px 8px', color: T.textMuted }}>{item?.reason || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Box>
+      )}
+      {shouldLimit && items.length > maxRows && <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 1 }}>Showing the first {maxRows} rows.</Typography>}
+      {!shouldLimit && items.length > 0 && <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 1 }}>Scroll to view the full column inventory.</Typography>}
+    </Paper>
+    <Dialog open={expanded} onClose={() => setExpanded(false)} fullWidth maxWidth="lg">
+      <DialogTitle sx={{ pb: 1 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between">
+          <Box>
+            <Typography sx={{ fontSize: 16, fontWeight: 800, color: T.textPrimary }}>{title}</Typography>
+            <Typography sx={{ fontSize: 11.5, color: T.textDim, mt: 0.35 }}>{items.length.toLocaleString()} columns</Typography>
+          </Box>
+          <IconButton size="small" onClick={() => setExpanded(false)}><Close /></IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent sx={{ pt: 0 }}>
+        <Box
+          sx={{
+            overflowX: 'auto',
+            overflowY: 'auto',
+            maxHeight: '72vh',
+            border: `1px solid ${T.border}`,
+            borderRadius: 1.25,
+            bgcolor: 'white',
+            '&::-webkit-scrollbar': { height: 10, width: 10 },
+            '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: 999 },
+            '&::-webkit-scrollbar-track': { backgroundColor: '#f8fafc' },
+          }}
+        >
+          <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['Column', 'Reason'].map((header) => (
+                  <th key={`${title}-expanded-${header}`} style={{ position: 'sticky', top: 0, zIndex: 1, padding: '8px 10px', textAlign: 'left', fontSize: 10.5, fontWeight: 700, color: T.textMuted, borderBottom: `1px solid ${T.border}`, background: '#f8fafc', whiteSpace: 'nowrap' }}>
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, idx) => (
+                <tr key={`${title}-expanded-row-${idx}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                  <td style={{ padding: '8px 10px', color: T.textPrimary, fontFamily: T.mono, whiteSpace: 'nowrap' }}>{item?.column || '-'}</td>
+                  <td style={{ padding: '8px 10px', color: T.textMuted, whiteSpace: 'nowrap' }}>{item?.reason || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Box>
+      </DialogContent>
+    </Dialog>
+    </>
+  );
+};
+
+const StructuredTrainingProgress = ({ jobStatus }) => {
+  const progress = Number(jobStatus?.progress ?? 0);
+  const stageText = String(jobStatus?.current_stage || '').toLowerCase();
+  const steps = [
+    { id: 'prepare', label: 'Prepare', hint: 'Build clean feature matrix' },
+    { id: 'split', label: 'Split', hint: 'Create validation holdout' },
+    { id: 'fit', label: 'Fit', hint: 'Train the selected algorithm' },
+    { id: 'evaluate', label: 'Evaluate', hint: 'Score holdout and compute metrics' },
+    { id: 'explain', label: 'Explain', hint: 'Generate interpretable drivers' },
+  ];
+  const inferStatus = (step, idx) => {
+    if (jobStatus?.status === 'failed') return progress > idx * 20 ? 'failed' : 'pending';
+    if (jobStatus?.status === 'complete') return 'completed';
+    if (stageText.includes(step.id)) return 'in_progress';
+    if (progress >= (idx + 1) * 20) return 'completed';
+    if (progress >= idx * 20) return 'in_progress';
+    return 'pending';
+  };
+  return (
+    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fcfcfd' }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
+        <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>Training Progress</Typography>
+        <Typography sx={{ fontSize: 11, color: T.textDim }}>{jobStatus?.current_stage || 'Waiting to start'}</Typography>
+      </Stack>
+      <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(5, minmax(0, 1fr))' } }}>
+        {steps.map((step, idx) => {
+          const status = inferStatus(step, idx);
+          const palette = status === 'completed'
+            ? { bg: '#fff7ed', border: T.orange, text: T.orange }
+            : status === 'in_progress'
+              ? { bg: '#f8fafc', border: '#cbd5e1', text: T.textPrimary }
+              : status === 'failed'
+                ? { bg: '#fef2f2', border: '#fecaca', text: T.red }
+                : { bg: '#ffffff', border: T.border, text: T.textDim };
+          return (
+            <Box key={step.id} sx={{ p: 1.25, borderRadius: 1.5, border: `1px solid ${palette.border}`, bgcolor: palette.bg }}>
+              <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.5 }}>{status.replace('_', ' ')}</Typography>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: palette.text }}>{step.label}</Typography>
+              <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 0.25 }}>{step.hint}</Typography>
+            </Box>
+          );
+        })}
+      </Box>
+    </Paper>
+  );
+};
+
 const CMCell = ({ label, value, type }) => {
   const colors = { tn: { bg: '#f8fafc', text: T.textPrimary, border: T.border }, fp: { bg: '#f8fafc', text: T.textPrimary, border: T.border }, fn: { bg: '#f8fafc', text: T.textPrimary, border: T.border }, tp: { bg: '#f8fafc', text: T.textPrimary, border: T.border } };
   const c = colors[type] || {};
@@ -1621,6 +2012,8 @@ const UnsupervisedWorkbench = ({ loading, error, data, selectedTechnique, setSel
   const recommended = data?.recommended_technique || 'kmeans';
   const techniqueKey = selectedTechnique || recommended;
   const technique = data?.techniques?.[techniqueKey];
+  const isAnomalyTechnique = (technique?.technique_type || '').toLowerCase() === 'anomaly'
+    || ['isolation_forest', 'local_outlier_factor', 'one_class_svm'].includes(techniqueKey);
   const groupedPoints = useMemo(() => {
     const groups = {};
     (technique?.projection || []).forEach((row) => {
@@ -1661,12 +2054,31 @@ const UnsupervisedWorkbench = ({ loading, error, data, selectedTechnique, setSel
             ))}
           </ToggleButtonGroup>
 
+          <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: '#fafbfc' }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }} justifyContent="space-between">
+              <Box>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>
+                  {technique?.label || 'Selected technique'}
+                </Typography>
+                <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 0.35 }}>
+                  {ALGO_VIZ[techniqueKey]?.description || 'Inspect cluster behavior, anomaly concentration, and downstream case-priority patterns.'}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Chip label={isAnomalyTechnique ? 'Anomaly detection' : 'Cluster discovery'} size="small" sx={{ bgcolor: T.orangeLight, color: T.orange, fontWeight: 700 }} />
+                {technique?.linkage && <Chip label={`Linkage ${technique.linkage}`} size="small" />}
+                {technique?.avg_membership_confidence != null && <Chip label={`Membership ${fmt(technique.avg_membership_confidence, 3)}`} size="small" />}
+              </Stack>
+            </Stack>
+          </Paper>
+
           <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
             <MetricBox label="Rows" value={data?.summary?.rows_analyzed} sub="Preview sample size" emphasis />
             <MetricBox label="Features" value={data?.summary?.features_used} sub="Encoded feature space" />
             {technique?.silhouette_score != null && <MetricBox label="Silhouette" value={technique.silhouette_score} sub="Cluster separation" />}
             {technique?.noise_count != null && <MetricBox label="Noise" value={technique.noise_count} sub="DBSCAN outliers" />}
-            {technique?.anomaly_rate_pct != null && <MetricBox label="Anomaly %" value={technique.anomaly_rate_pct} sub="Isolation Forest" />}
+            {technique?.anomaly_rate_pct != null && <MetricBox label="Anomaly %" value={technique.anomaly_rate_pct} sub="Rows outside the normal frontier" />}
+            {technique?.avg_membership_confidence != null && <MetricBox label="Confidence" value={technique.avg_membership_confidence} sub="Mean dominant-cluster membership" />}
           </Stack>
 
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.1fr 0.9fr' } }}>
@@ -1680,14 +2092,19 @@ const UnsupervisedWorkbench = ({ loading, error, data, selectedTechnique, setSel
                   <RechartsTip cursor={{ strokeDasharray: '3 3' }} formatter={(value, name) => [fmt(value, 4), name]} />
                   <Legend />
                   {Object.entries(groupedPoints).map(([key, rows], idx) => (
-                    <Scatter key={key} name={techniqueKey === 'isolation_forest' ? (key === '1' ? 'Anomaly' : 'Normal') : `Cluster ${key}`} data={rows} fill={scatterColors[idx % scatterColors.length]} />
+                    <Scatter
+                      key={key}
+                      name={isAnomalyTechnique ? (key === '1' ? 'Anomaly' : 'Normal') : (key === '-1' ? 'Noise' : `Cluster ${key}`)}
+                      data={rows}
+                      fill={scatterColors[idx % scatterColors.length]}
+                    />
                   ))}
                 </ScatterChart>
               </ResponsiveContainer>
             </Paper>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>{techniqueKey === 'isolation_forest' ? 'Anomaly Scores' : 'Cluster Summary'}</Typography>
-              {techniqueKey === 'isolation_forest' ? (
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>{isAnomalyTechnique ? 'Anomaly Scores' : 'Cluster Summary'}</Typography>
+              {isAnomalyTechnique ? (
                 <Stack spacing={1.25}>
                   <ResponsiveContainer width="100%" height={180}>
                     <BarChart data={technique?.score_distribution || []} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
@@ -1727,15 +2144,23 @@ const UnsupervisedWorkbench = ({ loading, error, data, selectedTechnique, setSel
 };
 
 const DeepLearningWorkbench = ({ loading, error, data, onRefresh }) => {
-  const method = data?.methods?.mlp_classifier;
+  const methodEntries = Object.entries(data?.methods || {});
+  const recommendedKey = data?.recommended_method || methodEntries[0]?.[0] || '';
+  const [selectedMethodKey, setSelectedMethodKey] = useState(recommendedKey);
+  useEffect(() => {
+    if (recommendedKey) setSelectedMethodKey(recommendedKey);
+  }, [recommendedKey]);
+  const method = (selectedMethodKey && data?.methods?.[selectedMethodKey]) || data?.methods?.[recommendedKey];
   const architecture = method?.architecture || {};
+  const isAutoencoder = (method?.method_type || '').toLowerCase() === 'autoencoder'
+    || selectedMethodKey === 'tabular_autoencoder';
 
   return (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fcfcfd' }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.25}>
         <Box>
           <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textPrimary }}>Deep Learning Workbench</Typography>
-          <Typography sx={{ fontSize: 11, color: T.textMuted }}>Inspect the trained MLP architecture, training curves, and learned model summary.</Typography>
+          <Typography sx={{ fontSize: 11, color: T.textMuted }}>Inspect the trained network topology, learning curves, and model behavior for the selected neural method.</Typography>
         </Box>
         {onRefresh && (
           <Button size="small" variant="outlined" onClick={onRefresh} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>
@@ -1748,6 +2173,31 @@ const DeepLearningWorkbench = ({ loading, error, data, onRefresh }) => {
       {loading && <LinearProgress sx={{ height: 4, borderRadius: 2, mb: 1.5 }} />}
       {method && (
         <Stack spacing={2}>
+          {methodEntries.length > 1 && (
+            <ToggleButtonGroup size="small" exclusive value={selectedMethodKey} onChange={(_, value) => value && setSelectedMethodKey(value)} sx={{ flexWrap: 'wrap', gap: 0.75 }}>
+              {methodEntries.map(([key, value]) => (
+                <ToggleButton key={key} value={key} sx={{ textTransform: 'none', borderRadius: '999px !important', px: 1.5, borderColor: T.border }}>
+                  {value?.label || key}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          )}
+          <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: '#fafbfc' }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }} justifyContent="space-between">
+              <Box>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>
+                  {method.label}
+                </Typography>
+                <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 0.35 }}>
+                  {ALGO_VIZ[selectedMethodKey]?.description || 'Inspect the network structure, optimization journey, and resulting holdout quality.'}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Chip label={isAutoencoder ? 'Autoencoder anomaly scoring' : 'Neural classifier'} size="small" sx={{ bgcolor: T.orangeLight, color: T.orange, fontWeight: 700 }} />
+                <Chip label={`${(method.model_summary || []).length} layers shown`} size="small" />
+              </Stack>
+            </Stack>
+          </Paper>
           <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
             <MetricBox label="Method" value={method.label} sub={`${architecture.iterations || 0} epochs`} emphasis />
             <MetricBox label="ROC AUC" value={method.metrics?.roc_auc} sub="Holdout discrimination" />
@@ -1772,7 +2222,7 @@ const DeepLearningWorkbench = ({ loading, error, data, onRefresh }) => {
               </Stack>
             </Paper>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Training Curves</Typography>
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>{isAutoencoder ? 'Reconstruction Curves' : 'Training Curves'}</Typography>
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={method.training_curves || []} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -1780,7 +2230,7 @@ const DeepLearningWorkbench = ({ loading, error, data, onRefresh }) => {
                   <YAxis tick={{ fontSize: 10 }} />
                   <RechartsTip formatter={(v) => (v == null ? '-' : Number(v).toFixed(4))} contentStyle={{ fontSize: 11 }} />
                   <Line dataKey="loss" stroke={T.orange} strokeWidth={2} dot={false} name="Loss" />
-                  <Line dataKey="validation_score" stroke={T.done} strokeWidth={2} dot={false} name="Validation Score" strokeDasharray="5 3" />
+                  <Line dataKey="validation_score" stroke={T.done} strokeWidth={2} dot={false} name="Validation Score" strokeDasharray="5 3" connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </Paper>
@@ -1801,12 +2251,99 @@ const DeepLearningWorkbench = ({ loading, error, data, onRefresh }) => {
               </Stack>
             </Paper>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Training Timeline</Typography>
-              <TimelinePreview steps={method.timeline || []} />
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>{isAutoencoder ? 'Reconstruction Watchlist' : 'Training Timeline'}</Typography>
+              {isAutoencoder ? (
+                <Stack spacing={1}>
+                  {(method.top_reconstruction_cases || []).map((row) => (
+                    <Box key={row.sample_index} sx={{ p: 1, borderRadius: 1.25, border: `1px solid ${T.border}`, bgcolor: '#fafbfc' }}>
+                      <Stack direction="row" justifyContent="space-between">
+                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textPrimary }}>Sample {row.sample_index}</Typography>
+                        <Typography sx={{ fontSize: 11, color: T.orange, fontFamily: T.mono }}>{fmt(row.reconstruction_error, 4)}</Typography>
+                      </Stack>
+                      <Typography sx={{ fontSize: 10.5, color: T.textMuted }}>Actual label {row.actual}</Typography>
+                    </Box>
+                  ))}
+                  {(!method.top_reconstruction_cases || method.top_reconstruction_cases.length === 0) && (
+                    <Typography sx={{ fontSize: 11, color: T.textMuted }}>No reconstruction watchlist is available for this run.</Typography>
+                  )}
+                </Stack>
+              ) : (
+                <TimelinePreview steps={method.timeline || []} />
+              )}
             </Paper>
           </Box>
+          {isAutoencoder && (
+            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Reconstruction Error Distribution</Typography>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={method.reconstruction_distribution || []} margin={{ top: 4, right: 8, left: -20, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="bin_start" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <RechartsTip contentStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="count" fill={T.orange} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Paper>
+          )}
         </Stack>
       )}
+    </Paper>
+  );
+};
+
+const AlgorithmChoiceTile = ({ algo, selected, onSelect }) => {
+  const Icon = algo.icon || ModelTraining;
+  const { accent, tag } = ALGO_COLOURS[algo.id] || { accent: T.orange, tag: 'Model' };
+
+  return (
+    <Paper
+      variant="outlined"
+      onClick={onSelect}
+      sx={{
+        p: 1.25,
+        cursor: 'pointer',
+        borderRadius: 2,
+        borderColor: selected ? accent : T.border,
+        bgcolor: selected ? '#fff7f2' : '#fff',
+        transition: 'all 0.12s ease',
+        '&:hover': {
+          borderColor: accent,
+          boxShadow: `0 0 0 2px ${accent}14`,
+        },
+      }}
+    >
+      <Stack direction="row" spacing={1.1} alignItems="flex-start">
+        <Box
+          sx={{
+            width: 30,
+            height: 30,
+            borderRadius: 1.25,
+            bgcolor: selected ? `${accent}18` : '#f8fafc',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Icon sx={{ fontSize: 16, color: selected ? accent : T.textDim }} />
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary }}>
+              {algo.label}
+            </Typography>
+            <Chip
+              label={tag}
+              size="small"
+              sx={{ height: 18, fontSize: 9.5, bgcolor: `${accent}14`, color: accent }}
+            />
+          </Stack>
+          <Typography sx={{ fontSize: 10.75, color: T.textMuted, mt: 0.45, lineHeight: 1.55 }}>
+            {algo.bizDesc}
+          </Typography>
+        </Box>
+      </Stack>
     </Paper>
   );
 };
@@ -1905,21 +2442,45 @@ const ModelTrainingPanel = ({
   targetColumn,
   onModelComplete,
   onOpenReport,
+  initialActiveTab = 0,
+  onActiveTabChange,
 }) => {
   const hasTargetColumn = (ds) => {
     if (!ds || !targetColumn) return false;
     const cols = ds.columns || ds.column_names || [];
     return Array.isArray(cols) && cols.includes(targetColumn);
   };
-  const dataset  = useMemo(() => {
-    if (preprocessedDataset && hasTargetColumn(preprocessedDataset)) return preprocessedDataset;
-    if (masterDataset && hasTargetColumn(masterDataset)) return masterDataset;
-    return preprocessedDataset || masterDataset;
+  const datasetSources = useMemo(() => {
+    const sources = [];
+    if (preprocessedDataset) {
+      sources.push({
+        key: 'preprocessed',
+        label: 'Model-ready dataset',
+        shortLabel: 'Model-ready',
+        description: 'Uses the engineered FCC feature set created in preprocessing.',
+        dataset: preprocessedDataset,
+        targetAvailable: hasTargetColumn(preprocessedDataset),
+      });
+    }
+    if (masterDataset) {
+      sources.push({
+        key: 'master',
+        label: 'Master dataset',
+        shortLabel: 'Master',
+        description: 'Uses the joined FCC master dataset before model-ready transformations.',
+        dataset: masterDataset,
+        targetAvailable: hasTargetColumn(masterDataset),
+      });
+    }
+    return sources;
   }, [preprocessedDataset, masterDataset, targetColumn]);
-  const fallbackToMaster = Boolean(preprocessedDataset && targetColumn && !hasTargetColumn(preprocessedDataset) && masterDataset);
-  const rowCount = dataset?.row_count ?? 0;
+  const preferredSourceKey = useMemo(() => {
+    const modelReady = datasetSources.find((source) => source.key === 'preprocessed' && source.targetAvailable);
+    if (modelReady) return modelReady.key;
+    return datasetSources[0]?.key || '';
+  }, [datasetSources]);
 
-  const [activeTab, setActiveTab]           = useState(0);
+  const [activeTab, setActiveTab]           = useState(initialActiveTab);
   const [trainingMode, setTrainingMode]     = useState('supervised');
   const [grain, setGrain]                   = useState('alert');
   const [selectedAlgo, setSelectedAlgo]     = useState('random_forest');
@@ -1975,6 +2536,36 @@ const ModelTrainingPanel = ({
   const pipelineRunsRef = useRef([]);
   const [selectedTreeSampleIndex, setSelectedTreeSampleIndex] = useState(null);
   const [selectedUnsupervisedTechnique, setSelectedUnsupervisedTechnique] = useState('kmeans');
+  const [showTechnicalControls, setShowTechnicalControls] = useState(false);
+  const [treeWorkbenchOpen, setTreeWorkbenchOpen] = useState(false);
+  const [trainingPreview, setTrainingPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
+  const [previewResolutionNote, setPreviewResolutionNote] = useState('');
+  const [checkApproved, setCheckApproved] = useState(false);
+  const [trainingDataSource, setTrainingDataSource] = useState('auto');
+  const [resolvedDataSourceKey, setResolvedDataSourceKey] = useState('');
+  const [splitStrategy, setSplitStrategy] = useState('auto');
+  const [selectedSplitDateColumn, setSelectedSplitDateColumn] = useState('');
+  const [showAlgorithmChooser, setShowAlgorithmChooser] = useState({
+    supervised: false,
+    unsupervised: false,
+    deep_learning: false,
+  });
+  const [showFullAlgorithmLibrary, setShowFullAlgorithmLibrary] = useState({
+    supervised: false,
+    unsupervised: false,
+    deep_learning: false,
+  });
+
+  useEffect(() => {
+    if (!Number.isInteger(initialActiveTab)) return;
+    setActiveTab((prev) => (prev === initialActiveTab ? prev : initialActiveTab));
+  }, [initialActiveTab]);
+
+  useEffect(() => {
+    onActiveTabChange?.(activeTab);
+  }, [activeTab, onActiveTabChange]);
 
   const algoObj = useMemo(() => ALGORITHMS.find((a) => a.id === selectedAlgo), [selectedAlgo]);
   const selectedTrainingAlgorithm = trainingMode === 'supervised'
@@ -1990,6 +2581,68 @@ const ModelTrainingPanel = ({
     const algoId = results?.algorithm || selectedTrainingAlgorithm;
     return TRAINING_LIBRARY.find((algo) => algo.id === algoId) || selectedTrainingOption || algoObj || null;
   }, [results?.algorithm, selectedTrainingAlgorithm, selectedTrainingOption, algoObj]);
+  const modeGuide = MODE_GUIDE[trainingMode] || MODE_GUIDE.supervised;
+  const trainingLibrary = useMemo(() => (
+    trainingMode === 'supervised'
+      ? ALGORITHMS
+      : trainingMode === 'unsupervised'
+        ? UNSUPERVISED_ALGORITHMS
+        : DEEP_LEARNING_METHODS
+  ), [trainingMode]);
+  const visibleAlgorithmOptions = useMemo(() => {
+    if (showFullAlgorithmLibrary?.[trainingMode]) return trainingLibrary;
+    const shortlist = new Set([...(MODE_SHORTLIST[trainingMode] || []), selectedTrainingAlgorithm]);
+    return trainingLibrary.filter((algo) => shortlist.has(algo.id));
+  }, [trainingLibrary, trainingMode, selectedTrainingAlgorithm, showFullAlgorithmLibrary]);
+  const hiddenAlgorithmCount = Math.max(trainingLibrary.length - visibleAlgorithmOptions.length, 0);
+  const selectedTrainingPalette = ALGO_COLOURS[selectedTrainingAlgorithm] || { accent: T.orange, tag: 'Model' };
+  const SelectedTrainingIcon = selectedTrainingOption?.icon || ModelTraining;
+  const selectedSource = useMemo(() => {
+    if (!datasetSources.length) return null;
+    if (trainingDataSource === 'auto') {
+      return datasetSources.find((source) => source.key === resolvedDataSourceKey)
+        || datasetSources.find((source) => source.key === preferredSourceKey)
+        || datasetSources[0];
+    }
+    return datasetSources.find((source) => source.key === trainingDataSource) || null;
+  }, [datasetSources, trainingDataSource, resolvedDataSourceKey, preferredSourceKey]);
+  const dataset = selectedSource?.dataset || null;
+  const availableSplitDateColumns = useMemo(() => {
+    const options = trainingPreview?.split_preview?.available_date_columns;
+    return Array.isArray(options) ? options : [];
+  }, [trainingPreview?.split_preview?.available_date_columns]);
+  const rowCount = dataset?.row_count ?? 0;
+  const completedTabIndexes = useMemo(() => {
+    const done = new Set();
+    if (dataset && targetColumn) done.add(0);
+    if (trainingPreview || checkApproved || activeTab > 1) done.add(1);
+    if (jobId || results || activeTab > 2) done.add(2);
+    if (results || activeTab > 3) done.add(3);
+    if (results || activeTab > 4) done.add(4);
+    if (savedRuns.length > 0 || activeTab > 5) done.add(5);
+    if (results || activeTab > 6) done.add(6);
+    if (results || activeTab === 7) done.add(7);
+    return done;
+  }, [activeTab, checkApproved, dataset, jobId, results, savedRuns.length, targetColumn, trainingPreview]);
+
+  useEffect(() => {
+    if (trainingDataSource !== 'auto' && !datasetSources.some((source) => source.key === trainingDataSource)) {
+      setTrainingDataSource('auto');
+    }
+  }, [datasetSources, trainingDataSource]);
+
+  useEffect(() => {
+    if (splitStrategy !== 'temporal' && selectedSplitDateColumn) {
+      setSelectedSplitDateColumn('');
+    }
+  }, [splitStrategy, selectedSplitDateColumn]);
+
+  useEffect(() => {
+    if (splitStrategy !== 'temporal' || !availableSplitDateColumns.length) return;
+    if (!selectedSplitDateColumn || !availableSplitDateColumns.includes(selectedSplitDateColumn)) {
+      setSelectedSplitDateColumn(availableSplitDateColumns[0]);
+    }
+  }, [splitStrategy, availableSplitDateColumns, selectedSplitDateColumn]);
 
   const buildHyperparams = useCallback((algoId) => {
     const algo = TRAINING_LIBRARY.find((a) => a.id === algoId);
@@ -2004,7 +2657,7 @@ const ModelTrainingPanel = ({
     return TRAINING_LIBRARY.find((algo) => algo.id === algoId)?.label || algoIdOrLabel || 'Model';
   }, []);
 
-  const emitModelComplete = useCallback((run, resultData = null) => {
+  const emitModelComplete = useCallback((run, resultData = null, options = {}) => {
     if (!onModelComplete || !run?.job_id) return;
     const result = resultData || run?.results || results || null;
     const algorithmId = run?.algorithm_id || run?.algo_id || result?.algorithm || selectedTrainingAlgorithm;
@@ -2026,7 +2679,7 @@ const ModelTrainingPanel = ({
       selected_threshold: selectedThreshold,
       hml_high_threshold: run?.hml_high_threshold ?? hmlHigh,
       hml_low_threshold: run?.hml_low_threshold ?? hmlLow,
-    });
+    }, options);
   }, [onModelComplete, results, selectedTrainingAlgorithm, threshold, resolveAlgorithmLabel, grain, hmlHigh, hmlLow]);
 
   const trainRows = Math.round(rowCount * (1 - testSplit / 100));
@@ -2053,6 +2706,13 @@ const ModelTrainingPanel = ({
     setPipelineSelection((prev) => prev.includes(algoId) ? prev.filter((id) => id !== algoId) : [...prev, algoId]);
   }, []);
 
+  const handleSelectTrainingAlgorithm = useCallback((algoId) => {
+    if (trainingMode === 'supervised') setSelectedAlgo(algoId);
+    else if (trainingMode === 'unsupervised') setSelectedUnsupervisedAlgo(algoId);
+    else setSelectedDeepLearningAlgo(algoId);
+    setShowAlgorithmChooser((prev) => ({ ...prev, [trainingMode]: false }));
+  }, [trainingMode]);
+
   const fetchResults = useCallback(async (jid) => {
     if (!jid) return null;
     setResultsError(null);
@@ -2064,13 +2724,90 @@ const ModelTrainingPanel = ({
       setTrainingMode(resultMode);
       setSelectedTreeSampleIndex(rData?.decision_tree?.selected_sample_index ?? null);
       setSelectedUnsupervisedTechnique(rData?.recommended_technique || rData?.algorithm || 'kmeans');
-      setThreshold(rData?.metrics?.threshold_table?.[2]?.threshold ?? 0.5);
+      const resolvedThreshold = rData?.configured_threshold
+        ?? rData?.deployable_threshold
+        ?? rData?.deploy_threshold_policy?.configured_threshold
+        ?? DEFAULT_BUSINESS_THRESHOLD;
+      setThreshold(Math.min(DEPLOY_THRESHOLD_MAX, Math.max(DEPLOY_THRESHOLD_MIN, Number(resolvedThreshold) || DEFAULT_BUSINESS_THRESHOLD)));
+      setRunsRefreshKey((key) => key + 1);
       return rData;
     } catch (e) {
       setResultsError(e?.response?.data?.error || 'Failed to load evaluation results');
       return null;
     }
   }, []);
+
+  const loadTrainingPreview = useCallback(async () => {
+    if (!datasetSources.length || !targetColumn) {
+      setTrainingPreview(null);
+      setPreviewError(null);
+      setPreviewResolutionNote('');
+      setResolvedDataSourceKey('');
+      return null;
+    }
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewResolutionNote('');
+    const candidates = trainingDataSource === 'auto'
+      ? [
+        datasetSources.find((source) => source.key === preferredSourceKey),
+        ...datasetSources.filter((source) => source.key !== preferredSourceKey),
+      ].filter(Boolean)
+      : datasetSources.filter((source) => source.key === trainingDataSource);
+    const failures = [];
+    for (const source of candidates) {
+      try {
+        const response = await mlopsApi.trainingWorkbenchPreview({
+          dataset_id: source.dataset?.dataset_id,
+          target_column: targetColumn,
+          mode: trainingMode,
+          grain,
+          algorithm: selectedTrainingAlgorithm,
+          hyperparams: buildHyperparams(selectedTrainingAlgorithm),
+          test_size: testSplit / 100,
+          stratify,
+          split_strategy: splitStrategy,
+          ...(splitStrategy === 'temporal' && selectedSplitDateColumn ? { date_column: selectedSplitDateColumn } : {}),
+        });
+        const data = response?.data?.data || response?.data;
+        if (!data || typeof data !== 'object') {
+          throw new Error('Training check returned no preview payload.');
+        }
+        const enriched = {
+          ...data,
+          _source_key: source.key,
+          _source_label: source.label,
+          _source_description: source.description,
+        };
+        setTrainingPreview(enriched);
+        setResolvedDataSourceKey(source.key);
+        if (trainingDataSource === 'auto' && source.key !== preferredSourceKey) {
+          setPreviewResolutionNote(`Auto source switched to ${source.label} because the preferred model-ready dataset was not safe for this check configuration.`);
+        } else if (trainingDataSource === 'auto') {
+          setPreviewResolutionNote(`Auto source is using ${source.label} for the current notebook-parity check.`);
+        } else {
+          setPreviewResolutionNote(`${source.label} is now the active source for the check and the training run.`);
+        }
+        setPreviewLoading(false);
+        return enriched;
+      } catch (e) {
+        failures.push({
+          source: source.label,
+          message: e?.response?.data?.error || e?.message || 'Training check failed. Review the target and preprocessing output.',
+        });
+        if (trainingDataSource !== 'auto') break;
+      }
+    }
+    const message = failures.length
+      ? failures.map((item) => `${item.source}: ${item.message}`).join(' ')
+      : 'Training check failed. Review the target and preprocessing output.';
+    setTrainingPreview(null);
+    setPreviewError(message);
+    setPreviewResolutionNote('');
+    setResolvedDataSourceKey('');
+    setPreviewLoading(false);
+    return null;
+  }, [datasetSources, targetColumn, trainingMode, grain, selectedTrainingAlgorithm, buildHyperparams, testSplit, stratify, trainingDataSource, preferredSourceKey, splitStrategy, selectedSplitDateColumn]);
 
   useEffect(() => {
     if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -2095,7 +2832,7 @@ const ModelTrainingPanel = ({
           const rData = await fetchResults(jobId);
           if (rData) {
             emitModelComplete({ job_id: jobId, grain }, rData);
-            setActiveTab(2);
+            setActiveTab(3);
           }
         } else if (status === 'failed') {
           clearInterval(pollRef.current);
@@ -2216,20 +2953,50 @@ const ModelTrainingPanel = ({
     setSelectedUnsupervisedTechnique('kmeans');
   }, [dataset?.dataset_id, grain, targetColumn]);
 
+  useEffect(() => {
+    setCheckApproved(false);
+  }, [dataset?.dataset_id, targetColumn, trainingMode, grain, selectedTrainingAlgorithm, testSplit, stratify, trainingDataSource, splitStrategy, selectedSplitDateColumn]);
+
+  useEffect(() => {
+    if (!datasetSources.length || !targetColumn) {
+      setTrainingPreview(null);
+      setPreviewError(null);
+      setPreviewResolutionNote('');
+      return;
+    }
+    if (activeTab !== 1) return;
+    loadTrainingPreview();
+  }, [activeTab, datasetSources.length, targetColumn, loadTrainingPreview]);
+
   const handleStartTraining = async () => {
     if (!dataset || !targetColumn) return;
+    const preview = trainingPreview || await loadTrainingPreview();
+    if (!preview?.training_readiness?.ready) {
+      setTrainingError(previewError || 'Training is blocked until the Check stage confirms the target is separated and the split is valid.');
+      setActiveTab(1);
+      return;
+    }
+    if (!checkApproved) {
+      setTrainingError('Approve the Check stage before starting model training.');
+      setActiveTab(1);
+      return;
+    }
     const algorithm = selectedTrainingAlgorithm;
+    const previewSource = datasetSources.find((source) => source.key === preview?._source_key) || selectedSource;
+    const activeTrainingDataset = previewSource?.dataset || dataset;
     setTrainingError(null);
     setResults(null);
     setResultsError(null);
     setJobId(null);
     setJobStatus({ status: 'starting', progress: 0, logs: ['Initiating training job...'], current_stage: 'Preparing dataset' });
-    setActiveTab(1);
+    setActiveTab(2);
     try {
       const res  = await mlopsApi.trainModel({
-        dataset_id: dataset.dataset_id, target_column: targetColumn, algorithm, mode: trainingMode, grain,
+        dataset_id: activeTrainingDataset.dataset_id, target_column: targetColumn, algorithm, mode: trainingMode, grain,
         hyperparams: buildHyperparams(algorithm), test_size: testSplit / 100, cv_folds: cvFolds, stratify,
         hml_high_threshold: hmlHigh, hml_low_threshold: hmlLow,
+        split_strategy: splitStrategy,
+        ...(splitStrategy === 'temporal' && selectedSplitDateColumn ? { date_column: selectedSplitDateColumn } : {}),
       });
       const data = res?.data?.data || res?.data;
       setJobId(data?.job_id || data?.run_id);
@@ -2241,6 +3008,14 @@ const ModelTrainingPanel = ({
 
   const handleStartPipeline = async () => {
     if (!dataset || !targetColumn || pipelineSelection.length === 0) return;
+    const preview = trainingPreview || await loadTrainingPreview();
+    if (!preview?.training_readiness?.ready || !checkApproved) {
+      setPipelineError('Approve the Check stage before launching a benchmarking pipeline.');
+      setActiveTab(1);
+      return;
+    }
+    const previewSource = datasetSources.find((source) => source.key === preview?._source_key) || selectedSource;
+    const activeTrainingDataset = previewSource?.dataset || dataset;
     setPipelineError(null);
     setPipelineRunning(true);
     const jobs = [];
@@ -2248,9 +3023,11 @@ const ModelTrainingPanel = ({
       const algoLabel = resolveAlgorithmLabel(algoId);
       try {
         const res  = await mlopsApi.trainModel({
-          dataset_id: dataset.dataset_id, target_column: targetColumn, algorithm: algoId, grain,
+          dataset_id: activeTrainingDataset.dataset_id, target_column: targetColumn, algorithm: algoId, grain,
           hyperparams: buildHyperparams(algoId), test_size: testSplit / 100, cv_folds: cvFolds, stratify,
           hml_high_threshold: hmlHigh, hml_low_threshold: hmlLow,
+          split_strategy: splitStrategy,
+          ...(splitStrategy === 'temporal' && selectedSplitDateColumn ? { date_column: selectedSplitDateColumn } : {}),
         });
         const data = res?.data?.data || res?.data;
         jobs.push({ algo_id: algoId, algorithm: algoLabel, algorithm_id: algoId, job_id: data?.job_id || data?.run_id, status: 'starting', started_at: new Date().toISOString(), grain, hml_high_threshold: hmlHigh, hml_low_threshold: hmlLow });
@@ -2264,7 +3041,7 @@ const ModelTrainingPanel = ({
     setPipelineRunning(false);
     // FIX ④: increment trigger to restart polling even if job count is unchanged
     setPipelinePollTrigger((n) => n + 1);
-    if (jobs.length) setActiveTab(1);
+    if (jobs.length) setActiveTab(2);
   };
 
   // FIX ⑤: only test against algo IDs (snake_case), never label strings
@@ -2281,8 +3058,23 @@ const ModelTrainingPanel = ({
     if (run.hml_low_threshold)  setHmlLow(run.hml_low_threshold);
     setJobId(run.job_id);
     const loadedResults = await fetchResults(run.job_id);
-    emitModelComplete(run, loadedResults);
-    setActiveTab(2);
+    emitModelComplete(run, loadedResults, { resumeExisting: true });
+    setActiveTab(3);
+    return loadedResults;
+  };
+
+  const handleOpenTreeFromHistory = async (run) => {
+    const loadedResults = await handleLoadRun(run);
+    const tree = loadedResults?.decision_tree;
+    const ready = Boolean(
+      (Array.isArray(tree?.tree_nodes) && tree.tree_nodes.length)
+      || Object.keys(tree?.sample_paths || {}).length,
+    );
+    if (ready) {
+      setTreeWorkbenchOpen(true);
+      return;
+    }
+    setTrainingError('This saved run does not expose a tree explanation yet. Load the run first, then inspect the Evaluate tab if needed.');
   };
 
   const handleAddRunToCompare = (run) => {
@@ -2366,6 +3158,33 @@ const ModelTrainingPanel = ({
   const rocData    = useMemo(() => (results?.metrics?.roc_curve || []).map((p) => ({ fpr: p.fpr, tpr: p.tpr })), [results]);
   const prData     = useMemo(() => (results?.metrics?.pr_curve  || []).map((p) => ({ recall: p.recall, precision: p.precision })), [results]);
   const threshTable = useMemo(() => results?.metrics?.threshold_table || [], [results]);
+  const targetCheck = trainingPreview?.target_check || {};
+  const splitPreview = trainingPreview?.split_preview || {};
+  const trainingReadiness = trainingPreview?.training_readiness || {};
+  const deployThresholdPolicy = results?.deploy_threshold_policy || trainingPreview?.deploy_threshold_policy || {};
+  const thresholdBandMin = Number(results?.threshold_band_min ?? deployThresholdPolicy?.threshold_band_min ?? DEPLOY_THRESHOLD_MIN);
+  const thresholdBandMax = Number(results?.threshold_band_max ?? deployThresholdPolicy?.threshold_band_max ?? DEPLOY_THRESHOLD_MAX);
+  const trainingRunStatus = normalizeJobStatus(jobStatus?.status || (results ? 'complete' : 'idle'));
+  const trainingBusy = ['starting', 'queued', 'running'].includes(trainingRunStatus);
+  const canStartTraining = Boolean(checkApproved && trainingReadiness?.ready && !previewLoading && !trainingBusy);
+  const splitStrategyLabel = splitPreview?.split_strategy || 'auto';
+  const dateColumnDisplay = splitStrategyLabel === 'random'
+    ? 'Not used for random split'
+    : (splitPreview?.date_column || '-');
+  const splitDateDisplay = splitStrategyLabel === 'random'
+    ? 'Not used for random split'
+    : (splitPreview?.split_date || '-');
+  const qualityReview = results?.quality_review || null;
+  const suppressedCasesPreview = Array.isArray(results?.suppressed_cases_preview) ? results.suppressed_cases_preview : [];
+  const decisionReasonSummary = results?.decision_reason_summary || null;
+  const deployableThresholdRows = useMemo(
+    () => threshTable.filter((row) => {
+      const rowThreshold = Number(row?.threshold);
+      return Number.isFinite(rowThreshold) && rowThreshold >= thresholdBandMin && rowThreshold <= thresholdBandMax;
+    }),
+    [threshTable, thresholdBandMin, thresholdBandMax],
+  );
+  const thresholdTableForDisplay = deployableThresholdRows.length ? deployableThresholdRows : threshTable;
   const derivedMetrics = useMemo(() => {
     if ([tn, fp_, fn_, tp].some((v) => typeof v !== 'number')) return null;
     const total = tn + fp_ + fn_ + tp;
@@ -2400,6 +3219,25 @@ const ModelTrainingPanel = ({
   const isFocusMetric = (key) => (objective?.focusMetrics || [objective?.metricKey]).includes(key);
   const bestRunId  = useMemo(() => savedRuns.length ? savedRuns.reduce((b, r) => ((r.f1 ?? 0) > (b.f1 ?? 0) ? r : b)).job_id : null, [savedRuns]);
   const grainConfig = GRAIN_OPTIONS.find((g) => g.id === grain) || GRAIN_OPTIONS[0];
+  const treeExplanation = results?.mode === 'supervised' ? (results?.decision_tree || null) : null;
+  const treePreviewReady = Boolean(
+    treeExplanation
+    && (
+      Array.isArray(treeExplanation?.tree_nodes) && treeExplanation.tree_nodes.length
+      || Object.keys(treeExplanation?.sample_paths || {}).length
+    ),
+  );
+  const explainabilityLabel = treePreviewReady
+    ? (treeExplanation?.tree_kind === 'surrogate' ? 'Surrogate tree explanation ready' : 'Native tree explanation ready')
+    : (TREE_BASED_ALGO_IDS.has(selectedTrainingAlgorithm)
+      ? 'Native tree path will appear after training'
+      : 'Surrogate tree path will appear after training');
+  const modelLabFacts = [
+    { label: 'Training rows', value: rowCount.toLocaleString(), detail: `${grainConfig.label} grain` },
+    { label: 'Outcome', value: targetColumn || '-', detail: 'Canonical alert outcome' },
+    { label: 'Explainability', value: explainabilityLabel, detail: treePreviewReady ? 'Open sample path explorer below' : 'Unlocked when evaluation results arrive' },
+    { label: 'Validation split', value: splitStrategy === 'auto' ? 'Auto' : splitStrategy, detail: splitStrategy === 'temporal' ? (selectedSplitDateColumn || 'Pick date column in Check') : `${cvFolds}-fold CV + holdout` },
+  ];
 
   // ── CONFIGURE TAB ──────────────────────────────────────────────────────────
   // FIX ⑧: tab components are defined as stable named components inside the render
@@ -2409,37 +3247,192 @@ const ModelTrainingPanel = ({
   // are observed - the real root cause in the original was unconditional redefinition.
   // JSX-consuming code is unchanged; just moving logic here is sufficient.
 
-  const shownRuns = recentRuns.slice(0, 5);
+  const shownRuns = recentRuns.slice(0, 6);
+  const recentRunHistoryPanel = (
+    <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, bgcolor: '#fafbfc' }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1} mb={1}>
+        <Box>
+          <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textPrimary }}>
+            Past trained models
+          </Typography>
+          <Typography sx={{ fontSize: 11.25, color: T.textMuted, mt: 0.3 }}>
+            Saved backend runs for this dataset. Load one to resume exactly where you left off, compare it, or open its tree path when available.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={0.75}>
+          <Chip label={`${recentRuns.length} saved run${recentRuns.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => dataset?.dataset_id && setRunsRefreshKey((k) => k + 1)}
+            sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+          >
+            Refresh
+          </Button>
+        </Stack>
+      </Stack>
+      {runsLoading && <LinearProgress sx={{ mb: 1, height: 4, borderRadius: 0 }} />}
+      {runsError && <Typography sx={{ fontSize: 11, color: T.red }}>{runsError}</Typography>}
+      {!runsLoading && shownRuns.length === 0 && (
+        <Alert severity="info" sx={{ ...neutralAlertSx, borderRadius: 0 }}>
+          No prior backend training runs were found for this dataset yet.
+        </Alert>
+      )}
+      {shownRuns.length > 0 && (
+        <Box sx={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['Status', 'Trained At', 'Algorithm', 'Grain', 'AUC', 'F1', 'Stage', 'Actions'].map((h) => (
+                  <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${T.border}` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {shownRuns.map((run) => {
+                const isCurrent = run.job_id === jobId;
+                return (
+                  <tr key={run.job_id} style={{ borderBottom: `1px solid ${T.border}`, background: isCurrent ? T.orangeLight : 'transparent' }}>
+                    <td style={{ padding: '6px 8px' }}>
+                      <Chip
+                        label={isCurrent ? 'Loaded now' : 'History'}
+                        size="small"
+                        sx={{
+                          height: 20,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          bgcolor: isCurrent ? T.orangeLight : '#fff',
+                          color: isCurrent ? T.orange : T.textMuted,
+                          border: `1px solid ${isCurrent ? T.orange : T.border}`,
+                        }}
+                      />
+                    </td>
+                    <td style={{ padding: '6px 8px', color: T.textDim }}>{run.trained_at ? String(run.trained_at).replace('T', ' ').slice(0, 19) : '-'}</td>
+                    <td style={{ padding: '6px 8px', color: T.textPrimary }}>{resolveAlgorithmLabel(run.algorithm_id || run.algo_id || run.algorithm)}</td>
+                    <td style={{ padding: '6px 8px', color: T.textDim }}>{run.grain}</td>
+                    <td style={{ padding: '6px 8px', color: metricColor(run.metrics?.roc_auc), fontFamily: T.mono }}>{fmt(run.metrics?.roc_auc)}</td>
+                    <td style={{ padding: '6px 8px', color: metricColor(run.metrics?.f1), fontFamily: T.mono }}>{fmt(run.metrics?.f1)}</td>
+                    <td style={{ padding: '6px 8px', color: T.textDim }}>{run.registry_stage || '-'}</td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <Stack direction="row" spacing={0.75}>
+                        <Button size="small" variant="outlined" onClick={() => handleLoadRun(run)} sx={{ height: 24, fontSize: 10.5, textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}>Load</Button>
+                        <Button size="small" variant="outlined" onClick={() => handleOpenTreeFromHistory(run)} sx={{ height: 24, fontSize: 10.5, textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}>Open tree</Button>
+                        <Button size="small" variant="outlined" onClick={() => handleAddRunToCompare(run)} sx={{ height: 24, fontSize: 10.5, textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}>Compare</Button>
+                      </Stack>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Box>
+      )}
+    </Paper>
+  );
 
   return (
     <Stack spacing={0}>
-      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', mb: 2 }}>
+      <Paper variant="outlined" sx={{ borderRadius: 0, overflow: 'hidden', mb: 2 }}>
+        <Box sx={{ px: 1.5, py: 1.1, bgcolor: '#f8fafc', borderBottom: `1px solid ${T.border}` }}>
+          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ lg: 'center' }}>
+            <Box>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.55 }}>
+                Modeling flow
+              </Typography>
+              <Typography sx={{ fontSize: 12.25, color: T.textMuted, mt: 0.35 }}>
+                Choose the modeling track once, then move through configure, check, train, evaluate, compare, and reporting in one continuous shell.
+              </Typography>
+            </Box>
+            <ToggleButtonGroup
+              exclusive
+              value={trainingMode}
+              onChange={(_, value) => value && setTrainingMode(value)}
+              size="small"
+              sx={{
+                '& .MuiToggleButtonGroup-grouped': {
+                  textTransform: 'none',
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  px: 1.4,
+                  py: 0.55,
+                  borderRadius: '0 !important',
+                  borderColor: `${T.border} !important`,
+                  color: T.textMuted,
+                },
+                '& .Mui-selected': {
+                  bgcolor: `${T.orangeLight} !important`,
+                  color: `${T.orange} !important`,
+                },
+              }}
+            >
+              <ToggleButton value="supervised">
+                <Stack direction="row" spacing={0.6} alignItems="center">
+                  <ModelTraining sx={{ fontSize: 15 }} />
+                  <span>Supervised</span>
+                </Stack>
+              </ToggleButton>
+              <ToggleButton value="unsupervised">
+                <Stack direction="row" spacing={0.6} alignItems="center">
+                  <ScatterPlot sx={{ fontSize: 15 }} />
+                  <span>Unsupervised</span>
+                </Stack>
+              </ToggleButton>
+              <ToggleButton value="deep_learning">
+                <Stack direction="row" spacing={0.6} alignItems="center">
+                  <Bolt sx={{ fontSize: 15 }} />
+                  <span>Deep Learning</span>
+                </Stack>
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
+        </Box>
         <Tabs
-          value={trainingMode}
-          onChange={(_, value) => setTrainingMode(value)}
-          sx={{ bgcolor: '#f8fafc', borderBottom: `1px solid ${T.border}`, '& .MuiTab-root': { textTransform: 'none', fontSize: 13, fontWeight: 700, minHeight: 48 }, '& .Mui-selected': { color: T.orange }, '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3 } }}
+          value={activeTab}
+          onChange={(_, v) => setActiveTab(v)}
+          sx={{
+            bgcolor: '#fff',
+            borderBottom: `1px solid ${T.border}`,
+            '& .MuiTab-root': {
+              textTransform: 'none',
+              fontSize: 13,
+              fontWeight: 600,
+              minHeight: 48,
+              borderRadius: 0,
+            },
+            '& .Mui-selected': { color: T.orange },
+            '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3 },
+          }}
         >
-          <Tab value="supervised" icon={<ModelTraining sx={{ fontSize: 16 }} />} iconPosition="start" label="Supervised" />
-          <Tab value="unsupervised" icon={<ScatterPlot sx={{ fontSize: 16 }} />} iconPosition="start" label="Unsupervised" />
-          <Tab value="deep_learning" icon={<Bolt sx={{ fontSize: 16 }} />} iconPosition="start" label="Deep Learning" />
-        </Tabs>
-      </Paper>
-
-      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', mb: 2 }}>
-        <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)}
-          sx={{ bgcolor: '#f8fafc', borderBottom: `1px solid ${T.border}`, '& .MuiTab-root': { textTransform: 'none', fontSize: 13, fontWeight: 600, minHeight: 46 }, '& .Mui-selected': { color: T.orange }, '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3 } }}>
-          <Tab icon={<Settings sx={{ fontSize: 15 }} />} iconPosition="start" label="Configure" />
-          <Tab icon={<ModelTraining sx={{ fontSize: 15 }} />} iconPosition="start" label="Train" />
-          <Tab icon={<Analytics sx={{ fontSize: 15 }} />} iconPosition="start" label="Evaluate" />
-          <Tab icon={<VisibilityOutlined sx={{ fontSize: 15 }} />} iconPosition="start" label="Business Understanding" />
-          {/* FIX ⑩: inline badge logic, no separate tabBadge function */}
-          <Tab iconPosition="start"
-            icon={savedRuns.length > 0
-              ? <Box sx={{ position: 'relative', display: 'flex' }}><CompareArrows sx={{ fontSize: 15 }} /><Box sx={{ position: 'absolute', top: -5, right: -7, bgcolor: T.orange, color: '#fff', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800 }}>{savedRuns.length}</Box></Box>
-              : <CompareArrows sx={{ fontSize: 15 }} />}
-            label="Compare" />
-          <Tab icon={<TableChart sx={{ fontSize: 15 }} />} iconPosition="start" label="Scoring Ledger" />
-          <Tab icon={<Article sx={{ fontSize: 15 }} />} iconPosition="start" label="Run Report" />
+          {[
+            { label: 'Configure', icon: <Settings sx={{ fontSize: 15 }} /> },
+            { label: 'Check', icon: <Search sx={{ fontSize: 15 }} /> },
+            { label: 'Train', icon: <ModelTraining sx={{ fontSize: 15 }} /> },
+            { label: 'Evaluate', icon: <Analytics sx={{ fontSize: 15 }} /> },
+            { label: 'Business Understanding', icon: <VisibilityOutlined sx={{ fontSize: 15 }} /> },
+            {
+              label: 'Compare',
+              icon: savedRuns.length > 0
+                ? <Box sx={{ position: 'relative', display: 'flex' }}><CompareArrows sx={{ fontSize: 15 }} /><Box sx={{ position: 'absolute', top: -5, right: -7, bgcolor: T.orange, color: '#fff', borderRadius: '50%', width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 800 }}>{savedRuns.length}</Box></Box>
+                : <CompareArrows sx={{ fontSize: 15 }} />,
+            },
+            { label: 'Scoring Ledger', icon: <TableChart sx={{ fontSize: 15 }} /> },
+            { label: 'Run Report', icon: <Article sx={{ fontSize: 15 }} /> },
+          ].map((item, idx) => (
+            <Tab
+              key={item.label}
+              icon={item.icon}
+              iconPosition="start"
+              label={(
+                <Stack direction="row" spacing={0.65} alignItems="center">
+                  <span>{item.label}</span>
+                  {completedTabIndexes.has(idx) && (
+                    <CheckCircle sx={{ fontSize: 13, color: T.done }} />
+                  )}
+                </Stack>
+              )}
+            />
+          ))}
         </Tabs>
       </Paper>
 
@@ -2448,47 +3441,203 @@ const ModelTrainingPanel = ({
         <Stack spacing={3}>
           <GrainSelector grain={grain} setGrain={setGrain} persona={persona} targetColumn={targetColumn} />
 
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textPrimary }}>Previous Model Runs</Typography>
-              <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => dataset?.dataset_id && setRunsRefreshKey((k) => k + 1)} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>Refresh</Button>
-            </Stack>
-            {runsLoading && <LinearProgress sx={{ mb: 1, height: 4, borderRadius: 2 }} />}
-            {runsError && <Typography sx={{ fontSize: 11, color: T.red }}>{runsError}</Typography>}
-            {!runsLoading && shownRuns.length === 0 && <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>No prior runs for this dataset yet.</Typography>}
-            {shownRuns.length > 0 && (
-              <Box sx={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: '#f8fafc' }}>
-                      {['Trained At', 'Algorithm', 'Grain', 'AUC', 'F1', 'Stage', 'Actions'].map((h) => (
-                        <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${T.border}` }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownRuns.map((run) => (
-                      <tr key={run.job_id} style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td style={{ padding: '6px 8px', color: T.textDim }}>{run.trained_at ? String(run.trained_at).replace('T', ' ').slice(0, 19) : '-'}</td>
-                        <td style={{ padding: '6px 8px', color: T.textPrimary }}>{resolveAlgorithmLabel(run.algorithm)}</td>
-                        <td style={{ padding: '6px 8px', color: T.textDim }}>{run.grain}</td>
-                        <td style={{ padding: '6px 8px', color: metricColor(run.metrics?.roc_auc), fontFamily: T.mono }}>{fmt(run.metrics?.roc_auc)}</td>
-                        <td style={{ padding: '6px 8px', color: metricColor(run.metrics?.f1), fontFamily: T.mono }}>{fmt(run.metrics?.f1)}</td>
-                        <td style={{ padding: '6px 8px', color: T.textDim }}>{run.registry_stage || '-'}</td>
-                        <td style={{ padding: '6px 8px' }}>
-                          <Stack direction="row" spacing={0.75}>
-                            <Button size="small" variant="outlined" onClick={() => handleLoadRun(run)} sx={{ height: 24, fontSize: 10.5, textTransform: 'none', borderRadius: 1, borderColor: T.border, color: T.textMuted }}>Load</Button>
-                            <Button size="small" variant="outlined" onClick={() => handleAddRunToCompare(run)} sx={{ height: 24, fontSize: 10.5, textTransform: 'none', borderRadius: 1, borderColor: T.border, color: T.textMuted }}>Compare</Button>
-                          </Stack>
-                        </td>
-                      </tr>
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, bgcolor: '#fcfcfd' }}>
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '0.82fr 1.18fr' } }}>
+              <Stack spacing={1.5}>
+                <Box>
+                  <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.textPrimary }}>
+                    Training brief
+                  </Typography>
+                  <Typography sx={{ fontSize: 11.25, color: T.textMuted, mt: 0.5, lineHeight: 1.7 }}>
+                    Keep the business story short here, then use the model lab on the right to choose the algorithm, explainability path, and training controls.
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                  {[
+                    { label: 'Decisioning Goal', value: modeGuide.title },
+                    { label: 'Selected Grain', value: grainConfig.label },
+                    { label: 'Business View', value: modeGuide.visual },
+                    { label: 'Operational Value', value: modeGuide.bankValue },
+                  ].map((item) => (
+                      <Box key={item.label} sx={{ p: 1.25, borderRadius: 0, bgcolor: '#fafbfc', border: `1px solid ${T.border}` }}>
+                      <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.45 }}>{item.label}</Typography>
+                      <Typography sx={{ fontSize: 11.5, color: T.textPrimary, mt: 0.45, lineHeight: 1.6 }}>{item.value}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, bgcolor: '#fff', borderColor: '#e8edf3' }}>
+                  <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+                    Sequence
+                  </Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mt: 0.5 }}>
+                    Check first, train second, explain third
+                  </Typography>
+                  <Typography sx={{ fontSize: 11.25, color: T.textMuted, mt: 0.65, lineHeight: 1.65 }}>
+                    Run the notebook-parity check before training, save the chosen model, then use the evaluation and tree-path explorer to explain how the model reached a decision on a real holdout record.
+                  </Typography>
+                </Paper>
+              </Stack>
+
+              <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 0, bgcolor: '#fff8f4', borderColor: '#f1d5c7' }}>
+                <Stack spacing={1.25}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                    <Stack direction="row" spacing={1.1} alignItems="center" flex={1}>
+                      <Box
+                        sx={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: 1.5,
+                          bgcolor: `${selectedTrainingPalette.accent}18`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <SelectedTrainingIcon sx={{ fontSize: 20, color: selectedTrainingPalette.accent }} />
+                      </Box>
+                      <Box>
+                        <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          Model lab
+                        </Typography>
+                        <Typography sx={{ fontSize: 16, fontWeight: 800, color: T.textPrimary, mt: 0.15 }}>
+                          {selectedTrainingOption?.label || 'Model'}
+                        </Typography>
+                        <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 0.3, lineHeight: 1.55 }}>
+                          {selectedTrainingOption?.bizDesc || modeGuide.output}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setShowAlgorithmChooser((prev) => ({ ...prev, [trainingMode]: !prev?.[trainingMode] }))}
+                        sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+                      >
+                        {showAlgorithmChooser?.[trainingMode]
+                          ? 'Hide model choices'
+                          : `Change model${hiddenAlgorithmCount > 0 ? ` (+${hiddenAlgorithmCount} more)` : ''}`}
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => setShowTechnicalControls((prev) => !prev)}
+                        sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+                      >
+                        {showTechnicalControls ? 'Hide modeling studio' : 'Open modeling studio'}
+                      </Button>
+                    </Stack>
+                  </Stack>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                    <Chip label={modeGuide.title} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    <Chip label={selectedTrainingOption?.speed || 'Standard speed'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    <Chip label={selectedTrainingPalette.tag || 'Model'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    <Chip label={ALGO_VIZ[selectedTrainingAlgorithm]?.vizLabel || 'Model visual'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                  </Stack>
+                  <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                    {modelLabFacts.map((fact) => (
+                      <Box key={fact.label} sx={{ p: 1.1, borderRadius: 0, bgcolor: '#fff', border: `1px solid ${T.border}` }}>
+                        <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+                          {fact.label}
+                        </Typography>
+                        <Typography sx={{ fontSize: 12.25, fontWeight: 700, color: T.textPrimary, mt: 0.35, lineHeight: 1.45 }}>
+                          {fact.value}
+                        </Typography>
+                        <Typography sx={{ fontSize: 10.75, color: T.textMuted, mt: 0.3, lineHeight: 1.5 }}>
+                          {fact.detail}
+                        </Typography>
+                      </Box>
                     ))}
-                  </tbody>
-                </table>
-              </Box>
-            )}
+                  </Box>
+                  <Collapse in={showAlgorithmChooser?.[trainingMode]} timeout={180}>
+                    <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 0, bgcolor: '#fff', borderColor: '#e8edf3' }}>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" mb={1.1}>
+                        <Box>
+                          <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary }}>
+                            Choose a different model
+                          </Typography>
+                          <Typography sx={{ fontSize: 10.75, color: T.textMuted, mt: 0.3 }}>
+                            Only the chosen model runs in the demo flow. Alternatives stay available here when you want to change the narrative.
+                          </Typography>
+                        </Box>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => setShowFullAlgorithmLibrary((prev) => ({ ...prev, [trainingMode]: !prev?.[trainingMode] }))}
+                          sx={{ textTransform: 'none', color: T.orange, px: 0.5 }}
+                        >
+                          {showFullAlgorithmLibrary?.[trainingMode] ? 'Show shortlist' : 'Show full library'}
+                        </Button>
+                      </Stack>
+                      <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                        {visibleAlgorithmOptions.map((algo) => (
+                          <AlgorithmChoiceTile
+                            key={algo.id}
+                            algo={algo}
+                            selected={selectedTrainingAlgorithm === algo.id}
+                            onSelect={() => handleSelectTrainingAlgorithm(algo.id)}
+                          />
+                        ))}
+                      </Box>
+                    </Paper>
+                  </Collapse>
+                  <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 0, bgcolor: '#fff', borderColor: T.border }}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                      <Box>
+                        <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+                          Inference view
+                        </Typography>
+                        <Typography sx={{ fontSize: 11.5, color: T.textPrimary, mt: 0.4, lineHeight: 1.6 }}>
+                          {treePreviewReady
+                            ? 'A trained tree-path explorer is ready. You can open a real holdout record and inspect the exact split trail that produced the score.'
+                            : `After training, this model will expose ${TREE_BASED_ALGO_IDS.has(selectedTrainingAlgorithm) ? 'a native tree path' : 'a surrogate tree path'} so investigators can inspect the scoring logic sample by sample.`}
+                        </Typography>
+                      </Box>
+                      <Button
+                        size="small"
+                        variant={treePreviewReady ? 'contained' : 'outlined'}
+                        onClick={() => treePreviewReady && setTreeWorkbenchOpen(true)}
+                        disabled={!treePreviewReady}
+                        sx={treePreviewReady
+                          ? { textTransform: 'none', borderRadius: 0, bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 700 }
+                          : { textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+                      >
+                        {treePreviewReady ? 'Open tree explanation' : 'Train model to unlock'}
+                      </Button>
+                    </Stack>
+                  </Paper>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <Button
+                      variant="contained"
+                      onClick={() => setActiveTab(1)}
+                      disabled={canDisable(!dataset || !targetColumn)}
+                      endIcon={<ArrowForward />}
+                      sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, textTransform: 'none', borderRadius: 0, fontWeight: 700 }}
+                    >
+                      Open training check
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={loadTrainingPreview}
+                      disabled={canDisable(!dataset || !targetColumn || previewLoading)}
+                      sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+                    >
+                      {previewLoading ? 'Refreshing...' : 'Refresh check'}
+                    </Button>
+                  </Stack>
+                  <Typography sx={{ fontSize: 10.75, color: T.textDim }}>
+                    {rowCount.toLocaleString()} rows | {trainingMode === 'unsupervised' ? 'label-assisted discovery flow' : `${cvFolds}-fold cross-validation`} | {grainConfig.label} | Check approval required before training
+                  </Typography>
+                </Stack>
+              </Paper>
+            </Box>
           </Paper>
 
+          {recentRunHistoryPanel}
+
+          <Collapse in={showTechnicalControls} timeout={180}>
+            <Stack spacing={3}>
           {trainingMode === 'supervised' ? (
             <>
               <Box>
@@ -2621,37 +3770,403 @@ const ModelTrainingPanel = ({
               {pipelineError && <Typography sx={{ fontSize: 11.5, color: T.red, mt: 1 }}>{pipelineError}</Typography>}
             </Paper>
           )}
+            </Stack>
+          </Collapse>
 
           {!dataset      && <Alert severity="warning" sx={neutralAlertSx}>Complete preprocessing (Step 5) before training.</Alert>}
           {!targetColumn && <Alert severity="warning" sx={neutralAlertSx}>Define a target variable (Step 3) before training.</Alert>}
-          {fallbackToMaster && (
-            <Alert severity="info" sx={neutralAlertSx}>
-              Preprocessed dataset is missing target "{targetColumn}". Using the master dataset for training.
-            </Alert>
-          )}
 
           <Box>
-            <Button variant="contained" size="large" disabled={canDisable(!dataset || !targetColumn)} onClick={handleStartTraining} endIcon={<ArrowForward />}
+            <Button variant="contained" size="large" disabled={canDisable(!dataset || !targetColumn)} onClick={() => setActiveTab(1)} endIcon={<ArrowForward />}
               sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, height: 44, px: 4, borderRadius: 2, fontWeight: 700, fontSize: 14, textTransform: 'none', boxShadow: 'none' }}>
-              {`Train ${selectedTrainingOption?.label || 'Model'}`}
+              Open training check
             </Button>
             <Typography sx={{ fontSize: 11, color: T.textDim, mt: 0.75 }}>
-              {grainConfig.label} | {selectedTrainingOption?.label || activeRunOption?.label || 'Model'} | {rowCount.toLocaleString()} rows | {cvFolds}-fold CV{trainingMode === 'unsupervised' ? ' | Labeled holdout evaluation enabled' : ` | HML: High>=${hmlHigh.toFixed(2)} Low<${hmlLow.toFixed(2)}`}
+              {grainConfig.label} | {selectedTrainingOption?.label || activeRunOption?.label || 'Model'} | {rowCount.toLocaleString()} rows | {cvFolds}-fold CV{trainingMode === 'unsupervised' ? ' | Labeled holdout evaluation enabled' : ` | HML: High>=${hmlHigh.toFixed(2)} Low<${hmlLow.toFixed(2)}`} | Notebook-parity check required
             </Typography>
           </Box>
         </Stack>
       </TabPanel>
 
-      {/* ── Train ── */}
       <TabPanel value={activeTab} index={1}>
         <Stack spacing={2.5}>
           {trainingError && (
-            <Alert severity="error" sx={neutralAlertSx} action={<IconButton size="small" onClick={() => { setTrainingError(null); setActiveTab(0); }}><Close /></IconButton>}>{trainingError}</Alert>
+            <Alert severity="error" sx={neutralAlertSx} action={<IconButton size="small" onClick={() => setTrainingError(null)}><Close /></IconButton>}>{trainingError}</Alert>
           )}
+          {!dataset && <Alert severity="warning" sx={neutralAlertSx}>Complete preprocessing before running the notebook-parity check.</Alert>}
+          {!targetColumn && <Alert severity="warning" sx={neutralAlertSx}>Define the canonical target before running the notebook-parity check.</Alert>}
+          {previewError && <Alert severity="error" sx={neutralAlertSx}>{previewError}</Alert>}
+          {previewResolutionNote && <Alert severity="info" sx={neutralAlertSx}>{previewResolutionNote}</Alert>}
+
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
+            <Stack spacing={1.5}>
+              <Box>
+                <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.textPrimary }}>Check controls</Typography>
+                <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.35, lineHeight: 1.7 }}>
+                  Choose the dataset and split policy you want to validate before training. Auto mode prefers the model-ready dataset, but it can fall back safely when the check finds a bad source or split configuration.
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, mb: 0.75 }}>
+                  Training data source
+                </Typography>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                  {[
+                    { key: 'auto', label: 'Auto', description: 'Prefer the model-ready FCC dataset, then fall back if needed.' },
+                    ...datasetSources.map((source) => ({
+                      key: source.key,
+                      label: source.shortLabel,
+                      description: `${source.dataset?.row_count?.toLocaleString?.() || 0} rows`,
+                    })),
+                  ].map((option) => {
+                    const active = trainingDataSource === option.key;
+                    return (
+                      <Button
+                        key={option.key}
+                        size="small"
+                        variant={active ? 'contained' : 'outlined'}
+                        onClick={() => setTrainingDataSource(option.key)}
+                        sx={{
+                          textTransform: 'none',
+                          borderRadius: 1.5,
+                          ...(active
+                            ? { bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover } }
+                            : { borderColor: T.border, color: T.textMuted }),
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    );
+                  })}
+                </Stack>
+                <Typography sx={{ fontSize: 11.25, color: T.textMuted, mt: 0.7 }}>
+                  {selectedSource?.description || 'Pick a dataset source to validate the notebook-parity check.'}
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, mb: 0.75 }}>
+                  Split policy
+                </Typography>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                  {[
+                    { key: 'auto', label: 'Auto', description: 'Prefer temporal when a reliable date exists.' },
+                    { key: 'random', label: 'Random', description: 'Use a standard stratified holdout.' },
+                    { key: 'temporal', label: 'Temporal', description: 'Force an out-of-time validation split.' },
+                  ].map((option) => {
+                    const active = splitStrategy === option.key;
+                    return (
+                      <Button
+                        key={option.key}
+                        size="small"
+                        variant={active ? 'contained' : 'outlined'}
+                        onClick={() => setSplitStrategy(option.key)}
+                        sx={{
+                          textTransform: 'none',
+                          borderRadius: 1.5,
+                          ...(active
+                            ? { bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover } }
+                            : { borderColor: T.border, color: T.textMuted }),
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    );
+                  })}
+                </Stack>
+                <Typography sx={{ fontSize: 11.25, color: T.textMuted, mt: 0.7 }}>
+                  {splitStrategy === 'auto'
+                    ? 'Auto chooses temporal only when a reliable alert/case date is truly available. Otherwise it falls back to random instead of silently breaking the split.'
+                    : splitStrategy === 'random'
+                      ? 'Random holdout is useful when the model-ready dataset no longer carries raw date columns.'
+                      : 'Temporal holdout enforces a business-safe out-of-time split and requires a reliable date column.'}
+                </Typography>
+              </Box>
+
+              {splitStrategy === 'temporal' && (
+                <Box>
+                  <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, mb: 0.75 }}>
+                    Date column for temporal split
+                  </Typography>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                    {(availableSplitDateColumns.length ? availableSplitDateColumns : ['No reliable date detected']).map((column) => {
+                      const active = selectedSplitDateColumn === column;
+                      const disabled = column === 'No reliable date detected';
+                      return (
+                        <Button
+                          key={column}
+                          size="small"
+                          disabled={disabled}
+                          variant={active ? 'contained' : 'outlined'}
+                          onClick={() => !disabled && setSelectedSplitDateColumn(column)}
+                          sx={{
+                            textTransform: 'none',
+                            borderRadius: 1.5,
+                            ...(active
+                              ? { bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover } }
+                              : { borderColor: T.border, color: T.textMuted }),
+                          }}
+                        >
+                          {column}
+                        </Button>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              )}
+
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {masterDataset && trainingDataSource !== 'master' && (
+                  <Button variant="outlined" onClick={() => setTrainingDataSource('master')} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>
+                    Use master dataset
+                  </Button>
+                )}
+                {preprocessedDataset && trainingDataSource !== 'preprocessed' && (
+                  <Button variant="outlined" onClick={() => setTrainingDataSource('preprocessed')} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>
+                    Use model-ready dataset
+                  </Button>
+                )}
+                {splitStrategy !== 'random' && (
+                  <Button variant="outlined" onClick={() => setSplitStrategy('random')} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>
+                    Use random split
+                  </Button>
+                )}
+                <Button variant="text" onClick={() => setActiveTab(0)} sx={{ textTransform: 'none', color: T.orange }}>
+                  Revisit configure tab
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fcfcfd' }}>
+            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} justifyContent="space-between">
+              <Box sx={{ maxWidth: 760 }}>
+                <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.textPrimary }}>Training safety check</Typography>
+                <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.5, lineHeight: 1.7 }}>
+                  Review the notebook-v5 label mapping, prove the target is separated from model features, confirm the split policy, and approve the run before training starts.
+                </Typography>
+              </Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <Button variant="outlined" onClick={loadTrainingPreview} disabled={canDisable(!dataset || !targetColumn || previewLoading)} sx={{ textTransform: 'none', borderRadius: 1.75, borderColor: T.border, color: T.textMuted }}>
+                  {previewLoading ? 'Refreshing check...' : 'Refresh check'}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={() => {
+                    setCheckApproved(true);
+                    setTrainingError(null);
+                    setActiveTab(2);
+                  }}
+                  disabled={canDisable(previewLoading || !trainingReadiness?.ready)}
+                  sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, textTransform: 'none', borderRadius: 1.75, fontWeight: 700 }}
+                >
+                  Approve and continue to train
+                </Button>
+                <Button variant="outlined" onClick={() => setCheckApproved(true)} disabled={canDisable(previewLoading || !trainingReadiness?.ready || checkApproved)} sx={{ textTransform: 'none', borderRadius: 1.75, borderColor: T.border, color: T.textMuted }}>
+                  Approve only
+                </Button>
+              </Stack>
+            </Stack>
+            {previewLoading && <LinearProgress sx={{ mt: 1.5, height: 4, borderRadius: 999 }} />}
+          </Paper>
+
+          {trainingPreview && (
+            <>
+              <Alert severity={trainingReadiness?.ready ? 'success' : 'warning'} sx={neutralAlertSx}>
+                {trainingReadiness?.ready
+                  ? `Check passed. Canonical target "${targetCheck?.canonical_target_column || targetColumn}" is separated and the run is ready for approval.`
+                  : 'Check blocked. Resolve the target or split issues below before training can start.'}
+              </Alert>
+
+              {checkApproved && trainingReadiness?.ready && (
+                <Alert severity="success" sx={neutralAlertSx}>
+                  Check approved. Training is now unlocked for this configuration.
+                </Alert>
+              )}
+
+              {Array.isArray(trainingReadiness?.blocking_reasons) && trainingReadiness.blocking_reasons.length > 0 && (
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff7ed', borderColor: '#fed7aa' }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Blocking issues</Typography>
+                  <Stack spacing={0.75}>
+                    {trainingReadiness.blocking_reasons.map((reason) => (
+                      <Typography key={reason} sx={{ fontSize: 11.5, color: T.textMuted }}>{reason}</Typography>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
+
+              {Array.isArray(trainingReadiness?.warnings) && trainingReadiness.warnings.length > 0 && (
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Notebook-parity warnings</Typography>
+                  <Stack spacing={0.75}>
+                    {trainingReadiness.warnings.map((warning) => (
+                      <Typography key={warning} sx={{ fontSize: 11.5, color: T.textMuted }}>{warning}</Typography>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
+
+              <Box sx={{ display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' } }}>
+                <MetricBox label="Training Source" value={trainingPreview?._source_label || selectedSource?.label || '-'} />
+                <MetricBox label="Canonical Target" value={targetCheck?.canonical_target_column || targetColumn || '-'} />
+                <MetricBox label="Labelled Rows" value={targetCheck?.labelled_rows ?? 0} />
+                <MetricBox label="Event Rate %" value={targetCheck?.event_rate_pct ?? 0} />
+                <MetricBox label="Split Policy" value={splitPreview?.split_strategy || 'auto'} />
+                <MetricBox label="Train Rows" value={splitPreview?.train_rows ?? 0} />
+                <MetricBox label="Test Rows" value={splitPreview?.test_rows ?? 0} />
+                <MetricBox label="Default Threshold" value={(deployThresholdPolicy?.default_threshold ?? DEFAULT_BUSINESS_THRESHOLD).toFixed(2)} />
+                <MetricBox label="Deploy Band" value={`${thresholdBandMin.toFixed(2)}-${thresholdBandMax.toFixed(2)}`} />
+              </Box>
+
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1.15fr 0.85fr' } }}>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.25 }}>Target definition and split proof</Typography>
+                  <Box sx={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <tbody>
+                        {[
+                          ['Canonical target', targetCheck?.canonical_target_column || targetColumn || '-'],
+                          ['Target separated from features', targetCheck?.target_is_separated ? 'Yes' : 'No'],
+                          ['Positive rows', (targetCheck?.positive_rows ?? 0).toLocaleString()],
+                          ['Negative rows', (targetCheck?.negative_rows ?? 0).toLocaleString()],
+                          ['Unlabelled rows dropped', (targetCheck?.dropped_rows ?? 0).toLocaleString()],
+                          ['Split strategy', splitStrategyLabel],
+                          ['Date column', dateColumnDisplay],
+                          ['Split date', splitDateDisplay],
+                          ['Train event rate', splitPreview?.train_event_rate_pct != null ? `${splitPreview.train_event_rate_pct}%` : '-'],
+                          ['Test event rate', splitPreview?.test_event_rate_pct != null ? `${splitPreview.test_event_rate_pct}%` : '-'],
+                        ].map(([label, value]) => (
+                          <tr key={label} style={{ borderBottom: `1px solid ${T.border}` }}>
+                            <td style={{ padding: '7px 8px', fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</td>
+                            <td style={{ padding: '7px 8px', color: T.textPrimary }}>{value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Box>
+                  {splitStrategyLabel === 'random' && (
+                    <Typography sx={{ fontSize: 11, color: T.textDim, mt: 1.25 }}>
+                      Random split is active because the approved training source does not expose a reliable alert or case date for a temporal cut.
+                    </Typography>
+                  )}
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+                    {(targetCheck?.target_aliases_present || []).map((alias) => (
+                      <Chip key={alias} label={`Trace alias: ${alias}`} size="small" sx={{ bgcolor: '#faf5ff', border: `1px solid ${T.border}` }} />
+                    ))}
+                    {(targetCheck?.target_proxy_features_present || []).slice(0, 8).map((column) => (
+                      <Chip key={column} label={`Proxy risk: ${column}`} size="small" sx={{ bgcolor: '#fff1ec', border: `1px solid #f1d5c7` }} />
+                    ))}
+                  </Stack>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.25 }}>Metrics and threshold policy</Typography>
+                  <Stack spacing={1}>
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      Ranking metrics stay visible as ROC-AUC and PR-AUC, but FCC deploy decisions are governed by suppression, event loss, and the approved operating threshold.
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      Default operating threshold: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{(deployThresholdPolicy?.default_threshold ?? DEFAULT_BUSINESS_THRESHOLD).toFixed(2)}</Box>
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      Deployable range: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{thresholdBandMin.toFixed(2)} to {thresholdBandMax.toFixed(2)}</Box>
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      Event-loss cap for deployable thresholds: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{deployThresholdPolicy?.event_loss_cap_pct ?? 2}%</Box>
+                    </Typography>
+                    <Divider sx={{ my: 0.5 }} />
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      Operating metrics exposed at approval time: Precision, Recall, F1, Specificity, Balanced Accuracy, Suppression %, and Event Loss %.
+                    </Typography>
+                  </Stack>
+                </Paper>
+              </Box>
+
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' } }}>
+                <PreviewDataTable title={`${trainingPreview?._source_label || selectedSource?.label || 'Selected source'} preview`} preview={trainingPreview?.raw_preview} />
+                <PreviewDataTable title="Encoded model input preview" preview={trainingPreview?.preprocessed_preview} tone="technical" />
+              </Box>
+
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' } }}>
+                <FeatureInventoryTable title="Included feature columns" items={trainingPreview?.included_features || []} maxHeight={380} />
+                <FeatureInventoryTable title="Excluded columns and reasons" items={trainingPreview?.excluded_features || []} maxHeight={380} />
+              </Box>
+
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Notebook v5 target mapping</Typography>
+                <Box sx={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc' }}>
+                        {['Rule', 'Definition'].map((header) => (
+                          <th key={header} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${T.border}` }}>{header}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(targetCheck?.mapping || {}).map(([label, value]) => (
+                        <tr key={label} style={{ borderBottom: `1px solid ${T.border}` }}>
+                          <td style={{ padding: '6px 8px', color: T.textPrimary, fontFamily: T.mono }}>{label}</td>
+                          <td style={{ padding: '6px 8px', color: T.textMuted }}>{typeof value === 'string' ? value : JSON.stringify(value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Box>
+              </Paper>
+            </>
+          )}
+        </Stack>
+      </TabPanel>
+
+      {/* ── Train ── */}
+      <TabPanel value={activeTab} index={2}>
+        <Stack spacing={2.5}>
+          {trainingError && (
+            <Alert severity="error" sx={neutralAlertSx} action={<IconButton size="small" onClick={() => { setTrainingError(null); setActiveTab(1); }}><Close /></IconButton>}>{trainingError}</Alert>
+          )}
+          {!checkApproved && <Alert severity="info" sx={neutralAlertSx}>Training is gated by the Check tab. Approve the notebook-parity check before launching a model run.</Alert>}
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
+            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', lg: 'center' }} justifyContent="space-between">
+              <Box>
+                <Typography sx={{ fontSize: 14, fontWeight: 800, color: T.textPrimary }}>Launch training run</Typography>
+                <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.5 }}>
+                  Start the approved FCC run from here. The structured milestones below will update as the job prepares data, splits the holdout, fits the model, and scores the validation set.
+                </Typography>
+                {!canStartTraining && (
+                  <Typography sx={{ fontSize: 11, color: T.textDim, mt: 0.75 }}>
+                    {trainingBusy
+                      ? 'A training job is already in progress.'
+                      : !checkApproved
+                        ? 'Approve the Check stage first.'
+                        : !trainingReadiness?.ready
+                          ? 'Resolve the Check-stage warnings before training can start.'
+                          : 'Refresh the training check if this view looks stale.'}
+                  </Typography>
+                )}
+              </Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} sx={{ width: { xs: '100%', lg: 'auto' } }}>
+                <Button variant="outlined" onClick={() => setActiveTab(1)} sx={{ textTransform: 'none', borderRadius: 1.75, borderColor: T.border, color: T.textMuted }}>
+                  Back to check
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleStartTraining}
+                  disabled={!canStartTraining}
+                  startIcon={trainingBusy ? <CircularProgress size={14} sx={{ color: 'inherit' }} /> : <ArrowForward />}
+                  sx={{ textTransform: 'none', borderRadius: 1.75, bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover } }}
+                >
+                  {trainingBusy ? 'Training in progress...' : (results ? 'Re-run training' : 'Start training run')}
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+          <StructuredTrainingProgress jobStatus={jobStatus} />
           <TrainingDAG jobStatus={jobStatus} algoObj={activeRunOption} />
           <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 2, bgcolor: '#fafbfc' }}>
             <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-              {[{ label: 'Grain', value: grainConfig.label }, { label: 'Algorithm', value: activeRunOption?.label }, { label: 'Dataset', value: `${rowCount.toLocaleString()} rows` }, { label: 'Train/Test', value: `${100 - testSplit}% / ${testSplit}%` }, { label: 'CV Folds', value: cvFolds }, { label: 'HML Thresholds', value: trainingMode === 'unsupervised' ? 'Not used' : `H>=${hmlHigh.toFixed(2)} / L<${hmlLow.toFixed(2)}` }].map((item) => (
+              {[{ label: 'Grain', value: grainConfig.label }, { label: 'Algorithm', value: activeRunOption?.label }, { label: 'Dataset', value: `${rowCount.toLocaleString()} rows` }, { label: 'Train/Test', value: `${100 - testSplit}% / ${testSplit}%` }, { label: 'CV Folds', value: cvFolds }, { label: 'Deploy Threshold Band', value: `${thresholdBandMin.toFixed(2)} - ${thresholdBandMax.toFixed(2)}` }].map((item) => (
                 <Box key={item.label}>
                   <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.5 }}>{item.label}</Typography>
                   <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>{item.value}</Typography>
@@ -2659,9 +4174,10 @@ const ModelTrainingPanel = ({
               ))}
             </Stack>
           </Paper>
+          <Alert severity="info" sx={neutralAlertSx}>Structured milestones are the primary training view. The raw log below is retained only for technical troubleshooting.</Alert>
           <Box>
             <Button size="small" variant="text" startIcon={<Terminal sx={{ fontSize: 14 }} />} endIcon={logExpanded ? <KeyboardArrowUp sx={{ fontSize: 14 }} /> : <KeyboardArrowDown sx={{ fontSize: 14 }} />} onClick={() => setLogExpanded((p) => !p)} sx={{ textTransform: 'none', fontSize: 12, color: T.textMuted, px: 0, mb: 0.5 }}>
-              {logExpanded ? 'Hide' : 'Show'} Training Log ({(jobStatus?.logs || []).length} lines)
+              {logExpanded ? 'Hide' : 'Show'} technical log ({(jobStatus?.logs || []).length} lines)
             </Button>
             <Collapse in={logExpanded}>
               <Box sx={{ bgcolor: T.termBg, borderRadius: 2, p: 2, height: 220, overflowY: 'auto', fontFamily: T.mono, fontSize: 11.5, border: '1px solid #1e293b' }}>
@@ -2758,7 +4274,7 @@ const ModelTrainingPanel = ({
       </TabPanel>
 
       {/* ── Evaluate ── */}
-      <TabPanel value={activeTab} index={2}>
+      <TabPanel value={activeTab} index={3}>
         {!results ? (
           <Paper variant="outlined" sx={{ p: 4, borderRadius: 2, textAlign: 'center' }}>
             <Analytics sx={{ fontSize: 48, color: T.textDim, mb: 1 }} />
@@ -2775,7 +4291,7 @@ const ModelTrainingPanel = ({
                 <MetricBox label="CV AUC"  value={m.cv_auc} />
               </Stack>
               <Typography sx={{ fontSize: 11.5, color: T.textDim }}>
-                Threshold metrics (t = {threshold.toFixed(2)})
+                Binary decision metrics at the approved operating threshold ({threshold.toFixed(2)})
               </Typography>
               <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
                 <MetricBox label="Precision"    value={thresholdMetrics.precision} emphasis={isFocusMetric('precision')} />
@@ -2786,6 +4302,74 @@ const ModelTrainingPanel = ({
                 <MetricBox label="Balanced Acc" value={thresholdMetrics.balanced_accuracy} emphasis={isFocusMetric('balanced_accuracy')} />
               </Stack>
             </Stack>
+
+            <Alert severity="info" sx={neutralAlertSx}>
+              Binary-first decision story: alerts below the approved threshold are suppressed in FCC, and the remaining alerts are escalated for downstream review.
+            </Alert>
+
+            {results?.mode === 'supervised' && (
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff8f4', borderColor: '#f1d5c7' }}>
+                <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between">
+                  <Box sx={{ maxWidth: 840 }}>
+                    <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>
+                      Decision path explorer
+                    </Typography>
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.45, lineHeight: 1.7 }}>
+                      Use a real holdout sample to show which conditions pushed the model toward suppressing or escalating an alert. Tree models use their native path; other algorithms use a surrogate tree built from the trained scorer.
+                    </Typography>
+                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                      <Chip label={treeExplanation?.tree_kind === 'surrogate' ? 'Surrogate tree explainer' : 'Native tree explainer'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                      <Chip label={`${Array.isArray(treeExplanation?.sample_candidates) ? treeExplanation.sample_candidates.length : 0} sample trace${Array.isArray(treeExplanation?.sample_candidates) && treeExplanation.sample_candidates.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                      {treeExplanation?.selected_sample?.entity_id && (
+                        <Chip label={`Selected sample ${treeExplanation.selected_sample.entity_id}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                      )}
+                    </Stack>
+                  </Box>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+                    <Button
+                      variant="contained"
+                      onClick={() => setTreeWorkbenchOpen(true)}
+                      disabled={!treePreviewReady}
+                      sx={{ bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, textTransform: 'none', borderRadius: 1.5, fontWeight: 700 }}
+                    >
+                      Open tree explanation
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      onClick={() => setActiveTab(2)}
+                      sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}
+                    >
+                      Back to train tab
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Paper>
+            )}
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 0.75 }}>Threshold deployment policy</Typography>
+              <Typography sx={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.7 }}>
+                Default operating threshold is {(deployThresholdPolicy?.default_threshold ?? DEFAULT_BUSINESS_THRESHOLD).toFixed(2)}. FCC will only allow deployable thresholds between {thresholdBandMin.toFixed(2)} and {thresholdBandMax.toFixed(2)} while still showing the broader trade-off curve for review.
+              </Typography>
+              {deployThresholdPolicy?.deployable_threshold != null && (
+                <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.75 }}>
+                  Best deployable threshold for this run: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{Number(deployThresholdPolicy.deployable_threshold).toFixed(2)}</Box>
+                </Typography>
+              )}
+            </Paper>
+
+            {qualityReview?.review_required && (
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff7ed', borderColor: '#fed7aa' }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 0.75 }}>Quality guard review required</Typography>
+                <Stack spacing={0.75}>
+                  {(qualityReview?.findings || []).map((finding, idx) => (
+                    <Typography key={`${finding?.code || 'finding'}-${idx}`} sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      {finding?.message || 'Suspicious run behaviour detected.'}
+                    </Typography>
+                  ))}
+                </Stack>
+              </Paper>
+            )}
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
               <Stack direction="row" alignItems="center" spacing={1} mb={1}>
@@ -2895,7 +4479,7 @@ const ModelTrainingPanel = ({
                     <Typography sx={{ fontSize: 12, fontWeight: 600, color: T.textPrimary }}>Decision threshold</Typography>
                     <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.orange }}>{threshold.toFixed(2)}</Typography>
                   </Stack>
-                  <Slider value={threshold} min={0.1} max={0.9} step={0.05} onChange={(_, v) => setThreshold(v)} size="small" sx={{ color: T.orange }} />
+                  <Slider value={threshold} min={thresholdBandMin} max={thresholdBandMax} step={0.01} onChange={(_, v) => setThreshold(v)} size="small" sx={{ color: T.orange }} />
                 </Paper>
 
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
@@ -2910,7 +4494,7 @@ const ModelTrainingPanel = ({
                         </tr>
                       </thead>
                       <tbody>
-                        {threshTable.map((row, i) => {
+                        {thresholdTableForDisplay.map((row, i) => {
                           const isActive = Math.abs(row.threshold - threshold) < 0.025;
                           return (
                             <tr key={i} style={{ background: isActive ? T.orangeLight : 'transparent', cursor: 'pointer' }} onClick={() => setThreshold(row.threshold)}>
@@ -2958,6 +4542,57 @@ const ModelTrainingPanel = ({
               </Stack>
             </Box>
 
+            {(decisionReasonSummary || suppressedCasesPreview.length > 0) && (
+              <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '0.8fr 1.2fr' } }}>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 0.75 }}>Suppression decision summary</Typography>
+                  <Typography sx={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.7 }}>
+                    {decisionReasonSummary?.headline || 'Suppressed rows are summarised below with their main drivers.'}
+                  </Typography>
+                  <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+                    <MetricBox label="Suppressed Preview" value={decisionReasonSummary?.suppressed_case_count ?? suppressedCasesPreview.length} />
+                    <MetricBox label="Potential Misses" value={decisionReasonSummary?.potentially_missed_events ?? 0} />
+                    <MetricBox label="Threshold" value={(decisionReasonSummary?.threshold ?? threshold).toFixed(2)} />
+                  </Stack>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
+                    {(decisionReasonSummary?.top_driver_features || []).map((driver) => (
+                      <Chip key={driver?.feature} label={`${String(driver?.feature || '').replaceAll('_', ' ')} (${driver?.count ?? 0})`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    ))}
+                  </Stack>
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Suppressed by model</Typography>
+                  {!suppressedCasesPreview.length ? (
+                    <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>No rows were suppressed at the approved operating threshold.</Typography>
+                  ) : (
+                    <Box sx={{ overflowX: 'auto', maxHeight: 320, overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc' }}>
+                            {['Entity', 'Score', 'Decision', 'Actual', 'Reason'].map((header) => (
+                              <th key={header} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${T.border}` }}>{header}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {suppressedCasesPreview.map((row) => (
+                            <tr key={`${row?.entity_id || 'row'}-${row?.sample_index}`} style={{ borderBottom: `1px solid ${T.border}` }}>
+                              <td style={{ padding: '6px 8px', color: T.textPrimary, fontFamily: T.mono }}>{row?.entity_id || row?.sample_index || '-'}</td>
+                              <td style={{ padding: '6px 8px', color: T.textPrimary, fontFamily: T.mono }}>{row?.score != null ? Number(row.score).toFixed(4) : '-'}</td>
+                              <td style={{ padding: '6px 8px', color: T.textPrimary }}>{row?.decision || 'SUPPRESS'}</td>
+                              <td style={{ padding: '6px 8px', color: T.textMuted }}>{row?.actual_label || '-'}</td>
+                              <td style={{ padding: '6px 8px', color: T.textMuted, minWidth: 260 }}>{row?.reason_text || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </Box>
+                  )}
+                </Paper>
+              </Box>
+            )}
+
             <HMLThresholdEditor hmlHigh={hmlHigh} hmlLow={hmlLow} setHmlHigh={setHmlHigh} setHmlLow={setHmlLow} totalAlerts={(tp ?? 0) + (tn ?? 0) + (fp_ ?? 0) + (fn_ ?? 0) || 2039} summary={hmlSummary} loading={hmlLoading} />
             {results?.mode === 'supervised' && <AlgorithmInternals algoId={results?.algorithm || selectedAlgo} results={results} persona={persona} />}
 
@@ -2971,7 +4606,7 @@ const ModelTrainingPanel = ({
                 startIcon={<Article />}
                 onClick={() => {
                   if (jobId && onOpenReport) onOpenReport(jobId);
-                  setActiveTab(6);
+                  setActiveTab(7);
                 }}
                 disabled={canDisable(!jobId)}
                 sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}
@@ -2979,15 +4614,15 @@ const ModelTrainingPanel = ({
                 Business Report
               </Button>
               <Button variant="outlined" startIcon={<CloudDownload />} onClick={() => handleExport(jobId)} disabled={canDisable(!jobId)} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>Download Model</Button>
-              <Button variant="outlined" startIcon={<CompareArrows />} onClick={() => setActiveTab(4)} disabled={canDisable(savedRuns.length === 0)} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>Compare Runs ({savedRuns.length})</Button>
-              <Button variant="outlined" startIcon={<TableChart />} onClick={() => setActiveTab(5)} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>View Scoring Ledger</Button>
+              <Button variant="outlined" startIcon={<CompareArrows />} onClick={() => setActiveTab(5)} disabled={canDisable(savedRuns.length === 0)} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>Compare Runs ({savedRuns.length})</Button>
+              <Button variant="outlined" startIcon={<TableChart />} onClick={() => setActiveTab(6)} sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}>View Scoring Ledger</Button>
             </Box>
           </Stack>
         )}
       </TabPanel>
 
       {/* ── Business Understanding ── */}
-      <TabPanel value={activeTab} index={3}>
+      <TabPanel value={activeTab} index={4}>
         {(() => {
           const unitLabel      = grain === 'case' ? 'cases' : 'alerts';
           const hml            = hmlSummary || results?.hml_summary;
@@ -3081,8 +4716,35 @@ const ModelTrainingPanel = ({
         })()}
       </TabPanel>
 
+      <Dialog open={treeWorkbenchOpen} onClose={() => setTreeWorkbenchOpen(false)} fullWidth maxWidth="xl">
+        <DialogTitle sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${T.border}` }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+            <Box>
+              <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.textPrimary }}>
+                Decision path explorer
+              </Typography>
+              <Typography sx={{ fontSize: 12, color: T.textMuted, mt: 0.35 }}>
+                Trace one scored holdout sample through the model and inspect the split-by-split explanation used for AML review.
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setTreeWorkbenchOpen(false)} size="small">
+              <Close fontSize="small" />
+            </IconButton>
+          </Stack>
+        </DialogTitle>
+        <DialogContent sx={{ p: 2 }}>
+          <SupervisedWorkbenchPreview
+            loading={false}
+            error={resultsError}
+            data={results}
+            selectedSampleIndex={selectedTreeSampleIndex}
+            onSelectSample={setSelectedTreeSampleIndex}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* ── Compare ── */}
-      <TabPanel value={activeTab} index={4}>
+      <TabPanel value={activeTab} index={5}>
         {!savedRuns.length ? (
           <Paper variant="outlined" sx={{ p: 4, borderRadius: 2, textAlign: 'center' }}>
             <CompareArrows sx={{ fontSize: 48, color: T.textDim, mb: 1 }} />
@@ -3140,11 +4802,11 @@ const ModelTrainingPanel = ({
       </TabPanel>
 
       {/* ── Scoring Ledger ── */}
-      <TabPanel value={activeTab} index={5}>
+      <TabPanel value={activeTab} index={6}>
         <ScoringLedger jobId={jobId} grain={grain} hmlHigh={hmlHigh} hmlLow={hmlLow} results={results} />
       </TabPanel>
 
-      <TabPanel value={activeTab} index={6}>
+      <TabPanel value={activeTab} index={7}>
         <RunReport
           runId={jobId || selectedRunId || ''}
           compact

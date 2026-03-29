@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import JoinDagViewer from '../JoinDagViewer';
+import MasterDatasetFlowDiagram from './MasterDatasetFlowDiagram';
 import { T, cardStyle } from './theme';
 import { fmt, pct, safe, isEventTable } from './utils';
 
@@ -271,15 +271,15 @@ const MasterDatasetWorkbench = ({
         </div>
       </div>
 
-      <JoinDagViewer
+      <MasterDatasetFlowDiagram
         datasets={datasets}
-        joins={activeJoins}
         anchorType={anchorType}
-        impactRows={dagImpactRows}
-        masterRowCount={estimatedOutputRows}
-        labelSummary={previewData?.label_summary || null}
-        rollupAudit={rollupTables}
-        aggregatedJoinSteps={previewData?.aggregated_joins || []}
+        activeJoins={activeJoins}
+        rowImpact={{ ...(rowImpact || {}), steps: dagImpactRows }}
+        estimatedOutputRows={estimatedOutputRows}
+        previewData={previewData}
+        rollupTables={rollupTables}
+        joinProfileEstimated={joinProfileEstimated}
       />
     </div>
   );

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -54,6 +55,10 @@ from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 from api.tools.mlops.path_utils import resolve_env_root
 from api.tools.mlops.model_training_service import (
     ModelTrainingService,
+    BUSINESS_DEFAULT_THRESHOLD,
+    DEFAULT_SPLIT_STRATEGY,
+    DEPLOYABLE_THRESHOLD_MAX,
+    DEPLOYABLE_THRESHOLD_MIN,
     _classification_preview_metrics,
     _closest_threshold_row,
 )
@@ -113,6 +118,362 @@ def _get_validation_service(env_root: Path) -> ModelValidationService:
 
 def _get_dataset(env_root, tenant_id, env_id, dataset_id):
     return _get_dataset_service(env_root).get_dataset(tenant_id, env_id, dataset_id)
+
+
+def _clean_lines(values: Any, max_items: int = 10) -> List[str]:
+    if not isinstance(values, (list, tuple)):
+        return []
+    cleaned: List[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        cleaned.append(text)
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
+
+
+def _extract_llm_json(text: str) -> Optional[Dict[str, Any]]:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    candidates = [raw]
+    match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw, re.DOTALL)
+    if match:
+        candidates.insert(0, match.group(1))
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _build_score_distribution(
+    y_true: List[Any],
+    y_prob: List[Any],
+    *,
+    bins: int = 20,
+) -> Dict[str, Any]:
+    total_bins = max(8, min(int(bins or 20), 50))
+    try:
+        truth = [int(v) for v in list(y_true or [])]
+        prob = [max(0.0, min(1.0, float(v))) for v in list(y_prob or [])]
+    except Exception:
+        truth, prob = [], []
+
+    if not truth or not prob or len(truth) != len(prob):
+        return {
+            "bins": [],
+            "bin_count": total_bins,
+            "max_count": 0,
+            "total_negative": 0,
+            "total_positive": 0,
+        }
+
+    rows: List[Dict[str, Any]] = []
+    neg_total = sum(1 for value in truth if value == 0)
+    pos_total = sum(1 for value in truth if value == 1)
+    max_count = 0
+    width = 1.0 / total_bins
+
+    for idx in range(total_bins):
+        start = round(idx * width, 4)
+        end = round((idx + 1) * width, 4)
+        neg_count = 0
+        pos_count = 0
+        for label, score in zip(truth, prob):
+            in_bin = start <= score < end if idx < total_bins - 1 else start <= score <= end
+            if not in_bin:
+                continue
+            if label == 1:
+                pos_count += 1
+            else:
+                neg_count += 1
+        max_count = max(max_count, neg_count, pos_count)
+        rows.append({
+            "start": start,
+            "end": end,
+            "label": f"{start:.2f}-{end:.2f}",
+            "negative_count": neg_count,
+            "positive_count": pos_count,
+            "negative_density": round((neg_count / max(neg_total, 1)) * 100.0, 3),
+            "positive_density": round((pos_count / max(pos_total, 1)) * 100.0, 3),
+        })
+
+    return {
+        "bins": rows,
+        "bin_count": total_bins,
+        "max_count": max_count,
+        "total_negative": neg_total,
+        "total_positive": pos_total,
+    }
+
+
+def _load_validation_scores(
+    trainer: ModelTrainingService,
+    dataset_service: MLOpsWorkbenchService,
+    job_id: str,
+) -> tuple[List[Any], List[Any], str]:
+    try:
+        y_true, y_prob = trainer._load_scores(str(job_id))
+        if len(y_true) and len(y_prob):
+            return list(y_true), list(y_prob), "model_training_runs"
+    except Exception:
+        pass
+
+    try:
+        legacy_run = dataset_service.get_model_run(str(job_id))
+        legacy_truth = legacy_run.get("test_truth") if isinstance(legacy_run, dict) else []
+        legacy_prob = legacy_run.get("test_prob") if isinstance(legacy_run, dict) else []
+        if isinstance(legacy_truth, list) and isinstance(legacy_prob, list) and len(legacy_truth) and len(legacy_truth) == len(legacy_prob):
+            return legacy_truth, legacy_prob, "mlops_model_runs"
+    except Exception:
+        pass
+
+    return [], [], "unavailable"
+
+
+def _build_validation_explain_fallback(body: Dict[str, Any]) -> Dict[str, Any]:
+    title = str(body.get("chart_title") or body.get("title") or "Validation analysis").strip()
+    scope = str(body.get("analysis_scope") or "validation").strip().lower() or "validation"
+    focus = str(body.get("chart_focus") or title or "this validation view").strip()
+    deterministic = body.get("deterministic_insight") if isinstance(body.get("deterministic_insight"), dict) else {}
+    facts = _clean_lines(body.get("facts"), max_items=10)
+
+    what = str(
+        deterministic.get("what")
+        or (
+            f"{title} summarises {facts[0].lower()}"
+            if facts
+            else f"{title} shows the current pattern in {focus.lower()}."
+        )
+    ).strip()
+    why = str(
+        deterministic.get("why")
+        or (
+            f"This matters because {facts[1].lower()}"
+            if len(facts) > 1
+            else "This helps the business judge whether the validation holdout supports the current operating decision."
+        )
+    ).strip()
+    how = str(
+        deterministic.get("how_it_helps_model_building")
+        or "Use this view to compare trade-offs, explain queue impact, and decide whether the operating threshold is acceptable."
+    ).strip()
+    action = str(
+        deterministic.get("action")
+        or deterministic.get("recommended_action")
+        or "Use this evidence together with policy thresholds, drift checks, and analyst review outcomes before changing production settings."
+    ).strip()
+    watch_out = str(
+        deterministic.get("watch_out")
+        or body.get("watch_out")
+        or "Do not rely on one chart alone. Read it together with event loss, suppression, and feature-level evidence."
+    ).strip()
+
+    return {
+        "analysis_source": "deterministic",
+        "llm_available": False,
+        "chart_title": title,
+        "analysis_scope": scope,
+        "facts": facts,
+        "sections": {
+            "what_this_says": what,
+            "why_it_matters": why,
+            "how_it_helps_model_building": how,
+            "recommended_action": action,
+            "watch_out": watch_out,
+        },
+    }
+
+
+def _maybe_upgrade_validation_explanation(body: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
+    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    if not wrapper:
+        return fallback
+    try:
+        if not wrapper.check_connection():
+            return fallback
+    except Exception:
+        return fallback
+
+    prompt_payload = {
+        "analysis_scope": fallback.get("analysis_scope"),
+        "chart_title": fallback.get("chart_title"),
+        "chart_focus": str(body.get("chart_focus") or "").strip(),
+        "facts": fallback.get("facts") or [],
+        "deterministic_sections": fallback.get("sections") or {},
+    }
+    system_prompt = (
+        "You are an AML model validation assistant for business and technical stakeholders. "
+        "Rewrite grounded validation facts in plain language. "
+        "Use only the facts supplied. Do not invent causes, numbers, or recommendations. "
+        "Avoid jargon where possible and explain any required technical label in brackets. "
+        "Return valid JSON with keys what_this_says, why_it_matters, "
+        "how_it_helps_model_building, recommended_action, watch_out."
+    )
+    response = wrapper.generate(
+        prompt=json.dumps(prompt_payload, default=str),
+        system_prompt=system_prompt,
+        temperature=0.2,
+        max_tokens=420,
+    )
+    if not response or not response.get("success"):
+        return fallback
+
+    parsed = _extract_llm_json(response.get("response", ""))
+    if not isinstance(parsed, dict):
+        return fallback
+
+    upgraded = dict(fallback)
+    upgraded["analysis_source"] = "ai"
+    upgraded["llm_available"] = True
+    upgraded["provider"] = response.get("provider")
+    upgraded["model"] = response.get("model")
+    upgraded["generated_at"] = response.get("timestamp")
+    sections = dict(upgraded.get("sections") or {})
+    for key in (
+        "what_this_says",
+        "why_it_matters",
+        "how_it_helps_model_building",
+        "recommended_action",
+        "watch_out",
+    ):
+        text = str(parsed.get(key) or "").strip()
+        if text:
+            sections[key] = text
+    upgraded["sections"] = sections
+    return upgraded
+
+
+def _build_release_summary_fallback(body: Dict[str, Any]) -> Dict[str, Any]:
+    model_name = str(body.get("model_name") or "This model").strip() or "This model"
+    algorithm = str(body.get("algorithm") or "the trained AML scoring approach").strip() or "the trained AML scoring approach"
+    threshold = body.get("threshold")
+    suppression_pct = body.get("suppression_pct")
+    event_loss_pct = body.get("event_loss_pct")
+    retained_risk_pct = body.get("suspicious_case_retention_pct")
+    recommendation_badge = str(body.get("recommendation_badge") or body.get("validation_status") or "ready").strip()
+    recommendation_reason = str(body.get("recommendation_reason") or "").strip()
+    validation_status = str(body.get("validation_status") or "Validation complete").strip()
+    registration_status = str(body.get("registration_status") or "Not registered").strip()
+    deployment_status = str(body.get("deployment_status") or "Not deployed").strip()
+
+    threshold_text = f"{float(threshold):.2f}" if threshold is not None else "the current cutoff"
+    suppression_text = f"{float(suppression_pct):.1f}%" if suppression_pct is not None else "the expected share"
+    event_loss_text = f"{float(event_loss_pct):.1f}%" if event_loss_pct is not None else "the current guardrail estimate"
+    retained_text = f"{float(retained_risk_pct):.1f}%" if retained_risk_pct is not None else "the retained suspicious-case share"
+
+    headline = f"{model_name} is {recommendation_badge.lower()} for the next business review step"
+    executive_summary = (
+        f"{model_name} uses {algorithm} to reduce manual alert review volume. "
+        f"At the current cutoff of {threshold_text}, it is expected to suppress {suppression_text} "
+        f"of review load while retaining {retained_text} of suspicious-case coverage."
+    )
+    next_step = (
+        "The model is ready to be registered so business and technical reviewers can approve the governed release."
+        if recommendation_badge.lower() == "ready for registration"
+        else "The model is already registered and can move into deployment review with the selected locked threshold."
+        if recommendation_badge.lower() == "ready for deployment"
+        else recommendation_reason
+        or "Review the release evidence and decide the next governed step."
+    )
+
+    return {
+        "analysis_source": "deterministic",
+        "llm_available": False,
+        "headline": headline,
+        "executive_summary": executive_summary,
+        "sections": {
+            "what_we_built": (
+                f"{model_name} is an AML false-positive suppression model trained to remove lower-value alerts "
+                f"from analyst queues while keeping higher-risk cases in review."
+            ),
+            "what_we_achieved": (
+                f"The current release view shows {suppression_text} expected suppression with {event_loss_text} "
+                f"potential risk miss at the selected threshold."
+            ),
+            "business_value": (
+                "This can reduce manual review effort, shorten queue pressure, and focus investigators "
+                "on the alerts most likely to need action."
+            ),
+            "next_step": next_step,
+            "caution": recommendation_reason or (
+                f"Validation status is {validation_status}, registration status is {registration_status}, "
+                f"and deployment status is {deployment_status}."
+            ),
+        },
+    }
+
+
+def _maybe_upgrade_release_summary(body: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
+    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    if not wrapper:
+        return fallback
+    try:
+        if not wrapper.check_connection():
+            return fallback
+    except Exception:
+        return fallback
+
+    prompt_payload = {
+        "grounded_release_summary": fallback,
+        "metrics": {
+            "suppression_pct": body.get("suppression_pct"),
+            "event_loss_pct": body.get("event_loss_pct"),
+            "suspicious_case_retention_pct": body.get("suspicious_case_retention_pct"),
+            "threshold": body.get("threshold"),
+        },
+        "statuses": {
+            "validation_status": body.get("validation_status"),
+            "registration_status": body.get("registration_status"),
+            "deployment_status": body.get("deployment_status"),
+            "recommendation_badge": body.get("recommendation_badge"),
+            "recommendation_reason": body.get("recommendation_reason"),
+        },
+    }
+    system_prompt = (
+        "You are an AML model-release assistant writing for business stakeholders. "
+        "Rewrite the supplied grounded release facts into concise business language. "
+        "Use only the facts given. Do not invent numbers, claims, approvals, or outcomes. "
+        "Avoid jargon and avoid em dashes. "
+        "Return valid JSON with keys headline, executive_summary, what_we_built, "
+        "what_we_achieved, business_value, next_step, caution."
+    )
+    response = wrapper.generate(
+        prompt=json.dumps(prompt_payload, default=str),
+        system_prompt=system_prompt,
+        temperature=0.2,
+        max_tokens=420,
+    )
+    if not response or not response.get("success"):
+        return fallback
+
+    parsed = _extract_llm_json(response.get("response", ""))
+    if not isinstance(parsed, dict):
+        return fallback
+
+    upgraded = dict(fallback)
+    upgraded["analysis_source"] = "ai"
+    upgraded["llm_available"] = True
+    upgraded["provider"] = response.get("provider")
+    upgraded["model"] = response.get("model")
+    upgraded["generated_at"] = response.get("timestamp")
+    for key in ("headline", "executive_summary"):
+        value = str(parsed.get(key) or "").strip()
+        if value:
+            upgraded[key] = value
+    sections = dict(upgraded.get("sections") or {})
+    for key in ("what_we_built", "what_we_achieved", "business_value", "next_step", "caution"):
+        value = str(parsed.get(key) or "").strip()
+        if value:
+            sections[key] = value
+    upgraded["sections"] = sections
+    return upgraded
 
 
 def _resolve_target_column(dataset: Dict, target_column: str) -> str:
@@ -222,6 +583,11 @@ def _enrich_result_for_workbench(result: Dict) -> Dict:
         if key not in result and key in m:
             result[key] = m[key]
 
+    policy = result.get("deploy_threshold_policy", {}) if isinstance(result.get("deploy_threshold_policy"), dict) else {}
+    for key in ("configured_threshold", "deployable_threshold", "threshold_band_min", "threshold_band_max"):
+        if key not in result and key in policy:
+            result[key] = policy[key]
+
     return result
 
 
@@ -260,6 +626,15 @@ def _to_float_or_default(value: Any, default: float) -> float:
         return float(default)
 
 
+def _validate_deployable_threshold(threshold: Any) -> float:
+    value = _to_float_or_default(threshold, BUSINESS_DEFAULT_THRESHOLD)
+    if not (DEPLOYABLE_THRESHOLD_MIN <= value <= DEPLOYABLE_THRESHOLD_MAX):
+        raise ValueError(
+            f"Deployable threshold must stay within {DEPLOYABLE_THRESHOLD_MIN:.2f}-{DEPLOYABLE_THRESHOLD_MAX:.2f}."
+        )
+    return float(value)
+
+
 def _deploy_dir(env_root: Path) -> Path:
     path = env_root / "mlops" / "deployments"
     path.mkdir(parents=True, exist_ok=True)
@@ -294,6 +669,29 @@ def _load_active_deployment(deploy_dir: Path) -> Optional[Dict[str, Any]]:
         return payload
     except Exception:
         return None
+
+
+def _list_deployment_history(deploy_dir: Path) -> List[Dict[str, Any]]:
+    active = _load_active_deployment(deploy_dir) or {}
+    active_id = str(active.get("deployment_id") or "").strip()
+    rows: List[Dict[str, Any]] = []
+    for dep_path in sorted(deploy_dir.glob("*.json")):
+        if dep_path.name.startswith("_"):
+            continue
+        try:
+            payload = json.loads(dep_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        deployment_id = str(payload.get("deployment_id") or dep_path.stem).strip()
+        payload["deployment_id"] = deployment_id
+        payload["active"] = deployment_id == active_id
+        payload["status"] = "active" if payload["active"] else str(payload.get("status") or "inactive")
+        rows.append(payload)
+    rows.sort(
+        key=lambda row: str(row.get("created_at") or row.get("rolled_back_at") or ""),
+        reverse=True,
+    )
+    return rows
 
 
 def _set_active_deployment(deploy_dir: Path, deployment_id: str) -> None:
@@ -343,8 +741,20 @@ def _select_upload_dataset(
 @model_training_bp.route("/train", methods=["POST"])
 def train_model() -> tuple:
     try:
-        unsupervised_algorithms = {"kmeans", "dbscan", "isolation_forest"}
-        deep_learning_algorithms = {"mlp_classifier"}
+        unsupervised_algorithms = {
+            "kmeans",
+            "gaussian_mixture",
+            "agglomerative_clustering",
+            "dbscan",
+            "isolation_forest",
+            "local_outlier_factor",
+            "one_class_svm",
+        }
+        deep_learning_algorithms = {
+            "mlp_classifier",
+            "deep_mlp_classifier",
+            "tabular_autoencoder",
+        }
         body           = request.get_json(silent=True) or {}
         dataset_id     = int(body.get("dataset_id") or 0)
         target_column  = str(body.get("target_column") or "").strip()
@@ -365,7 +775,7 @@ def train_model() -> tuple:
         grain          = str(body.get("grain") or "alert").strip().lower()
         hml_high       = float(body.get("hml_high_threshold") or 0.65)
         hml_low        = float(body.get("hml_low_threshold")  or 0.35)
-        split_strategy = str(body.get("split_strategy") or "random").strip().lower()
+        split_strategy = str(body.get("split_strategy") or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY
         split_date     = body.get("split_date")
         date_column    = str(body.get("date_column") or "ALERT_DATE").strip()
 
@@ -392,13 +802,9 @@ def train_model() -> tuple:
             return jsonify({"success": False,
                             "error": "cv_folds must be between 3 and 10",
                             "error_code": "VALIDATION_ERROR"}), 400
-        if split_strategy not in {"random", "temporal"}:
+        if split_strategy not in {"auto", "random", "temporal"}:
             return jsonify({"success": False,
-                            "error": "split_strategy must be 'random' or 'temporal'",
-                            "error_code": "VALIDATION_ERROR"}), 400
-        if split_strategy == "temporal" and not str(split_date or "").strip():
-            return jsonify({"success": False,
-                            "error": "split_date is required when split_strategy='temporal'",
+                            "error": "split_strategy must be 'auto', 'random', or 'temporal'",
                             "error_code": "VALIDATION_ERROR"}), 400
 
         tenant_id, env_id = _get_env_ids()
@@ -480,6 +886,9 @@ def training_workbench_preview() -> tuple:
         stratify = bool(body.get("stratify", True))
         random_state = int(body.get("random_state") or 42)
         sample_index = body.get("sample_index")
+        split_strategy = str(body.get("split_strategy") or DEFAULT_SPLIT_STRATEGY).strip().lower() or DEFAULT_SPLIT_STRATEGY
+        split_date = body.get("split_date")
+        date_column = str(body.get("date_column") or "ALERT_DATE").strip()
 
         if not dataset_id:
             return jsonify({"success": False, "error": "dataset_id is required", "error_code": "VALIDATION_ERROR"}), 400
@@ -507,6 +916,9 @@ def training_workbench_preview() -> tuple:
             stratify=stratify,
             random_state=random_state,
             sample_index=(int(sample_index) if sample_index is not None else None),
+            split_strategy=split_strategy,
+            split_date=(str(split_date).strip() if split_date is not None else None),
+            date_column=date_column,
         )
         return jsonify({"success": True, "data": preview}), 200
 
@@ -578,15 +990,11 @@ def rescore_threshold() -> tuple:
     try:
         body      = request.get_json(silent=True) or {}
         job_id    = str(body.get("job_id") or "").strip()
-        threshold = float(body.get("threshold") or 0.5)
+        threshold = _validate_deployable_threshold(body.get("threshold"))
 
         if not job_id:
             return jsonify({"success": False, "error": "job_id is required",
                             "error_code": "VALIDATION_ERROR"}), 400
-        if not (0 <= threshold <= 1):
-            return jsonify({"success": False, "error": "threshold must be in [0, 1]",
-                            "error_code": "VALIDATION_ERROR"}), 400
-
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
         trainer  = _get_training_service(env_root)
@@ -773,6 +1181,19 @@ def validation_report() -> tuple:
             target_suppression_pct=target_supp_pct,
             target_tolerance_pct=target_tol_pct,
         )
+        try:
+            validator.training.persist_validation_payload(
+                job_id,
+                {
+                    "report": dict(result),
+                    "selected_threshold": result.get("selected_threshold") or result.get("configured_threshold"),
+                    "locked_threshold": result.get("locked_threshold") or result.get("selected_threshold") or result.get("configured_threshold"),
+                    "recommended_threshold": result.get("optimal_threshold"),
+                },
+                merge=True,
+            )
+        except Exception:
+            pass
         return jsonify({"success": True, "data": result}), 200
 
     except ValueError as ve:
@@ -848,6 +1269,177 @@ def validation_compare() -> tuple:
 # ⑪ Registry CRUD  (all unchanged from v3)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@model_training_bp.route("/validation/detail/<job_id>", methods=["GET"])
+def validation_detail(job_id: str) -> tuple:
+    """
+    Compact visual payload for rich validation dashboards.
+
+    Returns score-distribution bins, business-readable confusion context,
+    and top feature rows without exposing raw holdout arrays to the client.
+    """
+    try:
+        bins = max(8, min(int(request.args.get("bins") or 20), 50))
+        threshold_arg = request.args.get("threshold")
+
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        trainer = _get_training_service(env_root)
+        dataset_service = _get_dataset_service(env_root)
+        labels = _get_labels(tenant_id, env_id)
+
+        result = trainer.get_job_result(str(job_id))
+        if result is None:
+            job = trainer.get_job(str(job_id))
+            if not job:
+                return jsonify({"success": False, "error": "Job not found", "error_code": "NOT_FOUND"}), 404
+            return jsonify({
+                "success": False,
+                "error": "Job is not complete yet",
+                "error_code": "JOB_NOT_READY",
+                "data": job,
+            }), 202
+
+        result = _enrich_result_for_workbench(result)
+        result["label"] = labels.get(job_id) or result.get("label") or job_id[:8]
+
+        y_true, y_prob, score_source = _load_validation_scores(
+            trainer,
+            dataset_service,
+            str(job_id),
+        )
+
+        validation = {}
+        try:
+            validation = trainer.validation_report(str(job_id), max_event_loss_pct=5.0)
+        except Exception:
+            validation = {}
+
+        persisted_validation = result.get("validation") if isinstance(result.get("validation"), dict) else {}
+        selected_threshold = _to_float_or_default(
+            threshold_arg,
+            _to_float_or_default(
+                persisted_validation.get("selected_threshold"),
+                _to_float_or_default(
+                    result.get("selected_threshold"),
+                    _to_float_or_default(
+                        validation.get("selected_threshold") or validation.get("configured_threshold"),
+                        _to_float_or_default(
+                            validation.get("optimal_threshold"),
+                            _to_float_or_default(
+                                result.get("optimal_threshold"),
+                                BUSINESS_DEFAULT_THRESHOLD,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        metrics = result.get("metrics", {}) if isinstance(result.get("metrics"), dict) else {}
+        confusion_matrix = (
+            validation.get("confusion_matrix")
+            or result.get("confusion_matrix")
+            or metrics.get("confusion_matrix")
+            or [[0, 0], [0, 0]]
+        )
+        tn = int((confusion_matrix or [[0, 0], [0, 0]])[0][0] if len(confusion_matrix) > 0 and len(confusion_matrix[0]) > 0 else 0)
+        fp = int((confusion_matrix or [[0, 0], [0, 0]])[0][1] if len(confusion_matrix) > 0 and len(confusion_matrix[0]) > 1 else 0)
+        fn = int((confusion_matrix or [[0, 0], [0, 0]])[1][0] if len(confusion_matrix) > 1 and len(confusion_matrix[1]) > 0 else 0)
+        tp = int((confusion_matrix or [[0, 0], [0, 0]])[1][1] if len(confusion_matrix) > 1 and len(confusion_matrix[1]) > 1 else 0)
+
+        feature_rows = result.get("feature_importance") or []
+        internals = result.get("model_internals") if isinstance(result.get("model_internals"), dict) else {}
+        if not feature_rows and internals.get("viz_type") == "feature_importance":
+            feature_rows = internals.get("data") or []
+        feature_rows = list(feature_rows or [])[:15]
+
+        score_distribution = _build_score_distribution(y_true, y_prob, bins=bins)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "job_id": str(job_id),
+                "label": result.get("label"),
+                "algorithm": result.get("algorithm"),
+                "selected_threshold": round(float(selected_threshold), 4),
+                "recommended_threshold": validation.get("optimal_threshold"),
+                "configured_threshold": validation.get("configured_threshold") or result.get("configured_threshold"),
+                "business_summary": persisted_validation.get("business_summary"),
+                "score_distribution": score_distribution,
+                "score_distribution_source": score_source,
+                "score_distribution_reason": (
+                    None
+                    if score_distribution.get("bins")
+                    else "Saved holdout score vectors were not found for this historical run. Re-running validation will repopulate the score-distribution chart."
+                ),
+                "feature_importance": feature_rows,
+                "confusion_matrix": confusion_matrix,
+                "confusion_matrix_business_explainer": (
+                    f"{tp:,} suspicious cases were correctly escalated (true positive), "
+                    f"{tn:,} low-value alerts were correctly set aside (true negative), "
+                    f"{fp:,} alerts were escalated unnecessarily (false positive), and "
+                    f"{fn:,} suspicious cases were missed by the cut-off (false negative)."
+                ),
+            },
+        }), 200
+
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@model_training_bp.route("/validation/explain", methods=["POST"])
+def validation_explain() -> tuple:
+    """
+    Deterministic-first validation explanation with optional local LLM rewrite.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        fallback = _build_validation_explain_fallback(body)
+        result = _maybe_upgrade_validation_explanation(body, fallback)
+        job_id = str(body.get("job_id") or "").strip()
+        if job_id and body.get("persist", True):
+            tenant_id, env_id = _get_env_ids()
+            env_root = _resolve_env_path(env_id, tenant_id)
+            trainer = _get_training_service(env_root)
+            trainer.persist_validation_payload(
+                job_id,
+                {
+                    "business_summary": {
+                        **dict(result),
+                        "workflow_steps": body.get("workflow_steps") if isinstance(body.get("workflow_steps"), list) else [],
+                        "conclusion": str(body.get("conclusion") or "").strip(),
+                        "generated_for": str(body.get("generated_for") or body.get("analysis_scope") or "model_validation_summary").strip(),
+                        "summary_metadata": body.get("summary_metadata") if isinstance(body.get("summary_metadata"), dict) else {},
+                    },
+                },
+                merge=True,
+            )
+            result = {**dict(result), "saved": True}
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@model_training_bp.route("/release/business-summary", methods=["POST"])
+def release_business_summary() -> tuple:
+    """
+    Deterministic-first business summary for model release with optional local LLM rewrite.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        fallback = _build_release_summary_fallback(body)
+        result = _maybe_upgrade_release_summary(body, fallback)
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
 @model_training_bp.route("/registry", methods=["GET"])
 def list_registry() -> tuple:
     try:
@@ -891,11 +1483,14 @@ def register_registry_entry() -> tuple:
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
         trainer  = _get_training_service(env_root)
+        selected_threshold = body.get("selected_threshold")
+        if selected_threshold is not None:
+            selected_threshold = _validate_deployable_threshold(selected_threshold)
         result   = trainer.register_model(
             job_id=job_id, tenant_id=tenant_id, env_id=env_id,
             model_name=body.get("model_name"),
             stage=body.get("stage") or "candidate",
-            selected_threshold=body.get("selected_threshold"),
+            selected_threshold=selected_threshold,
             max_event_loss_pct=body.get("max_event_loss_pct"),
             validation=body.get("validation") or {},
             tags=body.get("tags") if isinstance(body.get("tags"), list) else [],
@@ -1036,7 +1631,7 @@ def registry_upload_pkl() -> tuple:
         stage = str(request.form.get("stage") or "candidate").strip().lower()
         notes = str(request.form.get("notes") or "Uploaded external model").strip()
         grain = str(request.form.get("grain") or "alert").strip().lower()
-        threshold = float(request.form.get("threshold") or 0.5)
+        threshold = _validate_deployable_threshold(request.form.get("threshold"))
         hml_high_threshold = float(request.form.get("hml_high_threshold") or 0.65)
         hml_low_threshold = float(request.form.get("hml_low_threshold") or 0.35)
         dataset_id_raw = request.form.get("dataset_id")
@@ -1398,7 +1993,7 @@ def deploy_model() -> tuple:
     try:
         body = request.get_json(silent=True) or {}
         job_id = str(body.get("job_id") or "").strip()
-        threshold = float(body.get("threshold") or 0.5)
+        threshold = _validate_deployable_threshold(body.get("threshold"))
 
         if not job_id:
             return jsonify({"success": False, "error": "job_id is required",
@@ -1408,10 +2003,35 @@ def deploy_model() -> tuple:
         env_root = _resolve_env_path(env_id, tenant_id)
         trainer = _get_training_service(env_root)
         result = trainer.get_job_result(job_id)
+        try:
+            registry_entry = trainer.get_registry_entry(job_id, tenant_id=tenant_id, env_id=env_id)
+        except Exception:
+            registry_entry = None
 
         if result is None:
             return jsonify({"success": False, "error": "Job not found or not complete",
                             "error_code": "NOT_READY"}), 400
+        if not registry_entry:
+            return jsonify({
+                "success": False,
+                "error": "Model must be registered before deployment.",
+                "error_code": "REGISTRATION_REQUIRED",
+            }), 400
+        registry_stage = str(registry_entry.get("stage") or "").strip().lower()
+        if registry_stage in {"draft", "archived"}:
+            return jsonify({
+                "success": False,
+                "error": f"Model cannot be deployed from registry stage '{registry_stage}'. Promote it to Candidate or Champion first.",
+                "error_code": "INVALID_REGISTRY_STAGE",
+            }), 400
+        quality_review = result.get("quality_review") if isinstance(result, dict) else {}
+        if isinstance(quality_review, dict) and quality_review.get("blocking"):
+            return jsonify({
+                "success": False,
+                "error": "Deploy blocked because the run was flagged by the training quality guard. Review leakage / score behaviour first.",
+                "error_code": "QUALITY_GUARD_BLOCK",
+                "findings": quality_review.get("findings") or [],
+            }), 400
 
         deploy_dir = _deploy_dir(env_root)
         current_active = _load_active_deployment(deploy_dir)
@@ -1458,16 +2078,33 @@ def get_active_deployment() -> tuple:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
 
+@model_training_bp.route("/deployments/history", methods=["GET"])
+def get_deployment_history() -> tuple:
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        deploy_dir = _deploy_dir(env_root)
+        history = _list_deployment_history(deploy_dir)
+        return jsonify({"success": True, "data": history}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
 @model_training_bp.route("/deployments/swap", methods=["POST"])
 def swap_deployment() -> tuple:
     """
     Atomically switch active deployment to a new model run.
-    Body: { new_job_id, threshold?, deployment_name?, entity_type?, scoring_mode?, notes? }
+    Body: { new_job_id, threshold?, deployment_name?, entity_type?, scoring_mode?, notes?, validation_only? }
     """
     try:
         body = request.get_json(silent=True) or {}
         new_job_id = str(body.get("new_job_id") or body.get("job_id") or "").strip()
-        threshold = float(body.get("threshold") or 0.5)
+        threshold = _validate_deployable_threshold(body.get("threshold"))
+        validation_raw = body.get("validation_only", False)
+        if isinstance(validation_raw, str):
+            validation_only = validation_raw.strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            validation_only = bool(validation_raw)
 
         if not new_job_id:
             return jsonify({"success": False, "error": "new_job_id is required", "error_code": "VALIDATION_ERROR"}), 400
@@ -1476,8 +2113,33 @@ def swap_deployment() -> tuple:
         env_root = _resolve_env_path(env_id, tenant_id)
         trainer = _get_training_service(env_root)
         result = trainer.get_job_result(new_job_id)
+        try:
+            registry_entry = trainer.get_registry_entry(new_job_id, tenant_id=tenant_id, env_id=env_id)
+        except Exception:
+            registry_entry = None
         if result is None:
             return jsonify({"success": False, "error": "new_job_id not found or not complete", "error_code": "NOT_READY"}), 400
+        if not registry_entry and not validation_only:
+            return jsonify({
+                "success": False,
+                "error": "Model must be registered before creating a deployment version.",
+                "error_code": "REGISTRATION_REQUIRED",
+            }), 400
+        registry_stage = str(registry_entry.get("stage") or "").strip().lower() if registry_entry else ""
+        if registry_entry and registry_stage in {"draft", "archived"} and not validation_only:
+            return jsonify({
+                "success": False,
+                "error": f"Model cannot create a deployment version from registry stage '{registry_stage}'.",
+                "error_code": "INVALID_REGISTRY_STAGE",
+            }), 400
+        quality_review = result.get("quality_review") if isinstance(result, dict) else {}
+        if isinstance(quality_review, dict) and quality_review.get("blocking"):
+            return jsonify({
+                "success": False,
+                "error": "Deployment swap blocked because the selected run failed the training quality guard.",
+                "error_code": "QUALITY_GUARD_BLOCK",
+                "findings": quality_review.get("findings") or [],
+            }), 400
 
         deploy_dir = _deploy_dir(env_root)
         current_active = _load_active_deployment(deploy_dir)
@@ -1501,7 +2163,8 @@ def swap_deployment() -> tuple:
             "notes": str(body.get("notes") or ""),
             "previous_deployment_id": previous_deployment_id,
             "status": "active",
-            "action": "swap",
+            "action": "validation_swap" if validation_only else "swap",
+            "validation_only": validation_only,
         }
         _deployment_file(deploy_dir, deployment_id).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         _set_active_deployment(deploy_dir, deployment_id)

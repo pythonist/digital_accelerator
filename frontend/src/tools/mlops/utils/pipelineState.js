@@ -99,6 +99,11 @@ export const findPipelineByName = (pipelines, name) => {
 export const derivePipelineStepCompletion = (pipeline) => {
   const steps = asArray(pipeline?.steps);
   const edaState = getScreenState(steps, 'eda');
+  const modelState = getScreenState(steps, 'model');
+  const validationState = getScreenState(steps, 'validation');
+  const registryState = getScreenState(steps, 'registry');
+  const dashboardState = getScreenState(steps, 'dashboard');
+  const journeyState = getScreenState(steps, 'workbench_journey');
   const has = (screenKey) => Boolean(getScreenState(steps, screenKey));
   return {
     data: has('data_upload'),
@@ -106,5 +111,10 @@ export const derivePipelineStepCompletion = (pipeline) => {
     target: has('target'),
     eda: Boolean(edaState?.completed || edaState?.done || edaState?.status === 'completed'),
     preprocess: has('preprocess'),
+    model: Boolean(modelState?.job_id || validationState?.job_id || registryState?.job_id || dashboardState?.run_id || has('model')),
+    validation: Boolean(validationState?.job_id || validationState?.report_id || has('validation')),
+    registry: Boolean(registryState?.job_id || registryState?.deployment_id || has('registry')),
+    dashboard: Boolean(dashboardState?.deployment_id || dashboardState?.run_id || has('dashboard')),
+    reports: Boolean(journeyState?.run_status === 'complete' || dashboardState?.deployment_id),
   };
 };

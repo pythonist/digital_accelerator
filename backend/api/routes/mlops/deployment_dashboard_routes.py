@@ -30,6 +30,7 @@ from api.service_locator import services
 from api.tools.mlops.deployment_dashboard_service import DeploymentDashboardService
 from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 from api.tools.mlops.path_utils import resolve_env_root
+from services.fcc_sentinel_bridge import FCCSentinelBridgeService
 
 deployment_dashboard_bp = Blueprint("deployment_dashboard", __name__)
 
@@ -71,6 +72,14 @@ def _get_service(env_root: Path) -> DeploymentDashboardService:
 def _get_report_service(env_root: Path) -> MLOpsWorkbenchService:
     mlops_db = env_root / "mlops" / "duckdb" / "mlops.duckdb"
     return MLOpsWorkbenchService(mlops_db)
+
+
+def _bool_value(value, default: bool = False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _ok(data):
@@ -170,6 +179,8 @@ def live_simulate():
         compare_run_ids = body.get("compare_run_ids") or []
         seed = body.get("seed")
         seed = None if seed is None else int(seed)
+        pipeline_id = body.get("pipeline_id")
+        pipeline_name = body.get("pipeline_name")
 
         if not deployment_id:
             return _err("deployment_id is required")
@@ -188,6 +199,8 @@ def live_simulate():
             batch_size=max(16, min(batch_size, 5000)),
             compare_run_ids=list(compare_run_ids) if isinstance(compare_run_ids, list) else [],
             seed=seed,
+            pipeline_id=str(pipeline_id) if pipeline_id not in (None, "") else None,
+            pipeline_name=str(pipeline_name) if pipeline_name not in (None, "") else None,
         )
         return _ok(result)
 
@@ -317,6 +330,273 @@ def kpi_summary():
             "windows_count": len(windows),
         }
         return _ok(payload)
+    except Exception as e:
+        return _err(str(e), 500)
+
+
+@deployment_dashboard_bp.route("/handoff-sentinel", methods=["POST"])
+def handoff_sentinel():
+    """
+    POST /handoff-sentinel
+
+    One backend-owned FCC to Sentinel flow for the existing dashboard button.
+    It can either:
+      1. reuse a previously successful handoff for the same run, or
+      2. simulate, publish, import, scope, and persist the shared workflow state.
+    """
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        svc = _get_service(env_root)
+        report_service = _get_report_service(env_root)
+        bridge = FCCSentinelBridgeService(env_root)
+
+        body = request.get_json(force=True) or {}
+        deployment_id = str(body.get("deployment_id") or "").strip()
+        run_id = str(body.get("run_id") or "").strip()
+        if not deployment_id:
+            return _err("deployment_id is required")
+        if not run_id:
+            return _err("run_id is required")
+
+        pipeline_id_raw = body.get("pipeline_id")
+        pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        pipeline_name = str(body.get("pipeline_name") or "").strip() or None
+        threshold = float(body.get("threshold") or 0.5)
+        force_refresh = _bool_value(body.get("force_refresh"), default=False)
+        preferred_screen = str(body.get("preferred_screen") or "casepack").strip() or "casepack"
+
+        existing_session = report_service.get_workflow_session(
+            tenant_id=str(tenant_id),
+            env_id=str(env_id),
+            pipeline_id=pipeline_id,
+            run_id=run_id,
+            deployment_id=deployment_id,
+        )
+
+        existing_handoff = dict(existing_session.get("handoff_summary") or {}) if existing_session else {}
+        existing_scope = dict(existing_session.get("case_scope") or {}) if existing_session else {}
+        existing_case_ids = [
+            str(value).strip()
+            for value in (
+                existing_scope.get("case_ids")
+                or existing_handoff.get("imported_case_ids")
+                or []
+            )
+            if str(value or "").strip()
+        ]
+
+        if (
+            existing_session
+            and not force_refresh
+            and str(existing_session.get("publish_id") or "").strip()
+            and existing_case_ids
+        ):
+            scope_result = bridge.set_active_case_scope(
+                tenant_id=str(tenant_id),
+                target_env_id=str(env_id),
+                case_ids=existing_case_ids,
+                run_id=existing_scope.get("run_id") or existing_handoff.get("focus_result", {}).get("run_id"),
+                scope_type="CUSTOM",
+                scope_value=existing_case_ids,
+            )
+            handoff_payload = {
+                **existing_handoff,
+                "preferred_screen": preferred_screen,
+                "workflow_session_id": existing_session.get("session_id"),
+                "reused_existing_handoff": True,
+            }
+            session = report_service.save_workflow_session(
+                tenant_id=str(tenant_id),
+                env_id=str(env_id),
+                payload={
+                    "session_id": existing_session.get("session_id"),
+                    "pipeline_id": pipeline_id,
+                    "pipeline_name": pipeline_name or existing_session.get("pipeline_name"),
+                    "run_id": run_id,
+                    "deployment_id": deployment_id,
+                    "publish_id": existing_session.get("publish_id"),
+                    "current_module": "investigation",
+                    "current_step": preferred_screen,
+                    "current_state": {
+                        "preferred_screen": preferred_screen,
+                        "selected_case_id": existing_session.get("selected_case_id") or (existing_case_ids[0] if existing_case_ids else None),
+                        "pipeline_id": pipeline_id,
+                        "pipeline_name": pipeline_name or existing_session.get("pipeline_name"),
+                        "run_id": run_id,
+                        "deployment_id": deployment_id,
+                        "publish_id": existing_session.get("publish_id"),
+                    },
+                    "case_scope": scope_result,
+                    "handoff_summary": handoff_payload,
+                    "selected_case_id": existing_session.get("selected_case_id") or (existing_case_ids[0] if existing_case_ids else None),
+                    "mark_current_stable": True,
+                    "checkpoint_key": existing_session.get("checkpoint_key") or "SENTINEL_SCOPE_READY",
+                    "status": "sentinel_ready",
+                },
+            )
+            return _ok(
+                {
+                    "reused": True,
+                    "simulation": None,
+                    "publish": {"publish_id": session.get("publish_id")},
+                    "import": {
+                        "publish_id": session.get("publish_id"),
+                        "imported_case_ids": existing_case_ids,
+                        "imported_case_count": len(existing_case_ids),
+                    },
+                    "scope": scope_result,
+                    "handoff": session.get("handoff_summary") or handoff_payload,
+                    "workflow_session": session,
+                }
+            )
+
+        simulation = svc.simulate_live_pipeline(
+            deployment_id=deployment_id,
+            run_id=run_id,
+            threshold=threshold,
+            simulation_mode=str(body.get("simulation_mode") or "synthetic_pipeline"),
+            persist_to_ledger=_bool_value(body.get("persist_to_ledger"), default=True),
+            auto_optimize_threshold=body.get("auto_optimize_threshold"),
+            max_event_loss_pct=float(body.get("max_event_loss_pct") or 5.0),
+            scenario=str(body.get("scenario") or "steady"),
+            batch_size=max(16, min(int(body.get("batch_size") or 20), 5000)),
+            compare_run_ids=list(body.get("compare_run_ids") or []) if isinstance(body.get("compare_run_ids"), list) else [],
+            seed=(None if body.get("seed") in (None, "") else int(body.get("seed"))),
+            pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
+            pipeline_name=pipeline_name,
+        )
+
+        batch_id = str(simulation.get("scoring", {}).get("batch_id") or "").strip()
+        if not batch_id:
+            return _err("Scored FCC batch was created, but no batch_id was returned for Sentinel handoff.", 500)
+
+        publish_label = str(body.get("publish_label") or "").strip()
+        if not publish_label:
+            publish_label = (
+                f"{pipeline_name} retained queue {simulation.get('generated_at') or ''}".strip()
+                if pipeline_name
+                else f"FCC retained queue {simulation.get('generated_at') or ''}".strip()
+            )
+
+        publish_payload = bridge.publish_batch(
+            batch_id=batch_id,
+            run_id=run_id,
+            deployment_id=deployment_id,
+            include_suppressed=_bool_value(body.get("include_suppressed"), default=False),
+            publish_label=publish_label,
+            pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
+            pipeline_name=pipeline_name,
+        )
+        publish_id = str(publish_payload.get("publish_id") or "").strip()
+        if not publish_id:
+            return _err("Sentinel publish package was created, but no publish_id was returned.", 500)
+
+        import_payload = bridge.import_published_run(
+            publish_id=publish_id,
+            tenant_id=str(tenant_id),
+            target_env_id=str(env_id),
+            replace_existing=_bool_value(body.get("replace_existing"), default=False),
+            merge_existing=_bool_value(body.get("merge_existing"), default=True),
+            rerank_after_import=_bool_value(body.get("rerank_after_import"), default=True),
+        )
+
+        imported_case_ids = [
+            str(value).strip()
+            for value in (import_payload.get("imported_case_ids") or [])
+            if str(value or "").strip()
+        ]
+        focus_result = import_payload.get("focus_result") or {}
+        scope_result = bridge.set_active_case_scope(
+            tenant_id=str(tenant_id),
+            target_env_id=str(env_id),
+            case_ids=imported_case_ids,
+            run_id=focus_result.get("run_id"),
+            scope_type="CUSTOM",
+            scope_value=imported_case_ids,
+        )
+
+        selected_case_id = imported_case_ids[0] if imported_case_ids else None
+        handoff_payload = {
+            "source": "fcc_workbench",
+            "handoff_type": "fcc_to_sentinel",
+            "preferred_screen": preferred_screen,
+            "env_id": env_id,
+            "pipeline_id": pipeline_id,
+            "pipeline_name": pipeline_name,
+            "run_id": run_id,
+            "deployment_id": deployment_id,
+            "batch_id": batch_id,
+            "publish_id": publish_id,
+            "publish_label": publish_payload.get("publish_label"),
+            "imported_case_ids": imported_case_ids,
+            "imported_case_count": int(import_payload.get("imported_case_count") or len(imported_case_ids)),
+            "imported_alert_count": int(import_payload.get("imported_alert_count") or 0),
+            "suppressed_count": int(simulation.get("scoring", {}).get("suppressed") or 0),
+            "escalated_count": int(simulation.get("scoring", {}).get("escalated") or 0),
+            "total_scored": int(simulation.get("scoring", {}).get("total") or 0),
+            "threshold": float(simulation.get("scoring", {}).get("threshold_applied") or simulation.get("scoring", {}).get("threshold") or threshold),
+            "requested_row_count": int(body.get("batch_size") or 20),
+            "prediction_preview": simulation.get("preview_tables", {}).get("prediction_output"),
+            "retained_preview": simulation.get("preview_tables", {}).get("retained_queue"),
+            "master_data_preview": simulation.get("preview_tables", {}).get("master_data"),
+            "prepared_feature_preview": simulation.get("preview_tables", {}).get("prepared_features"),
+            "focus_result": focus_result,
+            "selected_case_id": selected_case_id,
+        }
+
+        session = report_service.save_workflow_session(
+            tenant_id=str(tenant_id),
+            env_id=str(env_id),
+            payload={
+                "session_id": existing_session.get("session_id") if existing_session else None,
+                "pipeline_id": pipeline_id,
+                "pipeline_name": pipeline_name,
+                "run_id": run_id,
+                "deployment_id": deployment_id,
+                "publish_id": publish_id,
+                "current_module": "investigation",
+                "current_step": preferred_screen,
+                "current_state": {
+                    "preferred_screen": preferred_screen,
+                    "selected_case_id": selected_case_id,
+                    "pipeline_id": pipeline_id,
+                    "pipeline_name": pipeline_name,
+                    "run_id": run_id,
+                    "deployment_id": deployment_id,
+                    "publish_id": publish_id,
+                },
+                "last_stable_step": preferred_screen,
+                "case_scope": scope_result,
+                "selected_case_id": selected_case_id,
+                "handoff_summary": handoff_payload,
+                "mark_current_stable": True,
+                "checkpoint_key": "SENTINEL_SCOPE_READY",
+                "status": "sentinel_ready",
+            },
+        )
+
+        saved_handoff = {
+            **(session.get("handoff_summary") or handoff_payload),
+            "workflow_session_id": session.get("session_id"),
+            "preferred_screen": preferred_screen,
+        }
+        return _ok(
+            {
+                "reused": False,
+                "simulation": simulation,
+                "publish": publish_payload,
+                "import": import_payload,
+                "scope": scope_result,
+                "handoff": saved_handoff,
+                "workflow_session": session,
+            }
+        )
+
+    except FileNotFoundError as e:
+        return _err(str(e), 404)
+    except ValueError as e:
+        return _err(str(e), 400)
     except Exception as e:
         return _err(str(e), 500)
 

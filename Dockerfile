@@ -14,15 +14,22 @@ FROM python:3.11-slim AS app-runtime
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV AML_AUTO_BOOTSTRAP_VENV=0
-ENV AML_BACKEND_PROFILE=mlops
+ENV AML_BACKEND_PROFILE=full
 ENV PORT=5000
 ENV APP_PORT=5000
+ENV WEB_CONCURRENCY=4
+ENV GUNICORN_THREADS=8
+ENV GUNICORN_TIMEOUT=600
+ENV GUNICORN_GRACEFUL_TIMEOUT=60
+ENV GUNICORN_KEEPALIVE=30
 
 WORKDIR /app/backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    && useradd --create-home --shell /usr/sbin/nologin appuser \
+    && mkdir -p /app/data /app/backend/data \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
@@ -32,7 +39,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY backend/ ./
 COPY --from=frontend-build /app/frontend/dist ./dist
 
+RUN chown -R appuser:appuser /app
+
 EXPOSE 5000
+USER appuser
 
-CMD ["python", "app.py"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 CMD curl -fsS "http://127.0.0.1:${APP_PORT:-5000}/ready" || exit 1
 
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]

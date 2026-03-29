@@ -139,12 +139,17 @@ const EnvironmentSelectScreen = () => {
         try {
           const ctxRes = await apiClient.post('/api/select-context', { env_id: envName });
           if (ctxRes?.success && ctxRes?.token) {
-            localStorage.setItem('token', ctxRes.token);
+            localStorage.setItem('auth_token', ctxRes.token);
           }
         } catch (e) {}
         setActiveEnv(envName);
         await refreshSystemState(); 
-        navigate('/tools');
+        navigate('/tools-transition', {
+          state: {
+            envName,
+            source: 'environment-select',
+          },
+        });
       }
     } catch (error) { 
       showNotification("Error selecting environment: " + error.message, "error");

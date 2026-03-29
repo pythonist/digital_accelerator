@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fcc-workbench
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fcc-workbench
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: fcc-workbench
+    spec:
+      containers:
+        - name: fcc-workbench
+          image: ghcr.io/your-org/ai-aml-tool:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: fcc-workbench-config
+          volumeMounts:
+            - name: workbench-data
+              mountPath: /app/data
+              subPath: data
+            - name: workbench-data
+              mountPath: /app/backend/data
+              subPath: backend-data
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "2Gi"
+            limits:
+              cpu: "4000m"
+              memory: "8Gi"
+      volumes:
+        - name: workbench-data
+          persistentVolumeClaim:
+            claimName: fcc-workbench-data

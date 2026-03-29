@@ -14,7 +14,20 @@ function Convert-ToSingleQuotedLiteral {
     return $PathValue -replace "'", "''"
 }
 
-function Resolve-PythonLaunchCommand {
+function New-PythonLaunchSpec {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+        [string[]]$Arguments = @()
+    )
+
+    return [pscustomobject]@{
+        Executable = $Executable
+        Arguments  = @($Arguments)
+    }
+}
+
+function Resolve-PythonLaunchSpec {
     param(
         [Parameter(Mandatory = $true)]
         [string]$RepoRoot,
@@ -42,8 +55,7 @@ function Resolve-PythonLaunchCommand {
         try {
             & $candidate -c "import flask" *> $null
             if ($LASTEXITCODE -eq 0) {
-                $pythonSource = Convert-ToSingleQuotedLiteral -PathValue $candidate
-                return "& '$pythonSource'"
+                return New-PythonLaunchSpec -Executable $candidate
             }
         } catch {
         }
@@ -55,7 +67,7 @@ function Resolve-PythonLaunchCommand {
             try {
                 & $pyCmd.Source $version -c "import flask" *> $null
                 if ($LASTEXITCODE -eq 0) {
-                    return "& py $version"
+                    return New-PythonLaunchSpec -Executable $pyCmd.Source -Arguments @($version)
                 }
             } catch {
             }
@@ -67,8 +79,7 @@ function Resolve-PythonLaunchCommand {
         try {
             & $pythonCmd.Source -c "import flask" *> $null
             if ($LASTEXITCODE -eq 0) {
-                $pythonSource = Convert-ToSingleQuotedLiteral -PathValue $pythonCmd.Source
-                return "& '$pythonSource'"
+                return New-PythonLaunchSpec -Executable $pythonCmd.Source
             }
         } catch {
         }
@@ -121,22 +132,36 @@ if (-not (Test-Path -LiteralPath $frontendNodeModules)) {
 
 $backendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendDir
 $frontendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $frontendDir
-$pythonLaunchCommand = Resolve-PythonLaunchCommand -RepoRoot $repoRoot -BackendDir $backendDir
+$pythonLaunchSpec = Resolve-PythonLaunchSpec -RepoRoot $repoRoot -BackendDir $backendDir
+$pythonExecutable = $pythonLaunchSpec.Executable
+$pythonExecutableLiteral = Convert-ToSingleQuotedLiteral -PathValue $pythonExecutable
+$pythonArgLiteral = @($pythonLaunchSpec.Arguments | ForEach-Object {
+    "'$(Convert-ToSingleQuotedLiteral -PathValue $_)'"
+}) -join " "
+$backendAppPath = Join-Path $backendDir "app.py"
+$backendAppPathLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendAppPath
 $backendProfileCommand = if ($MlopsOnly) { "$env:AML_BACKEND_PROFILE='mlops'; " } else { "" }
 
-$backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; $backendProfileCommand $pythonLaunchCommand app.py"
+$backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; $backendProfileCommand & '$pythonExecutableLiteral' $pythonArgLiteral '$backendAppPathLiteral'"
 $frontendCommand = "Set-Location -LiteralPath '$frontendDirLiteral'; npm run dev"
 
 Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-NoExit",
+    "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-Command", $backendCommand
 ) | Out-Null
 
 Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-NoExit",
+    "-NoProfile",
     "-ExecutionPolicy", "Bypass",
     "-Command", $frontendCommand
 ) | Out-Null
 
-Write-Host "Started backend using $pythonLaunchCommand and frontend (npm run dev) in separate PowerShell windows."
+$pythonLaunchSummaryParts = @($pythonExecutable)
+if ($pythonLaunchSpec.Arguments) {
+    $pythonLaunchSummaryParts += $pythonLaunchSpec.Arguments
+}
+$pythonLaunchSummary = $pythonLaunchSummaryParts -join " "
+Write-Host "Started backend using $pythonLaunchSummary and frontend (npm run dev) in separate PowerShell windows."

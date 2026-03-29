@@ -106,7 +106,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       items: [
         { id: 'graph', label: 'Graph Analysis', icon: <AccountTree fontSize="small" />, requiresData: true },
         { id: 'rules', label: 'Rule Engine', icon: <MenuBook fontSize="small" />, requiresData: true },
-        { id: 'typology', label: 'Typology', icon: <Warning fontSize="small" />, requiresData: true },
+        { id: 'typology', label: 'Typology Intelligence', icon: <Warning fontSize="small" />, requiresData: true },
         { id: 'baseline', label: 'Baseline', icon: <TrendingUp fontSize="small" />, requiresData: true },
         { id: 'vector', label: 'Vector Search', icon: <Psychology fontSize="small" />, requiresData: true },
       ]
@@ -115,7 +115,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       label: "SYSTEM",
       items: [
         { id: 'audit', label: 'Audit Trail', icon: <Security fontSize="small" /> },
-        { id: 'env_manager', label: 'Environments', icon: <Settings fontSize="small" /> },
+        { id: 'settings', label: 'Settings', icon: <Settings fontSize="small" /> },
       ]
     },
   ];
