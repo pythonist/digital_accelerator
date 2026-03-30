@@ -105,7 +105,7 @@ def import_published_run():
             publish_id=publish_id,
             tenant_id=str(tenant_id),
             target_env_id=target_env_id,
-            replace_existing=_bool_value(body.get("replace_existing"), default=False),
+            replace_existing=_bool_value(body.get("replace_existing"), default=True),
             merge_existing=_bool_value(body.get("merge_existing"), default=False),
             rerank_after_import=_bool_value(body.get("rerank_after_import"), default=True),
             prepare_investigation_context=_bool_value(body.get("prepare_investigation_context"), default=True),
@@ -114,6 +114,25 @@ def import_published_run():
         return jsonify({"success": True, "import": result})
     except FileNotFoundError as exc:
         return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@fcc_bridge_bp.route("/fcc-bridge/imported-queue/reset", methods=["POST"])
+def clear_imported_queue():
+    try:
+        tenant_id, env_id = _resolve_source_context()
+        body = request.get_json(force=True) or {}
+        target_env_id = str(body.get("target_env_id") or env_id).strip() or env_id
+        source_env_id = str(body.get("source_env_id") or env_id).strip() or env_id
+        bridge = FCCSentinelBridgeService(resolve_env_root(source_env_id, tenant_id, create_if_missing=True))
+        result = bridge.clear_imported_queue(
+            tenant_id=str(tenant_id),
+            target_env_id=target_env_id,
+        )
+        return jsonify({"success": True, "data": result})
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     except Exception as exc:

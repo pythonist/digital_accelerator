@@ -128,13 +128,15 @@ class BaselineEngine:
             )
             
             if baseline_txns.empty:
-                return {
-                    'error': 'Insufficient historical data for baseline',
-                    'customer_id': customer_id,
-                    'case_id': case_id,
-                    'total_transactions': len(all_transactions),
-                    'hint': 'Need at least 10 historical transactions'
-                }
+                return self._build_proxy_baseline_result(
+                    case_id=case_id,
+                    customer_id=customer_id,
+                    all_transactions=all_transactions,
+                    case_data=case_data,
+                    analysis_mode=analysis_mode,
+                    conn=conn,
+                    split_info=split_info,
+                )
             
             # Step 5: Calculate comprehensive profiles
             baseline_profile = self._calculate_comprehensive_profile(baseline_txns)
@@ -205,6 +207,180 @@ class BaselineEngine:
             }
         finally:
             self.db_manager.close_connection(conn)
+
+    def _build_proxy_baseline_result(self, case_id, customer_id, all_transactions, case_data, analysis_mode, conn, split_info):
+        """
+        Build a fallback comparison when there is not enough historical depth for the
+        standard 180-day baseline. This keeps the experience usable and clearly caveated.
+        """
+        working = all_transactions.copy()
+        if working.empty:
+            return {
+                'error': 'No transaction history found for customer',
+                'customer_id': customer_id,
+                'case_id': case_id,
+            }
+
+        date_col = self._get_col(working, [
+            'txn_timestamp', 'timestamp', 'date', 'transaction_date', 'txn_date',
+            'created_at', 'datetime', 'time', 'trans_date'
+        ])
+        if date_col:
+            working[date_col] = pd.to_datetime(working[date_col], errors='coerce')
+            working = working.dropna(subset=[date_col]).sort_values(date_col)
+
+        split_idx = max(1, int(len(working) * 0.7))
+        proxy_baseline = working.iloc[:split_idx].copy()
+        proxy_current = working.iloc[split_idx:].copy()
+        if proxy_current.empty:
+            proxy_current = working.tail(min(max(len(working), 1), 5)).copy()
+        if proxy_baseline.empty:
+            proxy_baseline = working.head(max(len(working) - len(proxy_current), 1)).copy()
+
+        baseline_profile = self._calculate_comprehensive_profile(proxy_baseline)
+        current_profile = self._calculate_comprehensive_profile(proxy_current)
+        peer_profile = None
+        if analysis_mode in ['comprehensive', 'deep']:
+            peer_profile = self._calculate_peer_baseline(customer_id, conn)
+
+        deviations = []
+
+        def add_deviation(category, dev_type, severity, score, message, baseline_value, current_value, change_pct=None, note=None):
+            deviations.append({
+                'category': category,
+                'type': dev_type,
+                'severity': severity,
+                'score': score,
+                'message': message,
+                'baseline_value': baseline_value,
+                'current_value': current_value,
+                'change_pct': change_pct,
+                'investigator_note': note,
+            })
+
+        baseline_count = float(baseline_profile.get('transaction_count', 0) or 0)
+        current_count = float(current_profile.get('transaction_count', 0) or 0)
+        if baseline_count > 0 and current_count > 0:
+            count_change = round(((current_count / max(baseline_count, 1)) - 1) * 100, 1)
+            severity = 'medium' if abs(count_change) >= 50 else 'low'
+            score = 15 if severity == 'medium' else 8
+            add_deviation(
+                'Activity Pattern',
+                'proxy_activity_shift',
+                severity,
+                score,
+                'Recent activity was compared with a proxy historical slice because full historical depth is limited.',
+                int(baseline_count),
+                int(current_count),
+                count_change,
+                'Use this directional comparison to decide whether more history or branch confirmation is needed.',
+            )
+
+        baseline_avg = float(baseline_profile.get('avg_amount', 0) or 0)
+        current_avg = float(current_profile.get('avg_amount', 0) or 0)
+        if baseline_avg > 0 and current_avg > 0:
+            amount_change = round(((current_avg / baseline_avg) - 1) * 100, 1)
+            if abs(amount_change) >= 25:
+                severity = 'medium' if abs(amount_change) >= 60 else 'low'
+                score = 18 if severity == 'medium' else 10
+                add_deviation(
+                    'Amount Behavior',
+                    'proxy_amount_shift',
+                    severity,
+                    score,
+                    'Average transaction size differs from the available proxy baseline and should be validated against expected customer activity.',
+                    round(baseline_avg, 2),
+                    round(current_avg, 2),
+                    amount_change,
+                    'Confirm whether the recent amount profile is consistent with customer purpose and source of funds.',
+                )
+
+        baseline_cps = float(baseline_profile.get('unique_counterparties', 0) or 0)
+        current_cps = float(current_profile.get('unique_counterparties', 0) or 0)
+        if baseline_cps > 0 and current_cps > 0 and current_cps != baseline_cps:
+            cp_change = round(((current_cps / max(baseline_cps, 1)) - 1) * 100, 1)
+            add_deviation(
+                'Counterparty Network',
+                'proxy_counterparty_shift',
+                'low' if abs(cp_change) < 60 else 'medium',
+                9 if abs(cp_change) < 60 else 16,
+                'Visible counterparty breadth changed in the recent slice, which may justify a relationship review.',
+                int(baseline_cps),
+                int(current_cps),
+                cp_change,
+                'Cross-check whether any newly active counterparties are already linked to alerts or adverse context.',
+            )
+
+        if peer_profile and peer_profile.get('avg_transaction_count'):
+            peer_count = float(peer_profile.get('avg_transaction_count') or 0)
+            if peer_count > 0 and current_count > 0:
+                peer_change = round(((current_count / peer_count) - 1) * 100, 1)
+                if abs(peer_change) >= 35:
+                    add_deviation(
+                        'Peer Comparison',
+                        'peer_activity_gap',
+                        'low' if abs(peer_change) < 75 else 'medium',
+                        8 if abs(peer_change) < 75 else 14,
+                        'Recent activity differs from the available peer group average and can be used as supporting context.',
+                        round(peer_count, 1),
+                        int(current_count),
+                        peer_change,
+                        'Peer comparison is indicative only and should be combined with case evidence.',
+                    )
+
+        risk_score, risk_level = self._calculate_risk_score(deviations)
+        insights = self._generate_investigator_insights(
+            deviations,
+            baseline_profile,
+            current_profile,
+            case_data,
+        )
+        insights.insert(0, {
+            'type': 'info',
+            'message': 'Historical coverage is limited, so this assessment uses a proxy baseline built from available activity and peer context.',
+            'action': 'Use this output as directional support and corroborate with case facts, graph review, and analyst judgement.',
+        })
+
+        method_label = split_info.get('split_method') if isinstance(split_info, dict) else None
+        baseline_label = 'proxy baseline from available history'
+        if method_label:
+            baseline_label = f'{baseline_label} ({method_label})'
+
+        self._save_analysis_history(customer_id, case_id, risk_score, risk_level, deviations, conn)
+
+        return {
+            'success': True,
+            'case_id': case_id,
+            'customer_id': customer_id,
+            'deviation_score': risk_score,
+            'deviation_level': risk_level if risk_level != 'No Risk' else 'Low',
+            'deviations': deviations,
+            'insights': insights,
+            'peer_comparison': peer_profile is not None,
+            'analysis_mode': analysis_mode,
+            'used_proxy_baseline': True,
+            'confidence_note': 'Baseline comparison is based on limited visible history and should be interpreted as supportive, not conclusive.',
+            'limitations': [
+                'Full historical baseline was not available for this case.',
+                'The module used available transaction history and peer context to produce a proxy comparison.',
+                'Additional history, branch context, or investigation evidence may strengthen the conclusion.',
+            ],
+            'baseline_summary': {
+                'period': baseline_label,
+                'transaction_count': len(proxy_baseline),
+                'total_volume': float(proxy_baseline['amount'].sum()) if 'amount' in proxy_baseline else 0,
+                'avg_amount': float(baseline_profile.get('avg_amount', 0)),
+                'date_range': f"{split_info.get('baseline_start', 'N/A')} to {split_info.get('baseline_end', 'N/A')}",
+            },
+            'current_summary': {
+                'period': split_info.get('current_period', f'{len(proxy_current)} transactions'),
+                'transaction_count': len(proxy_current),
+                'total_volume': float(proxy_current['amount'].sum()) if 'amount' in proxy_current else 0,
+                'avg_amount': float(current_profile.get('avg_amount', 0)),
+                'date_range': f"{split_info.get('current_start', 'N/A')} to {split_info.get('current_end', 'N/A')}",
+            },
+            'timestamp': datetime.now().isoformat(),
+        }
 
     def _resolve_customer_from_case(self, case_id, conn):
         """

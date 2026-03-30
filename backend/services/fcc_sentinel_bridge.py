@@ -144,6 +144,37 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
+def _numeric_suffix(value: Any) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _normalize_enterprise_case_id(
+    raw_case_id: Any,
+    *,
+    alert_id: Any = None,
+    idx: int = 1,
+    used_ids: Optional[set[str]] = None,
+) -> str:
+    used_ids = used_ids if used_ids is not None else set()
+    preferred_seeds = [raw_case_id, alert_id, idx]
+    for seed in preferred_seeds:
+        digits = _numeric_suffix(seed)
+        if not digits:
+            continue
+        candidate = f"CASE{int(digits):07d}"
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+
+    fallback_number = max(len(used_ids) + 1, int(idx or 1))
+    while True:
+        candidate = f"CASE{fallback_number:07d}"
+        if candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+        fallback_number += 1
+
+
 def _parse_datetime(value: Any, default: Optional[datetime] = None) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -633,6 +664,7 @@ def build_investigation_tables(
     customers: Dict[str, Dict[str, Any]] = {}
 
     grain = "case" if str(model_grain).lower() == "case" else "alert"
+    used_case_ids: set[str] = set()
 
     for idx, raw_row in enumerate(scored_rows, start=1):
         row = {str(k): _json_safe(v) for k, v in dict(raw_row).items()}
@@ -640,18 +672,28 @@ def build_investigation_tables(
         score = float(row.get("model_score") or 0.0)
         scored_at = row.get("scored_at") or _now_iso()
 
-        case_id = _coalesce(row, "case_id", "caseid")
+        source_case_id = _coalesce(row, "case_id", "caseid")
         alert_id = _coalesce(row, "alert_id", "alertid")
         transaction_id = _coalesce(row, "transaction_id", "txn_id", "trans_id")
         account_id = _coalesce(row, "account_id", "acct_id", "accountid", "account_no")
         customer_id = _coalesce(row, "customer_id", "cust_id", "customerid")
 
         if grain == "case":
-            case_id = str(case_id or entity_id or f"CSE-{idx:06d}")
+            case_id = _normalize_enterprise_case_id(
+                source_case_id or entity_id,
+                alert_id=alert_id,
+                idx=idx,
+                used_ids=used_case_ids,
+            )
             alert_id = str(alert_id or f"ALT-{case_id}")
         else:
             alert_id = str(alert_id or entity_id or f"ALT-{idx:06d}")
-            case_id = str(case_id or f"CASE-{alert_id}")
+            case_id = _normalize_enterprise_case_id(
+                None,
+                alert_id=alert_id,
+                idx=idx,
+                used_ids=used_case_ids,
+            )
 
         if transaction_id is not None:
             transaction_id = str(transaction_id)
@@ -721,6 +763,7 @@ def build_investigation_tables(
                 "fcc_pipeline_name": pipeline_name,
                 "fcc_publish_id": publish_id,
                 "fcc_publish_label": publish_label,
+                "fcc_source_case_id": str(source_case_id or "").strip() or None,
             },
         )
         cases[case_id]["alert_count"] = _safe_int(cases[case_id].get("alert_count"), default=0) + 1
@@ -830,6 +873,19 @@ class FCCSentinelBridgeService:
         "fcc_scored_entities",
     )
 
+    INVESTIGATION_RESET_TABLES = (
+        *CORE_REPLACE_TABLES,
+        "case_queue",
+        "case_status_history",
+        "case_escalations",
+        "escalation_batches",
+        "mail_logs",
+        "mail_inbox_messages",
+        "case_resolution_support",
+        "report_history",
+        "generated_reports",
+    )
+
     def __init__(self, env_root: str | Path):
         self.env_root = Path(env_root)
         self.mlops_data_dir = resolve_mlops_data_dir(self.env_root)
@@ -843,6 +899,28 @@ class FCCSentinelBridgeService:
 
     def _publish_dir(self, publish_id: str) -> Path:
         return self.publish_dir / str(publish_id)
+
+    def _resolve_locked_deployment_threshold(self, deployment_id: Optional[str], fallback: Any = None) -> Optional[float]:
+        deployment_text = str(deployment_id or "").strip()
+        if not deployment_text:
+            try:
+                return float(fallback) if fallback is not None else None
+            except Exception:
+                return None
+        deploy_file = self.env_root / "mlops" / "deployments" / f"{deployment_text}.json"
+        if not deploy_file.exists():
+            try:
+                return float(fallback) if fallback is not None else None
+            except Exception:
+                return None
+        try:
+            payload = json.loads(deploy_file.read_text(encoding="utf-8"))
+            return float(payload.get("threshold") or fallback)
+        except Exception:
+            try:
+                return float(fallback) if fallback is not None else None
+            except Exception:
+                return None
 
     def _table_has_rows(self, cursor, table_name: str) -> bool:
         cursor.execute(
@@ -914,6 +992,12 @@ class FCCSentinelBridgeService:
                 continue
             if deployment_id and str(manifest.get("deployment_id") or "") != str(deployment_id):
                 continue
+            locked_threshold = self._resolve_locked_deployment_threshold(
+                manifest.get("deployment_id"),
+                manifest.get("threshold"),
+            )
+            if locked_threshold is not None:
+                manifest["threshold"] = float(locked_threshold)
             rows.append(manifest)
         rows.sort(key=lambda row: str(row.get("scored_at") or row.get("created_at") or ""), reverse=True)
         return rows
@@ -993,7 +1077,10 @@ class FCCSentinelBridgeService:
             "run_id": manifest.get("run_id"),
             "deployment_id": manifest.get("deployment_id"),
             "model_grain": manifest.get("model_grain"),
-            "threshold": manifest.get("threshold"),
+            "threshold": self._resolve_locked_deployment_threshold(
+                manifest.get("deployment_id"),
+                manifest.get("threshold"),
+            ),
             "pipeline_id": resolved_pipeline_id,
             "pipeline_name": resolved_pipeline_name,
             "published_at": _now_iso(),
@@ -1015,7 +1102,14 @@ class FCCSentinelBridgeService:
         rows: List[Dict[str, Any]] = []
         for manifest_path in self.publish_dir.glob("*/manifest.json"):
             try:
-                rows.append(json.loads(manifest_path.read_text(encoding="utf-8")))
+                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+                locked_threshold = self._resolve_locked_deployment_threshold(
+                    payload.get("deployment_id"),
+                    payload.get("threshold"),
+                )
+                if locked_threshold is not None:
+                    payload["threshold"] = float(locked_threshold)
+                rows.append(payload)
             except Exception:
                 continue
         rows.sort(key=lambda row: str(row.get("published_at") or ""), reverse=True)
@@ -1210,9 +1304,16 @@ class FCCSentinelBridgeService:
             "target_env_id": target_env_id,
             "imported_at": _now_iso(),
             "merge_existing": bool(merge_existing and not replace_existing),
+            "replace_existing": bool(replace_existing),
             "pipeline_id": manifest.get("pipeline_id"),
             "pipeline_name": manifest.get("pipeline_name"),
             "publish_label": manifest.get("publish_label"),
+            "source_published_rows": int(manifest.get("published_rows") or 0),
+            "source_threshold": self._resolve_locked_deployment_threshold(
+                manifest.get("deployment_id"),
+                manifest.get("threshold"),
+            ),
+            "case_generation_mode": "one_case_per_retained_alert" if str(manifest.get("model_grain") or "").lower() != "case" else "source_case_grain",
             "prepare_investigation_context": bool(prepare_investigation_context),
             "context_profile": str(context_profile or "balanced"),
             "table_counts": {name: int(len(df.index)) for name, df in tables.items()},
@@ -1227,6 +1328,41 @@ class FCCSentinelBridgeService:
             "imported_case_count": int(len(tables.get("cases", pd.DataFrame()).index)),
             "imported_alert_count": int(len(tables.get("alerts", pd.DataFrame()).index)),
             "focus_result": focus_result,
+        }
+
+    def clear_imported_queue(
+        self,
+        *,
+        tenant_id: str,
+        target_env_id: str,
+    ) -> Dict[str, Any]:
+        target_env_root = resolve_env_root(target_env_id, tenant_id, create_if_missing=True)
+        target_db_path = _resolve_target_db_path(target_env_root)
+        db_manager = DatabaseManager(str(target_db_path))
+        db_manager.init_schema()
+
+        deleted_tables: List[str] = []
+        conn = db_manager.connect()
+        try:
+            cursor = conn.cursor()
+            for table_name in self.INVESTIGATION_RESET_TABLES:
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (str(table_name),),
+                )
+                if cursor.fetchone() is None:
+                    continue
+                cursor.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                deleted_tables.append(str(table_name))
+            conn.commit()
+        finally:
+            db_manager.close_connection(conn)
+
+        return {
+            "success": True,
+            "target_env_id": target_env_id,
+            "cleared_at": _now_iso(),
+            "deleted_tables": deleted_tables,
         }
 
     def set_active_case_scope(

@@ -83,7 +83,7 @@ export const getInvestigationNavigationSections = (hasData = false) => ([
       { id: 'case_queue', label: 'Case Queue', icon: Inbox, disabled: !hasData },
       { id: 'case_reports', label: 'Generate Report', icon: Description, disabled: !hasData },
       { id: 'report_history', label: 'Report History', icon: History, disabled: !hasData },
-      { id: 'mail_config', label: 'Mail Configuration', icon: Settings, disabled: !hasData },
+      { id: 'mail_config', label: 'Mail', icon: Settings, disabled: !hasData },
       { id: 'escalation_history', label: 'Escalation History', icon: History, disabled: !hasData },
     ],
   },

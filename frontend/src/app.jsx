@@ -99,6 +99,11 @@ const NavigationStateManager = () => {
     if (isAuthLoading || !isAuthenticated || !activeEnv) return;
     if (restoredScopeRef.current === scopeKey) return;
 
+    if (location.state?.skipRestore) {
+      restoredScopeRef.current = scopeKey;
+      return;
+    }
+
     if (!RESTORE_ENTRY_PATHS.has(location.pathname)) {
       restoredScopeRef.current = scopeKey;
       return;

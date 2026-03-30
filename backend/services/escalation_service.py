@@ -1,7 +1,7 @@
 import json
 import re
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from services.audit_log_service import AuditLogService
 from services.case_packet_builder import CasePacketBuilder
@@ -78,6 +78,62 @@ class EscalationService:
         body = str(template.get("body_template") or "").format(**context)
         return subject, body
 
+    def _build_mail_metadata(
+        self,
+        *,
+        case_id: Optional[str] = None,
+        queue_row: Optional[Dict[str, Any]] = None,
+        packet: Optional[Dict[str, Any]] = None,
+        batch_ref: Optional[str] = None,
+        case_rows: Optional[List[Dict[str, Any]]] = None,
+        summary: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {
+            "workflow": "FCIP Investigation Workbench",
+            "summary": summary or "",
+            "case_details": {},
+            "sections": [],
+            "case_rows": case_rows or [],
+        }
+        if case_id and queue_row and packet:
+            mail_context = packet.get("mail_context") or {}
+            resolution = packet.get("resolution_workspace") or {}
+            metadata["summary"] = metadata["summary"] or str(
+                mail_context.get("why_review_needed")
+                or packet.get("alert_summary", {}).get("why_generated")
+                or f"Case {case_id} is being escalated for additional review in FCIP."
+            )
+            metadata["case_details"] = {
+                "Case ID": case_id,
+                "Customer ID": mail_context.get("customer_id") or "-",
+                "Account ID": mail_context.get("account_id") or "-",
+                "Severity": mail_context.get("severity") or "-",
+                "Scenario": mail_context.get("scenario_name") or "-",
+                "SLA Due": mail_context.get("sla_due_at") or "-",
+            }
+            metadata["sections"].append({
+                "title": "Investigation Explanation",
+                "body": metadata["summary"],
+            })
+            metadata["sections"].append({
+                "title": "Transaction Context",
+                "body": str(mail_context.get("transaction_summary") or "Transaction summary is not yet available for this case."),
+            })
+            sar_excerpt = str(
+                resolution.get("accepted_sar_draft")
+                or resolution.get("sar_excerpt")
+                or resolution.get("sar_draft")
+                or ""
+            ).strip()
+            if sar_excerpt:
+                metadata["sections"].append({
+                    "title": "Potential SAR Narrative",
+                    "body": sar_excerpt[:1200],
+                })
+        elif batch_ref and not metadata["summary"]:
+            metadata["summary"] = f"Batch escalation prepared in FCIP under reference {batch_ref}."
+        return metadata
+
     def _apply_status_for_target(self, target_role: str) -> str:
         mapping = {
             "L2 Reviewer": "Pending L2 Review",
@@ -115,6 +171,12 @@ class EscalationService:
                 "recipients": recipients,
                 "subject": subject,
                 "body": body,
+                "mail_metadata": self._build_mail_metadata(
+                    case_id=case_id,
+                    queue_row=queue_row,
+                    packet=packet,
+                    summary=f"Escalation prepared for {target_role} review from the FCIP case-resolution workflow.",
+                ),
                 "status_after_send": self._apply_status_for_target(target_role),
             }
         finally:
@@ -181,6 +243,11 @@ class EscalationService:
                     "case_ids": [case_id for case_id, _ in group["cases"]],
                     "subject": subject,
                     "body": "\n\n".join(lines),
+                    "mail_metadata": self._build_mail_metadata(
+                        batch_ref="preview",
+                        case_rows=compact_rows,
+                        summary=f"{len(group['cases'])} cases are grouped for {target_role} review from the FCIP escalation workflow.",
+                    ),
                     "status_after_send": self._apply_status_for_target(target_role),
                     "cases": compact_rows,
                 })
@@ -203,7 +270,12 @@ class EscalationService:
             queue_row = self.queue_service.get_case_queue_row(case_id)
             result_logs = []
             for recipient in preview["recipients"]:
-                send_result = self.notification_service.send_email(recipient.get("email"), preview["subject"], preview["body"])
+                send_result = self.notification_service.send_email(
+                    recipient.get("email"),
+                    preview["subject"],
+                    preview["body"],
+                    metadata=preview.get("mail_metadata"),
+                )
                 self.audit_service.record_escalation(
                     conn,
                     case_id=case_id,
@@ -294,6 +366,7 @@ class EscalationService:
             for group in grouped.values():
                 recipient = group["recipient"]
                 lines = []
+                compact_rows = []
                 for case_id, queue_row in group["cases"]:
                     packet = self.packet_builder.build_case_summary(case_id, queue_row)
                     context = packet.get("mail_context", {})
@@ -302,13 +375,29 @@ class EscalationService:
                         f"Severity {context.get('severity')} | Scenario {context.get('scenario_name')} | "
                         f"Reason {context.get('why_review_needed')}"
                     )
+                    compact_rows.append({
+                        "case_id": case_id,
+                        "customer_id": context.get("customer_id"),
+                        "account_id": context.get("account_id"),
+                        "severity": context.get("severity"),
+                        "scenario_name": context.get("scenario_name"),
+                    })
                 subject = (
                     f"FCC Escalation Required | {len(group['cases'])} Cases | {target_role} Review Pending"
                     if len(group["cases"]) > 1 else
                     f"FCC Escalation Required | Case {group['cases'][0][0]} | {target_role}"
                 )
                 body = "\n\n".join(lines)
-                send_result = self.notification_service.send_email(recipient.get("email"), subject, body)
+                send_result = self.notification_service.send_email(
+                    recipient.get("email"),
+                    subject,
+                    body,
+                    metadata=self._build_mail_metadata(
+                        batch_ref=batch_ref,
+                        case_rows=compact_rows,
+                        summary=f"{len(group['cases'])} cases are being escalated to {target_role} from FCIP for additional review.",
+                    ),
+                )
                 self.audit_service.record_mail_log(conn, None, batch_ref, recipient.get("email"), subject, send_result.get("status") or "queued", send_result.get("error") or "")
 
                 for case_id, queue_row in group["cases"]:

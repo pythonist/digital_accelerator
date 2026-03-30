@@ -355,6 +355,23 @@ def ensure_case_queue_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mail_inbox_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            direction TEXT NOT NULL,
+            case_id TEXT,
+            batch_ref TEXT,
+            sender_email TEXT,
+            recipient_emails TEXT,
+            subject TEXT,
+            body_snapshot TEXT,
+            mail_status TEXT,
+            created_at TEXT,
+            thread_ref TEXT
+        )
+        """
+    )
     conn.commit()
 
 

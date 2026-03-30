@@ -2921,7 +2921,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           <Tooltip title="Back to module selection">
             <IconButton
               size="small"
-              onClick={() => navigate('/tools')}
+              onClick={() => navigate('/tools', { state: { skipRestore: true } })}
               sx={{
                 width: 24,
                 height: 24,

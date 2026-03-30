@@ -2089,11 +2089,10 @@ class DeploymentDashboardService:
             base_label_summary = {}
             table_counts = {}
             sim_mode = "source_batch"
-        optimize_threshold = (
-            (sim_mode == "synthetic_pipeline")
-            if auto_optimize_threshold is None
-            else bool(auto_optimize_threshold)
-        )
+        # Downstream deployment monitoring must honor the locked release threshold.
+        # Threshold experimentation belongs in validation / release governance, not
+        # inside live FCC scoring or Sentinel handoff flows.
+        optimize_threshold = False
 
         # Scenario jitter should not corrupt label provenance columns.
         protected_cols: Dict[str, pd.Series] = {}
@@ -2258,7 +2257,7 @@ class DeploymentDashboardService:
                 "threshold_auto_optimized": bool(
                     threshold_optimization is not None and optimize_threshold
                 ),
-                "threshold_optimization_skipped_reason": threshold_optimization_skipped_reason,
+                "threshold_optimization_skipped_reason": threshold_optimization_skipped_reason or "deployment_threshold_locked",
                 "model_grain": model_grain,
                 "mode": sim_mode,
                 "persisted_to_ledger": bool(persist_to_ledger),

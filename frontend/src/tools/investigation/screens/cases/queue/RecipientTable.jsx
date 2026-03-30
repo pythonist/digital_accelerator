@@ -11,9 +11,9 @@ import {
   TableRow,
   Tooltip,
 } from '@mui/material';
-import { Edit } from '@mui/icons-material';
+import { DeleteOutline, Edit } from '@mui/icons-material';
 
-const RecipientTable = ({ rows, onEdit }) => (
+const RecipientTable = ({ rows, onEdit, onDelete }) => (
   <Paper variant="outlined" sx={{ borderRadius: 2.5, overflow: 'hidden' }}>
     <TableContainer>
       <Table size="small">
@@ -49,6 +49,11 @@ const RecipientTable = ({ rows, onEdit }) => (
                 <Tooltip title="Edit recipient">
                   <IconButton size="small" onClick={() => onEdit(row)}>
                     <Edit fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Delete recipient">
+                  <IconButton size="small" color="error" onClick={() => onDelete?.(row)}>
+                    <DeleteOutline fontSize="small" />
                   </IconButton>
                 </Tooltip>
               </TableCell>

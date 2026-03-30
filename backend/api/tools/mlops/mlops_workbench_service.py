@@ -336,6 +336,15 @@ def _coerce_int(value, default: Optional[int] = None) -> Optional[int]:
         return default
 
 
+def _screen_state_is_completed(state: Any) -> bool:
+    if not isinstance(state, dict) or not state:
+        return False
+    if bool(state.get("completed")) or bool(state.get("done")):
+        return True
+    status_text = str(state.get("status") or "").strip().lower()
+    return status_text in {"completed", "complete", "done", "success", "saved"}
+
+
 def _sort_jsonable(value):
     if isinstance(value, list):
         return [_sort_jsonable(item) for item in value]
@@ -643,16 +652,16 @@ def _derive_substep(screen_key: str, screen_states: Dict[str, Dict]) -> Tuple[st
 def _fallback_progress_summary(steps: List[Dict], status: Optional[str] = None) -> Dict[str, Any]:
     screen_states = _screen_state_map(steps or [])
     completed_flags = {
-        "data": bool(screen_states.get("data_upload")),
-        "master": bool(screen_states.get("master")),
-        "target": bool(screen_states.get("target")),
-        "eda": bool(screen_states.get("eda")),
-        "preprocess": bool(screen_states.get("preprocess")),
-        "model": bool(screen_states.get("model")),
-        "validation": bool(screen_states.get("validation")),
-        "registry": bool(screen_states.get("registry")),
-        "ready": bool(screen_states.get("ready")),
-        "dashboard": bool(screen_states.get("dashboard")),
+        "data": _screen_state_is_completed(screen_states.get("data_upload")),
+        "master": _screen_state_is_completed(screen_states.get("master")),
+        "target": _screen_state_is_completed(screen_states.get("target")),
+        "eda": _screen_state_is_completed(screen_states.get("eda")),
+        "preprocess": _screen_state_is_completed(screen_states.get("preprocess")),
+        "model": _screen_state_is_completed(screen_states.get("model")),
+        "validation": _screen_state_is_completed(screen_states.get("validation")),
+        "registry": _screen_state_is_completed(screen_states.get("registry")),
+        "ready": _screen_state_is_completed(screen_states.get("ready")),
+        "dashboard": _screen_state_is_completed(screen_states.get("dashboard")),
     }
     completed_steps = sum(1 for key in _PROGRESS_STAGE_ORDER if completed_flags.get(key))
     total_steps = len(_PROGRESS_STAGE_ORDER)
@@ -2455,6 +2464,8 @@ class MLOpsWorkbenchService:
                 session_id = str(session.get("session_id") or "").strip()
                 if not session_id or session_id in seen_session_ids:
                     continue
+                if not self._workflow_session_belongs_to_mlops(session):
+                    continue
                 session_pipeline_id = _session_pipeline_ref(session)
                 session_pipeline_name = str(session.get("pipeline_name") or "").strip().lower()
                 if session_pipeline_id is not None:
@@ -2899,6 +2910,49 @@ class MLOpsWorkbenchService:
             "run_status": session.get("status") or "draft",
         }
         return self._apply_workflow_summary(record, session)
+
+    def _workflow_session_belongs_to_mlops(self, session: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(session, dict):
+            return False
+
+        current_state = session.get("current_state") if isinstance(session.get("current_state"), dict) else {}
+        mlops_state = current_state.get("mlops_state") if isinstance(current_state.get("mlops_state"), dict) else {}
+        current_module = _normalize_optional_text(
+            session.get("current_module") or current_state.get("current_module")
+        ) or "mlops"
+
+        if mlops_state:
+            return True
+
+        if current_module not in {"mlops", "fcc", "workbench"}:
+            return False
+
+        current_step = _normalize_optional_text(
+            session.get("current_step")
+            or current_state.get("preferred_screen")
+        ) or ""
+        if current_step:
+            if current_step in set(_PROGRESS_STAGE_ORDER) | {"data_upload", "pipelines", "reports"}:
+                return True
+            if current_step in {
+                "casepack",
+                "case_pack",
+                "priority_inbox",
+                "copilot",
+                "copilot_investigation",
+                "graph",
+                "network",
+                "queue",
+                "resolution",
+                "mail_config",
+                "escalations",
+            }:
+                return False
+
+        handoff_summary = session.get("handoff_summary")
+        if isinstance(handoff_summary, dict) and handoff_summary and current_module == "investigation":
+            return False
+        return True
 
     def _workflow_session_has_meaningful_state(self, session: Optional[Dict[str, Any]]) -> bool:
         if not isinstance(session, dict):

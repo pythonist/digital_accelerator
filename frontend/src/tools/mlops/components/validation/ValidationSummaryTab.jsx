@@ -208,6 +208,13 @@ const ValidationSummaryTab = ({
     generateSummary();
   }, [actionsDisabled, activeModel?.job_id, generateSummary]);
 
+  const lockedThreshold = validationReport?.selected_threshold
+    ?? validationReport?.optimal_threshold
+    ?? activeModel?.selected_threshold
+    ?? activeModel?.metrics?.selected_threshold
+    ?? activeModel?.metrics?.optimal_threshold
+    ?? 0.5;
+
   return (
     <Stack spacing={2.5}>
       <SectionCard>
@@ -235,6 +242,37 @@ const ValidationSummaryTab = ({
         {actionsDisabled ? <Alert severity="warning" sx={{ mt: 1.4, borderRadius: 0 }}>{gatingMessage}</Alert> : null}
         {notice ? <Alert severity="info" sx={{ mt: 1.4, borderRadius: 0 }}>{notice}</Alert> : null}
       </SectionCard>
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
+          gap: 1.5,
+        }}
+      >
+        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, borderColor: V.border }}>
+          <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: V.textMuted, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+            Locked Threshold
+          </Typography>
+          <Typography sx={{ mt: 0.6, fontSize: 24, fontWeight: 800, color: V.text }}>
+            {fmt(lockedThreshold, 2)}
+          </Typography>
+          <Typography sx={{ mt: 0.35, fontSize: 11.25, color: V.textMuted }}>
+            This validation decision is immutable and must flow unchanged into release, deployment, FCC scoring, Bridge, and Sentinel.
+          </Typography>
+        </Paper>
+        <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, borderColor: V.border }}>
+          <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: V.textMuted, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+            Downstream Policy
+          </Typography>
+          <Typography sx={{ mt: 0.6, fontSize: 15, fontWeight: 700, color: V.text }}>
+            No downstream screen should override the locked threshold
+          </Typography>
+          <Typography sx={{ mt: 0.35, fontSize: 11.25, color: V.textMuted }}>
+            If unseen-data behavior suggests a different cut-off, take that change back into validation and release governance instead of editing live operations.
+          </Typography>
+        </Paper>
+      </Box>
 
       <SectionCard>
         <SectionTitle title="Validation journey" subtitle="Step-by-step business summary of what was completed during Model Validation." />

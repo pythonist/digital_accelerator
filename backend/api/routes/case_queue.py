@@ -172,6 +172,13 @@ def update_mail_recipient(recipient_id):
     return jsonify({"success": True, **service.update_recipient(recipient_id, request.get_json(silent=True) or {})})
 
 
+@case_queue_bp.route("/mail-config/recipients/<int:recipient_id>", methods=["DELETE"])
+@handle_errors
+def delete_mail_recipient(recipient_id):
+    service = MailConfigService(_get_db_manager())
+    return jsonify({"success": True, **service.delete_recipient(recipient_id)})
+
+
 @case_queue_bp.route("/mail-config/rules", methods=["GET", "POST"])
 @handle_errors
 def mail_rules():
@@ -195,3 +202,28 @@ def mail_templates():
 def test_mail():
     service = MailConfigService(_get_db_manager())
     return jsonify({"success": True, **service.test_mail(request.get_json(silent=True) or {})})
+
+
+@case_queue_bp.route("/mail/messages", methods=["GET"])
+@handle_errors
+def list_mailbox_messages():
+    service = MailConfigService(_get_db_manager())
+    filters = {
+        "direction": request.args.get("direction"),
+        "search": request.args.get("search"),
+    }
+    return jsonify({"success": True, **service.list_mailbox(filters)})
+
+
+@case_queue_bp.route("/mail/send", methods=["POST"])
+@handle_errors
+def send_manual_mail():
+    service = MailConfigService(_get_db_manager())
+    return jsonify({"success": True, **service.send_mail(request.get_json(silent=True) or {})})
+
+
+@case_queue_bp.route("/mail/reply", methods=["POST"])
+@handle_errors
+def record_mail_reply():
+    service = MailConfigService(_get_db_manager())
+    return jsonify({"success": True, **service.record_reply(request.get_json(silent=True) or {})})

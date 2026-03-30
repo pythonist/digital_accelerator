@@ -354,6 +354,10 @@ class APIClient {
     return this.post('/api/v2/fcc-bridge/import', payload);
   }
 
+  async clearFccImportedQueue(payload = {}) {
+    return this.post('/api/v2/fcc-bridge/imported-queue/reset', payload);
+  }
+
   async getFccWorkflowSession(params = {}) {
     return this.get('/api/v2/fcc-workflow/session', params);
   }
@@ -438,6 +442,10 @@ class APIClient {
     return this.put(`/api/v2/mail-config/recipients/${recipientId}`, payload);
   }
 
+  async deleteMailRecipient(recipientId) {
+    return this.delete(`/api/v2/mail-config/recipients/${recipientId}`);
+  }
+
   async getMailRoutingRules() {
     return this.get('/api/v2/mail-config/rules');
   }
@@ -456,6 +464,18 @@ class APIClient {
 
   async testMailConfiguration(payload = {}) {
     return this.post('/api/v2/mail-config/test-mail', payload);
+  }
+
+  async getMailboxMessages(params = {}) {
+    return this.get('/api/v2/mail/messages', params);
+  }
+
+  async sendMailboxMessage(payload = {}) {
+    return this.post('/api/v2/mail/send', payload);
+  }
+
+  async recordMailboxReply(payload = {}) {
+    return this.post('/api/v2/mail/reply', payload);
   }
 
   async generateCaseReport(payload = {}) {

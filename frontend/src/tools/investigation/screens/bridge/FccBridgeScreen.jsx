@@ -46,6 +46,7 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState('');
   const [importingId, setImportingId] = useState('');
+  const [clearingQueue, setClearingQueue] = useState(false);
   const [prepareInvestigationContext, setPrepareInvestigationContext] = useState(true);
 
   const hasActiveWorkspace = Boolean(String(activeEnv || '').trim());
@@ -85,8 +86,8 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
       const res = await apiClient.importFccPublishedRun({
         publish_id: publishId,
         target_env_id: activeEnv,
-        merge_existing: true,
-        replace_existing: false,
+        merge_existing: false,
+        replace_existing: true,
         rerank_after_import: true,
         prepare_investigation_context: prepareInvestigationContext,
         context_profile: 'balanced',
@@ -94,18 +95,40 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
       const imported = res?.import || {};
       const importedCases = Number(imported?.imported_case_count || 0).toLocaleString();
       const importedAlerts = Number(imported?.imported_alert_count || 0).toLocaleString();
+      const sourceRows = Number(imported?.source_published_rows || row?.published_rows || 0).toLocaleString();
       setDatasetLoaded(true);
       await checkDatasetStatus();
       await loadCaseList(true);
       await refreshPriorityBuckets();
       setSuccessMessage(
-        `Imported ${importedCases} FCC cases and ${importedAlerts} alerts into shared workspace ${activeEnv}.`,
+        `Imported ${importedCases} Sentinel cases from ${sourceRows} FCC retained rows into shared workspace ${activeEnv}. Alerts imported: ${importedAlerts}.`,
       );
       await loadPublishedRuns();
     } catch (err) {
       setError(err.message || 'Failed to import FCC bridge package.');
     } finally {
       setImportingId('');
+    }
+  };
+
+  const handleClearImportedQueue = async () => {
+    if (!hasActiveWorkspace) return;
+    setClearingQueue(true);
+    setError(null);
+    setSuccessMessage('');
+    try {
+      await apiClient.clearFccImportedQueue({
+        target_env_id: activeEnv,
+      });
+      setDatasetLoaded(false);
+      await checkDatasetStatus();
+      await loadCaseList(true);
+      await refreshPriorityBuckets();
+      setSuccessMessage(`Cleared the imported FCC investigation queue from shared workspace ${activeEnv}. You can now import a new retained run.`);
+    } catch (err) {
+      setError(err.message || 'Failed to clear the imported FCC queue.');
+    } finally {
+      setClearingQueue(false);
     }
   };
 
@@ -118,6 +141,14 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
         <Stack direction="row" spacing={1.5}>
           <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadPublishedRuns} disabled={loading}>
             Refresh
+          </Button>
+          <Button
+            variant="outlined"
+            color="error"
+            onClick={handleClearImportedQueue}
+            disabled={!hasActiveWorkspace || clearingQueue}
+          >
+            {clearingQueue ? 'Clearing...' : 'Delete Imported Queue'}
           </Button>
         </Stack>
       )}
@@ -157,6 +188,9 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   FCC-published runs are imported into the active Sentinel workspace so the same pipeline, run, and publish lineage stays intact end to end.
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.8 }}>
+                  The downstream queue can be reset explicitly before importing a new FCC retained run.
                 </Typography>
               </Box>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
@@ -226,7 +260,7 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
               </Typography>
             </Box>
           ) : (
-            <TableContainer>
+            <TableContainer sx={{ maxHeight: 420 }}>
               <Table>
                 <TableHead>
                   <TableRow sx={{ backgroundColor: '#f8fafc' }}>

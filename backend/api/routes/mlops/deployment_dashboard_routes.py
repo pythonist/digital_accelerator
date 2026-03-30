@@ -21,6 +21,7 @@ Register in create_app():
 from __future__ import annotations
 
 import threading
+import json
 from pathlib import Path
 from typing import Dict
 
@@ -72,6 +73,20 @@ def _get_service(env_root: Path) -> DeploymentDashboardService:
 def _get_report_service(env_root: Path) -> MLOpsWorkbenchService:
     mlops_db = env_root / "mlops" / "duckdb" / "mlops.duckdb"
     return MLOpsWorkbenchService(mlops_db)
+
+
+def _resolve_locked_deployment_threshold(env_root: Path, deployment_id: str, fallback: float) -> float:
+    deployment_text = str(deployment_id or "").strip()
+    if not deployment_text:
+        return float(fallback)
+    deploy_file = env_root / "mlops" / "deployments" / f"{deployment_text}.json"
+    if not deploy_file.exists():
+        return float(fallback)
+    try:
+        payload = json.loads(deploy_file.read_text(encoding="utf-8"))
+        return float(payload.get("threshold") or fallback)
+    except Exception:
+        return float(fallback)
 
 
 def _bool_value(value, default: bool = False) -> bool:
@@ -172,7 +187,8 @@ def live_simulate():
             persist_to_ledger = persist_raw.strip().lower() in {"1", "true", "yes", "on"}
         else:
             persist_to_ledger = bool(persist_raw)
-        auto_optimize_threshold = body.get("auto_optimize_threshold")
+        threshold = _resolve_locked_deployment_threshold(env_root, deployment_id, threshold)
+        auto_optimize_threshold = False
         max_event_loss_pct = float(body.get("max_event_loss_pct") or 5.0)
         scenario = str(body.get("scenario") or "steady")
         batch_size = int(body.get("batch_size") or 200)
@@ -365,6 +381,7 @@ def handoff_sentinel():
         threshold = float(body.get("threshold") or 0.5)
         force_refresh = _bool_value(body.get("force_refresh"), default=False)
         preferred_screen = str(body.get("preferred_screen") or "casepack").strip() or "casepack"
+        requested_batch_id = str(body.get("batch_id") or "").strip()
 
         existing_session = report_service.get_workflow_session(
             tenant_id=str(tenant_id),
@@ -389,6 +406,7 @@ def handoff_sentinel():
         if (
             existing_session
             and not force_refresh
+            and (not requested_batch_id or requested_batch_id == str(existing_handoff.get("batch_id") or "").strip())
             and str(existing_session.get("publish_id") or "").strip()
             and existing_case_ids
         ):
@@ -451,23 +469,49 @@ def handoff_sentinel():
                 }
             )
 
-        simulation = svc.simulate_live_pipeline(
-            deployment_id=deployment_id,
-            run_id=run_id,
-            threshold=threshold,
-            simulation_mode=str(body.get("simulation_mode") or "synthetic_pipeline"),
-            persist_to_ledger=_bool_value(body.get("persist_to_ledger"), default=True),
-            auto_optimize_threshold=body.get("auto_optimize_threshold"),
-            max_event_loss_pct=float(body.get("max_event_loss_pct") or 5.0),
-            scenario=str(body.get("scenario") or "steady"),
-            batch_size=max(16, min(int(body.get("batch_size") or 20), 5000)),
-            compare_run_ids=list(body.get("compare_run_ids") or []) if isinstance(body.get("compare_run_ids"), list) else [],
-            seed=(None if body.get("seed") in (None, "") else int(body.get("seed"))),
-            pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
-            pipeline_name=pipeline_name,
-        )
-
-        batch_id = str(simulation.get("scoring", {}).get("batch_id") or "").strip()
+        simulation = None
+        batch_id = requested_batch_id
+        if batch_id:
+            existing_batch = next(
+                (
+                    row for row in bridge.list_scored_batches(run_id=run_id, deployment_id=deployment_id)
+                    if str(row.get("batch_id") or "").strip() == batch_id
+                ),
+                None,
+            )
+            if not existing_batch:
+                return _err(f"Requested scored batch {batch_id} was not found for this FCC run.", 404)
+            simulation = {
+                "generated_at": existing_batch.get("scored_at") or existing_batch.get("created_at"),
+                "preview_tables": {},
+                "scoring": {
+                    "batch_id": batch_id,
+                    "total": int(existing_batch.get("total") or 0),
+                    "suppressed": int(existing_batch.get("suppressed") or 0),
+                    "escalated": int(existing_batch.get("escalated") or 0),
+                    "threshold": float(existing_batch.get("threshold") or threshold),
+                    "threshold_requested": float(existing_batch.get("threshold") or threshold),
+                    "threshold_applied": float(existing_batch.get("threshold") or threshold),
+                    "threshold_auto_optimized": False,
+                },
+            }
+        else:
+            simulation = svc.simulate_live_pipeline(
+                deployment_id=deployment_id,
+                run_id=run_id,
+                threshold=threshold,
+                simulation_mode=str(body.get("simulation_mode") or "synthetic_pipeline"),
+                persist_to_ledger=_bool_value(body.get("persist_to_ledger"), default=True),
+                auto_optimize_threshold=body.get("auto_optimize_threshold"),
+                max_event_loss_pct=float(body.get("max_event_loss_pct") or 5.0),
+                scenario=str(body.get("scenario") or "steady"),
+                batch_size=max(16, min(int(body.get("batch_size") or 20), 5000)),
+                compare_run_ids=list(body.get("compare_run_ids") or []) if isinstance(body.get("compare_run_ids"), list) else [],
+                seed=(None if body.get("seed") in (None, "") else int(body.get("seed"))),
+                pipeline_id=str(pipeline_id) if pipeline_id is not None else None,
+                pipeline_name=pipeline_name,
+            )
+            batch_id = str(simulation.get("scoring", {}).get("batch_id") or "").strip()
         if not batch_id:
             return _err("Scored FCC batch was created, but no batch_id was returned for Sentinel handoff.", 500)
 
@@ -496,8 +540,8 @@ def handoff_sentinel():
             publish_id=publish_id,
             tenant_id=str(tenant_id),
             target_env_id=str(env_id),
-            replace_existing=_bool_value(body.get("replace_existing"), default=False),
-            merge_existing=_bool_value(body.get("merge_existing"), default=True),
+            replace_existing=_bool_value(body.get("replace_existing"), default=True),
+            merge_existing=_bool_value(body.get("merge_existing"), default=False),
             rerank_after_import=_bool_value(body.get("rerank_after_import"), default=True),
         )
 
@@ -532,11 +576,13 @@ def handoff_sentinel():
             "imported_case_ids": imported_case_ids,
             "imported_case_count": int(import_payload.get("imported_case_count") or len(imported_case_ids)),
             "imported_alert_count": int(import_payload.get("imported_alert_count") or 0),
+            "source_published_rows": int(import_payload.get("source_published_rows") or publish_payload.get("published_rows") or 0),
+            "case_generation_mode": import_payload.get("case_generation_mode"),
             "suppressed_count": int(simulation.get("scoring", {}).get("suppressed") or 0),
             "escalated_count": int(simulation.get("scoring", {}).get("escalated") or 0),
             "total_scored": int(simulation.get("scoring", {}).get("total") or 0),
             "threshold": float(simulation.get("scoring", {}).get("threshold_applied") or simulation.get("scoring", {}).get("threshold") or threshold),
-            "requested_row_count": int(body.get("batch_size") or 20),
+            "requested_row_count": int(simulation.get("scoring", {}).get("total") or body.get("batch_size") or 20),
             "prediction_preview": simulation.get("preview_tables", {}).get("prediction_output"),
             "retained_preview": simulation.get("preview_tables", {}).get("retained_queue"),
             "master_data_preview": simulation.get("preview_tables", {}).get("master_data"),

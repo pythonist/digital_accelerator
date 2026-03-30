@@ -11,6 +11,7 @@ import {
   Paper,
   Snackbar,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
@@ -18,12 +19,14 @@ import {
   TableHead,
   TableRow,
   TextField,
+  Tabs,
   Typography,
 } from '@mui/material';
 import { Add, Refresh } from '@mui/icons-material';
 
 import apiClient from '@services/api';
 import PageContainer from '@investigation-layout/PageContainer';
+import MailboxPanel from './MailboxPanel';
 import RecipientTable from './RecipientTable';
 import RoutingRulesPanel from './RoutingRulesPanel';
 import { ESCALATION_TARGETS } from './queueConfig';
@@ -62,6 +65,7 @@ const emptyTemplate = {
 };
 
 const MailConfigurationPage = () => {
+  const [activeTab, setActiveTab] = useState('mailbox');
   const [recipientRows, setRecipientRows] = useState([]);
   const [ruleRows, setRuleRows] = useState([]);
   const [templateRows, setTemplateRows] = useState([]);
@@ -73,7 +77,7 @@ const MailConfigurationPage = () => {
   const [ruleForm, setRuleForm] = useState(emptyRule);
   const [templateForm, setTemplateForm] = useState(emptyTemplate);
   const [testMailForm, setTestMailForm] = useState({
-    email: '',
+    recipient_id: '',
     subject: 'FCC Case Queue Test Mail',
     body: 'This is a test mail from the FCC Case Queue configuration area.',
   });
@@ -185,11 +189,21 @@ const MailConfigurationPage = () => {
     }
   };
 
+  const handleDeleteRecipient = async (row) => {
+    try {
+      await apiClient.deleteMailRecipient(row.id);
+      await fetchData();
+      setFeedback({ open: true, severity: 'success', message: 'Recipient deleted.' });
+    } catch (error) {
+      setFeedback({ open: true, severity: 'error', message: error.message || 'Unable to delete recipient.' });
+    }
+  };
+
   return (
     <PageContainer
-      title="Mail Configuration"
-      subtitle="Recipient routing, review templates, and operational notification settings for case escalation"
-      breadcrumbs={['Resolution', 'Mail Configuration']}
+      title="Mail"
+      subtitle="Mailbox activity, recipient routing, templates, and operational notification controls for Sentinel case workflows"
+      breadcrumbs={['Resolution', 'Mail']}
       actions={(
         <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={fetchData} disabled={loading}>
           Refresh
@@ -197,105 +211,139 @@ const MailConfigurationPage = () => {
       )}
     >
       <Stack spacing={2.25}>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-          <Stack direction={{ xs: 'column', xl: 'row' }} spacing={1.25} justifyContent="space-between" alignItems={{ xs: 'stretch', xl: 'center' }}>
-            <Box>
-              <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Recipient Master</Typography>
-              <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
-                Manage recipient ownership, routing eligibility, and supported case types for each reviewer role.
-              </Typography>
-            </Box>
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-              <TextField size="small" label="Search recipients" value={recipientSearch} onChange={(event) => setRecipientSearch(event.target.value)} sx={{ minWidth: 220 }} />
-              <TextField select size="small" label="Role" value={recipientRoleFilter} onChange={(event) => setRecipientRoleFilter(event.target.value)} sx={{ minWidth: 200 }}>
-                <MenuItem value="">All roles</MenuItem>
-                {ESCALATION_TARGETS.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-              </TextField>
-              <Button variant="contained" startIcon={<Add />} onClick={() => { setRecipientForm(emptyRecipient); setRecipientDialogOpen(true); }}>
-                Add Recipient
-              </Button>
-            </Stack>
-          </Stack>
+        <Paper variant="outlined" sx={{ borderRadius: 2.5 }}>
+          <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} sx={{ px: 1.5, pt: 1 }}>
+            <Tab value="mailbox" label="Mailbox" />
+            <Tab value="config" label="Mail Config" />
+          </Tabs>
         </Paper>
 
-        <RecipientTable
-          rows={recipientRows}
-          onEdit={(row) => {
-            setRecipientForm({
-              ...row,
-              case_types_supported: (row.case_types_supported || []).join(', '),
-            });
-            setRecipientDialogOpen(true);
-          }}
-        />
-
-        <RoutingRulesPanel
-          rows={ruleRows}
-          form={ruleForm}
-          onChange={(field, value) => setRuleForm((previous) => ({ ...previous, [field]: value }))}
-          onCreate={handleCreateRule}
-          creating={creatingRule}
-        />
-
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.2fr 0.9fr' }, gap: 2.25 }}>
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Mail Templates</Typography>
-            <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
-              Maintain reusable operational templates for L2, branch, vigilance, and compliance review.
-            </Typography>
-            <Stack spacing={1.25} sx={{ mt: 2 }}>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
-                <TextField size="small" label="Template Name" value={templateForm.template_name} onChange={(event) => setTemplateForm((previous) => ({ ...previous, template_name: event.target.value }))} sx={{ flex: 1 }} />
-                <TextField select size="small" label="Template Type" value={templateForm.template_type} onChange={(event) => setTemplateForm((previous) => ({ ...previous, template_type: event.target.value }))} sx={{ minWidth: 220 }}>
-                  {ESCALATION_TARGETS.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-                </TextField>
+        {activeTab === 'mailbox' ? (
+          <MailboxPanel
+            recipientRows={recipientRows}
+            templateRows={templateRows}
+            onFeedback={setFeedback}
+          />
+        ) : (
+          <>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
+              <Stack direction={{ xs: 'column', xl: 'row' }} spacing={1.25} justifyContent="space-between" alignItems={{ xs: 'stretch', xl: 'center' }}>
+                <Box>
+                  <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Recipient Master</Typography>
+                  <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
+                    Manage recipient ownership, routing eligibility, and supported case types for each reviewer role.
+                  </Typography>
+                </Box>
+                <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+                  <TextField size="small" label="Search recipients" value={recipientSearch} onChange={(event) => setRecipientSearch(event.target.value)} sx={{ minWidth: 220 }} />
+                  <TextField select size="small" label="Role" value={recipientRoleFilter} onChange={(event) => setRecipientRoleFilter(event.target.value)} sx={{ minWidth: 200 }}>
+                    <MenuItem value="">All roles</MenuItem>
+                    {ESCALATION_TARGETS.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                  </TextField>
+                  <Button variant="contained" startIcon={<Add />} onClick={() => { setRecipientForm(emptyRecipient); setRecipientDialogOpen(true); }}>
+                    Add Recipient
+                  </Button>
+                </Stack>
               </Stack>
-              <TextField size="small" label="Subject Template" value={templateForm.subject_template} onChange={(event) => setTemplateForm((previous) => ({ ...previous, subject_template: event.target.value }))} />
-              <TextField size="small" label="Body Template" value={templateForm.body_template} onChange={(event) => setTemplateForm((previous) => ({ ...previous, body_template: event.target.value }))} multiline minRows={5} />
-              <Button variant="contained" onClick={handleCreateTemplate} disabled={creatingTemplate || !templateForm.template_name || !templateForm.subject_template || !templateForm.body_template}>
-                {creatingTemplate ? 'Saving...' : 'Add Template'}
-              </Button>
-            </Stack>
-            <TableContainer sx={{ mt: 2 }}>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Template Name</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Subject</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {templateRows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>{row.template_name}</TableCell>
-                      <TableCell>{row.template_type}</TableCell>
-                      <TableCell>{row.subject_template}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
+            </Paper>
 
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Test Mail Configuration</Typography>
-            <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
-              Validate SMTP or fallback mail delivery before using live escalation workflows.
-            </Typography>
-            <Stack spacing={1.25} sx={{ mt: 2 }}>
-              <TextField size="small" label="Recipient Email" value={testMailForm.email} onChange={(event) => setTestMailForm((previous) => ({ ...previous, email: event.target.value }))} />
-              <TextField size="small" label="Subject" value={testMailForm.subject} onChange={(event) => setTestMailForm((previous) => ({ ...previous, subject: event.target.value }))} />
-              <TextField size="small" label="Body" value={testMailForm.body} onChange={(event) => setTestMailForm((previous) => ({ ...previous, body: event.target.value }))} multiline minRows={6} />
-              <Button variant="contained" onClick={handleTestMail} disabled={testingMail || !testMailForm.email}>
-                {testingMail ? 'Sending...' : 'Send Test Mail'}
-              </Button>
-              <Alert severity="info">
-                Routing rules can automatically include vigilance or compliance recipients when risk, PEP, sanctions, or linked-account conditions are met.
-              </Alert>
-            </Stack>
-          </Paper>
-        </Box>
+            <RecipientTable
+              rows={recipientRows}
+              onEdit={(row) => {
+                setRecipientForm({
+                  ...row,
+                  case_types_supported: (row.case_types_supported || []).join(', '),
+                });
+                setRecipientDialogOpen(true);
+              }}
+              onDelete={handleDeleteRecipient}
+            />
+
+            <RoutingRulesPanel
+              rows={ruleRows}
+              form={ruleForm}
+              onChange={(field, value) => setRuleForm((previous) => ({ ...previous, [field]: value }))}
+              onCreate={handleCreateRule}
+              creating={creatingRule}
+            />
+
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              Routing rules are applied automatically when cases are escalated from Case Queue. Manual mailbox send does not use routing rules; it sends only to the saved recipients selected by the analyst.
+            </Alert>
+
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.2fr 0.9fr' }, gap: 2.25 }}>
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Mail Templates</Typography>
+                <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
+                  Maintain reusable operational templates for L2, branch, vigilance, and compliance review.
+                </Typography>
+                <Stack spacing={1.25} sx={{ mt: 2 }}>
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
+                    <TextField size="small" label="Template Name" value={templateForm.template_name} onChange={(event) => setTemplateForm((previous) => ({ ...previous, template_name: event.target.value }))} sx={{ flex: 1 }} />
+                    <TextField select size="small" label="Template Type" value={templateForm.template_type} onChange={(event) => setTemplateForm((previous) => ({ ...previous, template_type: event.target.value }))} sx={{ minWidth: 220 }}>
+                      {ESCALATION_TARGETS.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                    </TextField>
+                  </Stack>
+                  <TextField size="small" label="Subject Template" value={templateForm.subject_template} onChange={(event) => setTemplateForm((previous) => ({ ...previous, subject_template: event.target.value }))} />
+                  <TextField size="small" label="Body Template" value={templateForm.body_template} onChange={(event) => setTemplateForm((previous) => ({ ...previous, body_template: event.target.value }))} multiline minRows={5} />
+                  <Button variant="contained" onClick={handleCreateTemplate} disabled={creatingTemplate || !templateForm.template_name || !templateForm.subject_template || !templateForm.body_template}>
+                    {creatingTemplate ? 'Saving...' : 'Add Template'}
+                  </Button>
+                </Stack>
+                <TableContainer sx={{ mt: 2 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Template Name</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Subject</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {templateRows.map((row) => (
+                        <TableRow key={row.id}>
+                          <TableCell>{row.template_name}</TableCell>
+                          <TableCell>{row.template_type}</TableCell>
+                          <TableCell>{row.subject_template}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
+                <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Test Mail Configuration</Typography>
+                <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
+                  Validate delivery using a saved recipient instead of typing ad hoc email addresses.
+                </Typography>
+                <Stack spacing={1.25} sx={{ mt: 2 }}>
+                  <TextField
+                    select
+                    size="small"
+                    label="Saved Recipient"
+                    value={testMailForm.recipient_id}
+                    onChange={(event) => setTestMailForm((previous) => ({ ...previous, recipient_id: event.target.value }))}
+                  >
+                    {recipientRows.map((row) => (
+                      <MenuItem key={row.id} value={row.id}>
+                        {row.name} | {row.email}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField size="small" label="Subject" value={testMailForm.subject} onChange={(event) => setTestMailForm((previous) => ({ ...previous, subject: event.target.value }))} />
+                  <TextField size="small" label="Body" value={testMailForm.body} onChange={(event) => setTestMailForm((previous) => ({ ...previous, body: event.target.value }))} multiline minRows={6} />
+                  <Button variant="contained" onClick={handleTestMail} disabled={testingMail || !testMailForm.recipient_id}>
+                    {testingMail ? 'Sending...' : 'Send Test Mail'}
+                  </Button>
+                  <Alert severity="info">
+                    Use routing rules for case-driven escalation. Use Mailbox for manual one-off or multi-recipient communication from Sentinel.
+                  </Alert>
+                </Stack>
+              </Paper>
+            </Box>
+          </>
+        )}
       </Stack>
 
       <Dialog open={recipientDialogOpen} onClose={() => setRecipientDialogOpen(false)} fullWidth maxWidth="sm">

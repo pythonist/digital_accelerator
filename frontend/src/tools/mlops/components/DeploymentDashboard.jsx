@@ -603,7 +603,7 @@ const LiveStageStrip = ({ stages = [] }) => (
 );
 
 const InvestigatorQueueTable = ({ rows = [] }) => (
-  <Box sx={{ overflowX: 'auto' }}>
+  <Box sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 360 }}>
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
       <thead>
         <tr>
@@ -713,7 +713,7 @@ const PreviewTable = ({
   };
 
   return (
-    <Box sx={{ overflowX: 'auto' }}>
+    <Box sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 360 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr>
@@ -990,7 +990,7 @@ const DeploymentDashboard = ({
   const [inferLoading, setInferLoading] = useState(false);
   const [simConfig, setSimConfig] = useState({
     simulation_mode: 'synthetic_pipeline',
-    auto_optimize_threshold: true,
+    auto_optimize_threshold: false,
     persist_to_ledger: false,
     max_event_loss_pct: 5,
     scenario: 'steady',
@@ -1122,12 +1122,21 @@ const DeploymentDashboard = ({
   useEffect(() => {
     const savedSimulation = savedDashboardState?.simulation_result;
     if (!savedSimulation || typeof savedSimulation !== 'object') return;
+    const savedThreshold = Number(
+      savedSimulation?.scoring?.threshold_applied
+      ?? savedSimulation?.scoring?.threshold
+      ?? threshold
+      ?? 0.5,
+    );
+    if (Number.isFinite(savedThreshold) && Math.abs(savedThreshold - Number(threshold || 0.5)) > 0.0001) {
+      return;
+    }
     const currentBatchId = String(simResult?.scoring?.batch_id || '').trim();
     const savedBatchId = String(savedSimulation?.scoring?.batch_id || '').trim();
     if (currentBatchId && savedBatchId && currentBatchId === savedBatchId) return;
     if (simResult && !savedBatchId) return;
     setSimResult(savedSimulation);
-  }, [savedDashboardState?.simulation_result, simResult]);
+  }, [savedDashboardState?.simulation_result, simResult, threshold]);
 
   useEffect(() => {
     const pipelineId = Number(activePipelineId || 0);
@@ -1343,9 +1352,7 @@ const DeploymentDashboard = ({
       persist_to_ledger: persistToLedgerOverride == null
         ? !!simConfig.persist_to_ledger
         : !!persistToLedgerOverride,
-      auto_optimize_threshold: autoOptimizeThresholdOverride == null
-        ? !!simConfig.auto_optimize_threshold
-        : !!autoOptimizeThresholdOverride,
+      auto_optimize_threshold: false,
       max_event_loss_pct: Number(simConfig.max_event_loss_pct || 5),
       scenario: simConfig.scenario,
       batch_size: Number((batchSizeOverride ?? simConfig.batch_size) || 20),
@@ -1591,9 +1598,7 @@ const DeploymentDashboard = ({
     : null;
   const simPersistedToLedger = !!(simResult?.persisted_to_ledger || simResult?.scoring?.persisted_to_ledger);
   const simFlow = simResult?.flow_stream || [];
-  const simThresholdRequested = simResult?.scoring?.threshold_requested ?? threshold;
   const simThresholdApplied = simResult?.scoring?.threshold_applied ?? simResult?.scoring?.threshold ?? threshold;
-  const simThresholdAuto = !!simResult?.scoring?.threshold_auto_optimized;
   const simHasOOT = !!simOOT?.defined;
   const effectiveSimFlow = simBatchHistory.length > 0 ? simBatchHistory : simFlow;
   const effectiveLiveQueue = streamQueueRows.length > 0 ? streamQueueRows : liveQueue;
@@ -1614,6 +1619,13 @@ const DeploymentDashboard = ({
   const effectiveLiveSuppressionRate = streamSummary
     ? (num(streamSummary.ingested) > 0 ? (100 * num(streamSummary.suppressed)) / num(streamSummary.ingested) : null)
     : simResult?.scoring?.suppression_rate;
+  const usingLiveHeadlineMetrics = tab === DEPLOYMENT_TAB.LIVE && Number(effectiveLiveGenerated || 0) > 0;
+  const headlineScored = usingLiveHeadlineMetrics ? effectiveLiveGenerated : totalScored;
+  const headlineSuppressed = usingLiveHeadlineMetrics ? effectiveLiveSuppressed : totalSuppressed;
+  const headlineEscalated = usingLiveHeadlineMetrics ? effectiveLiveEscalated : totalEscalated;
+  const headlineSuppressionRate = usingLiveHeadlineMetrics ? effectiveLiveSuppressionRate : overallSupprRate;
+  const headlineEventLoss = usingLiveHeadlineMetrics ? simEventLossValue : latestEventLoss;
+  const headlineReady = Number(headlineScored || 0) > 0;
   const liveDecisionFlow = useMemo(() => ([
     {
       key: 'generated',
@@ -1751,17 +1763,20 @@ const DeploymentDashboard = ({
       const handoffRes = await mlopsApi.handoffToSentinel({
         deployment_id: deploymentId,
         run_id: runId,
-        threshold,
+        batch_id: simResult?.scoring?.batch_id || undefined,
+        threshold: simThresholdApplied ?? threshold,
         simulation_mode: 'synthetic_pipeline',
         persist_to_ledger: true,
+        auto_optimize_threshold: false,
         scenario: simConfig.scenario,
-        batch_size: Number(simConfig.batch_size || 20),
+        batch_size: Number(simResult?.scoring?.total || simConfig.batch_size || 20),
         compare_run_ids: [],
-        seed: Date.now() % 1000000,
+        seed: simResult?.scoring?.batch_id ? undefined : (Date.now() % 1000000),
         pipeline_id: activePipelineId || undefined,
         pipeline_name: activePipelineName || undefined,
         preferred_screen: 'casepack',
-        merge_existing: true,
+        replace_existing: true,
+        merge_existing: false,
         rerank_after_import: true,
         force_refresh: false,
       });
@@ -1819,6 +1834,8 @@ const DeploymentDashboard = ({
     refreshPriorityBuckets,
     runId,
     simConfig.scenario,
+    simResult,
+    simThresholdApplied,
     setActiveTool,
     simConfig.batch_size,
     threshold,
@@ -2031,7 +2048,7 @@ const DeploymentDashboard = ({
                   onChange={(e) => setSelectedThreshold(e.target.value)}
                   sx={{ width: 170 }}
                   inputProps={{ min: 0, max: 1, step: 0.01 }}
-                  disabled={canDisable(switchingDeployment)}
+                  disabled
                 />
                 <Button
                   size="small"
@@ -2047,6 +2064,9 @@ const DeploymentDashboard = ({
             {bootstrapping && <Skeleton height={22} />}
             {runOptionsError && <Alert severity="warning">{runOptionsError}</Alert>}
             {switchError && <Alert severity="error">{switchError}</Alert>}
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              The deployment threshold is locked from Model Release and remains immutable downstream. To change it, run validation and create a new approved release rather than editing live FCC scoring.
+            </Alert>
             {selectedRunFlags.includes('label_leakage_features_present') && (
               <Alert
                 severity="warning"
@@ -2109,26 +2129,30 @@ const DeploymentDashboard = ({
         <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
           <StatCard
             icon={NotificationsOff}
-            label="Production Suppressed"
-            value={productionReady ? fmt(totalSuppressed) : '-'}
-            sub={productionReady ? `of ${fmt(totalScored)} scored` : 'No production-scored rows yet'}
+            label={usingLiveHeadlineMetrics ? 'Current Batch Suppressed' : 'Production Suppressed'}
+            value={headlineReady ? fmt(headlineSuppressed) : '-'}
+            sub={headlineReady ? `of ${fmt(headlineScored)} scored` : 'No production-scored rows yet'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
             tooltip={`${grainLabel} entities the model decided not to escalate`}
           />
           <StatCard
             icon={Shield}
-            label="Production Suppression Rate"
-            value={productionReady ? pct(overallSupprRate) : '-'}
-            sub={productionReady ? `${grainLabel.toLowerCase()}-grain model` : 'Run the live simulation tab for unseen-batch scoring'}
+            label={usingLiveHeadlineMetrics ? 'Current Batch Suppression Rate' : 'Production Suppression Rate'}
+            value={headlineReady ? pct(headlineSuppressionRate) : '-'}
+            sub={headlineReady ? `${grainLabel.toLowerCase()}-grain model` : 'Run the live simulation tab for unseen-batch scoring'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
           />
           <StatCard
             icon={modelGrain === 'case' ? Gavel : Notifications}
-            label={`Production ${grainLabel} Suppression`}
-            value={productionReady ? pct(kpiSummary?.suppression_rate_pct ?? grainRow?.suppression_rate) : '-'}
-            sub={productionReady ? `${fmt(kpiSummary?.total_suppressed ?? grainRow?.suppressed)} ${modelGrain === 'case' ? 'cases' : 'alerts'} suppressed` : 'Production view only'}
+            label={usingLiveHeadlineMetrics ? `Current ${grainLabel} Retained` : `Production ${grainLabel} Suppression`}
+            value={headlineReady ? (usingLiveHeadlineMetrics ? fmt(headlineEscalated) : pct(kpiSummary?.suppression_rate_pct ?? grainRow?.suppression_rate)) : '-'}
+            sub={headlineReady
+              ? (usingLiveHeadlineMetrics
+                ? `${fmt(headlineEscalated)} ${modelGrain === 'case' ? 'cases' : 'alerts'} retained for Sentinel at threshold ${dec(simThresholdApplied, 2)}`
+                : `${fmt(kpiSummary?.total_suppressed ?? grainRow?.suppressed)} ${modelGrain === 'case' ? 'cases' : 'alerts'} suppressed`)
+              : 'Production view only'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
           />
@@ -2150,13 +2174,17 @@ const DeploymentDashboard = ({
           />
           <StatCard
             icon={QueryStats}
-            label="Latest Production Event Loss"
-            value={productionReady ? pct(latestEventLoss) : '-'}
-            sub={productionReady ? 'missed true SARs (latest week)' : 'Shown when production-scored outcomes exist'}
+            label={usingLiveHeadlineMetrics ? 'Current Batch Event Loss' : 'Latest Production Event Loss'}
+            value={headlineReady ? pct(headlineEventLoss) : '-'}
+            sub={headlineReady
+              ? (usingLiveHeadlineMetrics
+                ? (simEventLossDefined ? 'estimated missed true SARs on current batch' : 'event loss unavailable for current batch')
+                : 'missed true SARs (latest week)')
+              : 'Shown when production-scored outcomes exist'}
             tone={
-              (!productionReady || latestEventLoss == null)
+              (!headlineReady || headlineEventLoss == null)
                 ? 'warn'
-                : ((latestEventLoss ?? 0) <= 5 ? 'good' : 'bad')
+                : ((headlineEventLoss ?? 0) <= 5 ? 'good' : 'bad')
             }
             loading={loading.kpis || loading.drift || bootstrapping}
             tooltip="Percentage of true suspicious activity reports the model suppressed (ideally < 5%)"
@@ -2674,24 +2702,9 @@ const DeploymentDashboard = ({
                   <MenuItem value="no">Do not persist simulation to ledger</MenuItem>
                   <MenuItem value="yes">Persist retained queue to ledger</MenuItem>
                 </Select>
-                <Select
-                  size="small"
-                  value={simConfig.auto_optimize_threshold ? 'yes' : 'no'}
-                  onChange={(e) => setSimConfig((p) => ({ ...p, auto_optimize_threshold: e.target.value === 'yes' }))}
-                  sx={{ minWidth: 190 }}
-                >
-                  <MenuItem value="yes">Use policy-guided threshold assist</MenuItem>
-                  <MenuItem value="no">Use approved threshold only</MenuItem>
-                </Select>
-                <TextField
-                  size="small"
-                  type="number"
-                  label="Policy cap for comparison (advanced)"
-                  value={simConfig.max_event_loss_pct}
-                  onChange={(e) => setSimConfig((p) => ({ ...p, max_event_loss_pct: e.target.value }))}
-                  sx={{ width: 240 }}
-                  helperText="Used only when threshold assist is enabled."
-                />
+                <Alert severity="info" sx={{ minWidth: 360, flex: 1 }}>
+                  Live simulation and Sentinel handoff always use the locked approved threshold {dec(threshold, 2)}. If new unseen data suggests a different cutoff, take that back into validation and release governance.
+                </Alert>
               </Stack>
               <Alert severity="info" sx={{ mt: 1.25 }}>
                 Use <strong>Run single batch</strong> for a demo snapshot, or <strong>Start live stream</strong> to generate recurring micro-batches and watch the operational flow update over time.
@@ -2727,17 +2740,13 @@ const DeploymentDashboard = ({
                 <StatCard label="Suppressed alerts" value={fmt(effectiveLiveSuppressed)} sub="low-signal volume stopped in FCC" tone="good" loading={simLoading} />
                 <StatCard label="Retained for Sentinel" value={fmt(effectiveLiveEscalated)} sub="queue handed to investigators" tone={effectiveLiveEscalated > 0 ? 'warn' : 'default'} loading={simLoading} />
                 <StatCard label="Suppression rate" value={pct(effectiveLiveSuppressionRate)} sub="false-positive workload reduced" tone="default" loading={simLoading} />
-                <StatCard label="Threshold used" value={dec(simThresholdApplied, 2)} sub={simThresholdAuto ? `assisted from ${dec(simThresholdRequested, 2)}` : 'approved operating threshold'} tone="default" loading={simLoading} />
+                <StatCard label="Threshold used" value={dec(simThresholdApplied, 2)} sub="locked release threshold carried downstream" tone="default" loading={simLoading} />
                 <StatCard label="Run mode" value={liveRunModeLabel} sub={streamingActive ? `${fmt(simBatchHistory.length)} batches generated` : 'single-run preview'} tone="blue" loading={simLoading && !simResult} />
                 <StatCard label="Known event loss" value={pct(streamSummary?.cumulative_event_loss_pct ?? simEventLossValue)} sub={simEventLossDefined ? `${fmt(simPositiveRows)} known positives observed` : 'awaiting labelled positives'} tone={simHealth?.status === 'error' ? 'warn' : (!simEventLossDefined ? 'warn' : (((streamSummary?.cumulative_event_loss_pct ?? simEventLossValue) ?? 0) <= 5 ? 'good' : 'bad'))} loading={simLoading} />
               </Stack>
-              {simResult?.threshold_optimization && (
-                <Typography sx={{ mt: 1.25, fontSize: 11.5, color: D.muted }}>
-                  {simResult.threshold_optimization.feasible
-                    ? `Threshold assist selected ${dec(simThresholdApplied, 2)} to maximize suppression while staying within the policy cap of ${dec(simResult.threshold_optimization.max_event_loss_pct, 2)}%.`
-                    : `No feasible operating point met the policy cap of ${dec(simResult.threshold_optimization.max_event_loss_pct, 2)}%. The dashboard is showing the minimum-loss fallback threshold ${dec(simThresholdApplied, 2)}.`}
-                </Typography>
-              )}
+              <Typography sx={{ mt: 1.25, fontSize: 11.5, color: D.muted }}>
+                FCC scoring, retained queue generation, and Sentinel handoff all use the same locked threshold {dec(simThresholdApplied, 2)} from Model Release.
+              </Typography>
               {simHealth && simHealth?.messages?.length > 0 && (
                 <Alert severity={simHealth.status === 'error' ? 'error' : 'warning'} sx={{ mt: 1.25, borderRadius: 2 }}>
                   <strong>
@@ -2863,7 +2872,10 @@ const DeploymentDashboard = ({
                     <Button
                       size="small"
                       variant="contained"
-                      onClick={() => publishRetainedQueue({ publishLabel: 'live_simulation' })}
+                      onClick={() => publishRetainedQueue({
+                        batchId: simResult?.scoring?.batch_id || null,
+                        publishLabel: 'live_simulation',
+                      })}
                       disabled={actionsDisabled || canDisable(!deploymentId || !runId || publishingToSentinel || effectiveLiveEscalated <= 0)}
                       sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700 }}
                     >
