@@ -16,6 +16,9 @@ import {
   TextField,
   Button,
   Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Table,
   TableHead,
   TableRow,
@@ -37,6 +40,7 @@ import {
 } from '@mui/material';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, Legend } from 'recharts';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import muleApi from '../../services/muleApi';
 import { pwcColors } from '../../theme';
 import { formatInteger, formatNumber, formatPercentFromRatio, formatProbability } from '../../utils/formatters';
@@ -548,6 +552,7 @@ const ModelLabScreen = () => {
   const [featureCatalog, setFeatureCatalog] = useState([]);
   const [featureRuns, setFeatureRuns] = useState([]);
   const [marketFilters, setMarketFilters] = useState({ q: '', category: '', risk: '', used_only: false, eligible_only: false });
+  const [expandedFeatureCategories, setExpandedFeatureCategories] = useState([]);
   const [previewFeature, setPreviewFeature] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -856,14 +861,71 @@ const ModelLabScreen = () => {
       .sort((a, b) => (b.importance_score || 0) - (a.importance_score || 0));
   }, [mergedFeatures, marketFilters]);
 
+  const selectedFeatureNames = useMemo(
+    () => new Set((featureSelection.include || []).map((item) => String(item))),
+    [featureSelection.include],
+  );
+
+  const excludedFeatureNames = useMemo(
+    () => new Set((featureSelection.exclude || []).map((item) => String(item))),
+    [featureSelection.exclude],
+  );
+
+  const featureCategorySections = useMemo(() => {
+    const grouped = new Map();
+    filteredFeatures.forEach((feature) => {
+      const categoryName = String(feature.category || 'Uncategorized');
+      if (!grouped.has(categoryName)) {
+        grouped.set(categoryName, []);
+      }
+      grouped.get(categoryName).push(feature);
+    });
+    return Array.from(grouped.entries())
+      .map(([categoryName, items]) => ({
+        categoryName,
+        items,
+        selectedCount: items.filter((item) => selectedFeatureNames.has(String(item.feature_name))).length,
+        excludedCount: items.filter((item) => excludedFeatureNames.has(String(item.feature_name))).length,
+        ineligibleCount: items.filter((item) => item.eligible !== true).length,
+      }))
+      .sort((left, right) => {
+        if (right.items.length !== left.items.length) return right.items.length - left.items.length;
+        return left.categoryName.localeCompare(right.categoryName);
+      });
+  }, [excludedFeatureNames, filteredFeatures, selectedFeatureNames]);
+
   const selectionSummary = useMemo(() => {
-    const selected = new Set((featureSelection.include || []).map((x) => String(x)));
+    const selected = selectedFeatureNames;
     const redundant = Array.from(selected).filter((n) => correlatedDropped.has(n)).length;
     const count = selected.size;
     const redundancy = count ? redundant / count : 0;
     const expectedDimensionality = Math.max(0, count - redundant);
     return { count, redundant, redundancy, expectedDimensionality };
-  }, [featureSelection.include, correlatedDropped]);
+  }, [selectedFeatureNames, correlatedDropped]);
+
+  const handleFeatureCategoryToggle = (categoryName) => (_event, expanded) => {
+    setExpandedFeatureCategories((previous) => {
+      const active = new Set(previous);
+      if (expanded) active.add(categoryName);
+      else active.delete(categoryName);
+      return Array.from(active);
+    });
+  };
+
+  useEffect(() => {
+    if (!featureCategorySections.length) {
+      setExpandedFeatureCategories([]);
+      return;
+    }
+    if (String(marketFilters.q || '').trim() || featureCategorySections.length === 1) {
+      setExpandedFeatureCategories(featureCategorySections.map((section) => section.categoryName));
+      return;
+    }
+    setExpandedFeatureCategories((previous) => {
+      if (previous.length) return previous.filter((name) => featureCategorySections.some((section) => section.categoryName === name));
+      return featureCategorySections.slice(0, 3).map((section) => section.categoryName);
+    });
+  }, [featureCategorySections, marketFilters.q]);
 
   const autoPickOptimalSet = () => {
     const excluded = new Set((featureSelection.exclude || []).map((x) => String(x)));
@@ -1559,97 +1621,142 @@ const ModelLabScreen = () => {
 
                 <Grid item xs={12} md={9}>
                   <Paper variant="outlined" sx={{ p: 2 }}>
-                    <TableContainer sx={{ maxHeight: 520 }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Feature</TableCell>
-                            <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Category</TableCell>
-                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Freshness</TableCell>
-                            <TableCell>Importance</TableCell>
-                            <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Correlation</TableCell>
-                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Nulls</TableCell>
-                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Stability</TableCell>
-                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Leakage</TableCell>
-                            <TableCell>Status</TableCell>
-                            <TableCell align="center">Select</TableCell>
-                            <TableCell align="center">Exclude</TableCell>
-                            <TableCell align="center">Preview</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {filteredFeatures.map((f) => {
-                            const included = (featureSelection.include || []).includes(f.feature_name);
-                            const excluded = (featureSelection.exclude || []).includes(f.feature_name);
-                            const eligible = f.eligible === true;
-                            const impNorm = maxImportance > 0 ? Number(f.importance_score || 0) / maxImportance : 0;
-                            const impLabel = impNorm >= 0.67 ? 'High' : impNorm >= 0.34 ? 'Medium' : 'Low';
-                            const corrLabel = f.correlation_risk === 'HIGH' ? 'High' : 'Not evaluated';
-                            const missing = f.missing_pct != null ? formatPercentFromRatio(f.missing_pct, 1) : '-';
-                            const stable = f.stability != null ? formatProbability(f.stability, 2) : '-';
-                            const leak = f.leakage_risk != null ? formatProbability(f.leakage_risk, 2) : '-';
-                            return (
-                              <TableRow
-                                key={f.feature_name}
-                                hover
-                                onClick={() => openFeaturePreview(f.feature_name)}
-                                sx={{ opacity: !eligible ? 0.85 : 1 }}
-                              >
-                                <TableCell>
-                                  <Stack spacing={0.25}>
-                                    <Typography variant="subtitle2" sx={{ fontWeight: 900 }} noWrap>
-                                      {f.feature_name}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary" noWrap>
-                                      {f.description}
-                                    </Typography>
-                                  </Stack>
-                                </TableCell>
-                                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>{f.category || '-'}</TableCell>
-                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{f.freshness || '-'}</TableCell>
-                                <TableCell>
-                                  <Chip size="small" label={impLabel} color={impLabel === 'High' ? 'primary' : impLabel === 'Medium' ? 'warning' : 'default'} />
-                                </TableCell>
-                                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
-                                  <Chip size="small" label={corrLabel} color={f.correlation_risk === 'HIGH' ? 'error' : 'default'} />
-                                </TableCell>
-                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{missing}</TableCell>
-                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{stable}</TableCell>
-                                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{leak}</TableCell>
-                                <TableCell>
-                                  <Stack direction="row" spacing={1} flexWrap="wrap">
-                                    {!eligible ? <Chip size="small" variant="outlined" label="Ineligible" /> : null}
-                                    {f.used_in_current_model ? <Chip size="small" color="success" label="Used" /> : null}
-                                  </Stack>
-                                </TableCell>
-                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
-                                  <Checkbox
-                                    checked={included}
-                                    disabled={!eligible}
-                                    onClick={() => toggleInclude(f.feature_name)}
-                                  />
-                                </TableCell>
-                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
-                                  <Button
-                                    size="small"
-                                    variant={excluded ? 'contained' : 'outlined'}
-                                    onClick={() => toggleExclude(f.feature_name)}
-                                    color={excluded ? 'error' : 'inherit'}
-                                  >
-                                    {excluded ? 'Excluded' : 'Exclude'}
-                                  </Button>
-                                </TableCell>
-                                <TableCell align="center" onClick={(e) => e.stopPropagation()}>
-                                  <Button size="small" variant="text" onClick={() => openFeaturePreview(f.feature_name)}>
-                                    Preview
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                    <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.25} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'center' }} sx={{ mb: 2 }}>
+                      <Box>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 900 }}>
+                          Feature selection workspace
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Features are grouped by category so large selections stay scan-friendly during review and demo walkthroughs.
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                        <Chip label={`${formatInteger(featureCategorySections.length)} categories`} />
+                        <Chip label={`${formatInteger(filteredFeatures.length)} filtered features`} />
+                        <Chip label={`${formatInteger(selectionSummary.count)} selected`} color="primary" variant="outlined" />
+                      </Stack>
+                    </Stack>
+
+                    <Stack spacing={1.25}>
+                      {featureCategorySections.map((section) => (
+                        <Accordion
+                          key={section.categoryName}
+                          expanded={expandedFeatureCategories.includes(section.categoryName)}
+                          onChange={handleFeatureCategoryToggle(section.categoryName)}
+                          disableGutters
+                          sx={{ border: '1px solid rgba(15,23,42,0.08)', borderRadius: 1.5, overflow: 'hidden', '&:before': { display: 'none' } }}
+                        >
+                          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} justifyContent="space-between" sx={{ width: '100%', pr: 1 }}>
+                              <Box>
+                                <Typography variant="subtitle2" sx={{ fontWeight: 900 }}>
+                                  {section.categoryName}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {`${formatInteger(section.items.length)} features in this category`}
+                                </Typography>
+                              </Box>
+                              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                <Chip size="small" label={`${formatInteger(section.selectedCount)} selected`} color={section.selectedCount ? 'primary' : 'default'} variant="outlined" />
+                                <Chip size="small" label={`${formatInteger(section.excludedCount)} excluded`} color={section.excludedCount ? 'error' : 'default'} variant="outlined" />
+                                <Chip size="small" label={`${formatInteger(section.ineligibleCount)} ineligible`} variant="outlined" />
+                              </Stack>
+                            </Stack>
+                          </AccordionSummary>
+                          <AccordionDetails sx={{ p: 0 }}>
+                            <TableContainer sx={{ maxHeight: 420 }}>
+                              <Table size="small" stickyHeader>
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell>Feature</TableCell>
+                                    <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Freshness</TableCell>
+                                    <TableCell>Importance</TableCell>
+                                    <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Correlation</TableCell>
+                                    <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Nulls</TableCell>
+                                    <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Stability</TableCell>
+                                    <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Leakage</TableCell>
+                                    <TableCell>Status</TableCell>
+                                    <TableCell align="center">Select</TableCell>
+                                    <TableCell align="center">Exclude</TableCell>
+                                    <TableCell align="center">Preview</TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {section.items.map((f) => {
+                                    const included = selectedFeatureNames.has(String(f.feature_name));
+                                    const excluded = excludedFeatureNames.has(String(f.feature_name));
+                                    const eligible = f.eligible === true;
+                                    const impNorm = maxImportance > 0 ? Number(f.importance_score || 0) / maxImportance : 0;
+                                    const impLabel = impNorm >= 0.67 ? 'High' : impNorm >= 0.34 ? 'Medium' : 'Low';
+                                    const corrLabel = f.correlation_risk === 'HIGH' ? 'High' : 'Not evaluated';
+                                    const missing = f.missing_pct != null ? formatPercentFromRatio(f.missing_pct, 1) : '-';
+                                    const stable = f.stability != null ? formatProbability(f.stability, 2) : '-';
+                                    const leak = f.leakage_risk != null ? formatProbability(f.leakage_risk, 2) : '-';
+                                    return (
+                                      <TableRow
+                                        key={f.feature_name}
+                                        hover
+                                        onClick={() => openFeaturePreview(f.feature_name)}
+                                        sx={{ opacity: !eligible ? 0.85 : 1 }}
+                                      >
+                                        <TableCell>
+                                          <Stack spacing={0.25}>
+                                            <Typography variant="subtitle2" sx={{ fontWeight: 900 }} noWrap>
+                                              {f.feature_name}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" noWrap>
+                                              {f.description}
+                                            </Typography>
+                                          </Stack>
+                                        </TableCell>
+                                        <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{f.freshness || '-'}</TableCell>
+                                        <TableCell>
+                                          <Chip size="small" label={impLabel} color={impLabel === 'High' ? 'primary' : impLabel === 'Medium' ? 'warning' : 'default'} />
+                                        </TableCell>
+                                        <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                                          <Chip size="small" label={corrLabel} color={f.correlation_risk === 'HIGH' ? 'error' : 'default'} />
+                                        </TableCell>
+                                        <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{missing}</TableCell>
+                                        <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{stable}</TableCell>
+                                        <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{leak}</TableCell>
+                                        <TableCell>
+                                          <Stack direction="row" spacing={1} flexWrap="wrap">
+                                            {!eligible ? <Chip size="small" variant="outlined" label="Ineligible" /> : null}
+                                            {f.used_in_current_model ? <Chip size="small" color="success" label="Used" /> : null}
+                                          </Stack>
+                                        </TableCell>
+                                        <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                          <Checkbox
+                                            checked={included}
+                                            disabled={!eligible}
+                                            onClick={() => toggleInclude(f.feature_name)}
+                                          />
+                                        </TableCell>
+                                        <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                          <Button
+                                            size="small"
+                                            variant={excluded ? 'contained' : 'outlined'}
+                                            onClick={() => toggleExclude(f.feature_name)}
+                                            color={excluded ? 'error' : 'inherit'}
+                                          >
+                                            {excluded ? 'Excluded' : 'Exclude'}
+                                          </Button>
+                                        </TableCell>
+                                        <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                                          <Button size="small" variant="text" onClick={() => openFeaturePreview(f.feature_name)}>
+                                            Preview
+                                          </Button>
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </TableContainer>
+                          </AccordionDetails>
+                        </Accordion>
+                      ))}
+                    </Stack>
                     {filteredFeatures.length === 0 ? (
                       <Alert
                         severity="info"

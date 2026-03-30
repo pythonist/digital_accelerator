@@ -483,9 +483,12 @@ const WorkflowGraphDialog = ({ open, onClose, params = {} }) => {
   );
 
   useEffect(() => {
+    if (!loading && !error && (!graph.nodes.length && !graph.edges.length) && (renderNodes.length || renderEdges.length)) {
+      return;
+    }
     setRenderNodes(graph.nodes);
     setRenderEdges(graph.edges);
-  }, [graph]);
+  }, [error, graph, loading, renderEdges.length, renderNodes.length]);
 
   const selectedNode = useMemo(() => {
     const allNodes = Object.values((graphPayload || {}).views || {}).flatMap((view) => [

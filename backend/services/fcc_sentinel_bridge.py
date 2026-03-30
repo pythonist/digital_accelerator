@@ -1309,6 +1309,8 @@ class FCCSentinelBridgeService:
             "pipeline_name": manifest.get("pipeline_name"),
             "publish_label": manifest.get("publish_label"),
             "source_published_rows": int(manifest.get("published_rows") or 0),
+            "source_published_case_count": int((manifest.get("table_counts") or {}).get("cases") or 0),
+            "source_published_alert_count": int((manifest.get("table_counts") or {}).get("alerts") or 0),
             "source_threshold": self._resolve_locked_deployment_threshold(
                 manifest.get("deployment_id"),
                 manifest.get("threshold"),
@@ -1327,6 +1329,11 @@ class FCCSentinelBridgeService:
             ],
             "imported_case_count": int(len(tables.get("cases", pd.DataFrame()).index)),
             "imported_alert_count": int(len(tables.get("alerts", pd.DataFrame()).index)),
+            "consistency": {
+                "published_rows_match_imported_alerts": int(manifest.get("published_rows") or 0) == int(len(tables.get("alerts", pd.DataFrame()).index)),
+                "published_case_count_match_imported_cases": int((manifest.get("table_counts") or {}).get("cases") or 0) == int(len(tables.get("cases", pd.DataFrame()).index)),
+                "published_alert_count_match_imported_alerts": int((manifest.get("table_counts") or {}).get("alerts") or 0) == int(len(tables.get("alerts", pd.DataFrame()).index)),
+            },
             "focus_result": focus_result,
         }
 

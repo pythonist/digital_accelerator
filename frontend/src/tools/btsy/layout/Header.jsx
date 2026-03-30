@@ -55,7 +55,7 @@ const Header = () => {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
           <Button
             size="small"
-            onClick={() => navigate('/tools')}
+            onClick={() => navigate('/tools', { state: { skipRestore: true } })}
             sx={{
               color: 'white',
               border: '1px solid rgba(255,255,255,0.35)',

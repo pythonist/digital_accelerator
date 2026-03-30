@@ -76,25 +76,25 @@ import duckdb
 logger = logging.getLogger(__name__)
 
 _REASON_THRESHOLDS = [
-    (0.15, "Very low risk — score well below detection threshold"),
-    (0.25, "Low risk — no strong SAR indicators present"),
-    (0.40, "Below threshold — insufficient signal to escalate"),
-    (0.50, "Borderline — suppressed under current threshold setting"),
+    (0.15, "Very low risk, score well below detection threshold"),
+    (0.25, "Low risk, no strong SAR indicators present"),
+    (0.40, "Below threshold, insufficient signal to escalate"),
+    (0.50, "Borderline, suppressed under current threshold setting"),
 ]
 
 
 def _reason_code(score: float, threshold: float) -> str:
     """Derive a human-readable suppression reason from score bucket."""
     if score >= threshold:
-        return "Escalated — score meets or exceeds alert threshold"
+        return "Escalated, score meets or exceeds alert threshold"
     gap = threshold - score
     if gap > 0.35:
-        return "Very low risk — score well below detection threshold"
+        return "Very low risk, score well below detection threshold"
     if gap > 0.20:
-        return "Low risk — no strong SAR indicators present"
+        return "Low risk, no strong SAR indicators present"
     if gap > 0.10:
-        return "Below threshold — insufficient signal to escalate"
-    return "Borderline — suppressed under current threshold setting"
+        return "Below threshold, insufficient signal to escalate"
+    return "Borderline, suppressed under current threshold setting"
 
 
 def _trapezoid_area(y_values: List[float], x_values: List[float]) -> float:
@@ -3087,7 +3087,7 @@ class DeploymentDashboardService:
             {
                 "id": "training",
                 "type": "model",
-                "label": f"Training — {meta.get('algorithm', 'Unknown').replace('_', ' ').title()}",
+                "label": f"Training | {meta.get('algorithm', 'Unknown').replace('_', ' ').title()}",
                 "detail": (
                     f"CV Folds: {meta.get('cv_folds', 5)} | "
                     + " | ".join(f"{k}={v}" for k, v in list(hp.items())[:3])
@@ -3126,7 +3126,7 @@ class DeploymentDashboardService:
                 "id": "suppression",
                 "type": "output",
                 "label": f"{grain_label} Suppression",
-                "detail": f"Scoring {model_grain} entities only — suppress or escalate",
+                "detail": f"Scoring {model_grain} entities only | suppress or escalate",
                 "status": "active",
             },
         ]
@@ -3143,15 +3143,15 @@ class DeploymentDashboardService:
 
         summary_cards = [
             {"label": "Model Grain",      "value": grain_label, "tone": "default"},
-            {"label": "Algorithm",        "value": meta.get("algorithm", "—").replace("_", " ").title(), "tone": "default"},
+            {"label": "Algorithm",        "value": meta.get("algorithm", "N/A").replace("_", " ").title(), "tone": "default"},
             {"label": "ROC-AUC",          "value": f"{metrics.get('roc_auc', 0):.4f}", "tone": "good" if metrics.get("roc_auc", 0) >= 0.75 else "warn"},
             {"label": "F1 Score",         "value": f"{metrics.get('f1', 0):.4f}",      "tone": "default"},
             {"label": "Precision",        "value": f"{metrics.get('precision', 0):.4f}", "tone": "default"},
             {"label": "Recall",           "value": f"{metrics.get('recall', 0):.4f}",  "tone": "default"},
             {"label": "CV AUC (mean)",    "value": f"{metrics.get('cv_auc_mean', 0):.4f}", "tone": "default"},
-            {"label": "Features Used",    "value": str(meta.get("features_used", "—")), "tone": "default"},
+            {"label": "Features Used",    "value": str(meta.get("features_used", "N/A")), "tone": "default"},
             {"label": "Training Rows",    "value": f"{meta.get('train_rows', 0):,}",   "tone": "default"},
-            {"label": "Decision Threshold","value": str(meta.get("threshold", "—")),   "tone": "default"},
+            {"label": "Decision Threshold","value": str(meta.get("threshold", "N/A")),   "tone": "default"},
         ]
 
         return {"nodes": nodes, "edges": edges, "summary_cards": summary_cards}
@@ -3243,8 +3243,8 @@ class DeploymentDashboardService:
                     "escalated": 0,
                     "suppression_rate": 0.0,
                     "avg_score": 0.0,
-                    "first_scored": "—",
-                    "last_scored": "—",
+                    "first_scored": "N/A",
+                    "last_scored": "N/A",
                 }
             return {"model_grain": resolved_grain, resolved_grain: result[resolved_grain]}
 
@@ -3256,8 +3256,8 @@ class DeploymentDashboardService:
                 "escalated": 0,
                 "suppression_rate": 0.0,
                 "avg_score": 0.0,
-                "first_scored": "—",
-                "last_scored": "—",
+                "first_scored": "N/A",
+                "last_scored": "N/A",
             }
         if "case" not in result:
             result["case"] = {
@@ -3267,8 +3267,8 @@ class DeploymentDashboardService:
                 "escalated": 0,
                 "suppression_rate": 0.0,
                 "avg_score": 0.0,
-                "first_scored": "—",
-                "last_scored": "—",
+                "first_scored": "N/A",
+                "last_scored": "N/A",
             }
         result["model_grain"] = "mixed"
         return result

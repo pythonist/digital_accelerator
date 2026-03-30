@@ -36,6 +36,9 @@ const emptyRecipient = {
   name: '',
   role: 'L2 Reviewer',
   email: '',
+  recipient_type: 'individual',
+  distribution_list: '',
+  description: '',
   branch_code: '',
   region: '',
   case_types_supported: '',
@@ -120,6 +123,10 @@ const MailConfigurationPage = () => {
     try {
       const payload = {
         ...recipientForm,
+        distribution_list: String(recipientForm.distribution_list || '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
         case_types_supported: String(recipientForm.case_types_supported || '')
           .split(',')
           .map((item) => item.trim())
@@ -231,7 +238,7 @@ const MailConfigurationPage = () => {
                 <Box>
                   <Typography sx={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>Recipient Master</Typography>
                   <Typography sx={{ mt: 0.4, fontSize: 12.5, color: '#64748b' }}>
-                    Manage recipient ownership, routing eligibility, and supported case types for each reviewer role.
+                    Manage individual users, shared team mailboxes, and group routing for Sentinel communication.
                   </Typography>
                 </Box>
                 <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
@@ -252,6 +259,7 @@ const MailConfigurationPage = () => {
               onEdit={(row) => {
                 setRecipientForm({
                   ...row,
+                  distribution_list: (row.distribution_list || []).join(', '),
                   case_types_supported: (row.case_types_supported || []).join(', '),
                 });
                 setRecipientDialogOpen(true);
@@ -337,7 +345,7 @@ const MailConfigurationPage = () => {
                     {testingMail ? 'Sending...' : 'Send Test Mail'}
                   </Button>
                   <Alert severity="info">
-                    Use routing rules for case-driven escalation. Use Mailbox for manual one-off or multi-recipient communication from Sentinel.
+                    Use routing rules for case-driven escalation. Use Mailbox for manual one-off, To and CC, and multi-case communication from Sentinel.
                   </Alert>
                 </Stack>
               </Paper>
@@ -354,7 +362,14 @@ const MailConfigurationPage = () => {
             <TextField select size="small" label="Role" value={recipientForm.role} onChange={(event) => setRecipientForm((previous) => ({ ...previous, role: event.target.value }))}>
               {ESCALATION_TARGETS.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
             </TextField>
-            <TextField size="small" label="Email" value={recipientForm.email} onChange={(event) => setRecipientForm((previous) => ({ ...previous, email: event.target.value }))} />
+            <TextField select size="small" label="Recipient Type" value={recipientForm.recipient_type} onChange={(event) => setRecipientForm((previous) => ({ ...previous, recipient_type: event.target.value }))}>
+              <MenuItem value="individual">Individual</MenuItem>
+              <MenuItem value="team">Team</MenuItem>
+              <MenuItem value="group">Group</MenuItem>
+            </TextField>
+            <TextField size="small" label="Primary Email / Mailbox" value={recipientForm.email} onChange={(event) => setRecipientForm((previous) => ({ ...previous, email: event.target.value }))} />
+            <TextField size="small" label="Distribution List" value={recipientForm.distribution_list} onChange={(event) => setRecipientForm((previous) => ({ ...previous, distribution_list: event.target.value }))} helperText="Optional comma-separated member emails. Leave blank to use only the primary mailbox." />
+            <TextField size="small" label="Description" value={recipientForm.description} onChange={(event) => setRecipientForm((previous) => ({ ...previous, description: event.target.value }))} helperText="Optional note such as branch escalation desk or vigilance shared mailbox." />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
               <TextField size="small" label="Branch" value={recipientForm.branch_code} onChange={(event) => setRecipientForm((previous) => ({ ...previous, branch_code: event.target.value }))} sx={{ flex: 1 }} />
               <TextField size="small" label="Region" value={recipientForm.region} onChange={(event) => setRecipientForm((previous) => ({ ...previous, region: event.target.value }))} sx={{ flex: 1 }} />

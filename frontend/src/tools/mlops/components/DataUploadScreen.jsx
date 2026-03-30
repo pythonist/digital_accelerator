@@ -86,11 +86,11 @@ const typeBadge = (type) => TYPE_BADGE[type] || { bg: PwC.cloud, fg: PwC.ash, la
 
 const MAX_MB = 500;
 const fmtBytes  = (b) => b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
-const fmtNum    = (n) => n == null ? '—' : Number(n).toLocaleString();
+const fmtNum    = (n) => n == null ? 'N/A' : Number(n).toLocaleString();
 const ext       = (f) => (f.name || '').split('.').pop().toLowerCase();
 const safe      = (v) => String(v || '').trim().toLowerCase();
 const ratio     = (v) => { const n = Number(v); if (!Number.isFinite(n)) return null; return n > 1 ? n / 100 : n; };
-const pct       = (v, d = 1) => { const r = ratio(v); return r == null ? '—' : `${(r * 100).toFixed(d)}%`; };
+const pct       = (v, d = 1) => { const r = ratio(v); return r == null ? 'N/A' : `${(r * 100).toFixed(d)}%`; };
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
 const toColumnName = (column) => {
   if (typeof column === 'string') return column;
@@ -184,7 +184,7 @@ const buildColumnRows = (dataset, schema, profile) => {
     ]));
     return { id: `${idx}_${String(name)}`, name: String(name), dtype, role, null_pct: nullPct,
       unique_count: uniqueCount, cardinality_ratio: cardinalityRatio,
-      sample: sampleValue != null ? String(sampleValue) : '—',
+      sample: sampleValue != null ? String(sampleValue) : 'N/A',
       identifier_confidence: idConfidence, model_action: modelAction,
       is_identifier: isIdentifier, is_high_card: isHighCard, temporal_gaps: temporalGaps, issue_flags: issueFlags };
   });
@@ -245,7 +245,7 @@ const buildNarrative = (dataset, profile, allDatasets) => {
   if (freshnessDays != null) {
     const days = Number(freshnessDays);
     freshnessNote = days <= 7 ? 'Data freshness: current (updated within 7 days)'
-      : days <= 30 ? `Data freshness: ${days} days old — verify recency`
+      : days <= 30 ? `Data freshness: ${days} days old. Verify recency`
       : `Data freshness: potentially stale (${days} days since last record)`;
   }
   return { summary: parts.join(' · '), freshnessNote };
@@ -300,7 +300,7 @@ const QualityRing = ({ score, size = 36 }) => {
 
 const NullBar = ({ value }) => {
   const r = ratio(value);
-  if (r == null) return <Typography sx={{ fontSize: 11, color: PwC.mist }}>—</Typography>;
+  if (r == null) return <Typography sx={{ fontSize: 11, color: PwC.mist }}>N/A</Typography>;
   const pctVal = r * 100;
   const color = pctVal > 20 ? PwC.red : pctVal > 5 ? PwC.amber : PwC.emerald;
   return (
@@ -445,7 +445,7 @@ const PipelineRunPanel = ({
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1.25, py: 0.9, bgcolor: PwC.amberLight, borderRadius: '5px', border: `1px solid #FDE68A` }}>
           <Circle sx={{ fontSize: 7, color: PwC.amber }} />
           <Typography sx={{ fontSize: 11, color: '#78350F', fontWeight: 500 }}>
-            No active run — create or open one below
+            No active run. Create or open one below
           </Typography>
         </Box>
       )}
@@ -1219,7 +1219,7 @@ const DataUploadScreen = ({
   const validateItem = (item) => {
     if (item.restoredPlaceholder) return 'Reattach the source file before upload';
     const e2 = ext(item.file);
-    if (!['csv', 'parquet'].includes(e2)) return `".${e2}" not supported — CSV or Parquet only`;
+    if (!['csv', 'parquet'].includes(e2)) return `".${e2}" not supported. Use CSV or Parquet only`;
     if (item.file.size / 1048576 > MAX_MB) return `File exceeds ${MAX_MB} MB limit`;
     const resolvedType = item.type === 'custom' ? item.customName : item.type;
     if (!resolvedType) return 'Select a dataset type';
@@ -1532,7 +1532,7 @@ const DataUploadScreen = ({
           {!hasActivePipeline && (
             <Alert severity="warning"
               sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
-              Upload locked — create or open a run in the left panel.
+              Upload locked. Create or open a run in the left panel.
             </Alert>
           )}
 
@@ -1668,7 +1668,7 @@ const DataUploadScreen = ({
                   {[
                     { label: 'Rows', value: fmtNum(totalRows) },
                     { label: 'Cols', value: fmtNum(totalCols) },
-                    { label: 'Quality', value: avgQuality == null ? '—' : `${avgQuality.toFixed(0)}%`,
+                    { label: 'Quality', value: avgQuality == null ? 'N/A' : `${avgQuality.toFixed(0)}%`,
                       color: avgQuality == null ? PwC.mist : qualityColor(avgQuality) },
                   ].map((k) => (
                     <Box key={k.label}>

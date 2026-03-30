@@ -1,3 +1,5 @@
+import json
+
 from flask import Blueprint, jsonify, request
 
 from api.services import services
@@ -47,10 +49,21 @@ def case_retrieval_rebuild_index():
     })
 
 
-@case_retrieval_bp.route("/case-retrieval/similar", methods=["POST"])
+@case_retrieval_bp.route("/case-retrieval/similar", methods=["GET", "POST"])
 @handle_errors
 def case_retrieval_similar():
     payload = request.get_json(silent=True) or {}
+    if request.method == "GET":
+        weights_raw = request.args.get("weights")
+        filters_raw = request.args.get("filters")
+        payload = {
+            "base_case_id": request.args.get("base_case_id") or request.args.get("case_id"),
+            "mode": request.args.get("mode"),
+            "top_k": request.args.get("top_k"),
+            "threshold": request.args.get("threshold"),
+            "weights": json.loads(weights_raw) if weights_raw else None,
+            "filters": json.loads(filters_raw) if filters_raw else {},
+        }
     service = CaseSimilarityService(_get_db_manager())
     result = service.retrieve_similar_cases(
         base_case_id=str(payload.get("base_case_id") or ""),

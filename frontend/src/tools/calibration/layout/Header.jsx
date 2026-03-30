@@ -59,7 +59,7 @@ const Header = ({ activeScreen }) => {
           <Tooltip title="Back to Tools">
             <IconButton
               size="small"
-              onClick={() => navigate('/tools')}
+              onClick={() => navigate('/tools', { state: { skipRestore: true } })}
               sx={{ color: 'white' }}
             >
               <ArrowBackIcon fontSize="small" />

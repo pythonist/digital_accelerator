@@ -295,6 +295,9 @@ def ensure_case_queue_schema(conn: sqlite3.Connection) -> None:
             name TEXT NOT NULL,
             role TEXT NOT NULL,
             email TEXT NOT NULL,
+            recipient_type TEXT DEFAULT 'individual',
+            distribution_list TEXT,
+            description TEXT,
             branch_code TEXT,
             region TEXT,
             case_types_supported TEXT,
@@ -348,6 +351,7 @@ def ensure_case_queue_schema(conn: sqlite3.Connection) -> None:
             case_id TEXT,
             batch_ref TEXT,
             recipient_email TEXT,
+            delivery_role TEXT,
             subject TEXT,
             send_status TEXT,
             error_message TEXT,
@@ -364,6 +368,7 @@ def ensure_case_queue_schema(conn: sqlite3.Connection) -> None:
             batch_ref TEXT,
             sender_email TEXT,
             recipient_emails TEXT,
+            cc_emails TEXT,
             subject TEXT,
             body_snapshot TEXT,
             mail_status TEXT,
@@ -372,6 +377,39 @@ def ensure_case_queue_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    for table_name, expected_columns in (
+        (
+            "mail_recipients",
+            {
+                "recipient_type": "TEXT DEFAULT 'individual'",
+                "distribution_list": "TEXT",
+                "description": "TEXT",
+            },
+        ),
+        (
+            "case_escalations",
+            {
+                "cc_emails": "TEXT",
+            },
+        ),
+        (
+            "mail_logs",
+            {
+                "delivery_role": "TEXT",
+            },
+        ),
+        (
+            "mail_inbox_messages",
+            {
+                "cc_emails": "TEXT",
+            },
+        ),
+    ):
+        cur.execute(f'PRAGMA table_info("{table_name}")')
+        existing_columns = {str(row[1]) for row in cur.fetchall()}
+        for column_name, column_type in expected_columns.items():
+            if column_name not in existing_columns:
+                cur.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_type}')
     conn.commit()
 
 

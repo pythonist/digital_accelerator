@@ -25,11 +25,13 @@ import { Add, MarkEmailRead, Refresh, Send } from '@mui/icons-material';
 import apiClient from '@services/api';
 
 const emptyCompose = {
-  recipient_ids: [],
+  to_recipient_ids: [],
+  cc_recipient_ids: [],
   template_id: '',
   subject: '',
   body: '',
   case_id: '',
+  case_ids_text: '',
   batch_ref: '',
 };
 
@@ -106,7 +108,12 @@ const MailboxPanel = ({
     try {
       await apiClient.sendMailboxMessage({
         ...composeForm,
-        recipient_ids: composeForm.recipient_ids,
+        to_recipient_ids: composeForm.to_recipient_ids,
+        cc_recipient_ids: composeForm.cc_recipient_ids,
+        case_ids: String(composeForm.case_ids_text || '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
       });
       setComposeOpen(false);
       setComposeForm(emptyCompose);
@@ -209,9 +216,14 @@ const MailboxPanel = ({
                   </TableCell>
                   <TableCell sx={{ maxWidth: 340 }}>
                     <Typography sx={{ fontSize: 12.5, fontWeight: 700 }}>{row.subject || '-'}</Typography>
-                    <Typography sx={{ fontSize: 11, color: '#64748b', mt: 0.35 }}>
+                   <Typography sx={{ fontSize: 11, color: '#64748b', mt: 0.35 }}>
                       {row.source === 'routing' ? 'Case routing' : 'Mailbox'}
                     </Typography>
+                    {row.cc_emails ? (
+                      <Typography sx={{ fontSize: 11, color: '#64748b', mt: 0.35 }}>
+                        CC: {row.cc_emails}
+                      </Typography>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <Typography sx={{ fontSize: 12 }}>{row.direction === 'received' ? row.sender_email : row.recipient_emails}</Typography>
@@ -249,13 +261,28 @@ const MailboxPanel = ({
               size="small"
               label="Saved Recipients"
               SelectProps={{ multiple: true }}
-              value={composeForm.recipient_ids}
-              onChange={(event) => setComposeForm((previous) => ({ ...previous, recipient_ids: event.target.value }))}
-              helperText="Select one or multiple saved recipients."
+              value={composeForm.to_recipient_ids}
+              onChange={(event) => setComposeForm((previous) => ({ ...previous, to_recipient_ids: event.target.value }))}
+              helperText="Choose one or more primary recipients."
             >
               {recipientRows.map((row) => (
                 <MenuItem key={row.id} value={row.id}>
-                  {row.name} | {row.role} | {row.email}
+                  {row.name} | {row.role} | {row.recipient_type || 'individual'} | {row.email}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              select
+              size="small"
+              label="CC Recipients"
+              SelectProps={{ multiple: true }}
+              value={composeForm.cc_recipient_ids}
+              onChange={(event) => setComposeForm((previous) => ({ ...previous, cc_recipient_ids: event.target.value }))}
+              helperText="Optional copy recipients for the same thread."
+            >
+              {recipientRows.map((row) => (
+                <MenuItem key={row.id} value={row.id}>
+                  {row.name} | {row.role} | {row.recipient_type || 'individual'} | {row.email}
                 </MenuItem>
               ))}
             </TextField>
@@ -275,6 +302,7 @@ const MailboxPanel = ({
             </TextField>
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
               <TextField size="small" label="Case ID" value={composeForm.case_id} onChange={(event) => setComposeForm((previous) => ({ ...previous, case_id: event.target.value }))} sx={{ flex: 1 }} />
+              <TextField size="small" label="Case IDs (comma-separated)" value={composeForm.case_ids_text} onChange={(event) => setComposeForm((previous) => ({ ...previous, case_ids_text: event.target.value }))} sx={{ flex: 1 }} />
               <TextField size="small" label="Batch Ref" value={composeForm.batch_ref} onChange={(event) => setComposeForm((previous) => ({ ...previous, batch_ref: event.target.value }))} sx={{ flex: 1 }} />
             </Stack>
             <TextField size="small" label="Subject" value={composeForm.subject} onChange={(event) => setComposeForm((previous) => ({ ...previous, subject: event.target.value }))} />
@@ -283,7 +311,7 @@ const MailboxPanel = ({
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setComposeOpen(false)}>Cancel</Button>
-          <Button variant="contained" startIcon={<Add />} onClick={handleSendMail} disabled={sending || !composeForm.recipient_ids.length || !composeForm.subject || !composeForm.body}>
+          <Button variant="contained" startIcon={<Add />} onClick={handleSendMail} disabled={sending || !composeForm.to_recipient_ids.length || !composeForm.subject || !composeForm.body}>
             {sending ? 'Sending...' : 'Send'}
           </Button>
         </DialogActions>
@@ -322,6 +350,11 @@ const MailboxPanel = ({
                 ? `From ${detailRow?.sender_email || '-'}`
                 : `To ${detailRow?.recipient_emails || '-'}`}
             </Typography>
+            {detailRow?.cc_emails ? (
+              <Typography sx={{ fontSize: 12, color: '#64748b' }}>
+                {`CC ${detailRow?.cc_emails || '-'}`}
+              </Typography>
+            ) : null}
             <Typography sx={{ fontSize: 12, color: '#64748b' }}>
               {detailRow?.case_id || detailRow?.batch_ref || 'No linked case'}
             </Typography>

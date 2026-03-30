@@ -21,7 +21,9 @@ const RecipientTable = ({ rows, onEdit, onDelete }) => (
           <TableRow>
             <TableCell>Name</TableCell>
             <TableCell>Role</TableCell>
+            <TableCell>Type</TableCell>
             <TableCell>Email</TableCell>
+            <TableCell>Distribution</TableCell>
             <TableCell>Branch</TableCell>
             <TableCell>Region</TableCell>
             <TableCell>Case Types Supported</TableCell>
@@ -35,7 +37,9 @@ const RecipientTable = ({ rows, onEdit, onDelete }) => (
             <TableRow key={row.id} hover>
               <TableCell>{row.name}</TableCell>
               <TableCell>{row.role}</TableCell>
+              <TableCell sx={{ textTransform: 'capitalize' }}>{row.recipient_type || 'individual'}</TableCell>
               <TableCell>{row.email}</TableCell>
+              <TableCell>{(row.distribution_list || []).join(', ') || '-'}</TableCell>
               <TableCell>{row.branch_code || '-'}</TableCell>
               <TableCell>{row.region || '-'}</TableCell>
               <TableCell>{(row.case_types_supported || []).join(', ') || '-'}</TableCell>

@@ -581,6 +581,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
   const journeySaveTimerRef = useRef(null);
   const workflowSaveTimerRef = useRef(null);
   const workflowSessionRef = useRef(null);
+  const restoredWorkflowSessionKeyRef = useRef('');
   const workflowPersistencePausedRef = useRef(false);
   const screenStatePersistencePausedRef = useRef(false);
   const autoResumeKeyRef = useRef('');
@@ -1293,6 +1294,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     setActivePipelineMeta(null);
     setPipelineSelectionNotice('');
     workflowSessionRef.current = null;
+    restoredWorkflowSessionKeyRef.current = '';
     autoResumeKeyRef.current = '';
     clearPipelineSession(currentEnvId);
   }, [currentEnvId, pauseWorkflowPersistence]);
@@ -1340,6 +1342,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     setPipelineSelectionNotice('');
     setExperimentName(scopedName || DEFAULT_EXPERIMENT_NAME);
     workflowSessionRef.current = null;
+    restoredWorkflowSessionKeyRef.current = '';
     autoResumeKeyRef.current = '';
   }, [currentEnvId, resetWorkbenchRuntimeState]);
 
@@ -1363,6 +1366,7 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
         const session = res?.session || null;
         workflowSessionRef.current = session || null;
         if (!session) return;
+        const restoreKey = `${currentEnvId}::${String(session?.session_id || scopedWorkflowSessionId || validActivePipelineId || 'draft').trim()}`;
 
         const savedMlopsState = session?.current_state?.mlops_state || session?.last_stable_state?.mlops_state || {};
         const sessionPipelineId = Number(
@@ -1422,8 +1426,9 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
           setActivePipelineName(sessionPipelineName);
         }
 
-        if (!hasWorkbenchRuntimeState) {
+        if (restoredWorkflowSessionKeyRef.current !== restoreKey) {
           restoreWorkflowRuntimeState(session);
+          restoredWorkflowSessionKeyRef.current = restoreKey;
         }
 
         if (sessionStep && STEPS.some((step) => step.id === sessionStep)) {
@@ -1461,19 +1466,21 @@ const MLOpsWorkbench = ({ renderAutoBuild }) => {
     (async () => {
       const first = await loadDatasets({ sync: false });
       if (!alive) return;
-      if (workflowSessionRef.current && !hasWorkbenchRuntimeState) {
+      if (workflowSessionRef.current && !restoredWorkflowSessionKeyRef.current) {
         restoreWorkflowRuntimeState(workflowSessionRef.current, first?.all || []);
+        restoredWorkflowSessionKeyRef.current = `${currentEnvId}::${String(workflowSessionRef.current?.session_id || 'draft').trim()}`;
       }
       if (!(first?.all?.length > 0)) {
         const second = await loadDatasets({ sync: true });
         if (!alive) return;
-        if (workflowSessionRef.current && !hasWorkbenchRuntimeState) {
+        if (workflowSessionRef.current && !restoredWorkflowSessionKeyRef.current) {
           restoreWorkflowRuntimeState(workflowSessionRef.current, second?.all || []);
+          restoredWorkflowSessionKeyRef.current = `${currentEnvId}::${String(workflowSessionRef.current?.session_id || 'draft').trim()}`;
         }
       }
     })();
     return () => { alive = false; };
-  }, [datasetCacheKey, hasWorkbenchRuntimeState, hydrateDatasets, loadDatasets, restoreWorkflowRuntimeState]);
+  }, [currentEnvId, datasetCacheKey, hydrateDatasets, loadDatasets, restoreWorkflowRuntimeState]);
 
   useEffect(() => { loadSavedPipelines(); }, [loadSavedPipelines]);
 

@@ -144,7 +144,7 @@ const MuleLayout = ({ children, hasData, activeScreen, onNavigate, dataStats }) 
             <IconButton 
               edge="start" 
               color="inherit" 
-              onClick={() => navigate('/tools')}
+              onClick={() => navigate('/tools', { state: { skipRestore: true } })}
               sx={{ mr: 2 }}
             >
               <ArrowBack />

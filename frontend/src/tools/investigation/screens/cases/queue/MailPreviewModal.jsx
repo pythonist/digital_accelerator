@@ -18,8 +18,13 @@ const MailPreviewModal = ({ open, onClose, preview }) => (
           {preview.previews.map((item, index) => (
             <Paper key={`${item.recipient?.email || 'preview'}_${index + 1}`} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
               <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.45 }}>
-                {item.target_role} | {item.recipient?.email || '-'}
+                {item.target_role} | {(item.recipient_emails || []).join(', ') || item.recipient?.email || '-'}
               </Typography>
+              {item.cc_emails?.length ? (
+                <Typography sx={{ mt: 0.75, fontSize: 12, color: '#64748b' }}>
+                  {`CC | ${item.cc_emails.join(', ')}`}
+                </Typography>
+              ) : null}
               <Typography sx={{ mt: 1, fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
                 {item.subject}
               </Typography>
@@ -33,8 +38,13 @@ const MailPreviewModal = ({ open, onClose, preview }) => (
       ) : (
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
           <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.45 }}>
-            {preview.target_role} | {(preview.recipients || []).map((item) => item.email).filter(Boolean).join(', ') || '-'}
+            {preview.target_role} | {(preview.recipient_emails || []).join(', ') || (preview.recipients || []).map((item) => item.email).filter(Boolean).join(', ') || '-'}
           </Typography>
+          {preview.cc_emails?.length ? (
+            <Typography sx={{ mt: 0.75, fontSize: 12, color: '#64748b' }}>
+              {`CC | ${preview.cc_emails.join(', ')}`}
+            </Typography>
+          ) : null}
           <Typography sx={{ mt: 1, fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
             {preview.subject}
           </Typography>

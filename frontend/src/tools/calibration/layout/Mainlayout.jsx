@@ -26,7 +26,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen }) => {
         })}
         username={username}
         activeEnvironment={activeBankName || activeEnv}
-        onBackToTools={() => navigate('/tools')}
+        onBackToTools={() => navigate('/tools', { state: { skipRestore: true } })}
         onLogout={async () => {
           await handleLogout();
           navigate('/login');

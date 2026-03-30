@@ -28,6 +28,7 @@ const EscalationModal = ({
   onSuccess,
 }) => {
   const [targetRole, setTargetRole] = useState('L2 Reviewer');
+  const [copyRole, setCopyRole] = useState('');
   const [templateType, setTemplateType] = useState('');
   const [mailMode, setMailMode] = useState('grouped');
   const [analystComment, setAnalystComment] = useState('');
@@ -53,6 +54,7 @@ const EscalationModal = ({
       setAnalystComment('');
       setMailMode('grouped');
       setTargetRole('L2 Reviewer');
+      setCopyRole('');
       setTemplateType('');
     }
   }, [open]);
@@ -66,10 +68,11 @@ const EscalationModal = ({
     case_id: caseIds?.[0],
     case_ids: mode === 'batch' ? caseIds : undefined,
     target_role: targetRole,
+    copy_role: copyRole || undefined,
     template_type: templateType || targetRole,
     analyst_comment: analystComment,
     mail_mode: mailMode,
-  }), [analystComment, caseIds, mailMode, mode, targetRole, templateType]);
+  }), [analystComment, caseIds, copyRole, mailMode, mode, targetRole, templateType]);
 
   const handlePreview = async () => {
     setLoadingPreview(true);
@@ -125,6 +128,10 @@ const EscalationModal = ({
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25}>
               <TextField select size="small" label="Escalation Target" value={targetRole} onChange={(event) => setTargetRole(event.target.value)} sx={{ minWidth: 220 }}>
                 {ESCALATION_TARGETS.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+              </TextField>
+              <TextField select size="small" label="CC Role" value={copyRole} onChange={(event) => setCopyRole(event.target.value)} sx={{ minWidth: 220 }}>
+                <MenuItem value="">No CC</MenuItem>
+                {ESCALATION_TARGETS.filter((value) => value !== targetRole).map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
               </TextField>
               <TextField select size="small" label="Template" value={templateType} onChange={(event) => setTemplateType(event.target.value)} sx={{ minWidth: 240 }}>
                 <MenuItem value="">Use default for target</MenuItem>

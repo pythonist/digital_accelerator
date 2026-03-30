@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
@@ -31,6 +34,46 @@ def _resolve_source_context():
         raise ValueError("X-Environment-ID header required")
     tenant_id = getattr(request, "tenant_id", None) or "default"
     return str(tenant_id), str(env_id)
+
+
+def _ensure_sentinel_environment_initialized(env_id: str, tenant_id: str) -> None:
+    env_name = str(env_id or "").strip()
+    tenant_name = str(tenant_id or "").strip() or "default"
+    if not env_name:
+        return
+
+    metadata_manager = getattr(services, "metadata_manager", None)
+    if metadata_manager is None:
+        return
+
+    env_root = Path(metadata_manager.base_dir) / tenant_name / env_name
+    for relative_dir in (
+        Path("investigation/source_data"),
+        Path("investigation/master_data"),
+        Path("investigation/vector_store"),
+        Path("calibration/experiments"),
+        Path("calibration/datasets"),
+        Path("audit_logs"),
+    ):
+        (env_root / relative_dir).mkdir(parents=True, exist_ok=True)
+
+    registry_path = env_root / "registry.json"
+    if not registry_path.exists():
+        registry_path.write_text(json.dumps({
+            "case_id": env_name,
+            "tenant_id": tenant_name,
+            "created_at": datetime.now().isoformat(),
+            "tables": {},
+            "pipeline_stage": "INIT",
+        }, indent=2), encoding="utf-8")
+
+    for db_path in (
+        env_root / "investigation" / "investigation.db",
+        env_root / "calibration" / "calibration.db",
+    ):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(db_path):
+            pass
 
 
 def _get_mlops_service(env_root: Path) -> MLOpsWorkbenchService:
@@ -100,6 +143,7 @@ def import_published_run():
         publish_id = str(body.get("publish_id") or "").strip()
         if not publish_id:
             return jsonify({"success": False, "error": "publish_id is required"}), 400
+        _ensure_sentinel_environment_initialized(target_env_id, tenant_id)
         bridge = FCCSentinelBridgeService(resolve_env_root(source_env_id, tenant_id, create_if_missing=True))
         result = bridge.import_published_run(
             publish_id=publish_id,
@@ -127,6 +171,7 @@ def clear_imported_queue():
         body = request.get_json(force=True) or {}
         target_env_id = str(body.get("target_env_id") or env_id).strip() or env_id
         source_env_id = str(body.get("source_env_id") or env_id).strip() or env_id
+        _ensure_sentinel_environment_initialized(target_env_id, tenant_id)
         bridge = FCCSentinelBridgeService(resolve_env_root(source_env_id, tenant_id, create_if_missing=True))
         result = bridge.clear_imported_queue(
             tenant_id=str(tenant_id),

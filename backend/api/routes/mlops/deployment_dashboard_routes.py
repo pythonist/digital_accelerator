@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import threading
 import json
+import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
@@ -55,6 +57,46 @@ def _get_env_ids():
 
 def _resolve_env_path(env_id: str, tenant_id: str) -> Path:
     return resolve_env_root(env_id, tenant_id, create_if_missing=True)
+
+
+def _ensure_sentinel_environment_initialized(env_id: str, tenant_id: str) -> None:
+    env_name = str(env_id or "").strip()
+    tenant_name = str(tenant_id or "").strip() or "default"
+    if not env_name:
+        return
+
+    metadata_manager = getattr(services, "metadata_manager", None)
+    if metadata_manager is None:
+        return
+
+    env_root = Path(metadata_manager.base_dir) / tenant_name / env_name
+    for relative_dir in (
+        Path("investigation/source_data"),
+        Path("investigation/master_data"),
+        Path("investigation/vector_store"),
+        Path("calibration/experiments"),
+        Path("calibration/datasets"),
+        Path("audit_logs"),
+    ):
+        (env_root / relative_dir).mkdir(parents=True, exist_ok=True)
+
+    registry_path = env_root / "registry.json"
+    if not registry_path.exists():
+        registry_path.write_text(json.dumps({
+            "case_id": env_name,
+            "tenant_id": tenant_name,
+            "created_at": datetime.now().isoformat(),
+            "tables": {},
+            "pipeline_stage": "INIT",
+        }, indent=2), encoding="utf-8")
+
+    for db_path in (
+        env_root / "investigation" / "investigation.db",
+        env_root / "calibration" / "calibration.db",
+    ):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(db_path):
+            pass
 
 
 def _get_service(env_root: Path) -> DeploymentDashboardService:
@@ -362,6 +404,7 @@ def handoff_sentinel():
     """
     try:
         tenant_id, env_id = _get_env_ids()
+        _ensure_sentinel_environment_initialized(env_id, tenant_id)
         env_root = _resolve_env_path(env_id, tenant_id)
         svc = _get_service(env_root)
         report_service = _get_report_service(env_root)
@@ -577,6 +620,9 @@ def handoff_sentinel():
             "imported_case_count": int(import_payload.get("imported_case_count") or len(imported_case_ids)),
             "imported_alert_count": int(import_payload.get("imported_alert_count") or 0),
             "source_published_rows": int(import_payload.get("source_published_rows") or publish_payload.get("published_rows") or 0),
+            "source_published_case_count": int(import_payload.get("source_published_case_count") or (publish_payload.get("table_counts") or {}).get("cases") or 0),
+            "source_published_alert_count": int(import_payload.get("source_published_alert_count") or (publish_payload.get("table_counts") or {}).get("alerts") or 0),
+            "count_consistency": import_payload.get("consistency") or {},
             "case_generation_mode": import_payload.get("case_generation_mode"),
             "suppressed_count": int(simulation.get("scoring", {}).get("suppressed") or 0),
             "escalated_count": int(simulation.get("scoring", {}).get("escalated") or 0),

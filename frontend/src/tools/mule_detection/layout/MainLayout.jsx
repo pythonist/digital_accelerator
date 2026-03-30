@@ -23,7 +23,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen, hasData }) => {
         sections={getMuleNavigationSections(hasData)}
         username={username}
         activeEnvironment={activeBankName || activeEnv}
-        onBackToTools={() => navigate('/tools')}
+        onBackToTools={() => navigate('/tools', { state: { skipRestore: true } })}
         onLogout={async () => {
           await handleLogout();
           navigate('/login');

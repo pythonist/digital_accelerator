@@ -21,6 +21,71 @@ class MailConfigService:
         self.queue_service._seed_default_templates(conn)
         return conn
 
+    def _parse_json_list(self, value: Any) -> List[str]:
+        if value in (None, "", []):
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item or "").strip()]
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item or "").strip()]
+        except Exception:
+            pass
+        text = str(value or "").replace(";", ",")
+        return [item.strip() for item in text.split(",") if item.strip()]
+
+    def _recipient_payload(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        payload = dict(row)
+        payload["case_types_supported"] = self._parse_json_list(payload.get("case_types_supported"))
+        payload["distribution_list"] = self._parse_json_list(payload.get("distribution_list"))
+        payload["auto_route_enabled"] = bool(payload.get("auto_route_enabled"))
+        payload["is_active"] = bool(payload.get("is_active"))
+        payload["recipient_type"] = str(payload.get("recipient_type") or "individual")
+        payload["description"] = str(payload.get("description") or "").strip()
+        return payload
+
+    def _expand_recipient_emails(self, recipient: Dict[str, Any]) -> List[str]:
+        distribution_list = self._parse_json_list(recipient.get("distribution_list"))
+        if distribution_list:
+            return distribution_list
+        email = str(recipient.get("email") or "").strip()
+        return [email] if email else []
+
+    def _unique_emails(self, values: List[str]) -> List[str]:
+        seen = set()
+        emails: List[str] = []
+        for value in values:
+            email = str(value or "").strip()
+            if not email:
+                continue
+            lowered = email.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            emails.append(email)
+        return emails
+
+    def _build_multi_case_rows(self, case_ids: List[str]) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        for case_id in case_ids:
+            queue_row = self.queue_service.get_case_queue_row(case_id)
+            if not queue_row:
+                rows.append({
+                    "case_id": case_id,
+                    "customer_id": "-",
+                    "severity": "-",
+                    "scenario_name": "-",
+                })
+                continue
+            rows.append({
+                "case_id": case_id,
+                "customer_id": queue_row.get("customer_id") or "-",
+                "severity": queue_row.get("severity") or queue_row.get("risk_rating") or "-",
+                "scenario_name": queue_row.get("scenario_name") or queue_row.get("alert_type") or "-",
+            })
+        return rows
+
     def list_recipients(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         filters = filters or {}
         conn = self._connect()
@@ -33,18 +98,19 @@ class MailConfigService:
             if search:
                 rows = [
                     row for row in rows
-                    if search in " ".join([str(row.get("name") or ""), str(row.get("email") or ""), str(row.get("branch_code") or ""), str(row.get("region") or "")]).lower()
+                    if search in " ".join([
+                        str(row.get("name") or ""),
+                        str(row.get("email") or ""),
+                        str(row.get("branch_code") or ""),
+                        str(row.get("region") or ""),
+                        str(row.get("distribution_list") or ""),
+                        str(row.get("description") or ""),
+                        str(row.get("recipient_type") or ""),
+                    ]).lower()
                 ]
             if role:
                 rows = [row for row in rows if row.get("role") == role]
-            for row in rows:
-                try:
-                    row["case_types_supported"] = json.loads(row.get("case_types_supported") or "[]")
-                except Exception:
-                    row["case_types_supported"] = []
-                row["auto_route_enabled"] = bool(row.get("auto_route_enabled"))
-                row["is_active"] = bool(row.get("is_active"))
-            return {"rows": rows}
+            return {"rows": [self._recipient_payload(row) for row in rows]}
         finally:
             self.db_manager.close_connection(conn)
 
@@ -56,13 +122,16 @@ class MailConfigService:
             cur.execute(
                 """
                 INSERT INTO mail_recipients (
-                    name, role, email, branch_code, region, case_types_supported, auto_route_enabled, is_active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    name, role, email, recipient_type, distribution_list, description, branch_code, region, case_types_supported, auto_route_enabled, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload.get("name"),
                     payload.get("role"),
                     payload.get("email"),
+                    payload.get("recipient_type") or "individual",
+                    json.dumps(payload.get("distribution_list") or []),
+                    payload.get("description"),
                     payload.get("branch_code"),
                     payload.get("region"),
                     json.dumps(payload.get("case_types_supported") or []),
@@ -92,7 +161,7 @@ class MailConfigService:
             conn.execute(
                 """
                 UPDATE mail_recipients
-                SET name = ?, role = ?, email = ?, branch_code = ?, region = ?, case_types_supported = ?,
+                SET name = ?, role = ?, email = ?, recipient_type = ?, distribution_list = ?, description = ?, branch_code = ?, region = ?, case_types_supported = ?,
                     auto_route_enabled = ?, is_active = ?, updated_at = ?
                 WHERE id = ?
                 """,
@@ -100,6 +169,9 @@ class MailConfigService:
                     payload.get("name"),
                     payload.get("role"),
                     payload.get("email"),
+                    payload.get("recipient_type") or "individual",
+                    json.dumps(payload.get("distribution_list") or []),
+                    payload.get("description"),
                     payload.get("branch_code"),
                     payload.get("region"),
                     json.dumps(payload.get("case_types_supported") or []),
@@ -217,17 +289,25 @@ class MailConfigService:
                 f"SELECT * FROM mail_recipients WHERE id IN ({placeholders}) ORDER BY role, name",
                 selected_ids,
             )
-            return [dict(row) for row in cur.fetchall()]
+            return [self._recipient_payload(dict(row)) for row in cur.fetchall()]
         if email:
             return [{
                 "id": None,
                 "name": str(email).split("@")[0],
                 "role": "Ad hoc",
                 "email": str(email),
+                "recipient_type": "individual",
+                "distribution_list": [],
             }]
         return []
 
-    def _build_mail_metadata(self, case_id: Optional[str], batch_ref: Optional[str], body: str) -> Dict[str, Any]:
+    def _build_mail_metadata(
+        self,
+        case_id: Optional[str],
+        batch_ref: Optional[str],
+        body: str,
+        case_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         metadata: Dict[str, Any] = {
             "workflow": "FCIP Investigation Workbench",
             "summary": "",
@@ -235,7 +315,23 @@ class MailConfigService:
             "sections": [],
             "case_rows": [],
         }
+        normalized_case_ids = [str(item).strip() for item in (case_ids or []) if str(item or "").strip()]
         case_text = str(case_id or "").strip()
+        if not case_text and len(normalized_case_ids) == 1:
+            case_text = normalized_case_ids[0]
+        if len(normalized_case_ids) > 1:
+            metadata["summary"] = f"Manual FCIP mail prepared for {len(normalized_case_ids)} selected cases."
+            metadata["case_details"] = {
+                "Case Count": len(normalized_case_ids),
+                "Batch Ref": batch_ref or "-",
+            }
+            metadata["case_rows"] = self._build_multi_case_rows(normalized_case_ids)
+            if body:
+                metadata["sections"].append({
+                    "title": "Analyst Message",
+                    "body": body,
+                })
+            return metadata
         if not case_text:
             if batch_ref:
                 metadata["summary"] = f"Manual FCIP mail prepared for batch reference {batch_ref}."
@@ -309,6 +405,7 @@ class MailConfigService:
                     "batch_ref": item.get("batch_ref"),
                     "sender_email": self.notification_service.smtp_sender,
                     "recipient_emails": item.get("recipient_email"),
+                    "cc_emails": item.get("cc_emails"),
                     "subject": item.get("subject"),
                     "body_snapshot": item.get("body_snapshot"),
                     "mail_status": item.get("status") or "queued",
@@ -328,6 +425,7 @@ class MailConfigService:
                     "batch_ref": item.get("batch_ref"),
                     "sender_email": item.get("sender_email"),
                     "recipient_emails": item.get("recipient_emails"),
+                    "cc_emails": item.get("cc_emails"),
                     "subject": item.get("subject"),
                     "body_snapshot": item.get("body_snapshot"),
                     "mail_status": item.get("mail_status") or "received",
@@ -348,6 +446,7 @@ class MailConfigService:
                         str(row.get("batch_ref") or ""),
                         str(row.get("sender_email") or ""),
                         str(row.get("recipient_emails") or ""),
+                        str(row.get("cc_emails") or ""),
                         str(row.get("subject") or ""),
                         str(row.get("body_snapshot") or ""),
                     ]).lower()
@@ -360,14 +459,19 @@ class MailConfigService:
     def send_mail(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         conn = self._connect()
         try:
-            recipients = self._resolve_recipient_rows(
+            to_recipients = self._resolve_recipient_rows(
                 conn,
-                recipient_ids=payload.get("recipient_ids") or [],
-                recipient_id=payload.get("recipient_id"),
+                recipient_ids=payload.get("to_recipient_ids") or payload.get("recipient_ids") or [],
+                recipient_id=payload.get("to_recipient_id") or payload.get("recipient_id"),
                 email=payload.get("email"),
             )
-            if not recipients:
-                raise ValueError("Select at least one saved recipient.")
+            cc_recipients = self._resolve_recipient_rows(
+                conn,
+                recipient_ids=payload.get("cc_recipient_ids") or [],
+                recipient_id=payload.get("cc_recipient_id"),
+            )
+            if not to_recipients:
+                raise ValueError("Select at least one primary recipient.")
 
             subject = str(payload.get("subject") or "FCC Sentinel Mail").strip()
             body = str(payload.get("body") or "").strip()
@@ -375,27 +479,57 @@ class MailConfigService:
                 raise ValueError("Subject and body are required.")
 
             case_id = str(payload.get("case_id") or "").strip() or None
+            case_ids = [str(item).strip() for item in (payload.get("case_ids") or []) if str(item or "").strip()]
             batch_ref = str(payload.get("batch_ref") or "").strip() or None
+            if len(case_ids) > 1 and not batch_ref:
+                batch_ref = f"MAIL-{uuid.uuid4().hex[:8].upper()}"
             thread_ref = str(payload.get("thread_ref") or case_id or batch_ref or f"THREAD-{uuid.uuid4().hex[:8]}").strip()
-            sent_rows = []
             now = utcnow_iso()
-            for recipient in recipients:
-                email = str(recipient.get("email") or "").strip()
-                send_result = self.notification_service.send_email(
-                    email,
-                    subject,
-                    body,
-                    metadata=self._build_mail_metadata(case_id, batch_ref, body),
-                )
+            to_emails = self._unique_emails([
+                email
+                for recipient in to_recipients
+                for email in self._expand_recipient_emails(recipient)
+            ])
+            cc_emails = self._unique_emails([
+                email
+                for recipient in cc_recipients
+                for email in self._expand_recipient_emails(recipient)
+            ])
+            send_result = self.notification_service.send_email(
+                to_emails,
+                subject,
+                body,
+                metadata=self._build_mail_metadata(case_id, batch_ref, body, case_ids=case_ids),
+                cc_emails=cc_emails,
+            )
+            for email in to_emails:
                 conn.execute(
                     """
-                    INSERT INTO mail_logs (case_id, batch_ref, recipient_email, subject, send_status, error_message, sent_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO mail_logs (case_id, batch_ref, recipient_email, delivery_role, subject, send_status, error_message, sent_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         case_id,
                         batch_ref,
                         email,
+                        "to",
+                        subject,
+                        send_result.get("status") or "queued",
+                        send_result.get("error") or "",
+                        now,
+                    ),
+                )
+            for email in cc_emails:
+                conn.execute(
+                    """
+                    INSERT INTO mail_logs (case_id, batch_ref, recipient_email, delivery_role, subject, send_status, error_message, sent_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        case_id,
+                        batch_ref,
+                        email,
+                        "cc",
                         subject,
                         send_result.get("status") or "queued",
                         send_result.get("error") or "",
@@ -405,16 +539,17 @@ class MailConfigService:
                 conn.execute(
                     """
                     INSERT INTO mail_inbox_messages (
-                        direction, case_id, batch_ref, sender_email, recipient_emails, subject, body_snapshot,
+                        direction, case_id, batch_ref, sender_email, recipient_emails, cc_emails, subject, body_snapshot,
                         mail_status, created_at, thread_ref
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         "sent",
                         case_id,
                         batch_ref,
                         self.notification_service.smtp_sender,
-                        email,
+                        ", ".join(to_emails),
+                        ", ".join(cc_emails),
                         subject,
                         body,
                         send_result.get("status") or "queued",
@@ -422,9 +557,16 @@ class MailConfigService:
                         thread_ref,
                     ),
                 )
-                sent_rows.append({"recipient": recipient, "result": send_result})
             conn.commit()
-            return {"status": "processed", "thread_ref": thread_ref, "rows": sent_rows}
+            return {
+                "status": "processed",
+                "thread_ref": thread_ref,
+                "to_recipients": to_recipients,
+                "cc_recipients": cc_recipients,
+                "to_emails": to_emails,
+                "cc_emails": cc_emails,
+                "result": send_result,
+            }
         finally:
             self.db_manager.close_connection(conn)
 
@@ -439,9 +581,9 @@ class MailConfigService:
             conn.execute(
                 """
                 INSERT INTO mail_inbox_messages (
-                    direction, case_id, batch_ref, sender_email, recipient_emails, subject, body_snapshot,
+                    direction, case_id, batch_ref, sender_email, recipient_emails, cc_emails, subject, body_snapshot,
                     mail_status, created_at, thread_ref
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "received",
@@ -449,6 +591,7 @@ class MailConfigService:
                     str(payload.get("batch_ref") or "").strip() or None,
                     sender_email,
                     self.notification_service.smtp_sender,
+                    None,
                     subject,
                     body,
                     "received",
@@ -476,7 +619,7 @@ class MailConfigService:
             body = payload.get("body") or "This is a test mail from the FCC Case Queue mail configuration module."
             primary = recipients[0]
             result = self.notification_service.send_email(
-                primary.get("email"),
+                self._expand_recipient_emails(primary),
                 subject,
                 body,
                 metadata={
@@ -493,16 +636,17 @@ class MailConfigService:
             conn.execute(
                 """
                 INSERT INTO mail_inbox_messages (
-                    direction, case_id, batch_ref, sender_email, recipient_emails, subject, body_snapshot,
+                    direction, case_id, batch_ref, sender_email, recipient_emails, cc_emails, subject, body_snapshot,
                     mail_status, created_at, thread_ref
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "sent",
                     None,
                     None,
                     self.notification_service.smtp_sender,
-                    primary.get("email"),
+                    ", ".join(self._expand_recipient_emails(primary)),
+                    None,
                     subject,
                     body,
                     result.get("status") or "queued",

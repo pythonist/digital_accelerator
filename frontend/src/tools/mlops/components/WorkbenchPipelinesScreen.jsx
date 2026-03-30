@@ -1123,8 +1123,8 @@ const WorkbenchPipelinesScreen = ({
                 : 'No saved FCC runs were found for the current environment.'}
             </Alert>
           ) : (
-            <Box sx={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1520 }}>
+              <Box sx={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1120 }}>
                 <thead>
                   <tr style={{ background: '#faf7f4' }}>
                     {['Pipeline Name', 'Run ID', 'Created By', 'Owner', 'Created On', 'Last Updated', 'Current Step', 'Progress %', 'Status', 'Last Completed Step', 'Next Pending Step', 'Environment', 'Actions'].map((label) => (
@@ -1218,12 +1218,12 @@ const WorkbenchPipelinesScreen = ({
       <Box sx={{ display: 'flex', gap: 2, flex: 1, minHeight: 0 }}>
         <Paper
           variant="outlined"
-          sx={{
-            width: 320,
-            minWidth: 320,
-            borderColor: tone.border,
-            borderRadius: 0,
-            display: 'flex',
+            sx={{
+              width: { xs: '100%', xl: 320 },
+              minWidth: { xs: 0, xl: 320 },
+              borderColor: tone.border,
+              borderRadius: 0,
+              display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
           }}
@@ -1462,7 +1462,7 @@ const WorkbenchPipelinesScreen = ({
           )}
           {!loadingDetail && (
             <Box sx={{ overflowX: 'auto', pb: 0.5 }}>
-              <Stack direction="row" spacing={1.2} alignItems="center" sx={{ minWidth: 1120 }}>
+              <Stack direction="row" spacing={1.2} alignItems="center" sx={{ minWidth: { xs: 860, lg: 1120 } }}>
                 {stageOrder.map((key, idx) => {
                   const stage = stageCatalog[key];
                   if (!stage) return null;
@@ -1473,10 +1473,10 @@ const WorkbenchPipelinesScreen = ({
                     <React.Fragment key={key}>
                       <Paper
                         variant="outlined"
-                        sx={{
-                          width: 220,
-                          p: 1.2,
-                          borderRadius: 0,
+                          sx={{
+                            width: { xs: 188, lg: 220 },
+                            p: 1.2,
+                            borderRadius: 0,
                           borderColor: stale ? T.warningBorder : done ? T.successBorder : tone.border,
                           bgcolor: '#ffffff',
                           flexShrink: 0,

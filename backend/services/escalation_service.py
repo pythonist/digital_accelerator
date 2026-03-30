@@ -51,6 +51,41 @@ class EscalationService:
             return region_matches
         return recipients[:1]
 
+    def _parse_json_list(self, value: Any) -> List[str]:
+        if value in (None, "", []):
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item or "").strip()]
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item or "").strip()]
+        except Exception:
+            pass
+        text = str(value or "").replace(";", ",")
+        return [item.strip() for item in text.split(",") if item.strip()]
+
+    def _expand_recipient_emails(self, recipient: Dict[str, Any]) -> List[str]:
+        distribution_list = self._parse_json_list(recipient.get("distribution_list"))
+        if distribution_list:
+            return distribution_list
+        email = str(recipient.get("email") or "").strip()
+        return [email] if email else []
+
+    def _unique_emails(self, values: List[str]) -> List[str]:
+        seen = set()
+        normalized: List[str] = []
+        for value in values:
+            email = str(value or "").strip()
+            if not email:
+                continue
+            lowered = email.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(email)
+        return normalized
+
     def _resolve_routing_rules(self, conn, queue_row: Dict[str, Any]) -> List[Dict[str, Any]]:
         cur = conn.cursor()
         cur.execute("SELECT * FROM mail_routing_rules WHERE is_active = 1 AND auto_route_enabled = 1 ORDER BY id")
@@ -72,6 +107,17 @@ class EscalationService:
                 continue
             matched.append(row)
         return matched
+
+    def _resolve_copy_role(self, conn, queue_row: Dict[str, Any], target_role: str, explicit_copy_role: Optional[str] = None) -> Optional[str]:
+        explicit = str(explicit_copy_role or "").strip()
+        if explicit:
+            return explicit
+        for rule in self._resolve_routing_rules(conn, queue_row):
+            if str(rule.get("recipient_role") or "").strip() == str(target_role or "").strip():
+                copy_role = str(rule.get("copy_role") or "").strip()
+                if copy_role:
+                    return copy_role
+        return None
 
     def _render_template(self, template: Dict[str, Any], context: Dict[str, Any]) -> Tuple[str, str]:
         subject = str(template.get("subject_template") or "").format(**context)
@@ -158,6 +204,8 @@ class EscalationService:
                 raise ValueError(f"No active template found for {target_role}.")
 
             recipients = self._resolve_recipients(conn, queue_row, target_role)
+            copy_role = self._resolve_copy_role(conn, queue_row, target_role, payload.get("copy_role"))
+            cc_recipients = self._resolve_recipients(conn, queue_row, copy_role) if copy_role else []
             packet = self.packet_builder.build_case_summary(case_id, queue_row)
             context = {
                 **packet.get("mail_context", {}),
@@ -165,10 +213,26 @@ class EscalationService:
                 "escalation_reason": payload.get("escalation_reason") or "Further review required",
             }
             subject, body = self._render_template(template, context)
+            recipient_emails = self._unique_emails([
+                email
+                for recipient in recipients
+                for email in self._expand_recipient_emails(recipient)
+            ])
+            if not recipient_emails:
+                raise ValueError(f"No routable primary recipient was found for case {case_id}.")
+            cc_emails = self._unique_emails([
+                email
+                for recipient in cc_recipients
+                for email in self._expand_recipient_emails(recipient)
+            ])
             return {
                 "case_id": case_id,
                 "target_role": target_role,
                 "recipients": recipients,
+                "recipient_emails": recipient_emails,
+                "copy_role": copy_role,
+                "cc_recipients": cc_recipients,
+                "cc_emails": cc_emails,
                 "subject": subject,
                 "body": body,
                 "mail_metadata": self._build_mail_metadata(
@@ -203,15 +267,25 @@ class EscalationService:
                 if not recipients:
                     warnings.append(f"No active recipient mapping for case {case_id}.")
                     continue
-                if len(recipients) > 1:
-                    warnings.append(f"Multiple recipients matched for case {case_id}; first active recipient used.")
-                recipient = recipients[0]
-                key = recipient.get("email") if group_mode == "grouped" else f"{recipient.get('email')}::{case_id}"
-                grouped.setdefault(key, {"recipient": recipient, "cases": []})["cases"].append((case_id, queue_row))
+                copy_role = self._resolve_copy_role(conn, queue_row, target_role, payload.get("copy_role"))
+                cc_recipients = self._resolve_recipients(conn, queue_row, copy_role) if copy_role else []
+                to_emails = self._unique_emails([email for recipient in recipients for email in self._expand_recipient_emails(recipient)])
+                cc_emails = self._unique_emails([email for recipient in cc_recipients for email in self._expand_recipient_emails(recipient)])
+                if not to_emails:
+                    warnings.append(f"No routable email addresses were found for case {case_id}.")
+                    continue
+                key = "|".join(to_emails + ["cc"] + cc_emails) if group_mode == "grouped" else f"{'|'.join(to_emails)}::{case_id}"
+                grouped.setdefault(key, {
+                    "recipients": recipients,
+                    "recipient_emails": to_emails,
+                    "cc_recipients": cc_recipients,
+                    "cc_emails": cc_emails,
+                    "copy_role": copy_role,
+                    "cases": [],
+                })["cases"].append((case_id, queue_row))
 
             previews = []
             for group in grouped.values():
-                recipient = group["recipient"]
                 lines = []
                 compact_rows = []
                 for case_id, queue_row in group["cases"]:
@@ -237,7 +311,12 @@ class EscalationService:
                     f"FCC Escalation Required | Case {group['cases'][0][0]} | {target_role}"
                 )
                 previews.append({
-                    "recipient": recipient,
+                    "recipient": group["recipients"][0] if group["recipients"] else None,
+                    "recipients": group["recipients"],
+                    "recipient_emails": group["recipient_emails"],
+                    "copy_role": group["copy_role"],
+                    "cc_recipients": group["cc_recipients"],
+                    "cc_emails": group["cc_emails"],
                     "target_role": target_role,
                     "case_count": len(group["cases"]),
                     "case_ids": [case_id for case_id, _ in group["cases"]],
@@ -269,37 +348,57 @@ class EscalationService:
             remarks = payload.get("analyst_comment") or payload.get("remarks") or ""
             queue_row = self.queue_service.get_case_queue_row(case_id)
             result_logs = []
-            for recipient in preview["recipients"]:
-                send_result = self.notification_service.send_email(
-                    recipient.get("email"),
-                    preview["subject"],
-                    preview["body"],
-                    metadata=preview.get("mail_metadata"),
-                )
-                self.audit_service.record_escalation(
-                    conn,
-                    case_id=case_id,
-                    batch_ref=None,
-                    escalation_type="Single",
-                    escalation_level=int(queue_row.get("escalation_level") or 1),
-                    recipient_role=preview["target_role"],
-                    recipient_email=recipient.get("email"),
-                    subject=preview["subject"],
-                    body_snapshot=preview["body"],
-                    status=send_result.get("status") or "queued",
-                    sent_by=self.username,
-                    remarks=remarks,
-                )
+            send_result = self.notification_service.send_email(
+                preview.get("recipient_emails") or [],
+                preview["subject"],
+                preview["body"],
+                metadata=preview.get("mail_metadata"),
+                cc_emails=preview.get("cc_emails") or [],
+            )
+            self.audit_service.record_escalation(
+                conn,
+                case_id=case_id,
+                batch_ref=None,
+                escalation_type="Single",
+                escalation_level=int(queue_row.get("escalation_level") or 1),
+                recipient_role=preview["target_role"],
+                recipient_email=", ".join(preview.get("recipient_emails") or []),
+                subject=preview["subject"],
+                body_snapshot=preview["body"],
+                status=send_result.get("status") or "queued",
+                sent_by=self.username,
+                cc_emails=", ".join(preview.get("cc_emails") or []),
+                remarks=remarks,
+            )
+            for email in preview.get("recipient_emails") or []:
                 self.audit_service.record_mail_log(
                     conn,
                     case_id=case_id,
                     batch_ref=None,
-                    recipient_email=recipient.get("email"),
+                    recipient_email=email,
                     subject=preview["subject"],
                     send_status=send_result.get("status") or "queued",
                     error_message=send_result.get("error") or "",
+                    delivery_role="to",
                 )
-                result_logs.append({"recipient": recipient, "result": send_result})
+            for email in preview.get("cc_emails") or []:
+                self.audit_service.record_mail_log(
+                    conn,
+                    case_id=case_id,
+                    batch_ref=None,
+                    recipient_email=email,
+                    subject=preview["subject"],
+                    send_status=send_result.get("status") or "queued",
+                    error_message=send_result.get("error") or "",
+                    delivery_role="cc",
+                )
+            result_logs.append({
+                "recipients": preview.get("recipients") or [],
+                "recipient_emails": preview.get("recipient_emails") or [],
+                "cc_recipients": preview.get("cc_recipients") or [],
+                "cc_emails": preview.get("cc_emails") or [],
+                "result": send_result,
+            })
 
             self.audit_service.record_status_change(
                 conn,
@@ -348,11 +447,22 @@ class EscalationService:
                 if not recipients:
                     warnings.append(f"No active recipient mapping for case {case_id}.")
                     continue
-                if len(recipients) > 1:
-                    warnings.append(f"Multiple recipients matched for case {case_id}; first active recipient used.")
-                recipient = recipients[0]
-                key = recipient.get("email") if group_mode == "grouped" else f"{recipient.get('email')}::{case_id}"
-                grouped.setdefault(key, {"recipient": recipient, "cases": []})["cases"].append((case_id, queue_row))
+                copy_role = self._resolve_copy_role(conn, queue_row, target_role, payload.get("copy_role"))
+                cc_recipients = self._resolve_recipients(conn, queue_row, copy_role) if copy_role else []
+                to_emails = self._unique_emails([email for recipient in recipients for email in self._expand_recipient_emails(recipient)])
+                cc_emails = self._unique_emails([email for recipient in cc_recipients for email in self._expand_recipient_emails(recipient)])
+                if not to_emails:
+                    warnings.append(f"No routable email addresses were found for case {case_id}.")
+                    continue
+                key = "|".join(to_emails + ["cc"] + cc_emails) if group_mode == "grouped" else f"{'|'.join(to_emails)}::{case_id}"
+                grouped.setdefault(key, {
+                    "recipients": recipients,
+                    "recipient_emails": to_emails,
+                    "cc_recipients": cc_recipients,
+                    "cc_emails": cc_emails,
+                    "copy_role": copy_role,
+                    "cases": [],
+                })["cases"].append((case_id, queue_row))
 
             conn.execute(
                 """
@@ -364,7 +474,6 @@ class EscalationService:
 
             summary_logs = []
             for group in grouped.values():
-                recipient = group["recipient"]
                 lines = []
                 compact_rows = []
                 for case_id, queue_row in group["cases"]:
@@ -389,7 +498,7 @@ class EscalationService:
                 )
                 body = "\n\n".join(lines)
                 send_result = self.notification_service.send_email(
-                    recipient.get("email"),
+                    group.get("recipient_emails") or [],
                     subject,
                     body,
                     metadata=self._build_mail_metadata(
@@ -397,8 +506,12 @@ class EscalationService:
                         case_rows=compact_rows,
                         summary=f"{len(group['cases'])} cases are being escalated to {target_role} from FCIP for additional review.",
                     ),
+                    cc_emails=group.get("cc_emails") or [],
                 )
-                self.audit_service.record_mail_log(conn, None, batch_ref, recipient.get("email"), subject, send_result.get("status") or "queued", send_result.get("error") or "")
+                for email in group.get("recipient_emails") or []:
+                    self.audit_service.record_mail_log(conn, None, batch_ref, email, subject, send_result.get("status") or "queued", send_result.get("error") or "", "to")
+                for email in group.get("cc_emails") or []:
+                    self.audit_service.record_mail_log(conn, None, batch_ref, email, subject, send_result.get("status") or "queued", send_result.get("error") or "", "cc")
 
                 for case_id, queue_row in group["cases"]:
                     self.audit_service.record_escalation(
@@ -408,11 +521,12 @@ class EscalationService:
                         escalation_type="Batch",
                         escalation_level=int(queue_row.get("escalation_level") or 1),
                         recipient_role=target_role,
-                        recipient_email=recipient.get("email"),
+                        recipient_email=", ".join(group.get("recipient_emails") or []),
                         subject=subject,
                         body_snapshot=body,
                         status=send_result.get("status") or "queued",
                         sent_by=self.username,
+                        cc_emails=", ".join(group.get("cc_emails") or []),
                         remarks=payload.get("analyst_comment") or "",
                     )
                     self.audit_service.record_status_change(conn, case_id, queue_row.get("current_status"), self._apply_status_for_target(target_role), self.username, payload.get("analyst_comment") or "")
@@ -424,7 +538,14 @@ class EscalationService:
                         """,
                         (self._apply_status_for_target(target_role), "Escalation", target_role, utcnow_iso(), case_id),
                     )
-                summary_logs.append({"recipient": recipient, "case_count": len(group["cases"]), "result": send_result})
+                summary_logs.append({
+                    "recipients": group.get("recipients") or [],
+                    "recipient_emails": group.get("recipient_emails") or [],
+                    "cc_recipients": group.get("cc_recipients") or [],
+                    "cc_emails": group.get("cc_emails") or [],
+                    "case_count": len(group["cases"]),
+                    "result": send_result,
+                })
 
             conn.execute("UPDATE escalation_batches SET mail_status = ? WHERE batch_ref = ?", ("Processed", batch_ref))
             conn.commit()

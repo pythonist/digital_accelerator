@@ -26,14 +26,15 @@ class AuditLogService:
         body_snapshot: str,
         status: str,
         sent_by: str,
+        cc_emails: str = "",
         remarks: str = "",
     ) -> None:
         conn.execute(
             """
             INSERT INTO case_escalations (
                 case_id, batch_ref, escalation_type, escalation_level, recipient_role,
-                recipient_email, subject, body_snapshot, status, sent_at, sent_by, response_status, remarks
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                recipient_email, cc_emails, subject, body_snapshot, status, sent_at, sent_by, response_status, remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 case_id,
@@ -42,6 +43,7 @@ class AuditLogService:
                 int(escalation_level or 0),
                 recipient_role,
                 recipient_email,
+                cc_emails,
                 subject,
                 body_snapshot,
                 status,
@@ -52,11 +54,21 @@ class AuditLogService:
             ),
         )
 
-    def record_mail_log(self, conn, case_id: Optional[str], batch_ref: Optional[str], recipient_email: str, subject: str, send_status: str, error_message: str = "") -> None:
+    def record_mail_log(
+        self,
+        conn,
+        case_id: Optional[str],
+        batch_ref: Optional[str],
+        recipient_email: str,
+        subject: str,
+        send_status: str,
+        error_message: str = "",
+        delivery_role: str = "to",
+    ) -> None:
         conn.execute(
             """
-            INSERT INTO mail_logs (case_id, batch_ref, recipient_email, subject, send_status, error_message, sent_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO mail_logs (case_id, batch_ref, recipient_email, delivery_role, subject, send_status, error_message, sent_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (case_id, batch_ref, recipient_email, subject, send_status, error_message, utcnow_iso()),
+            (case_id, batch_ref, recipient_email, delivery_role, subject, send_status, error_message, utcnow_iso()),
         )

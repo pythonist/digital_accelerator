@@ -2,7 +2,7 @@ import html
 import os
 import smtplib
 from email.message import EmailMessage
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 
 class NotificationService:
@@ -15,6 +15,29 @@ class NotificationService:
 
     def _escape(self, value: Any) -> str:
         return html.escape(str(value or ""))
+
+    def _normalize_email_list(self, values: Any) -> List[str]:
+        if values in (None, ""):
+            return []
+        if isinstance(values, str):
+            candidates: Iterable[Any] = values.replace(";", ",").split(",")
+        elif isinstance(values, (list, tuple, set)):
+            candidates = values
+        else:
+            candidates = [values]
+
+        seen = set()
+        normalized: List[str] = []
+        for item in candidates:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            lower_text = text.lower()
+            if lower_text in seen:
+                continue
+            seen.add(lower_text)
+            normalized.append(text)
+        return normalized
 
     def _render_case_details(self, case_details: Dict[str, Any]) -> str:
         rows = []
@@ -161,13 +184,16 @@ class NotificationService:
 
     def send_email(
         self,
-        recipient_email: str,
+        recipient_email: Any,
         subject: str,
         body: str,
         metadata: Optional[Dict[str, Any]] = None,
+        cc_emails: Any = None,
     ) -> Dict[str, Any]:
-        if not recipient_email:
-            return {"success": False, "status": "failed", "error": "Recipient email is required."}
+        to_emails = self._normalize_email_list(recipient_email)
+        cc_list = self._normalize_email_list(cc_emails)
+        if not to_emails:
+            return {"success": False, "status": "failed", "error": "At least one primary recipient is required."}
 
         plain_text = self._compose_plain_text(body or "", metadata)
         html_body = self._render_html_email(subject, body or "", metadata)
@@ -177,7 +203,9 @@ class NotificationService:
                 message = EmailMessage()
                 message["Subject"] = subject
                 message["From"] = self.smtp_sender
-                message["To"] = recipient_email
+                message["To"] = ", ".join(to_emails)
+                if cc_list:
+                    message["Cc"] = ", ".join(cc_list)
                 message.set_content(plain_text or subject)
                 message.add_alternative(html_body, subtype="html")
 
@@ -189,8 +217,14 @@ class NotificationService:
                         except Exception:
                             pass
                         server.login(self.smtp_user, self.smtp_pass)
-                    server.sendmail(self.smtp_sender, [recipient_email], message.as_string())
-                return {"success": True, "status": "sent", "delivery_mode": "smtp"}
+                    server.sendmail(self.smtp_sender, [*to_emails, *cc_list], message.as_string())
+                return {
+                    "success": True,
+                    "status": "sent",
+                    "delivery_mode": "smtp",
+                    "to_emails": to_emails,
+                    "cc_emails": cc_list,
+                }
             except Exception as exc:
                 return {"success": False, "status": "failed", "error": str(exc)}
 
@@ -199,4 +233,6 @@ class NotificationService:
             "status": "queued",
             "delivery_mode": "mock",
             "error": "",
+            "to_emails": to_emails,
+            "cc_emails": cc_list,
         }

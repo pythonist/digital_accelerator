@@ -423,7 +423,22 @@ class APIClient {
   }
 
   async retrieveSimilarCases(payload = {}) {
-    return this.post('/api/v2/case-retrieval/similar', payload);
+    try {
+      return await this.post('/api/v2/case-retrieval/similar', payload);
+    } catch (error) {
+      const message = String(error?.message || '').toLowerCase();
+      if (!message.includes('method not allowed')) {
+        throw error;
+      }
+      return this.get('/api/v2/case-retrieval/similar', {
+        base_case_id: payload?.base_case_id,
+        mode: payload?.mode,
+        top_k: payload?.top_k,
+        threshold: payload?.threshold,
+        weights: JSON.stringify(payload?.weights || {}),
+        filters: JSON.stringify(payload?.filters || {}),
+      });
+    }
   }
 
   async compareRetrievedCases(payload = {}) {

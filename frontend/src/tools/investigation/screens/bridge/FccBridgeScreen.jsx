@@ -96,12 +96,13 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
       const importedCases = Number(imported?.imported_case_count || 0).toLocaleString();
       const importedAlerts = Number(imported?.imported_alert_count || 0).toLocaleString();
       const sourceRows = Number(imported?.source_published_rows || row?.published_rows || 0).toLocaleString();
+      const sourcePublishedCases = Number(imported?.source_published_case_count || row?.table_counts?.cases || 0).toLocaleString();
       setDatasetLoaded(true);
       await checkDatasetStatus();
       await loadCaseList(true);
       await refreshPriorityBuckets();
       setSuccessMessage(
-        `Imported ${importedCases} Sentinel cases from ${sourceRows} FCC retained rows into shared workspace ${activeEnv}. Alerts imported: ${importedAlerts}.`,
+        `Imported ${importedCases} Sentinel cases and ${importedAlerts} alerts from ${sourceRows} FCC retained rows into shared workspace ${activeEnv}. Published case count: ${sourcePublishedCases}.`,
       );
       await loadPublishedRuns();
     } catch (err) {
@@ -290,7 +291,7 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
                           </Stack>
                         </TableCell>
                         <TableCell>
-                          <Stack spacing={0.35}>
+                      <Stack spacing={0.35}>
                             <Typography variant="body2">
                               {row.pipeline_name || 'FCC Pipeline'}
                             </Typography>
@@ -307,7 +308,11 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
                           </Typography>
                         </TableCell>
                         <TableCell align="right">
-                          <Chip label={Number(row.published_rows || 0).toLocaleString()} size="small" />
+                          <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap" useFlexGap>
+                            <Chip label={`${Number(row.published_rows || 0).toLocaleString()} retained`} size="small" />
+                            <Chip label={`${Number(row.table_counts?.cases || 0).toLocaleString()} cases`} size="small" variant="outlined" />
+                            <Chip label={`${Number(row.table_counts?.alerts || 0).toLocaleString()} alerts`} size="small" variant="outlined" />
+                          </Stack>
                         </TableCell>
                         <TableCell align="right">
                           <Typography variant="body2">{formatThreshold(row.threshold)}</Typography>
@@ -333,6 +338,12 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
             </TableContainer>
           )}
         </Paper>
+
+        {rows.some((row) => Number(row?.published_rows || 0) !== Number(row?.table_counts?.alerts || 0)) ? (
+          <Alert severity="warning" variant="outlined">
+            One or more FCC bridge packages have retained-row counts that do not match the generated alert count. The bridge now exposes both counts so the handoff can be reviewed before demo use.
+          </Alert>
+        ) : null}
       </Stack>
     </PageContainer>
   );
