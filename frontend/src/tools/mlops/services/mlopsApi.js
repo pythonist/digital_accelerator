@@ -206,7 +206,31 @@ const mlopsApi = {
    * }
    */
   pipelineSave: async (payload) => {
-    return apiClient.post('/api/mlops/pipeline/save', payload);
+    const candidates = [
+      { url: '/api/mlops/pipeline/save', method: 'post' },
+      { url: '/api/mlops/pipeline/create', method: 'post' },
+      { url: '/api/mlops/pipeline', method: 'post' },
+      { url: '/api/mlops/pipeline/save', method: 'put' },
+    ];
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        if (candidate.method === 'put') {
+          return await apiClient.put(candidate.url, payload);
+        }
+        return await apiClient.post(candidate.url, payload);
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || '').toLowerCase();
+        const retryable = (
+          message.includes('method not allowed')
+          || message.includes('not found')
+          || message.includes('no response from server')
+        );
+        if (!retryable) throw error;
+      }
+    }
+    throw lastError || new Error('Failed to create pipeline run.');
   },
 
   /** Trigger an async pipeline run. Returns { job_id } with 202. */

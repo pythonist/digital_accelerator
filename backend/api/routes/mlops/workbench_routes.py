@@ -1316,10 +1316,9 @@ def mlops_pipeline_preview():
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
 
-@mlops_workbench_bp.route("/pipeline/save", methods=["POST"])
-def mlops_pipeline_save():
+def _save_pipeline_from_request():
     """
-    POST /api/mlops/pipeline/save
+    Save a pipeline definition.
 
     Full pipeline definition save. Accepts both the legacy minimal payload
     { dataset_id, name, steps } and the extended payload that drives the
@@ -1341,28 +1340,42 @@ def mlops_pipeline_save():
 
     Returns { pipeline_id, version, name, status }
     """
+    body = request.get_json(silent=True) or {}
+    tenant_id, env_id = _get_env_ids()
+    env_root = _resolve_env_path(env_id, tenant_id)
+    mlops_svc = _get_mlops_service(env_root)
+
+    name = body.get("name") or "Unnamed Pipeline"
+    dataset_id = int(body.get("dataset_id") or 0)
+    steps = body.get("steps") or []
+
+    return mlops_svc.save_pipeline(
+        tenant_id, env_id, dataset_id, name, steps,
+        grain=str(body.get("grain") or "transaction"),
+        anchor_dataset_id=int(body["anchor_dataset_id"]) if body.get("anchor_dataset_id") else None,
+        dataset_ids=[int(d) for d in (body.get("dataset_ids") or []) if d],
+        joins=list(body.get("joins") or []),
+        transforms=list(body.get("transforms") or []),
+        str_config=dict(body.get("str_config") or {}),
+        schedule=dict(body.get("schedule") or {}),
+        output_name=str(body.get("output_name") or "master_dataset"),
+        created_by_persona=str(body.get("created_by_persona") or "technical"),
+    )
+
+
+@mlops_workbench_bp.route("/pipeline/save", methods=["POST", "PUT", "OPTIONS"])
+@mlops_workbench_bp.route("/pipeline/create", methods=["POST", "PUT", "OPTIONS"])
+@mlops_workbench_bp.route("/pipeline", methods=["POST", "OPTIONS"])
+def mlops_pipeline_save():
+    """
+    POST /api/mlops/pipeline/save
+    POST /api/mlops/pipeline/create
+    POST /api/mlops/pipeline
+
+    The extra aliases keep older FCIP bundles and local proxies working during upgrades.
+    """
     try:
-        body = request.get_json(silent=True) or {}
-        tenant_id, env_id = _get_env_ids()
-        env_root   = _resolve_env_path(env_id, tenant_id)
-        mlops_svc  = _get_mlops_service(env_root)
-
-        name       = body.get("name") or "Unnamed Pipeline"
-        dataset_id = int(body.get("dataset_id") or 0)
-        steps      = body.get("steps") or []
-
-        result = mlops_svc.save_pipeline(
-            tenant_id, env_id, dataset_id, name, steps,
-            grain=str(body.get("grain") or "transaction"),
-            anchor_dataset_id=int(body["anchor_dataset_id"]) if body.get("anchor_dataset_id") else None,
-            dataset_ids=[int(d) for d in (body.get("dataset_ids") or []) if d],
-            joins=list(body.get("joins") or []),
-            transforms=list(body.get("transforms") or []),
-            str_config=dict(body.get("str_config") or {}),
-            schedule=dict(body.get("schedule") or {}),
-            output_name=str(body.get("output_name") or "master_dataset"),
-            created_by_persona=str(body.get("created_by_persona") or "technical"),
-        )
+        result = _save_pipeline_from_request()
         return jsonify({"success": True, "data": result}), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500

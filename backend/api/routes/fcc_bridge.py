@@ -209,7 +209,7 @@ def get_workflow_session():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-@fcc_bridge_bp.route("/fcc-workflow/session", methods=["POST"])
+@fcc_bridge_bp.route("/fcc-workflow/session", methods=["POST", "PUT", "OPTIONS"])
 def save_workflow_session():
     try:
         tenant_id, env_id = _resolve_source_context()
