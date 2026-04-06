@@ -15,7 +15,12 @@ export const pickFirst = (...values) => values.find(hasValue);
 
 export const fmt = (v, d = 3) => (v == null || Number.isNaN(Number(v)) ? '-' : Number(v).toFixed(d));
 
-export const pct = (v, d = 2) => (v == null || Number.isNaN(Number(v)) ? '-' : `${Number(v).toFixed(d)}%`);
+export const pct = (v, d = 2) => {
+  if (v == null || Number.isNaN(Number(v))) return '-';
+  const numeric = Number(v);
+  const normalized = numeric > 0 && numeric <= 1 ? numeric * 100 : numeric;
+  return `${normalized.toFixed(d)}%`;
+};
 
 export const num = (v, d = 2) => (v == null || Number.isNaN(Number(v)) ? '-' : Number(v).toFixed(d));
 

@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Alert } from '@mui/material';
+import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useAppContext } from '@context/AppContext';
 import MLOpsWorkbench from './screens/MLOpsWorkbench';
 import AutoPipelineScreen from './AutoPipeline/AutoPipelineScreen';
@@ -9,6 +10,62 @@ const PIPELINE_ARTEFACT_TYPES = new Set([
   'master_dataset', 'master', 'preprocessed_dataset', 'preprocessed',
   'model_output', 'model_dataset', 'scored_dataset', 'feature_store',
 ]);
+
+const RUN_ROUTE_STEP_IDS = new Set([
+  'data',
+  'master',
+  'target',
+  'eda',
+  'preprocess',
+  'model',
+  'validation',
+  'registry',
+  'dashboard',
+  'reports',
+  'pipelines',
+]);
+
+const normalizeRouteRunId = (value) => {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const normalizeRouteStepId = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'data_upload') return 'data';
+  if (raw === 'ready') return 'registry';
+  return RUN_ROUTE_STEP_IDS.has(raw) ? raw : '';
+};
+
+const WorkbenchRouteShell = ({ datasets, masterDataset }) => {
+  const { runId, stepId } = useParams();
+  const routeRunId = useMemo(() => normalizeRouteRunId(runId), [runId]);
+  const routeStepId = useMemo(() => normalizeRouteStepId(stepId), [stepId]);
+
+  return (
+    <MLOpsWorkbench
+      routeRunId={routeRunId}
+      routeStepId={routeStepId}
+      renderAutoBuild={(workbenchContext = {}) => (
+        <AutoPipelineScreen
+          datasets={datasets}
+          masterDataset={masterDataset}
+          {...workbenchContext}
+        />
+      )}
+    />
+  );
+};
+
+const RunIndexRedirect = () => {
+  const { runId } = useParams();
+  const normalizedRunId = normalizeRouteRunId(runId);
+  if (!normalizedRunId) {
+    return <Navigate to="/mlops/runs" replace />;
+  }
+  return <Navigate to={`/mlops/runs/${normalizedRunId}/pipelines`} replace />;
+};
 
 const MLOpsPlatform = () => {
   const { activeEnv } = useAppContext();
@@ -58,15 +115,13 @@ const MLOpsPlatform = () => {
   // display it when AutoBuild mode is selected.
   return (
     <Box sx={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
-      <MLOpsWorkbench
-        renderAutoBuild={(workbenchContext = {}) => (
-          <AutoPipelineScreen
-            datasets={datasets}
-            masterDataset={masterDataset}
-            {...workbenchContext}
-          />
-        )}
-      />
+      <Routes>
+        <Route index element={<Navigate to="runs" replace />} />
+        <Route path="runs" element={<WorkbenchRouteShell datasets={datasets} masterDataset={masterDataset} />} />
+        <Route path="runs/:runId" element={<RunIndexRedirect />} />
+        <Route path="runs/:runId/:stepId" element={<WorkbenchRouteShell datasets={datasets} masterDataset={masterDataset} />} />
+        <Route path="*" element={<Navigate to="runs" replace />} />
+      </Routes>
     </Box>
   );
 };

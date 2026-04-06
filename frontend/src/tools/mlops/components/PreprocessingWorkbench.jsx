@@ -1313,7 +1313,7 @@ const StepForm = ({
           </Stack>
         </Box>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '240px minmax(0, 1fr)' }, gap: 1.25 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '240px minmax(0, 1fr)' }, gap: 1.25 }}>
           <Box>
             <SLabel>Transformation type</SLabel>
             <Select
@@ -1510,7 +1510,7 @@ const StepForm = ({
 
       <Box sx={{ p: 1.2, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
         <SLabel sx={{ mb: 1 }}>Input → transformation → output</SLabel>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr auto 1fr auto 1fr' }, gap: 1, alignItems: 'stretch' }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr auto 1fr auto 1fr' }, gap: 1, alignItems: 'stretch' }}>
           <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
             <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Input</Typography>
             <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35 }}>{flow.input}</Typography>
@@ -1907,7 +1907,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
             )}
 
             {!statsLoading && !statsErr && filteredColumns.length > 0 && (
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1fr) minmax(320px, 0.95fr)' }, gap: 1.25 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1fr) minmax(360px, 1fr)' }, gap: 1.25 }}>
                 <Box sx={{ maxHeight: 520, overflowY: 'auto', border: `1px solid ${T.border}`, bgcolor: 'white' }}>
                   {groupedColumns.map(([groupLabel, items]) => (
                     <Box key={groupLabel} sx={{ borderBottom: `1px solid ${T.border}` }}>
@@ -1986,7 +1986,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                         {activeMeta.businessMeaning}
                       </Typography>
 
-                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.8, mt: 1.2 }}>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 0.8, mt: 1.2 }}>
                         {[
                           ['Source table', activeMeta.tables.map(humanizeTableName).join(', ')],
                           ['Missing', pct(activeMeta.missingPct, 1)],
@@ -2032,7 +2032,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                         <>
                           <Divider sx={{ my: 1.2 }} />
                           <SLabel>Numeric profile</SLabel>
-                          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.8 }}>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 0.8 }}>
                             {[
                               ['Min', fmtF(activeStats.min)],
                               ['Max', fmtF(activeStats.max)],
@@ -4271,6 +4271,43 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
     [activeStage, laneSteps],
   );
 
+  const fmtDelta = (value) => {
+    if (value == null || Number.isNaN(Number(value))) return '-';
+    const n = Number(value);
+    return `${n > 0 ? '+' : ''}${n.toLocaleString()}`;
+  };
+
+  const fmtTransition = (before, after) => {
+    if (before == null && after == null) return 'n/a';
+    return `${fmt(before)} -> ${fmt(after)}`;
+  };
+
+  const fmtAddDrop = (added, dropped) => {
+    if (added == null && dropped == null) return 'n/a';
+    return `+${fmt(added || 0)} / -${fmt(dropped || 0)}`;
+  };
+
+  const executionLedgerRows = useMemo(
+    () => traceSteps.map((step, idx) => {
+      const meta = stepMeta(step?.step_type || step?.type || '');
+      const affected = Array.isArray(step?.affected_columns) && step.affected_columns.length
+        ? step.affected_columns
+        : inferAffectedColumns(step);
+      return {
+        stage: laneMeta[step?.category]?.label || laneMeta[meta.cat]?.label || 'Transformation',
+        label: step?.label || meta.label,
+        status: step?.status === 'applied' ? 'Applied' : (step?.status || 'Planned'),
+        index: step?.step_index || idx + 1,
+        rowsText: fmtTransition(step?.before_rows, step?.after_rows),
+        columnsText: fmtTransition(step?.before_columns_count, step?.after_columns_count),
+        deltaText: fmtAddDrop(step?.added_columns_count, step?.dropped_columns_count),
+        affectedText: affected.length ? affected.join(', ') : '-',
+        notesText: Array.isArray(step?.notes) && step.notes.length ? step.notes.join(' | ') : '-',
+      };
+    }),
+    [fmtAddDrop, fmtTransition, inferAffectedColumns, laneMeta, traceSteps],
+  );
+
   const run = async () => {
     if (!masterDataset?.dataset_id || !steps.length) return;
     setRunning(true);
@@ -4297,22 +4334,6 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
     } finally {
       setRunning(false);
     }
-  };
-
-  const fmtDelta = (value) => {
-    if (value == null || Number.isNaN(Number(value))) return '-';
-    const n = Number(value);
-    return `${n > 0 ? '+' : ''}${n.toLocaleString()}`;
-  };
-
-  const fmtTransition = (before, after) => {
-    if (before == null && after == null) return 'n/a';
-    return `${fmt(before)} -> ${fmt(after)}`;
-  };
-
-  const fmtAddDrop = (added, dropped) => {
-    if (added == null && dropped == null) return 'n/a';
-    return `+${fmt(added || 0)} / -${fmt(dropped || 0)}`;
   };
 
   const runDisabled = (typeof canDisable === 'function')
@@ -4358,6 +4379,68 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Applied steps</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.applied_steps)}</Typography>
           </Box>
+        </Box>
+      </Card>
+
+      <Card>
+        <SLabel>Execution Checklist</SLabel>
+        <Box sx={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['#', 'Stage', 'Transformation', 'Status', 'Rows', 'Columns', '+/-', 'Substeps / affected columns'].map((header) => (
+                  <th
+                    key={header}
+                    style={{
+                      padding: '8px 10px',
+                      textAlign: 'left',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: T.textSec,
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.4,
+                      borderBottom: `1px solid ${T.border}`,
+                    }}
+                  >
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {executionLedgerRows.map((row) => (
+                <tr key={`ledger-${row.index}`} style={{ borderBottom: `1px solid ${T.border}`, verticalAlign: 'top' }}>
+                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 52 }}>{row.index}</td>
+                  <td style={{ padding: '8px 10px', width: 140 }}>
+                    <Typography sx={{ fontSize: 11.25, fontWeight: 700 }}>{row.stage}</Typography>
+                  </td>
+                  <td style={{ padding: '8px 10px', width: 180 }}>
+                    <Typography sx={{ fontSize: 11.5, fontWeight: 700 }}>{row.label}</Typography>
+                  </td>
+                  <td style={{ padding: '8px 10px', width: 92 }}>
+                    <Chip
+                      size="small"
+                      label={row.status}
+                      sx={{ height: 18, fontSize: 9, bgcolor: row.status === 'Applied' ? T.doneBg : T.surface }}
+                    />
+                  </td>
+                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 120 }}>{row.rowsText}</td>
+                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 120 }}>{row.columnsText}</td>
+                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 100 }}>{row.deltaText}</td>
+                  <td style={{ padding: '8px 10px', minWidth: 260 }}>
+                    <Typography sx={{ fontSize: 11, color: T.textSec, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.55 }}>
+                      {row.affectedText}
+                    </Typography>
+                    {row.notesText !== '-' && (
+                      <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 0.45, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.5 }}>
+                        {row.notesText}
+                      </Typography>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Box>
       </Card>
 
@@ -4465,7 +4548,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
         </DialogTitle>
         <DialogContent dividers sx={{ p: 0 }}>
           <Box sx={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
               <thead>
                 <tr style={{ background: '#f8fafc' }}>
                   {['#', 'Transformation', 'Status', 'Rows', 'Columns', '+/-', 'Affected columns'].map((h) => (
@@ -4515,9 +4598,11 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                       <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: T.textSec }}>
                         {fmtAddDrop(step?.added_columns_count, step?.dropped_columns_count)}
                       </td>
-                      <td style={{ padding: '7px 10px' }}>
+                      <td style={{ padding: '7px 10px', minWidth: 260 }}>
                         <Typography sx={{ fontSize: 11, color: T.textSec }}>
-                          {affected.slice(0, 8).join(', ') || '-'}{affected.length > 8 ? ` +${affected.length - 8} more` : ''}
+                          <Box component="span" sx={{ whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.55 }}>
+                            {affected.slice(0, 8).join(', ') || '-'}{affected.length > 8 ? ` +${affected.length - 8} more` : ''}
+                          </Box>
                         </Typography>
                       </td>
                     </tr>
@@ -4642,11 +4727,10 @@ const PreprocessingWorkbench = ({
   activePipelineName = '',
   onPipelineActivated,
 }) => {
-  const [tab, setTab] = useState(3);
+  const [tab, setTab] = useState(0);
   const activeGuide = PREPROCESS_TAB_GUIDES[tab] || PREPROCESS_TAB_GUIDES[0];
   const completedTabIndexes = useMemo(() => {
     const done = new Set();
-    if (Array.isArray(suggestions) && suggestions.length) done.add(0);
     if (Array.isArray(steps) && steps.length) {
       done.add(0);
       done.add(1);

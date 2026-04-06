@@ -3,6 +3,7 @@ const safeLower = (value) => String(value || '').trim().toLowerCase();
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const MANIFEST_STAGE_KEYS = ['data', 'master', 'target', 'eda', 'preprocess', 'model', 'validation', 'registry', 'ready', 'dashboard', 'reports'];
 
 const toNumberOrNull = (value) => {
   const n = Number(value);
@@ -96,7 +97,20 @@ export const findPipelineByName = (pipelines, name) => {
   return asArray(pipelines).find((pipeline) => safeLower(pipeline?.name) === needle) || null;
 };
 
-export const derivePipelineStepCompletion = (pipeline) => {
+export const getWorkflowManifest = (pipeline) => (
+  isObject(pipeline?.workflow_manifest) ? pipeline.workflow_manifest : null
+);
+
+export const getManifestStepState = (pipeline, stepKey) => {
+  const manifest = getWorkflowManifest(pipeline);
+  const key = safeLower(stepKey);
+  if (!manifest || !isObject(manifest.steps)) return null;
+  const step = manifest.steps[key];
+  return isObject(step) ? step : null;
+};
+
+const deriveLegacyPipelineStepCompletion = (pipeline) => {
+  const staleSet = new Set(asArray(pipeline?.stale_steps).map((step) => safeLower(step)));
   const steps = asArray(pipeline?.steps);
   const edaState = getScreenState(steps, 'eda');
   const modelState = getScreenState(steps, 'model');
@@ -105,7 +119,7 @@ export const derivePipelineStepCompletion = (pipeline) => {
   const dashboardState = getScreenState(steps, 'dashboard');
   const journeyState = getScreenState(steps, 'workbench_journey');
   const has = (screenKey) => Boolean(getScreenState(steps, screenKey));
-  return {
+  const completion = {
     data: has('data_upload'),
     master: has('master'),
     target: has('target'),
@@ -117,4 +131,37 @@ export const derivePipelineStepCompletion = (pipeline) => {
     dashboard: Boolean(dashboardState?.deployment_id || dashboardState?.run_id || has('dashboard')),
     reports: Boolean(journeyState?.run_status === 'complete' || dashboardState?.deployment_id),
   };
+  return {
+    ...completion,
+    staleSet,
+  };
+};
+
+export const derivePipelineStepStatuses = (pipeline) => {
+  const manifest = getWorkflowManifest(pipeline);
+  if (manifest && isObject(manifest.steps)) {
+    return MANIFEST_STAGE_KEYS.reduce((acc, key) => {
+      acc[key] = safeLower(manifest.steps?.[key]?.status || 'not_started');
+      return acc;
+    }, {});
+  }
+
+  const { staleSet, ...completion } = deriveLegacyPipelineStepCompletion(pipeline);
+  return MANIFEST_STAGE_KEYS.reduce((acc, key) => {
+    if (staleSet.has(key)) acc[key] = 'invalidated';
+    else if (completion[key]) acc[key] = 'completed';
+    else acc[key] = 'not_started';
+    return acc;
+  }, {});
+};
+
+export const derivePipelineStepCompletion = (pipeline) => {
+  const manifestStatuses = derivePipelineStepStatuses(pipeline);
+  if (Object.keys(manifestStatuses).length > 0 && getWorkflowManifest(pipeline)) {
+    return Object.fromEntries(
+        MANIFEST_STAGE_KEYS.map((key) => [key, manifestStatuses[key] === 'completed'])
+    );
+  }
+  const { staleSet, ...completion } = deriveLegacyPipelineStepCompletion(pipeline);
+  return completion;
 };

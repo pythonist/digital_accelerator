@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -40,6 +40,7 @@ const colors = {
 
 const ToolSelectScreen = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     activeEnv,
     setActiveTool,
@@ -58,6 +59,10 @@ const ToolSelectScreen = () => {
       navigate('/environments');
     }
   }, [activeEnv, navigate]);
+
+  useEffect(() => {
+    setActiveTool((previousTool) => (previousTool == null ? previousTool : null));
+  }, [location.pathname, setActiveTool]);
 
   const tools = useMemo(() => ([
     {

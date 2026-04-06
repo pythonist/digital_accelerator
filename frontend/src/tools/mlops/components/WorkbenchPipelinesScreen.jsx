@@ -37,6 +37,9 @@ import mlopsApi from '../services/mlopsApi';
 import { FCC_THEME as T } from '../theme/fccWorkbenchTheme';
 import {
   derivePipelineStepCompletion,
+  derivePipelineStepStatuses,
+  getManifestStepState,
+  getWorkflowManifest,
   getScreenState,
   upsertScreenState,
 } from '../utils/pipelineState';
@@ -198,6 +201,12 @@ const isFailed = (row) => ['failed', 'error'].includes(statusKey(row));
 const isArchived = (row) => statusKey(row) === 'archived';
 const nextPendingStepLabel = (row) => {
   if (isComplete(row)) return '-';
+  const explicitStatuses = derivePipelineStepStatuses(row || {});
+  const firstOpenStep = historyStepOrder.find((step) => {
+    const status = String(explicitStatuses?.[step] || '').toLowerCase();
+    return status && status !== 'completed';
+  });
+  if (firstOpenStep) return workflowStepLabels[firstOpenStep] || firstOpenStep;
   const current = String(row?.current_step || '').trim().toLowerCase();
   if (current) return workflowStepLabels[current] || row?.current_step_label || current.replace(/_/g, ' ');
   const idx = Math.max(0, Math.min(Number(row?.completed_steps || 0), historyStepOrder.length - 1));
@@ -205,6 +214,12 @@ const nextPendingStepLabel = (row) => {
 };
 const lastCompletedStepLabel = (row) => {
   if (isComplete(row)) return row?.current_step_label || workflowStepLabels[String(row?.current_step || '').trim().toLowerCase()] || 'Reports';
+  const explicitStatuses = derivePipelineStepStatuses(row || {});
+  const completedStages = historyStepOrder.filter((step) => String(explicitStatuses?.[step] || '').toLowerCase() === 'completed');
+  if (completedStages.length > 0) {
+    const stepKey = completedStages[completedStages.length - 1];
+    return workflowStepLabels[stepKey] || stepKey;
+  }
   const completed = Math.max(0, Number(row?.completed_steps || 0) - 1);
   if (completed < 0) return '-';
   const stepKey = historyStepOrder[Math.min(completed, historyStepOrder.length - 1)];
@@ -259,6 +274,10 @@ const WorkbenchPipelinesScreen = ({
   const [cloningPipeline, setCloningPipeline] = useState(false);
   const [archivingPipeline, setArchivingPipeline] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteImpact, setDeleteImpact] = useState(null);
+  const [deleteImpactLoading, setDeleteImpactLoading] = useState(false);
+  const [deleteImpactError, setDeleteImpactError] = useState('');
+  const [deleteSentinelAction, setDeleteSentinelAction] = useState('keep');
   const [renameDialog, setRenameDialog] = useState({ open: false, value: '', saving: false, error: '' });
   const [searchText, setSearchText] = useState('');
   const [scopeFilter, setScopeFilter] = useState('all');
@@ -280,12 +299,14 @@ const WorkbenchPipelinesScreen = ({
   }, [pipelines]);
 
   const effectivePipeline = fullPipeline || selected;
+  const workflowManifest = useMemo(() => getWorkflowManifest(effectivePipeline), [effectivePipeline]);
   const workflowState = effectivePipeline?.workflow_session?.current_state?.mlops_state || {};
   const staleStepSet = useMemo(
     () => new Set((effectivePipeline?.stale_steps || []).map((step) => String(step))),
     [effectivePipeline],
   );
   const completion = useMemo(() => derivePipelineStepCompletion(effectivePipeline || {}), [effectivePipeline]);
+  const explicitStepStatuses = useMemo(() => derivePipelineStepStatuses(effectivePipeline || {}), [effectivePipeline]);
   const filteredPipelines = useMemo(() => {
     return (pipelines || []).filter((row) => {
       const mine = ownerLabel(row).toLowerCase() === String(persona || '').toLowerCase();
@@ -487,14 +508,21 @@ const WorkbenchPipelinesScreen = ({
     const next = {};
     stageOrder.forEach((key) => {
       const stepId = String(stageCatalog[key]?.stepId || key);
-      if (staleStepSet.has(stepId)) next[key] = 'stale';
+      const manifestStatus = String(explicitStepStatuses[stepId] || '').toLowerCase();
+      if (manifestStatus === 'completed') next[key] = 'done';
+      else if (manifestStatus === 'invalidated') next[key] = 'stale';
+      else if (manifestStatus === 'blocked') next[key] = 'blocked';
+      else if (manifestStatus === 'failed') next[key] = 'failed';
+      else if (manifestStatus === 'in_progress') next[key] = 'in_progress';
+      else if (staleStepSet.has(stepId)) next[key] = 'stale';
       else if (stageDetails[key]?.done) next[key] = 'done';
       else next[key] = 'pending';
     });
     return next;
-  }, [stageDetails, stageOrder, staleStepSet]);
+  }, [explicitStepStatuses, stageDetails, stageOrder, staleStepSet]);
 
-  const latestChange = effectivePipeline?.latest_change || null;
+  const latestChange = workflowManifest?.latest_change || effectivePipeline?.latest_change || null;
+  const manifestInconsistencies = Array.isArray(workflowManifest?.inconsistencies) ? workflowManifest.inconsistencies : [];
   const impactedStepLabels = useMemo(() => {
     const impacted = Array.isArray(latestChange?.impacted_steps) ? latestChange.impacted_steps : [];
     return impacted
@@ -813,14 +841,34 @@ const WorkbenchPipelinesScreen = ({
     }
   }, [selected, loadPipelines]);
 
-  const openDeleteDialog = useCallback(() => {
+  const openDeleteDialog = useCallback(async () => {
     if (!selected?.pipeline_id && !selected?.workflow_session_id) return;
+    setDeleteImpact(null);
+    setDeleteImpactError('');
+    setDeleteSentinelAction('keep');
     setDeleteDialogOpen(true);
+    if (selected?.pipeline_id == null) return;
+    setDeleteImpactLoading(true);
+    try {
+      const res = await mlopsApi.pipelineDeleteImpact(selected.pipeline_id);
+      const impact = pick(res) || {};
+      setDeleteImpact(impact);
+      const purgeAllowed = Boolean(impact?.sentinel_purge_allowed);
+      setDeleteSentinelAction(purgeAllowed ? 'purge_imported_queue' : 'keep');
+    } catch (e) {
+      setDeleteImpactError(e?.message || 'Failed to inspect Sentinel impact');
+    } finally {
+      setDeleteImpactLoading(false);
+    }
   }, [selected]);
 
   const closeDeleteDialog = useCallback(() => {
     if (deletingPipeline) return;
     setDeleteDialogOpen(false);
+    setDeleteImpact(null);
+    setDeleteImpactLoading(false);
+    setDeleteImpactError('');
+    setDeleteSentinelAction('keep');
   }, [deletingPipeline]);
 
   const handleDeletePipeline = useCallback(async () => {
@@ -835,14 +883,19 @@ const WorkbenchPipelinesScreen = ({
         const res = await mlopsApi.pipelineDelete(selected.pipeline_id, {
           delete_artifacts: true,
           delete_files: true,
+          sentinel_action: deleteSentinelAction,
         });
         const payload = pick(res) || {};
         const deletedArtifacts = Number(payload?.deleted_artifacts_count || 0);
         const deletedSessions = Number(payload?.deleted_workflow_sessions_count || 0);
+        const sentinelPurged = Number(payload?.sentinel_purged_imports_count || 0);
+        const sentinelMarked = Number(payload?.sentinel_imports_marked?.updated_import_count || 0);
         setMessage(
           `Deleted "${name}"`
           + `${deletedArtifacts ? ` · ${deletedArtifacts} artefact(s) removed` : ''}`
-          + `${deletedSessions ? ` · ${deletedSessions} workflow session(s) cleared` : ''}`,
+          + `${deletedSessions ? ` · ${deletedSessions} workflow session(s) cleared` : ''}`
+          + `${sentinelPurged ? ` · ${sentinelPurged} Sentinel import batch(es) removed` : ''}`
+          + `${!sentinelPurged && sentinelMarked ? ` · ${sentinelMarked} Sentinel import record(s) marked as deleted in FCC` : ''}`,
         );
       } else if (selected?.workflow_session_id) {
         await mlopsApi.deleteWorkflowSession(selected.workflow_session_id);
@@ -858,12 +911,15 @@ const WorkbenchPipelinesScreen = ({
       setSelectedPipelineId('');
       setFullPipeline(null);
       setRunState(null);
+      setDeleteImpact(null);
+      setDeleteImpactError('');
+      setDeleteSentinelAction('keep');
     } catch (e) {
       setError(e?.message || 'Failed to delete pipeline');
     } finally {
       setDeletingPipeline(false);
     }
-  }, [loadPipelines, onPipelineDeleted, selected]);
+  }, [deleteSentinelAction, loadPipelines, onPipelineDeleted, selected]);
 
   const openRenameDialog = useCallback((pipeline = selected) => {
     if (!pipeline) return;
@@ -1429,6 +1485,16 @@ const WorkbenchPipelinesScreen = ({
               )}
             </Alert>
           )}
+          {manifestInconsistencies.length > 0 && (
+            <Alert severity="error" sx={{ mt: 1.5, borderRadius: 0 }}>
+              <Typography sx={{ fontSize: 11.5, color: tone.text, fontWeight: 600 }}>
+                Run consistency issue
+              </Typography>
+              <Typography sx={{ fontSize: 11.5, color: tone.text, mt: 0.4 }}>
+                {manifestInconsistencies[0]?.reason || 'This run has contradictory checkpoint state and should be repaired before resume.'}
+              </Typography>
+            </Alert>
+          )}
         </Paper>
 
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
@@ -1440,7 +1506,7 @@ const WorkbenchPipelinesScreen = ({
               ['Created by', selected ? ownerLabel(selected) : '-'],
               ['Last completed step', selected ? lastCompletedStepLabel(selected) : '-'],
               ['Next pending step', selected ? nextPendingStepLabel(selected) : '-'],
-              ['Resume ready', selected ? (isArchived(selected) ? 'No - archived' : 'Yes') : '-'],
+              ['Resume ready', selected ? (isArchived(selected) ? 'No - archived' : workflowManifest?.resume_ready === false ? 'No - inconsistent' : 'Yes') : '-'],
             ].map(([label, value]) => (
               <Box key={label} sx={{ border: `1px solid ${tone.border}`, bgcolor: '#ffffff', px: 1.1, py: 0.95 }}>
                 <Typography sx={{ fontSize: 10.25, color: tone.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.55 }}>
@@ -1469,6 +1535,11 @@ const WorkbenchPipelinesScreen = ({
                   const visualState = stageVisualStates[key] || 'pending';
                   const done = visualState === 'done';
                   const stale = visualState === 'stale';
+                  const blocked = visualState === 'blocked';
+                  const failed = visualState === 'failed';
+                  const running = visualState === 'in_progress';
+                  const manifestStep = getManifestStepState(effectivePipeline || {}, stage.stepId);
+                  const stepMessage = manifestStep?.invalidated_reason || manifestInconsistencies[0]?.reason || '';
                   return (
                     <React.Fragment key={key}>
                       <Paper
@@ -1477,7 +1548,7 @@ const WorkbenchPipelinesScreen = ({
                             width: { xs: 188, lg: 220 },
                             p: 1.2,
                             borderRadius: 0,
-                          borderColor: stale ? T.warningBorder : done ? T.successBorder : tone.border,
+                          borderColor: failed ? tone.bad : stale ? T.warningBorder : done ? T.successBorder : blocked ? tone.warn : tone.border,
                           bgcolor: '#ffffff',
                           flexShrink: 0,
                         }}
@@ -1488,14 +1559,14 @@ const WorkbenchPipelinesScreen = ({
                           </Typography>
                           <Chip
                             size="small"
-                            label={stale ? 'Needs rerun' : done ? 'Done' : 'Pending'}
+                            label={failed ? 'Failed' : stale ? 'Needs rerun' : done ? 'Done' : blocked ? 'Blocked' : running ? 'In progress' : 'Pending'}
                             sx={{
                               height: 16,
                               fontSize: 9,
                               fontWeight: 700,
                               bgcolor: '#fff',
-                              color: stale ? tone.warn : done ? tone.good : tone.muted,
-                              border: `1px solid ${stale ? tone.warn : done ? tone.good : tone.border}`,
+                              color: failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.muted,
+                              border: `1px solid ${failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.border}`,
                               borderRadius: 0,
                             }}
                           />
@@ -1503,15 +1574,19 @@ const WorkbenchPipelinesScreen = ({
                         <Typography sx={{ fontSize: 10.5, color: tone.muted, minHeight: 32 }}>
                           {stageDetails[key]?.summary || 'No saved details yet'}
                         </Typography>
-                        {stale && (
-                          <Typography sx={{ mt: 0.45, fontSize: 10.25, color: tone.warn, minHeight: 28 }}>
-                            Outdated after an upstream change. Open this step and rerun it.
+                        {(stale || blocked || failed) && (
+                          <Typography sx={{ mt: 0.45, fontSize: 10.25, color: failed ? tone.bad : tone.warn, minHeight: 28 }}>
+                            {stepMessage || (stale
+                              ? 'Outdated after an upstream change. Open this step and rerun it.'
+                              : blocked
+                                ? 'Blocked until required upstream steps are completed.'
+                                : 'This step failed and needs attention before the run can continue.')}
                           </Typography>
                         )}
                         <Button
                           size="small"
                           variant="text"
-                          onClick={() => onOpenStep?.(stage.stepId)}
+                          onClick={() => onOpenStep?.(stage.stepId, selected || effectivePipeline || null)}
                           sx={{ mt: 0.5, px: 0, minWidth: 0, textTransform: 'none', fontSize: 10.5 }}
                         >
                           Open Step
@@ -1551,6 +1626,9 @@ const WorkbenchPipelinesScreen = ({
               const visualState = stageVisualStates[key] || 'pending';
               const done = visualState === 'done';
               const stale = visualState === 'stale';
+              const blocked = visualState === 'blocked';
+              const failed = visualState === 'failed';
+              const running = visualState === 'in_progress';
               return (
                 <Box
                   key={`order_${key}`}
@@ -1576,14 +1654,14 @@ const WorkbenchPipelinesScreen = ({
                   </Typography>
                   <Chip
                     size="small"
-                    label={stale ? 'Needs rerun' : done ? 'Completed' : 'Pending'}
+                    label={failed ? 'Failed' : stale ? 'Needs rerun' : done ? 'Completed' : blocked ? 'Blocked' : running ? 'In progress' : 'Pending'}
                     sx={{
                       height: 18,
                       fontSize: 9.5,
                       fontWeight: 700,
                       bgcolor: '#ffffff',
-                      color: stale ? tone.warn : done ? tone.good : tone.muted,
-                      border: `1px solid ${stale ? tone.warn : done ? tone.good : tone.border}`,
+                      color: failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.muted,
+                      border: `1px solid ${failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.border}`,
                       borderRadius: 0,
                     }}
                   />
@@ -1750,7 +1828,7 @@ const WorkbenchPipelinesScreen = ({
         open={deleteDialogOpen}
         onClose={closeDeleteDialog}
         fullWidth
-        maxWidth="xs"
+        maxWidth="sm"
         PaperProps={{
           sx: {
             borderRadius: 2.5,
@@ -1794,6 +1872,95 @@ const WorkbenchPipelinesScreen = ({
               ? 'This removes the saved pipeline, linked workflow session records, and any generated artefacts tracked against it.'
               : 'This removes the tracked workflow session draft for this run from the FCC run center.'}
           </Typography>
+          {selected?.pipeline_id != null ? (
+            <Stack spacing={1.2} sx={{ mt: 1.75 }}>
+              {deleteImpactLoading ? (
+                <Alert severity="info" sx={{ borderRadius: 1.75 }}>
+                  Checking whether this FCC run was published or imported into Sentinel.
+                </Alert>
+              ) : null}
+              {deleteImpactError ? (
+                <Alert severity="warning" sx={{ borderRadius: 1.75 }}>
+                  {deleteImpactError}
+                </Alert>
+              ) : null}
+              {!deleteImpactLoading && !deleteImpactError && deleteImpact ? (
+                <>
+                  {deleteImpact.state === 'not_published' ? (
+                    <Alert severity="info" sx={{ borderRadius: 1.75 }}>
+                      This FCC run was not published to Sentinel. Deleting it only removes FCC-side data.
+                    </Alert>
+                  ) : null}
+                  {deleteImpact.state === 'published_only' ? (
+                    <Alert severity="info" sx={{ borderRadius: 1.75 }}>
+                      This FCC run was published, but no Sentinel environment has imported it yet.
+                    </Alert>
+                  ) : null}
+                  {deleteImpact.state === 'imported_no_activity' ? (
+                    <Alert severity="warning" sx={{ borderRadius: 1.75 }}>
+                      This FCC run was imported into Sentinel, but no analyst activity was found. You can keep Sentinel for traceability or remove the untouched intake.
+                    </Alert>
+                  ) : null}
+                  {deleteImpact.state === 'imported_with_activity' ? (
+                    <Alert severity="error" sx={{ borderRadius: 1.75 }}>
+                      This FCC run already has downstream Sentinel activity. FCC can be deleted, but Sentinel cases and audit history must be kept.
+                    </Alert>
+                  ) : null}
+                  <Box
+                    sx={{
+                      border: `1px solid ${tone.border}`,
+                      borderRadius: 1.75,
+                      p: 1.5,
+                      bgcolor: '#fff',
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip size="small" label={`${Number(deleteImpact?.published_package_count || 0)} published package(s)`} />
+                      <Chip size="small" label={`${Number(deleteImpact?.linked_import_count || 0)} Sentinel import(s)`} />
+                      <Chip size="small" label={`${Number(deleteImpact?.linked_target_env_count || 0)} target env(s)`} />
+                    </Stack>
+                    {Array.isArray(deleteImpact?.linked_imports) && deleteImpact.linked_imports.length > 0 ? (
+                      <Stack spacing={0.8} sx={{ mt: 1.2 }}>
+                        {deleteImpact.linked_imports.slice(0, 3).map((item) => (
+                          <Box key={`${item.publish_id}-${item.target_env_id}`} sx={{ fontSize: 11.5, color: tone.muted }}>
+                            <strong style={{ color: tone.text }}>{item.target_env_id || 'Sentinel env'}</strong>
+                            {` · ${Number(item.imported_case_count || 0)} case(s) · ${Number(item.imported_alert_count || 0)} alert(s)`}
+                            {item?.analyst_activity?.has_activity ? ' · analyst activity detected' : ' · no analyst activity'}
+                          </Box>
+                        ))}
+                        {deleteImpact.linked_imports.length > 3 ? (
+                          <Typography sx={{ fontSize: 11.5, color: tone.muted }}>
+                            +{deleteImpact.linked_imports.length - 3} more linked import(s)
+                          </Typography>
+                        ) : null}
+                      </Stack>
+                    ) : null}
+                  </Box>
+                  {Number(deleteImpact?.linked_import_count || 0) > 0 ? (
+                    <FormControl fullWidth size="small">
+                      <InputLabel id="fcc-delete-sentinel-action-label">Sentinel handling</InputLabel>
+                      <Select
+                        labelId="fcc-delete-sentinel-action-label"
+                        value={deleteSentinelAction}
+                        label="Sentinel handling"
+                        onChange={(event) => setDeleteSentinelAction(String(event.target.value || 'keep'))}
+                      >
+                        <MenuItem value="keep">
+                          Delete FCC run only and keep Sentinel history
+                        </MenuItem>
+                        <MenuItem
+                          value="purge_imported_queue"
+                          disabled={!Boolean(deleteImpact?.sentinel_purge_allowed)}
+                        >
+                          Delete FCC run and remove untouched Sentinel intake
+                        </MenuItem>
+                      </Select>
+                    </FormControl>
+                  ) : null}
+                </>
+              ) : null}
+            </Stack>
+          ) : null}
         </DialogContent>
         <DialogActions sx={{ px: 2.5, py: 1.75, borderTop: `1px solid ${tone.border}` }}>
           <Button
@@ -1806,7 +1973,7 @@ const WorkbenchPipelinesScreen = ({
           </Button>
           <Button
             onClick={handleDeletePipeline}
-            disabled={deletingPipeline}
+            disabled={deletingPipeline || deleteImpactLoading}
             variant="contained"
             sx={{
               textTransform: 'none',

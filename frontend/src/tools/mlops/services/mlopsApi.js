@@ -230,6 +230,11 @@ const mlopsApi = {
     return apiClient.get(`/api/mlops/pipeline/${pipelineId}`);
   },
 
+  /** Fetch the canonical workflow manifest for one FCC run. */
+  pipelineManifest: async (pipelineId) => {
+    return apiClient.get(`/api/mlops/pipeline/${pipelineId}/manifest`);
+  },
+
   /** Rename one saved pipeline without creating a duplicate. */
   pipelineRename: async (pipelineId, name) => {
     return apiClient.post(`/api/mlops/pipeline/${pipelineId}/rename`, { name });
@@ -251,6 +256,11 @@ const mlopsApi = {
   },
 
   /** Delete one pipeline and (optionally) its generated artefacts. */
+  pipelineDeleteImpact: async (pipelineId) => {
+    return apiClient.get(`/api/mlops/pipeline/${pipelineId}/delete-impact`);
+  },
+
+  /** Delete one pipeline and (optionally) its generated artefacts. */
   pipelineDelete: async (pipelineId, options = {}) => {
     const params = new URLSearchParams();
     if (Object.prototype.hasOwnProperty.call(options, 'delete_artifacts')) {
@@ -258,6 +268,9 @@ const mlopsApi = {
     }
     if (Object.prototype.hasOwnProperty.call(options, 'delete_files')) {
       params.set('delete_files', options.delete_files ? '1' : '0');
+    }
+    if (Object.prototype.hasOwnProperty.call(options, 'sentinel_action')) {
+      params.set('sentinel_action', String(options.sentinel_action || 'keep'));
     }
     const qs = params.toString();
     return apiClient.delete(`/api/mlops/pipeline/${pipelineId}${qs ? `?${qs}` : ''}`);

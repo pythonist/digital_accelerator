@@ -858,6 +858,40 @@ class FCCSentinelBridgeService:
         "fcc_scored_entities": "record_id",
     }
 
+    IMPORT_ACTIVITY_TABLES = (
+        "case_resolution_workspaces",
+        "case_resolution_support",
+        "case_queue",
+        "case_status_history",
+        "case_escalations",
+        "mail_logs",
+        "report_history",
+        "generated_reports",
+        "mail_inbox_messages",
+    )
+
+    CASE_ID_FALLBACK_TABLES = (
+        "cases",
+        "master_case_summary",
+        "master_cleaned_data",
+        "case_resolution_workspaces",
+        "case_resolution_support",
+        "case_queue",
+        "case_status_history",
+        "case_escalations",
+        "mail_logs",
+        "report_history",
+        "generated_reports",
+        "active_case_scope",
+    )
+
+    ALERT_ID_FALLBACK_TABLES = (
+        "alerts",
+        "focus_results",
+        "investigation_risk_index",
+        "fcc_scored_entities",
+    )
+
     CORE_REPLACE_TABLES = (
         "alerts",
         "transactions",
@@ -922,12 +956,15 @@ class FCCSentinelBridgeService:
             except Exception:
                 return None
 
-    def _table_has_rows(self, cursor, table_name: str) -> bool:
+    def _table_exists(self, cursor, table_name: str) -> bool:
         cursor.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             (str(table_name),),
         )
-        if cursor.fetchone() is None:
+        return cursor.fetchone() is not None
+
+    def _table_has_rows(self, cursor, table_name: str) -> bool:
+        if not self._table_exists(cursor, table_name):
             return False
         try:
             cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
@@ -935,6 +972,185 @@ class FCCSentinelBridgeService:
             return int((row[0] if row else 0) or 0) > 0
         except Exception:
             return True
+
+    def _table_columns(self, cursor, table_name: str) -> List[str]:
+        if not self._table_exists(cursor, table_name):
+            return []
+        try:
+            cursor.execute(f'PRAGMA table_info("{table_name}")')
+            return [str(row[1]) for row in cursor.fetchall() if row and len(row) > 1]
+        except Exception:
+            return []
+
+    def _ensure_bridge_import_columns(self, cursor) -> None:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS fcc_bridge_imports (
+                import_id TEXT PRIMARY KEY,
+                publish_id TEXT,
+                source_env_id TEXT,
+                target_env_id TEXT,
+                imported_at TEXT,
+                run_id TEXT,
+                deployment_id TEXT,
+                pipeline_id TEXT,
+                pipeline_name TEXT,
+                publish_label TEXT,
+                imported_rows INTEGER,
+                replace_existing INTEGER,
+                merge_existing INTEGER,
+                prepare_investigation_context INTEGER,
+                context_profile TEXT
+            )
+            """
+        )
+        cursor.execute("PRAGMA table_info(fcc_bridge_imports)")
+        existing_cols = {str(row[1]) for row in cursor.fetchall()}
+        for col_name, col_type in (
+            ("pipeline_id", "TEXT"),
+            ("pipeline_name", "TEXT"),
+            ("publish_label", "TEXT"),
+            ("merge_existing", "INTEGER"),
+            ("prepare_investigation_context", "INTEGER"),
+            ("context_profile", "TEXT"),
+            ("source_pipeline_deleted", "INTEGER"),
+            ("source_pipeline_deleted_at", "TEXT"),
+            ("source_pipeline_deleted_reason", "TEXT"),
+        ):
+            if col_name not in existing_cols:
+                cursor.execute(f'ALTER TABLE fcc_bridge_imports ADD COLUMN "{col_name}" {col_type}')
+
+    def _read_publish_table(self, publish_id: str, table_name: str) -> pd.DataFrame:
+        table_path = self._publish_dir(publish_id) / f"{table_name}.json"
+        if not table_path.exists():
+            return pd.DataFrame()
+        try:
+            payload = json.loads(table_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = []
+        return _records_to_df(payload if isinstance(payload, list) else [])
+
+    def _collect_publish_keys(self, publish_id: str) -> Dict[str, List[str]]:
+        def _values(df: pd.DataFrame, column: str) -> List[str]:
+            if df.empty or column not in df.columns:
+                return []
+            return [
+                str(value).strip()
+                for value in df[column].dropna().astype(str).tolist()
+                if str(value).strip()
+            ]
+
+        cases_df = self._read_publish_table(publish_id, "cases")
+        alerts_df = self._read_publish_table(publish_id, "alerts")
+        return {
+            "case_ids": _values(cases_df, "case_id"),
+            "alert_ids": _values(alerts_df, "alert_id"),
+        }
+
+    def _count_matching_rows(
+        self,
+        cursor,
+        table_name: str,
+        *,
+        publish_id: Optional[str] = None,
+        case_ids: Optional[List[str]] = None,
+        alert_ids: Optional[List[str]] = None,
+    ) -> int:
+        if not self._table_exists(cursor, table_name):
+            return 0
+        columns = set(self._table_columns(cursor, table_name))
+        clauses: List[str] = []
+        params: List[Any] = []
+        if publish_id and "fcc_publish_id" in columns:
+            clauses.append('"fcc_publish_id" = ?')
+            params.append(str(publish_id))
+        if case_ids and "case_id" in columns:
+            placeholders = ",".join(["?"] * len(case_ids))
+            clauses.append(f'"case_id" IN ({placeholders})')
+            params.extend(case_ids)
+        if alert_ids and "alert_id" in columns:
+            placeholders = ",".join(["?"] * len(alert_ids))
+            clauses.append(f'"alert_id" IN ({placeholders})')
+            params.extend(alert_ids)
+        if not clauses:
+            return 0
+        try:
+            cursor.execute(
+                f'SELECT COUNT(*) FROM "{table_name}" WHERE ' + " OR ".join(clauses),
+                params,
+            )
+            row = cursor.fetchone()
+            return int((row[0] if row else 0) or 0)
+        except Exception:
+            return 0
+
+    def _delete_matching_rows(
+        self,
+        cursor,
+        table_name: str,
+        *,
+        publish_id: Optional[str] = None,
+        case_ids: Optional[List[str]] = None,
+        alert_ids: Optional[List[str]] = None,
+    ) -> int:
+        if not self._table_exists(cursor, table_name):
+            return 0
+        columns = set(self._table_columns(cursor, table_name))
+        clauses: List[str] = []
+        params: List[Any] = []
+        if publish_id and "fcc_publish_id" in columns:
+            clauses.append('"fcc_publish_id" = ?')
+            params.append(str(publish_id))
+        elif table_name in self.CASE_ID_FALLBACK_TABLES and case_ids and "case_id" in columns:
+            placeholders = ",".join(["?"] * len(case_ids))
+            clauses.append(f'"case_id" IN ({placeholders})')
+            params.extend(case_ids)
+        elif table_name in self.ALERT_ID_FALLBACK_TABLES and alert_ids and "alert_id" in columns:
+            placeholders = ",".join(["?"] * len(alert_ids))
+            clauses.append(f'"alert_id" IN ({placeholders})')
+            params.extend(alert_ids)
+        if not clauses:
+            return 0
+        try:
+            cursor.execute(
+                f'SELECT COUNT(*) FROM "{table_name}" WHERE ' + " OR ".join(clauses),
+                params,
+            )
+            before = int(((cursor.fetchone() or [0])[0]) or 0)
+            if before <= 0:
+                return 0
+            cursor.execute(
+                f'DELETE FROM "{table_name}" WHERE ' + " OR ".join(clauses),
+                params,
+            )
+            return before
+        except Exception:
+            return 0
+
+    def _summarize_import_activity(
+        self,
+        cursor,
+        *,
+        publish_id: str,
+        case_ids: List[str],
+        alert_ids: List[str],
+    ) -> Dict[str, Any]:
+        table_counts = {
+            table_name: self._count_matching_rows(
+                cursor,
+                table_name,
+                publish_id=publish_id,
+                case_ids=case_ids,
+                alert_ids=alert_ids,
+            )
+            for table_name in self.IMPORT_ACTIVITY_TABLES
+        }
+        total_rows = int(sum(int(value or 0) for value in table_counts.values()))
+        return {
+            "has_activity": total_rows > 0,
+            "total_rows": total_rows,
+            "tables": table_counts,
+        }
 
     def _existing_target_tables(self, cursor) -> List[str]:
         populated_tables: List[str] = []
@@ -1227,39 +1443,7 @@ class FCCSentinelBridgeService:
                 else:
                     _prepare_sqlite_df(scored_df).to_sql("fcc_scored_entities", conn, if_exists="replace", index=False)
 
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS fcc_bridge_imports (
-                    import_id TEXT PRIMARY KEY,
-                    publish_id TEXT,
-                    source_env_id TEXT,
-                    target_env_id TEXT,
-                    imported_at TEXT,
-                    run_id TEXT,
-                    deployment_id TEXT,
-                    pipeline_id TEXT,
-                    pipeline_name TEXT,
-                    publish_label TEXT,
-                    imported_rows INTEGER,
-                    replace_existing INTEGER,
-                    merge_existing INTEGER,
-                    prepare_investigation_context INTEGER,
-                    context_profile TEXT
-                )
-                """
-            )
-            cursor.execute("PRAGMA table_info(fcc_bridge_imports)")
-            existing_cols = {str(row[1]) for row in cursor.fetchall()}
-            for col_name, col_type in (
-                ("pipeline_id", "TEXT"),
-                ("pipeline_name", "TEXT"),
-                ("publish_label", "TEXT"),
-                ("merge_existing", "INTEGER"),
-                ("prepare_investigation_context", "INTEGER"),
-                ("context_profile", "TEXT"),
-            ):
-                if col_name not in existing_cols:
-                    cursor.execute(f'ALTER TABLE fcc_bridge_imports ADD COLUMN "{col_name}" {col_type}')
+            self._ensure_bridge_import_columns(cursor)
             cursor.execute(
                 """
                 INSERT INTO fcc_bridge_imports
@@ -1334,6 +1518,303 @@ class FCCSentinelBridgeService:
                 "published_case_count_match_imported_cases": int((manifest.get("table_counts") or {}).get("cases") or 0) == int(len(tables.get("cases", pd.DataFrame()).index)),
                 "published_alert_count_match_imported_alerts": int((manifest.get("table_counts") or {}).get("alerts") or 0) == int(len(tables.get("alerts", pd.DataFrame()).index)),
             },
+            "focus_result": focus_result,
+        }
+
+    def inspect_pipeline_delete_impact(
+        self,
+        *,
+        tenant_id: str,
+        pipeline_id: str | int,
+    ) -> Dict[str, Any]:
+        pipeline_text = str(pipeline_id or "").strip()
+        pipeline_name = None
+        try:
+            mlops_db_path = self.env_root / "mlops" / "duckdb" / "mlops.duckdb"
+            with duckdb.connect(str(mlops_db_path), read_only=True) as conn:
+                row = conn.execute(
+                    "SELECT name FROM mlops_pipelines WHERE pipeline_id = ? LIMIT 1",
+                    [int(pipeline_text)],
+                ).fetchone()
+                if row:
+                    pipeline_name = str(row[0] or "").strip() or None
+        except Exception:
+            pipeline_name = None
+
+        published_runs = [
+            manifest
+            for manifest in self.list_published_runs()
+            if str(manifest.get("pipeline_id") or "").strip() == pipeline_text
+        ]
+        imports: List[Dict[str, Any]] = []
+        env_parent = self.env_root.parent
+        for env_root in sorted(env_parent.iterdir(), key=lambda path: path.name.lower()):
+            if not env_root.is_dir() or env_root.name == self.env_root.name:
+                continue
+            target_db_path = _resolve_target_db_path(env_root)
+            if not target_db_path.exists():
+                continue
+            db_manager = DatabaseManager(str(target_db_path))
+            conn = db_manager.connect()
+            try:
+                cursor = conn.cursor()
+                if not self._table_exists(cursor, "fcc_bridge_imports"):
+                    continue
+                self._ensure_bridge_import_columns(cursor)
+                rows = cursor.execute(
+                    """
+                    SELECT import_id, publish_id, source_env_id, target_env_id, imported_at,
+                           run_id, deployment_id, pipeline_id, pipeline_name, publish_label,
+                           imported_rows, replace_existing, merge_existing,
+                           source_pipeline_deleted, source_pipeline_deleted_at
+                    FROM fcc_bridge_imports
+                    WHERE source_env_id = ? AND pipeline_id = ?
+                    ORDER BY imported_at DESC
+                    """,
+                    [self.env_root.name, pipeline_text],
+                ).fetchall()
+                for row in rows:
+                    publish_id = str(row[1] or "").strip()
+                    keys = self._collect_publish_keys(publish_id) if publish_id else {"case_ids": [], "alert_ids": []}
+                    case_ids = keys.get("case_ids") or []
+                    alert_ids = keys.get("alert_ids") or []
+                    activity = self._summarize_import_activity(
+                        cursor,
+                        publish_id=publish_id,
+                        case_ids=case_ids,
+                        alert_ids=alert_ids,
+                    )
+                    imports.append(
+                        {
+                            "import_id": str(row[0] or "").strip(),
+                            "publish_id": publish_id,
+                            "source_env_id": str(row[2] or "").strip(),
+                            "target_env_id": str(row[3] or env_root.name).strip() or env_root.name,
+                            "imported_at": row[4],
+                            "run_id": str(row[5] or "").strip() or None,
+                            "deployment_id": str(row[6] or "").strip() or None,
+                            "pipeline_id": str(row[7] or "").strip() or pipeline_text,
+                            "pipeline_name": str(row[8] or "").strip() or pipeline_name,
+                            "publish_label": str(row[9] or "").strip() or None,
+                            "imported_rows": int(row[10] or 0),
+                            "replace_existing": bool(row[11]),
+                            "merge_existing": bool(row[12]),
+                            "source_pipeline_deleted": bool(row[13]),
+                            "source_pipeline_deleted_at": row[14],
+                            "imported_case_count": int(
+                                self._count_matching_rows(
+                                    cursor,
+                                    "cases",
+                                    publish_id=publish_id,
+                                    case_ids=case_ids,
+                                )
+                            ),
+                            "imported_alert_count": int(
+                                self._count_matching_rows(
+                                    cursor,
+                                    "alerts",
+                                    publish_id=publish_id,
+                                    alert_ids=alert_ids,
+                                )
+                            ),
+                            "analyst_activity": activity,
+                            "purge_allowed": not bool(activity.get("has_activity")),
+                        }
+                    )
+            finally:
+                db_manager.close_connection(conn)
+
+        has_published = bool(published_runs)
+        has_imports = bool(imports)
+        has_activity = any(bool(item.get("analyst_activity", {}).get("has_activity")) for item in imports)
+        if not has_published and not has_imports:
+            state = "not_published"
+        elif has_published and not has_imports:
+            state = "published_only"
+        elif has_imports and not has_activity:
+            state = "imported_no_activity"
+        else:
+            state = "imported_with_activity"
+
+        return {
+            "pipeline_id": pipeline_text,
+            "pipeline_name": pipeline_name,
+            "source_env_id": self.env_root.name,
+            "state": state,
+            "published_package_count": len(published_runs),
+            "published_packages": [
+                {
+                    "publish_id": str(item.get("publish_id") or "").strip(),
+                    "publish_label": item.get("publish_label"),
+                    "published_at": item.get("published_at"),
+                    "published_rows": int(item.get("published_rows") or 0),
+                    "published_case_count": int((item.get("table_counts") or {}).get("cases") or 0),
+                }
+                for item in published_runs
+            ],
+            "linked_import_count": len(imports),
+            "linked_target_env_count": len({str(item.get("target_env_id") or "").strip() for item in imports if str(item.get("target_env_id") or "").strip()}),
+            "linked_imports": imports,
+            "has_analyst_activity": has_activity,
+            "sentinel_purge_allowed": has_imports and not has_activity,
+        }
+
+    def mark_source_pipeline_deleted(
+        self,
+        *,
+        tenant_id: str,
+        pipeline_id: str | int,
+        reason: str = "deleted_from_fcc",
+    ) -> Dict[str, Any]:
+        pipeline_text = str(pipeline_id or "").strip()
+        updated_imports = 0
+        updated_envs: List[str] = []
+        env_parent = self.env_root.parent
+        for env_root in sorted(env_parent.iterdir(), key=lambda path: path.name.lower()):
+            if not env_root.is_dir():
+                continue
+            target_db_path = _resolve_target_db_path(env_root)
+            if not target_db_path.exists():
+                continue
+            db_manager = DatabaseManager(str(target_db_path))
+            conn = db_manager.connect()
+            try:
+                cursor = conn.cursor()
+                if not self._table_exists(cursor, "fcc_bridge_imports"):
+                    continue
+                self._ensure_bridge_import_columns(cursor)
+                cursor.execute(
+                    """
+                    UPDATE fcc_bridge_imports
+                    SET source_pipeline_deleted = 1,
+                        source_pipeline_deleted_at = ?,
+                        source_pipeline_deleted_reason = ?
+                    WHERE source_env_id = ? AND pipeline_id = ?
+                    """,
+                    [_now_iso(), str(reason or "deleted_from_fcc"), self.env_root.name, pipeline_text],
+                )
+                changed = int(cursor.rowcount or 0)
+                if changed > 0:
+                    conn.commit()
+                    updated_imports += changed
+                    updated_envs.append(env_root.name)
+            finally:
+                db_manager.close_connection(conn)
+        return {
+            "success": True,
+            "pipeline_id": pipeline_text,
+            "updated_import_count": updated_imports,
+            "updated_envs": updated_envs,
+        }
+
+    def purge_imported_run(
+        self,
+        *,
+        publish_id: str,
+        tenant_id: str,
+        target_env_id: str,
+        require_no_activity: bool = True,
+    ) -> Dict[str, Any]:
+        publish_text = str(publish_id or "").strip()
+        if not publish_text:
+            raise ValueError("publish_id is required")
+
+        target_env_root = resolve_env_root(target_env_id, tenant_id, create_if_missing=True)
+        target_db_path = _resolve_target_db_path(target_env_root)
+        db_manager = DatabaseManager(str(target_db_path))
+        db_manager.init_schema()
+        keys = self._collect_publish_keys(publish_text)
+        case_ids = keys.get("case_ids") or []
+        alert_ids = keys.get("alert_ids") or []
+
+        deleted_rows: Dict[str, int] = {}
+        conn = db_manager.connect()
+        try:
+            cursor = conn.cursor()
+            if require_no_activity:
+                activity = self._summarize_import_activity(
+                    cursor,
+                    publish_id=publish_text,
+                    case_ids=case_ids,
+                    alert_ids=alert_ids,
+                )
+                if activity.get("has_activity"):
+                    raise ValueError(
+                        "Sentinel investigation activity already exists for this FCC publish. Keep the Sentinel record and delete FCC only."
+                    )
+
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+            table_names = [str(row[0]) for row in cursor.fetchall() if row and row[0]]
+            for table_name in table_names:
+                if table_name == "fcc_bridge_imports":
+                    continue
+                deleted_count = self._delete_matching_rows(
+                    cursor,
+                    table_name,
+                    publish_id=publish_text,
+                    case_ids=case_ids,
+                    alert_ids=alert_ids,
+                )
+                if deleted_count > 0:
+                    deleted_rows[table_name] = int(deleted_count)
+
+            if self._table_exists(cursor, "active_case_scope") and case_ids:
+                try:
+                    row = cursor.execute(
+                        "SELECT case_ids FROM active_case_scope WHERE id = 1"
+                    ).fetchone()
+                    existing_case_ids = json.loads(str((row or [None])[0] or "[]"))
+                    if isinstance(existing_case_ids, list):
+                        remove_set = set(case_ids)
+                        remaining_case_ids = [str(value) for value in existing_case_ids if str(value) not in remove_set]
+                        if remaining_case_ids != existing_case_ids:
+                            cursor.execute(
+                                """
+                                UPDATE active_case_scope
+                                SET case_ids = ?, scope_value = ?, updated_at = CURRENT_TIMESTAMP
+                                WHERE id = 1
+                                """,
+                                [
+                                    json.dumps(remaining_case_ids, default=str),
+                                    json.dumps(remaining_case_ids, default=str),
+                                ],
+                            )
+                except Exception:
+                    pass
+
+            if self._table_exists(cursor, "fcc_bridge_imports"):
+                self._ensure_bridge_import_columns(cursor)
+                cursor.execute('DELETE FROM "fcc_bridge_imports" WHERE publish_id = ?', [publish_text])
+                bridge_import_rows = int(cursor.rowcount or 0)
+                if bridge_import_rows > 0:
+                    deleted_rows["fcc_bridge_imports"] = bridge_import_rows
+            conn.commit()
+        finally:
+            db_manager.close_connection(conn)
+
+        focus_result = None
+        conn = db_manager.connect()
+        try:
+            cursor = conn.cursor()
+            alerts_remaining = self._count_matching_rows(cursor, "alerts")
+        finally:
+            db_manager.close_connection(conn)
+        if alerts_remaining > 0:
+            try:
+                focus_engine = FocusEngine(db_manager)
+                focus_result = focus_engine.run_focus_job()
+            except Exception as exc:
+                focus_result = {"success": False, "error": str(exc)}
+
+        return {
+            "success": True,
+            "publish_id": publish_text,
+            "target_env_id": target_env_id,
+            "deleted_rows_by_table": deleted_rows,
+            "deleted_case_count": len(case_ids),
+            "deleted_alert_count": len(alert_ids),
             "focus_result": focus_result,
         }
 

@@ -35,6 +35,50 @@ const chooseChampion = (runs) => {
   }, runs[0]);
 };
 
+const deriveSuppressionRate = (run) => {
+  const direct = run?.metrics?.suppression_rate_pct ?? run?.suppression_rate_pct;
+  if (direct != null && Number.isFinite(Number(direct))) return Number(direct);
+
+  const thresholdTable = Array.isArray(run?.threshold_table)
+    ? run.threshold_table
+    : Array.isArray(run?.metrics?.threshold_table)
+      ? run.metrics.threshold_table
+      : [];
+  const threshold = run?.metrics?.optimal_threshold ?? run?.optimal_threshold ?? run?.selected_threshold ?? run?.threshold;
+  if (thresholdTable.length && Number.isFinite(Number(threshold))) {
+    const matchedRow = thresholdTable.find((row) => Number(row?.threshold) === Number(threshold));
+    const tableRate = matchedRow?.suppression_rate_pct ?? matchedRow?.suppression_rate;
+    if (tableRate != null && Number.isFinite(Number(tableRate))) return Number(tableRate);
+  }
+
+  const cm = run?.confusion_matrix || run?.metrics?.confusion_matrix;
+  const tn = Number(cm?.[0]?.[0] ?? 0);
+  const fp = Number(cm?.[0]?.[1] ?? 0);
+  const fn = Number(cm?.[1]?.[0] ?? 0);
+  const tp = Number(cm?.[1]?.[1] ?? 0);
+  const total = tn + fp + fn + tp;
+  if (total > 0) {
+    return ((tn + fn) / total) * 100;
+  }
+
+  return null;
+};
+
+const deriveEventLoss = (run) => {
+  const direct = run?.metrics?.event_loss_pct ?? run?.event_loss_pct;
+  if (direct != null && Number.isFinite(Number(direct))) return Number(direct);
+
+  const cm = run?.confusion_matrix || run?.metrics?.confusion_matrix;
+  const fn = Number(cm?.[1]?.[0] ?? 0);
+  const tp = Number(cm?.[1]?.[1] ?? 0);
+  const totalEvents = fn + tp;
+  if (totalEvents > 0) {
+    return (fn / totalEvents) * 100;
+  }
+
+  return null;
+};
+
 const OverviewTab = ({
   summary,
   runs,
@@ -47,13 +91,25 @@ const OverviewTab = ({
   const champion = summary?.champion || chooseChampion(runs);
   const active = activeModel || (runs?.[0] || null);
   const activeMetrics = active?.metrics || {};
-  const activeHealth = healthScore(activeMetrics);
+  const activeSuppressionRate = deriveSuppressionRate(active);
+  const activeEventLoss = deriveEventLoss(active);
+  const activeHealth = healthScore({
+    ...activeMetrics,
+    event_loss_pct: activeEventLoss ?? activeMetrics.event_loss_pct,
+  });
   const recommended = chooseChampion(runs);
+  const activeEventLossTone = activeEventLoss == null
+    ? 'warn'
+    : activeEventLoss <= 5
+      ? 'good'
+      : activeEventLoss <= 8
+        ? 'warn'
+        : 'bad';
 
   const ringCards = [
     { label: 'ROC-AUC', value: activeMetrics.roc_auc, tone: activeMetrics.roc_auc >= 0.8 ? 'good' : activeMetrics.roc_auc >= 0.7 ? 'warn' : 'bad' },
     { label: 'F1 Score', value: activeMetrics.f1, tone: activeMetrics.f1 >= 0.75 ? 'good' : activeMetrics.f1 >= 0.6 ? 'warn' : 'bad' },
-    { label: 'Event Loss %', value: activeMetrics.event_loss_pct ?? active?.event_loss_pct, max: 10, tone: (activeMetrics.event_loss_pct ?? active?.event_loss_pct) <= 5 ? 'good' : (activeMetrics.event_loss_pct ?? active?.event_loss_pct) <= 8 ? 'warn' : 'bad', format: (v) => num(v, 2) },
+    { label: 'Event Loss %', value: activeEventLoss, max: 10, tone: activeEventLossTone, format: (v) => num(v, 2) },
   ];
 
   const algorithmMix = useMemo(() => {
@@ -108,7 +164,7 @@ const OverviewTab = ({
           <Box sx={{ mt: 2 }}>
             <SectionTitle icon={<Stars sx={{ fontSize: 16, color: V.orange }} />} title="KPI Bar" subtitle="Operational mix for the active model" />
             <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-              <KpiBar label="Suppression Rate" value={activeMetrics.suppression_rate_pct ?? active?.suppression_rate_pct} max={100} format={(v) => pct(v, 1)} />
+              <KpiBar label="Suppression Rate" value={activeSuppressionRate} max={100} format={(v) => pct(v, 1)} />
               <KpiBar label="Recall" value={activeMetrics.recall} max={1} />
               <KpiBar label="Precision" value={activeMetrics.precision} max={1} />
               <KpiBar label="Balanced Accuracy" value={activeMetrics.balanced_accuracy} max={1} />

@@ -1727,7 +1727,10 @@ const FeatureGovernanceWorkbench = ({
               gap: 1.5,
               gridTemplateColumns: isBusinessView
                 ? '1fr'
-                : { xs: '1fr', xl: 'minmax(420px, 0.95fr) minmax(760px, 1.45fr)' },
+                : '1fr',
+              '@media (min-width: 1880px)': isBusinessView
+                ? {}
+                : { gridTemplateColumns: 'minmax(420px, 0.95fr) minmax(760px, 1.45fr)' },
               alignItems: 'stretch',
             }}
           >

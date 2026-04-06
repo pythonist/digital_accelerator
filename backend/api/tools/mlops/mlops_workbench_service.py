@@ -14,8 +14,9 @@ import duckdb
 import numpy as np
 import pandas as pd
 from api.tools.mlops.duckdb_manager import get_connection
-from api.tools.mlops.path_utils import resolve_data_file_path
+from api.tools.mlops.path_utils import resolve_data_file_path, resolve_env_root
 from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
+from services.fcc_sentinel_bridge import FCCSentinelBridgeService
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,34 @@ _DEPENDENCY_SOURCE_LABELS = {
     "validation": "validation settings",
     "registry": "registry decision",
     "ready": "deployment readiness settings",
+}
+
+_STEP_DEPENDENCIES = {
+    "data": (),
+    "master": ("data",),
+    "target": ("master",),
+    "eda": ("master",),
+    "preprocess": ("master", "target"),
+    "model": ("preprocess",),
+    "validation": ("model",),
+    "registry": ("validation",),
+    "ready": ("registry",),
+    "dashboard": ("ready",),
+    "reports": ("dashboard",),
+}
+
+_STEP_TO_SCREEN = {
+    "data": "data_upload",
+    "master": "master",
+    "target": "target",
+    "eda": "eda",
+    "preprocess": "preprocess",
+    "model": "model",
+    "validation": "validation",
+    "registry": "registry",
+    "ready": "ready",
+    "dashboard": "dashboard",
+    "reports": "reports",
 }
 
 
@@ -733,6 +762,502 @@ def _progress_summary_from_steps(steps: List[Dict], status: Optional[str] = None
         "stale_steps": stale_summary["stale_steps"],
         "stale_details": stale_summary["stale_details"],
         "latest_change": stale_summary["latest_change"],
+    }
+
+
+def _workflow_step_event_map(step_events: Any) -> Dict[str, Dict[str, Any]]:
+    latest_by_step: Dict[str, Dict[str, Any]] = {}
+    for event in (step_events or []):
+        row = event if isinstance(event, dict) else {}
+        step_id = _normalize_text(row.get("step_id") or row.get("screen"))
+        if not step_id:
+            continue
+        latest_by_step.setdefault(step_id, row)
+    return latest_by_step
+
+
+def _workflow_pipeline_assets_by_stage(asset_links: Any) -> Dict[str, List[Dict[str, Any]]]:
+    assets_by_stage: Dict[str, List[Dict[str, Any]]] = {}
+    for asset in (asset_links or []):
+        row = asset if isinstance(asset, dict) else {}
+        stage = _normalize_text(row.get("stage")).lower()
+        if not stage:
+            continue
+        assets_by_stage.setdefault(stage, []).append(row)
+    return assets_by_stage
+
+
+def _workflow_positive_int(*values: Any) -> Optional[int]:
+    for value in values:
+        try:
+            parsed = int(value)
+            if parsed > 0:
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _workflow_first_text(*values: Any) -> str:
+    for value in values:
+        text = _normalize_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _workflow_first_dict(*values: Any) -> Dict[str, Any]:
+    for value in values:
+        if isinstance(value, dict) and value:
+            return value
+    return {}
+
+
+def _workflow_state_container(session: Optional[Dict[str, Any]], key: str) -> Dict[str, Any]:
+    if not isinstance(session, dict):
+        return {}
+    current_state = session.get("current_state") if isinstance(session.get("current_state"), dict) else {}
+    last_stable_state = session.get("last_stable_state") if isinstance(session.get("last_stable_state"), dict) else {}
+    if key == "current":
+        return current_state.get("mlops_state") if isinstance(current_state.get("mlops_state"), dict) else {}
+    if key == "stable":
+        return last_stable_state.get("mlops_state") if isinstance(last_stable_state.get("mlops_state"), dict) else {}
+    return {}
+
+
+def _workflow_step_completed(
+    step_key: str,
+    *,
+    record: Dict[str, Any],
+    screen_states: Dict[str, Dict[str, Any]],
+    session: Optional[Dict[str, Any]],
+) -> bool:
+    current_mlops_state = _workflow_state_container(session, "current")
+    stable_mlops_state = _workflow_state_container(session, "stable")
+    screen_key = _STEP_TO_SCREEN.get(step_key, step_key)
+    screen_state = screen_states.get(screen_key) or {}
+    if _screen_state_is_completed(screen_state):
+        return True
+
+    if step_key == "data":
+        return bool(
+            _workflow_positive_int(current_mlops_state.get("datasets_count"), stable_mlops_state.get("datasets_count"))
+            or current_mlops_state.get("datasets")
+            or stable_mlops_state.get("datasets")
+            or record.get("dataset_ids")
+            or record.get("dataset_id")
+        )
+
+    if step_key == "master":
+        return bool(
+            _workflow_positive_int(
+                screen_state.get("builtMasterDatasetId"),
+                current_mlops_state.get("master_dataset_id"),
+                stable_mlops_state.get("master_dataset_id"),
+                (current_mlops_state.get("master_dataset") or {}).get("dataset_id"),
+                (stable_mlops_state.get("master_dataset") or {}).get("dataset_id"),
+            )
+        )
+
+    if step_key == "target":
+        return bool(
+            _workflow_first_text(
+                screen_state.get("currentTargetColumn"),
+                screen_state.get("selectedTargetColumn"),
+                current_mlops_state.get("target_column"),
+                stable_mlops_state.get("target_column"),
+            )
+        )
+
+    if step_key == "eda":
+        return bool(
+            current_mlops_state.get("eda_completed")
+            or stable_mlops_state.get("eda_completed")
+            or screen_state.get("completed")
+            or screen_state.get("done")
+        )
+
+    if step_key == "preprocess":
+        return bool(
+            _workflow_positive_int(
+                screen_state.get("preprocessedDatasetId"),
+                current_mlops_state.get("preprocess_dataset_id"),
+                stable_mlops_state.get("preprocess_dataset_id"),
+                (current_mlops_state.get("preprocess_dataset") or {}).get("dataset_id"),
+                (stable_mlops_state.get("preprocess_dataset") or {}).get("dataset_id"),
+            )
+        )
+
+    if step_key == "model":
+        return bool(
+            _workflow_first_text(
+                _screen_job_id(screen_states, "model"),
+                _extract_nested_identifier(current_mlops_state.get("active_model_run"), ("job_id", "run_id")),
+                _extract_nested_identifier(stable_mlops_state.get("active_model_run"), ("job_id", "run_id")),
+                record.get("run_id"),
+            )
+        )
+
+    if step_key == "validation":
+        return bool(
+            _workflow_first_text(
+                _screen_job_id(screen_states, "validation"),
+                _extract_nested_identifier(current_mlops_state.get("validation_report"), ("job_id", "run_id", "report_id")),
+                _extract_nested_identifier(stable_mlops_state.get("validation_report"), ("job_id", "run_id", "report_id")),
+            )
+        )
+
+    if step_key == "registry":
+        return bool(
+            _workflow_first_text(
+                _screen_job_id(screen_states, "registry"),
+                _screen_deployment_id(screen_states, "registry"),
+                _extract_nested_identifier(current_mlops_state.get("registry_entry"), ("deployment_id", "job_id", "run_id")),
+                _extract_nested_identifier(stable_mlops_state.get("registry_entry"), ("deployment_id", "job_id", "run_id")),
+            )
+        )
+
+    if step_key == "ready":
+        return bool(
+            _workflow_first_text(
+                _screen_deployment_id(screen_states, "ready"),
+                _screen_deployment_id(screen_states, "registry"),
+                _workflow_first_text(
+                    current_mlops_state.get("deployment_id"),
+                    stable_mlops_state.get("deployment_id"),
+                    record.get("deployment_id"),
+                ),
+            )
+        )
+
+    if step_key == "dashboard":
+        dashboard_state = _workflow_first_dict(
+            screen_states.get("dashboard"),
+            current_mlops_state.get("dashboard_state"),
+            stable_mlops_state.get("dashboard_state"),
+        )
+        return bool(
+            _workflow_first_text(
+                dashboard_state.get("deployment_id"),
+                dashboard_state.get("run_id"),
+                dashboard_state.get("publish_id"),
+                record.get("publish_id"),
+            )
+        )
+
+    if step_key == "reports":
+        return bool(
+            _workflow_first_text(
+                current_mlops_state.get("report_run_id"),
+                stable_mlops_state.get("report_run_id"),
+            )
+            or str(record.get("run_status") or record.get("status") or "").strip().lower() in {"complete", "completed", "done"}
+        )
+
+    return False
+
+
+def _workflow_step_artifacts(
+    step_key: str,
+    *,
+    record: Dict[str, Any],
+    screen_states: Dict[str, Dict[str, Any]],
+    session: Optional[Dict[str, Any]],
+    assets_by_stage: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    current_mlops_state = _workflow_state_container(session, "current")
+    stable_mlops_state = _workflow_state_container(session, "stable")
+    screen_key = _STEP_TO_SCREEN.get(step_key, step_key)
+    screen_state = screen_states.get(screen_key) or {}
+    assets = list((assets_by_stage or {}).get(screen_key, []))
+    compact_assets = [
+        {
+            "asset_kind": _normalize_text(asset.get("asset_kind")).lower(),
+            "asset_ref": _workflow_first_text(asset.get("asset_text_id"), asset.get("asset_numeric_id")),
+            "relation": _normalize_text(asset.get("relation")).lower(),
+        }
+        for asset in assets
+    ]
+
+    if step_key == "data":
+        return {
+            "dataset_ids": list(record.get("dataset_ids") or []),
+            "dataset_count": _workflow_positive_int(
+                current_mlops_state.get("datasets_count"),
+                stable_mlops_state.get("datasets_count"),
+                len(record.get("dataset_ids") or []),
+            ) or 0,
+            "linked_assets": compact_assets,
+        }
+    if step_key == "master":
+        master_state = _workflow_first_dict(
+            current_mlops_state.get("master_dataset"),
+            stable_mlops_state.get("master_dataset"),
+        )
+        return {
+            "dataset_id": _workflow_positive_int(
+                screen_state.get("builtMasterDatasetId"),
+                current_mlops_state.get("master_dataset_id"),
+                stable_mlops_state.get("master_dataset_id"),
+                master_state.get("dataset_id"),
+            ),
+            "row_count": _workflow_positive_int(master_state.get("row_count")),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "target":
+        return {
+            "target_column": _workflow_first_text(
+                screen_state.get("currentTargetColumn"),
+                screen_state.get("selectedTargetColumn"),
+                current_mlops_state.get("target_column"),
+                stable_mlops_state.get("target_column"),
+            ),
+        }
+    if step_key == "eda":
+        return {
+            "status": _workflow_first_text(
+                screen_state.get("status"),
+                "completed" if _workflow_step_completed(step_key, record=record, screen_states=screen_states, session=session) else "",
+            ),
+        }
+    if step_key == "preprocess":
+        preprocess_dataset = _workflow_first_dict(
+            current_mlops_state.get("preprocess_dataset"),
+            stable_mlops_state.get("preprocess_dataset"),
+        )
+        steps = screen_state.get("steps") if isinstance(screen_state.get("steps"), list) else (
+            current_mlops_state.get("preprocess_steps") if isinstance(current_mlops_state.get("preprocess_steps"), list) else []
+        )
+        return {
+            "dataset_id": _workflow_positive_int(
+                screen_state.get("preprocessedDatasetId"),
+                current_mlops_state.get("preprocess_dataset_id"),
+                stable_mlops_state.get("preprocess_dataset_id"),
+                preprocess_dataset.get("dataset_id"),
+            ),
+            "steps_count": len(steps or []),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "model":
+        active_run = _workflow_first_dict(
+            current_mlops_state.get("active_model_run"),
+            stable_mlops_state.get("active_model_run"),
+        )
+        return {
+            "job_id": _workflow_first_text(
+                _screen_job_id(screen_states, "model"),
+                active_run.get("job_id"),
+                record.get("run_id"),
+            ),
+            "algorithm": _workflow_first_text(screen_state.get("algorithm"), active_run.get("algorithm")),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "validation":
+        validation_state = _workflow_first_dict(
+            current_mlops_state.get("validation_report"),
+            stable_mlops_state.get("validation_report"),
+        )
+        return {
+            "job_id": _workflow_first_text(
+                _screen_job_id(screen_states, "validation"),
+                validation_state.get("job_id"),
+            ),
+            "report_id": _workflow_first_text(screen_state.get("report_id"), validation_state.get("report_id")),
+            "optimal_threshold": screen_state.get("optimal_threshold") if "optimal_threshold" in screen_state else validation_state.get("optimal_threshold"),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "registry":
+        registry_state = _workflow_first_dict(
+            current_mlops_state.get("registry_entry"),
+            stable_mlops_state.get("registry_entry"),
+        )
+        return {
+            "job_id": _workflow_first_text(
+                _screen_job_id(screen_states, "registry"),
+                registry_state.get("job_id"),
+            ),
+            "deployment_id": _workflow_first_text(
+                _screen_deployment_id(screen_states, "registry"),
+                registry_state.get("deployment_id"),
+                record.get("deployment_id"),
+            ),
+            "stage": _workflow_first_text(screen_state.get("stage"), registry_state.get("stage")),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "ready":
+        return {
+            "deployment_id": _workflow_first_text(
+                _screen_deployment_id(screen_states, "ready"),
+                _screen_deployment_id(screen_states, "registry"),
+                current_mlops_state.get("deployment_id"),
+                stable_mlops_state.get("deployment_id"),
+                record.get("deployment_id"),
+            ),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "dashboard":
+        dashboard_state = _workflow_first_dict(
+            screen_states.get("dashboard"),
+            current_mlops_state.get("dashboard_state"),
+            stable_mlops_state.get("dashboard_state"),
+        )
+        return {
+            "deployment_id": _workflow_first_text(dashboard_state.get("deployment_id"), record.get("deployment_id")),
+            "run_id": _workflow_first_text(dashboard_state.get("run_id"), record.get("run_id")),
+            "publish_id": _workflow_first_text(dashboard_state.get("publish_id"), record.get("publish_id")),
+            "linked_assets": compact_assets,
+        }
+    if step_key == "reports":
+        return {
+            "report_run_id": _workflow_first_text(
+                current_mlops_state.get("report_run_id"),
+                stable_mlops_state.get("report_run_id"),
+                record.get("run_id"),
+            ),
+        }
+    return {}
+
+
+def _build_workflow_manifest(
+    record: Dict[str, Any],
+    session: Optional[Dict[str, Any]] = None,
+    *,
+    step_events: Optional[List[Dict[str, Any]]] = None,
+    asset_links: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    row = dict(record or {})
+    steps = row.get("steps") if isinstance(row.get("steps"), list) else []
+    screen_states = _screen_state_map(steps)
+    dependency_state = _dependency_state_payload(steps)
+    stale_details = dependency_state.get("stale_steps") if isinstance(dependency_state.get("stale_steps"), dict) else {}
+    fingerprints = dependency_state.get("fingerprints") if isinstance(dependency_state.get("fingerprints"), dict) else {}
+    latest_change = dependency_state.get("latest_change") if isinstance(dependency_state.get("latest_change"), dict) else {}
+    current_step = _normalize_text(
+        (session or {}).get("current_step")
+        or row.get("current_step")
+        or (row.get("workflow_session") or {}).get("current_step")
+    ).lower()
+    if current_step == "data_upload":
+        current_step = "data"
+
+    event_map = _workflow_step_event_map(step_events)
+    assets_by_stage = _workflow_pipeline_assets_by_stage(asset_links)
+    overall_status = _normalize_text(row.get("workflow_status") or row.get("run_status") or row.get("status")).lower()
+    manifest_steps: Dict[str, Dict[str, Any]] = {}
+    inconsistencies: List[Dict[str, Any]] = []
+
+    for step_key in (*_PROGRESS_STAGE_ORDER, "reports"):
+        screen_key = _STEP_TO_SCREEN.get(step_key, step_key)
+        screen_state = screen_states.get(screen_key) or {}
+        completed = _workflow_step_completed(
+            step_key,
+            record=row,
+            screen_states=screen_states,
+            session=session,
+        )
+        invalidation = stale_details.get(step_key) if isinstance(stale_details.get(step_key), dict) else {}
+        event_row = event_map.get(step_key) or event_map.get(screen_key) or {}
+        event_status = _normalize_text(event_row.get("status")).lower()
+        prerequisites = list(_STEP_DEPENDENCIES.get(step_key, ()))
+
+        status = "completed" if completed else "not_started"
+        if event_status in {"failed", "error"} or (
+            step_key == current_step and overall_status in {"failed", "error"}
+        ):
+            status = "failed"
+        elif invalidation:
+            status = "invalidated"
+        elif prerequisites and not completed:
+            incomplete_prereqs = [
+                dep for dep in prerequisites
+                if manifest_steps.get(dep, {}).get("status") != "completed"
+            ]
+            if incomplete_prereqs:
+                status = "blocked"
+        if status == "not_started" and step_key == current_step:
+            status = "in_progress"
+
+        artifacts = _workflow_step_artifacts(
+            step_key,
+            record=row,
+            screen_states=screen_states,
+            session=session,
+            assets_by_stage=assets_by_stage,
+        )
+        input_signature = _workflow_first_text(
+            fingerprints.get(screen_key),
+            _state_fingerprint(screen_key, screen_state),
+        )
+        output_signature = _stable_json(artifacts) if artifacts else ""
+        completed_at = _normalize_optional_text(event_row.get("created_at"))
+        invalidated_reason = _normalize_optional_text(invalidation.get("message"))
+        invalidated_by_step = _normalize_optional_text(invalidation.get("source_step"))
+
+        if status == "completed":
+            missing_dependencies = [
+                dep for dep in prerequisites
+                if manifest_steps.get(dep, {}).get("status") != "completed"
+            ]
+            if missing_dependencies:
+                inconsistencies.append({
+                    "step": step_key,
+                    "reason": (
+                        f"{_PIPELINE_STEP_LABELS.get(step_key, step_key.title())} is marked completed while "
+                        f"{_join_labels([_PIPELINE_STEP_LABELS.get(dep, dep.title()) for dep in missing_dependencies])} "
+                        "is not completed."
+                    ),
+                    "missing_prerequisites": missing_dependencies,
+                })
+
+        manifest_steps[step_key] = {
+            "step_key": step_key,
+            "label": _PIPELINE_STEP_LABELS.get(step_key, step_key.replace("_", " ").title()),
+            "screen_key": screen_key,
+            "status": status,
+            "version": 1,
+            "prerequisites": prerequisites,
+            "input_signature": input_signature,
+            "output_signature": output_signature,
+            "completed_at": completed_at,
+            "invalidated_by": invalidated_by_step,
+            "invalidated_reason": invalidated_reason,
+            "artifacts": artifacts,
+            "summary": {
+                "current_step": step_key == current_step,
+                "has_screen_state": bool(screen_state),
+            },
+        }
+
+    if inconsistencies:
+        manifest_status = "inconsistent"
+    elif any(step.get("status") == "failed" for step in manifest_steps.values()):
+        manifest_status = "failed"
+    elif all(manifest_steps.get(step, {}).get("status") == "completed" for step in _PROGRESS_STAGE_ORDER):
+        manifest_status = "completed"
+    elif any(step.get("status") == "invalidated" for step in manifest_steps.values()):
+        manifest_status = "invalidated"
+    elif any(step.get("status") == "in_progress" for step in manifest_steps.values()):
+        manifest_status = "in_progress"
+    elif any(step.get("status") == "completed" for step in manifest_steps.values()):
+        manifest_status = "in_progress"
+    else:
+        manifest_status = "not_started"
+
+    latest_message = _normalize_optional_text(latest_change.get("message"))
+    return {
+        "run_id": row.get("run_ref") or row.get("run_id") or row.get("pipeline_id"),
+        "pipeline_id": row.get("pipeline_id"),
+        "workflow_type": "fcc_false_positive_suppression",
+        "status": manifest_status,
+        "current_step": current_step or row.get("current_step") or "data",
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("workflow_updated_at") or row.get("updated_at") or row.get("created_at"),
+        "step_order": list((*_PROGRESS_STAGE_ORDER, "reports")),
+        "latest_change": latest_change if latest_change else {},
+        "latest_change_message": latest_message,
+        "resume_ready": not inconsistencies,
+        "inconsistencies": inconsistencies,
+        "steps": manifest_steps,
     }
 
 
@@ -2393,12 +2918,13 @@ class MLOpsWorkbenchService:
                 "schedule": json.loads(r[13] or "{}"),
             }
             record.update(_progress_summary_from_steps(steps, status=record["status"]))
-            results.append(
-                self._apply_workflow_summary(
-                    record,
-                    workflow_by_pipeline.get(int(record["pipeline_id"])),
-                )
+            workflow_session = workflow_by_pipeline.get(int(record["pipeline_id"]))
+            hydrated_record = self._apply_workflow_summary(record, workflow_session)
+            hydrated_record["workflow_manifest"] = _build_workflow_manifest(
+                hydrated_record,
+                workflow_session,
             )
+            results.append(hydrated_record)
         if healed_pipelines:
             with get_connection(self.db_path) as conn:
                 for pipeline_id, healed_steps in healed_pipelines:
@@ -2478,7 +3004,9 @@ class MLOpsWorkbenchService:
                 if not self._workflow_session_has_meaningful_state(session):
                     trivial_session_ids.append(session_id)
                     continue
-                results.append(self._workflow_session_manager_record(session))
+                session_record = self._workflow_session_manager_record(session)
+                session_record["workflow_manifest"] = _build_workflow_manifest(session_record, session)
+                results.append(session_record)
             cleanup_session_ids = orphan_session_ids + trivial_session_ids
             if cleanup_session_ids:
                 placeholders = ",".join(["?"] * len(cleanup_session_ids))
@@ -2716,6 +3244,12 @@ class MLOpsWorkbenchService:
         hydrated = self._apply_workflow_summary(result, workflow_session)
         if workflow_session:
             hydrated["workflow_session"] = workflow_session
+        hydrated["workflow_manifest"] = _build_workflow_manifest(
+            hydrated,
+            workflow_session,
+            step_events=hydrated.get("step_events"),
+            asset_links=hydrated.get("asset_links"),
+        )
         return hydrated
 
     def _list_workflow_sessions(self, tenant_id: str, env_id: str) -> List[Dict[str, Any]]:
@@ -2909,7 +3443,9 @@ class MLOpsWorkbenchService:
             "current_step_label": current_step_label,
             "run_status": session.get("status") or "draft",
         }
-        return self._apply_workflow_summary(record, session)
+        hydrated = self._apply_workflow_summary(record, session)
+        hydrated["workflow_manifest"] = _build_workflow_manifest(hydrated, session)
+        return hydrated
 
     def _workflow_session_belongs_to_mlops(self, session: Optional[Dict[str, Any]]) -> bool:
         if not isinstance(session, dict):
@@ -3722,6 +4258,34 @@ class MLOpsWorkbenchService:
             )
         return {"pipeline_id": int(pipeline_id), "schedule": schedule}
 
+    def get_pipeline_delete_impact(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+    ) -> Dict[str, Any]:
+        pid = int(pipeline_id)
+        with get_connection(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT pipeline_id
+                FROM mlops_pipelines
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [pid, tenant_id, env_id],
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Pipeline {pid} not found")
+
+        env_root = resolve_env_root(env_id, tenant_id, create_if_missing=True)
+        bridge_service = FCCSentinelBridgeService(env_root)
+        impact = bridge_service.inspect_pipeline_delete_impact(
+            tenant_id=tenant_id,
+            pipeline_id=pid,
+        )
+        impact["pipeline_id"] = pid
+        return impact
+
     def delete_pipeline(
         self,
         tenant_id: str,
@@ -3730,6 +4294,7 @@ class MLOpsWorkbenchService:
         *,
         delete_artifacts: bool = True,
         delete_files: bool = True,
+        sentinel_action: str = "keep",
     ) -> Dict[str, Any]:
         """
         Delete one saved pipeline and, when requested, any assets linked
@@ -3744,12 +4309,31 @@ class MLOpsWorkbenchService:
             except Exception:
                 return None
 
+        normalized_sentinel_action = str(sentinel_action or "keep").strip().lower()
+        if normalized_sentinel_action not in {"keep", "purge_imported_queue"}:
+            raise ValueError("Unsupported sentinel_action")
+
+        env_root = resolve_env_root(env_id, tenant_id, create_if_missing=True)
+        bridge_service = FCCSentinelBridgeService(env_root)
+        sentinel_delete_impact = self.get_pipeline_delete_impact(tenant_id, env_id, pid)
+        linked_imports = list(sentinel_delete_impact.get("linked_imports") or [])
+        if linked_imports and normalized_sentinel_action == "purge_imported_queue":
+            blocked_imports = [
+                item for item in linked_imports if not bool(item.get("purge_allowed"))
+            ]
+            if blocked_imports:
+                raise ValueError(
+                    "Sentinel investigation activity already exists for one or more imported FCC batches. Delete FCC only and keep Sentinel."
+                )
+
         deleted_datasets: List[Dict[str, Any]] = []
         deleted_training_jobs: List[Dict[str, Any]] = []
         deleted_reports: List[Dict[str, Any]] = []
         deleted_deployments: List[Dict[str, Any]] = []
         deleted_files: set[str] = set()
         deleted_pipeline_asset_link_count = 0
+        sentinel_keep_result: Dict[str, Any] = {}
+        sentinel_purged_imports: List[Dict[str, Any]] = []
 
         def _safe_delete_file(raw_path: Any) -> None:
             if not delete_files or not raw_path:
@@ -4092,12 +4676,34 @@ class MLOpsWorkbenchService:
                 [pid, tenant_id, env_id],
             )
 
+        if linked_imports:
+            if normalized_sentinel_action == "purge_imported_queue":
+                for linked_import in linked_imports:
+                    purge_result = bridge_service.purge_imported_run(
+                        publish_id=str(linked_import.get("publish_id") or ""),
+                        tenant_id=tenant_id,
+                        target_env_id=str(linked_import.get("target_env_id") or ""),
+                        require_no_activity=True,
+                    )
+                    sentinel_purged_imports.append(purge_result)
+            else:
+                sentinel_keep_result = bridge_service.mark_source_pipeline_deleted(
+                    tenant_id=tenant_id,
+                    pipeline_id=pid,
+                    reason="deleted_from_fcc",
+                )
+
         return {
             "pipeline_id": pid,
             "name": pipeline_name,
             "deleted_pipeline": True,
             "delete_artifacts": bool(delete_artifacts),
             "delete_files": bool(delete_files),
+            "sentinel_action": normalized_sentinel_action,
+            "sentinel_delete_impact": sentinel_delete_impact,
+            "sentinel_imports_marked": sentinel_keep_result,
+            "sentinel_purged_imports_count": int(len(sentinel_purged_imports)),
+            "sentinel_purged_imports": sentinel_purged_imports,
             "deleted_artifacts_count": int(len(deleted_datasets)),
             "deleted_artifacts": deleted_datasets,
             "deleted_datasets_count": int(len(deleted_datasets)),

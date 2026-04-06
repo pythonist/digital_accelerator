@@ -361,7 +361,11 @@ const ComparisonTab = ({
   );
 
   useEffect(() => {
-    const missingModels = comparisonModels.filter((model) => model?.job_id && !detailByJobId[model.job_id] && !detailLoading[model.job_id]);
+    const missingModels = comparisonModels.filter((model) => (
+      model?.job_id
+      && !Object.prototype.hasOwnProperty.call(detailByJobId, model.job_id)
+      && !detailLoading[model.job_id]
+    ));
     if (!missingModels.length) return undefined;
     let cancelled = false;
 
@@ -388,7 +392,7 @@ const ComparisonTab = ({
         setDetailByJobId((prev) => {
           const next = { ...prev };
           payload.forEach(([jobId, detail]) => {
-            if (detail) next[jobId] = detail;
+            next[jobId] = detail;
           });
           return next;
         });

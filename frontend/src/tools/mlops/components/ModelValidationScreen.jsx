@@ -252,7 +252,7 @@ const ModelValidationScreen = ({
   );
 
   useEffect(() => {
-    const missingIds = requestedDetailIds.filter((id) => !runDetailsByJobId[id]);
+    const missingIds = requestedDetailIds.filter((id) => !Object.prototype.hasOwnProperty.call(runDetailsByJobId, id));
     if (!missingIds.length) return undefined;
     let cancelled = false;
 
@@ -273,7 +273,7 @@ const ModelValidationScreen = ({
         setRunDetailsByJobId((prev) => {
           const next = { ...prev };
           payload.forEach(([job_id, detail]) => {
-            if (detail) next[job_id] = detail;
+            next[job_id] = detail;
           });
           return next;
         });

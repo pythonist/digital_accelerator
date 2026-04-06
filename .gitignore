@@ -69,3 +69,14 @@ mlops_smoke_*/
 
 # Logs
 *.log
+
+# Local backups
+_backups/
+
+# Automation runtime outputs
+automation/**/node_modules/
+automation/**/env/
+automation/**/data/
+automation/**/audit/
+automation/**/artifacts/screenshots/
+automation/**/artifacts/videos/

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -481,14 +481,48 @@ const WorkflowGraphDialog = ({ open, onClose, params = {} }) => {
     ),
     [activeNodeId, expandedClusters, graphPayload, playbackState, positionOverrides, viewMode],
   );
+  const syncedGraphSignatureRef = useRef('');
+  const graphSyncSignature = useMemo(
+    () => JSON.stringify({
+      loading: Boolean(loading),
+      error: String(error || ''),
+      open: Boolean(open),
+      nodes: (graph.nodes || []).map((node) => ({
+        id: node.id,
+        hidden: Boolean(node.hidden),
+        parentNode: node.parentNode || '',
+        x: Number(node.position?.x || 0),
+        y: Number(node.position?.y || 0),
+      })),
+      edges: (graph.edges || []).map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        hidden: Boolean(edge.hidden),
+      })),
+    }),
+    [error, graph.edges, graph.nodes, loading, open],
+  );
 
   useEffect(() => {
+    if (!open) {
+      syncedGraphSignatureRef.current = '';
+      if (renderNodes.length || renderEdges.length) {
+        setRenderNodes([]);
+        setRenderEdges([]);
+      }
+      return;
+    }
     if (!loading && !error && (!graph.nodes.length && !graph.edges.length) && (renderNodes.length || renderEdges.length)) {
       return;
     }
+    if (syncedGraphSignatureRef.current === graphSyncSignature) {
+      return;
+    }
+    syncedGraphSignatureRef.current = graphSyncSignature;
     setRenderNodes(graph.nodes);
     setRenderEdges(graph.edges);
-  }, [error, graph, loading, renderEdges.length, renderNodes.length]);
+  }, [error, graph.edges, graph.nodes, graphSyncSignature, loading, open, renderEdges.length, renderNodes.length]);
 
   const selectedNode = useMemo(() => {
     const allNodes = Object.values((graphPayload || {}).views || {}).flatMap((view) => [

@@ -1383,6 +1383,21 @@ def mlops_pipeline_get(pipeline_id):
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
 
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/manifest", methods=["GET"])
+def mlops_pipeline_manifest(pipeline_id):
+    """GET /api/mlops/pipeline/<id>/manifest - canonical workflow manifest for FCC resume/status."""
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.load_pipeline(tenant_id, env_id, pipeline_id)
+        return jsonify({"success": True, "data": result.get("workflow_manifest") or {}}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
 @mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/rename", methods=["POST"])
 def mlops_pipeline_rename(pipeline_id):
     """POST /api/mlops/pipeline/<id>/rename"""
@@ -1443,10 +1458,25 @@ def mlops_pipeline_screen_state(pipeline_id):
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
 
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/delete-impact", methods=["GET"])
+def mlops_pipeline_delete_impact(pipeline_id):
+    """GET /api/mlops/pipeline/<id>/delete-impact - inspect Sentinel consequences before FCC delete."""
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.get_pipeline_delete_impact(tenant_id, env_id, int(pipeline_id))
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
 @mlops_workbench_bp.route("/pipeline/<int:pipeline_id>", methods=["DELETE"])
 def mlops_pipeline_delete(pipeline_id):
     """
-    DELETE /api/mlops/pipeline/<id>?delete_artifacts=1&delete_files=1
+    DELETE /api/mlops/pipeline/<id>?delete_artifacts=1&delete_files=1&sentinel_action=keep
 
     Deletes a saved pipeline. By default also deletes pipeline-generated artefacts.
     """
@@ -1457,6 +1487,7 @@ def mlops_pipeline_delete(pipeline_id):
 
         delete_artifacts_raw = str(request.args.get("delete_artifacts", "1")).strip().lower()
         delete_files_raw = str(request.args.get("delete_files", "1")).strip().lower()
+        sentinel_action = str(request.args.get("sentinel_action", "keep")).strip().lower() or "keep"
         delete_artifacts = delete_artifacts_raw not in {"0", "false", "no", "off"}
         delete_files = delete_files_raw not in {"0", "false", "no", "off"}
 
@@ -1466,10 +1497,13 @@ def mlops_pipeline_delete(pipeline_id):
             int(pipeline_id),
             delete_artifacts=delete_artifacts,
             delete_files=delete_files,
+            sentinel_action=sentinel_action,
         )
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
-        return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
+        code = "NOT_FOUND" if "not found" in str(ve).lower() else "VALIDATION_ERROR"
+        status = 404 if code == "NOT_FOUND" else 400
+        return jsonify({"success": False, "error": str(ve), "error_code": code}), status
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 

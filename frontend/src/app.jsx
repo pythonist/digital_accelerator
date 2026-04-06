@@ -19,7 +19,7 @@ const MulePlatform = lazy(() => import("@tools/mule_detection/MulePlatform"));
 const BTSYPlatform = lazy(() => import("@tools/btsy/BTSYPlatform"));
 const MLOpsPlatform = lazy(() => import("@tools/mlops/MLOpsPlatform"));
 
-const RESTORE_ENTRY_PATHS = new Set(['/', '/tools', '/environments']);
+const RESTORE_ENTRY_PATHS = new Set(['/', '/environments']);
 const TOOL_ROUTE_PREFIXES = [
   ['/investigation', 'investigation'],
   ['/calibration', 'calibration'],
@@ -74,7 +74,12 @@ const NavigationStateManager = () => {
 
   useEffect(() => {
     const derivedTool = resolveToolKeyFromPath(location.pathname);
-    if (!derivedTool) return;
+    if (!derivedTool) {
+      if (location.pathname === '/tools') {
+        setActiveTool((previousTool) => (previousTool == null ? previousTool : null));
+      }
+      return;
+    }
 
     setActiveTool((previousTool) => (previousTool === derivedTool ? previousTool : derivedTool));
   }, [location.pathname, setActiveTool]);
@@ -122,6 +127,7 @@ const NavigationStateManager = () => {
 // --- MAIN LAYOUT ---
 const MainLayout = () => {
   const { isAuthenticated, isAuthLoading } = useAppContext();
+  const location = useLocation();
 
   if (isAuthLoading) {
     return <RouteLoader />;
@@ -132,7 +138,7 @@ const MainLayout = () => {
   }
 
   return (
-    <PageTransition className="h-full w-full">
+    <PageTransition key={location.pathname} className="h-full w-full">
       <Outlet />
     </PageTransition>
   );
@@ -141,6 +147,7 @@ const MainLayout = () => {
 // --- TOOL LAYOUT (Requires Environment) ---
 const ToolLayout = () => {
   const { activeEnv } = useAppContext();
+  const location = useLocation();
 
   if (!activeEnv) return <Navigate to="/environments" replace />;
 
@@ -148,7 +155,7 @@ const ToolLayout = () => {
     <div className="flex h-screen min-h-0 flex-col overflow-hidden animate-in fade-in duration-700">
       <div className="relative flex-1 min-h-0 overflow-hidden bg-slate-100">
         <PageTransition className="h-full w-full">
-          <Outlet />
+          <Outlet key={location.pathname} />
         </PageTransition>
       </div>
     </div>
