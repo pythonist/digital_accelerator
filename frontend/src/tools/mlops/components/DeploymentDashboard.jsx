@@ -1774,7 +1774,7 @@ const DeploymentDashboard = ({
         seed: simResult?.scoring?.batch_id ? undefined : (Date.now() % 1000000),
         pipeline_id: activePipelineId || undefined,
         pipeline_name: activePipelineName || undefined,
-        preferred_screen: 'casepack',
+        preferred_screen: 'fcc_bridge',
         replace_existing: true,
         merge_existing: false,
         rerank_after_import: true,
@@ -1792,7 +1792,7 @@ const DeploymentDashboard = ({
 
       persistFccSentinelHandoff({
         ...handoffPayload,
-        preferred_screen: handoffPayload?.preferred_screen || 'casepack',
+        preferred_screen: handoffPayload?.preferred_screen || 'fcc_bridge',
         pipeline_id: handoffPayload?.pipeline_id ?? activePipelineId ?? null,
         pipeline_name: handoffPayload?.pipeline_name ?? activePipelineName ?? null,
         run_id: handoffPayload?.run_id ?? runId,

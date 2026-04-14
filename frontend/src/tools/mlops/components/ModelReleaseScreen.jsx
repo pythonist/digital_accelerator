@@ -15,7 +15,6 @@ import {
   MenuItem,
   Paper,
   Select,
-  Slider,
   Stack,
   Tab,
   Tabs,
@@ -141,6 +140,20 @@ const getJobName = (run, registryEntry) =>
   || run?.algorithm_display
   || run?.algorithm
   || 'Current run';
+
+const formatPipelineRunRef = (pipelineId) => {
+  const parsed = Number(pipelineId);
+  return Number.isFinite(parsed) && parsed > 0 ? `FCC-RUN-${String(parsed).padStart(5, '0')}` : '';
+};
+
+const deriveReleaseModelName = ({ run, registryEntry, pipelineName, pipelineId }) => {
+  const explicit = getJobName(run, registryEntry);
+  if (explicit && explicit !== 'Current run') return explicit;
+  const pipelineLabel = String(pipelineName || '').trim() || formatPipelineRunRef(pipelineId);
+  const algorithmLabel = String(run?.algorithm_display || run?.algorithm || '').trim();
+  if (pipelineLabel && algorithmLabel) return `${pipelineLabel} ${algorithmLabel}`;
+  return pipelineLabel || algorithmLabel || 'Current run';
+};
 
 const stageLabel = (stage) => {
   const value = String(stage || '').trim().toLowerCase();
@@ -292,6 +305,24 @@ const resolveCurrentJobId = (activeModelRun, validationReport, registryEntry) =>
   || '',
 ).trim();
 
+const pickDefaultReleaseJobId = ({
+  explicitJobId = '',
+  trainingRuns = [],
+  registryRows = [],
+  activeDeployment = null,
+}) => {
+  const normalizedExplicit = String(explicitJobId || '').trim();
+  if (normalizedExplicit) return normalizedExplicit;
+  const preferredTrainingRun = (trainingRuns || []).find((row) => Boolean(row?.validation_ready || row?.resume_ready || row?.selected_threshold != null));
+  if (preferredTrainingRun?.job_id) return String(preferredTrainingRun.job_id).trim();
+  const latestTrainingRun = (trainingRuns || [])[0];
+  if (latestTrainingRun?.job_id) return String(latestTrainingRun.job_id).trim();
+  const activeDeploymentJobId = String(activeDeployment?.job_id || '').trim();
+  if (activeDeploymentJobId) return activeDeploymentJobId;
+  const latestRegistryJobId = String((registryRows || [])[0]?.job_id || '').trim();
+  return latestRegistryJobId;
+};
+
 const buildReleaseBusinessSummaryFallback = ({
   modelName,
   algorithm,
@@ -355,7 +386,7 @@ const ThresholdLockNote = ({ deployedThreshold, deploymentName, deploymentDate }
 const EnterpriseSection = ({ title, subtitle, children, action, defaultOpen = true }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden', borderColor: T.border }}>
+    <Paper variant="outlined" sx={{ borderRadius: 1.5, overflow: 'hidden', borderColor: T.border, boxShadow: 'none' }}>
       <Stack
         direction="row"
         alignItems="center"
@@ -386,7 +417,7 @@ const SummaryCard = ({ label, value, helper, tone = 'default', mono = false }) =
       ? { bg: T.successSoft, fg: T.success, bd: '#BBF7D0' }
       : { bg: '#FFFFFF', fg: T.text, bd: T.border };
   return (
-    <Box sx={{ p: 1.7, borderRadius: 2.5, border: `1px solid ${palette.bd}`, bgcolor: palette.bg, minHeight: 110 }}>
+    <Box sx={{ p: 1.7, borderRadius: 1.5, border: `1px solid ${palette.bd}`, bgcolor: palette.bg, minHeight: 110 }}>
       <Typography sx={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.8, color: T.dim, fontWeight: 700 }}>
         {label}
       </Typography>
@@ -426,7 +457,7 @@ const StatusChip = ({ label, value }) => {
 const StepCell = ({ title, summary, status, time }) => {
   const tone = statusTone(status);
   return (
-    <Box sx={{ minWidth: 200, p: 1.5, borderRadius: 2.5, border: `1px solid ${T.border}`, bgcolor: '#FFF' }}>
+    <Box sx={{ minWidth: 200, p: 1.5, borderRadius: 1.5, border: `1px solid ${T.border}`, bgcolor: '#FFF' }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.6 }}>
         <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>{title}</Typography>
         <Chip size="small" label={status} sx={{ height: 20, fontSize: 10, bgcolor: tone.bg, color: tone.fg, border: `1px solid ${tone.bd}` }} />
@@ -564,12 +595,15 @@ const ModelReleaseScreen = ({
   onDeploy,
   onViewReport,
   onBack,
+  activePipelineName = '',
+  activePipelineId = null,
   actionsDisabled = false,
   actionsMessage = '',
 }) => {
   const currentJobId = resolveCurrentJobId(activeModelRun, validationReport, registryEntry);
   const gatingMessage = actionsMessage || 'This release action is blocked because the current run is outdated. Refresh the upstream stages first.';
   const runDatasetId = Number(preprocessedDataset?.dataset_id || masterDataset?.dataset_id || 0) || null;
+  const pipelineRunLabel = String(activePipelineName || '').trim() || formatPipelineRunRef(activePipelineId) || 'Current FCC run';
 
   const compareRef = useRef(null);
   const auditRef = useRef(null);
@@ -581,6 +615,7 @@ const ModelReleaseScreen = ({
   const [releaseError, setReleaseError] = useState(null);
   const [registryRows, setRegistryRows] = useState([]);
   const [trainingRuns, setTrainingRuns] = useState([]);
+  const [selectedReleaseJobId, setSelectedReleaseJobId] = useState(currentJobId || '');
   const [activeDeployment, setActiveDeployment] = useState(null);
   const [deploymentHistory, setDeploymentHistory] = useState([]);
   const [auditRows, setAuditRows] = useState([]);
@@ -647,6 +682,7 @@ const ModelReleaseScreen = ({
         mlopsApi.listModelRegistry(),
         mlopsApi.listTrainingRuns({
           limit: 250,
+          ...(Number.isFinite(Number(activePipelineId)) && Number(activePipelineId) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
           ...(runDatasetId ? { dataset_id: runDatasetId } : {}),
         }),
         mlopsApi.getActiveDeployment(),
@@ -663,44 +699,92 @@ const ModelReleaseScreen = ({
     } finally {
       setLoading(false);
     }
-  }, [runDatasetId]);
+  }, [activePipelineId, runDatasetId]);
 
   useEffect(() => {
     refreshReleaseData();
   }, [refreshReleaseData]);
 
   useEffect(() => {
-    if (!currentJobId) {
+    const normalizedCurrentJobId = String(currentJobId || '').trim();
+    if (!normalizedCurrentJobId) return;
+    setSelectedReleaseJobId((prev) => {
+      const normalizedPrev = String(prev || '').trim();
+      return normalizedPrev === normalizedCurrentJobId ? prev : normalizedCurrentJobId;
+    });
+  }, [currentJobId]);
+
+  useEffect(() => {
+    const nextDefaultJobId = pickDefaultReleaseJobId({
+      explicitJobId: currentJobId,
+      trainingRuns,
+      registryRows,
+      activeDeployment,
+    });
+    if (!nextDefaultJobId) return;
+    setSelectedReleaseJobId((prev) => {
+      const normalizedPrev = String(prev || '').trim();
+      return normalizedPrev === nextDefaultJobId ? prev : nextDefaultJobId;
+    });
+  }, [activeDeployment, currentJobId, registryRows, trainingRuns]);
+
+  const effectiveCurrentJobId = useMemo(
+    () => pickDefaultReleaseJobId({
+      explicitJobId: selectedReleaseJobId || currentJobId,
+      trainingRuns,
+      registryRows,
+      activeDeployment,
+    }),
+    [activeDeployment, currentJobId, registryRows, selectedReleaseJobId, trainingRuns],
+  );
+
+  useEffect(() => {
+    if (!effectiveCurrentJobId) {
       setRunDetail(null);
       setValidationDetail(null);
       return;
     }
     let cancelled = false;
     Promise.all([
-      mlopsApi.modelResults(currentJobId).catch(() => null),
-      mlopsApi.validationDetail(currentJobId).catch(() => null),
+      mlopsApi.modelResults(effectiveCurrentJobId).catch(() => null),
+      mlopsApi.validationDetail(effectiveCurrentJobId).catch(() => null),
     ]).then(([detailRes, validationRes]) => {
       if (cancelled) return;
       setRunDetail(unwrap(detailRes) || null);
       setValidationDetail(unwrap(validationRes) || null);
     });
     return () => { cancelled = true; };
-  }, [currentJobId]);
+  }, [effectiveCurrentJobId]);
 
   const currentRegistryEntry = useMemo(() => {
-    if (resolveCurrentJobId(null, null, registryEntry) === currentJobId) return registryEntry;
-    return registryRows.find((row) => String(row.job_id) === currentJobId) || null;
-  }, [currentJobId, registryEntry, registryRows]);
+    if (resolveCurrentJobId(null, null, registryEntry) === effectiveCurrentJobId) return registryEntry;
+    return registryRows.find((row) => String(row.job_id) === effectiveCurrentJobId) || null;
+  }, [effectiveCurrentJobId, registryEntry, registryRows]);
+
+  const selectedTrainingRun = useMemo(
+    () => trainingRuns.find((row) => String(row?.job_id || '').trim() === String(effectiveCurrentJobId || '').trim()) || null,
+    [effectiveCurrentJobId, trainingRuns],
+  );
 
   const activeRun = useMemo(() => {
-    if (!currentJobId) return activeModelRun || null;
+    if (!effectiveCurrentJobId) return activeModelRun || selectedTrainingRun || null;
+    const activeModelMatches = String(activeModelRun?.job_id || '').trim() === String(effectiveCurrentJobId || '').trim();
     return {
-      ...(activeModelRun || {}),
+      ...(activeModelMatches ? (activeModelRun || {}) : {}),
+      ...(selectedTrainingRun || {}),
       ...(runDetail || {}),
-      results: runDetail?.results || activeModelRun?.results,
-      metrics: metricsForRun(runDetail || activeModelRun),
+      job_id: effectiveCurrentJobId,
+      results: runDetail?.results || selectedTrainingRun?.results || (activeModelMatches ? activeModelRun?.results : null),
+      metrics: metricsForRun(runDetail || selectedTrainingRun || (activeModelMatches ? activeModelRun : null)),
     };
-  }, [activeModelRun, currentJobId, runDetail]);
+  }, [activeModelRun, effectiveCurrentJobId, runDetail, selectedTrainingRun]);
+
+  const effectiveValidationReport = useMemo(() => {
+    const validationJobId = String(validationReport?.job_id || validationReport?.run_id || '').trim();
+    const targetJobId = String(effectiveCurrentJobId || '').trim();
+    if (validationJobId && targetJobId && validationJobId === targetJobId) return validationReport;
+    return validationDetail || validationReport || null;
+  }, [effectiveCurrentJobId, validationDetail, validationReport]);
 
   const releaseMeta = useMemo(() => parseReleaseMetadata(currentRegistryEntry, activeRun), [activeRun, currentRegistryEntry]);
 
@@ -708,11 +792,16 @@ const ModelReleaseScreen = ({
     const lockedThreshold = clampThreshold(
       currentRegistryEntry?.selected_threshold
       ?? validationDetail?.selected_threshold
-      ?? validationReport?.selected_threshold
+      ?? effectiveValidationReport?.selected_threshold
       ?? runThreshold(activeRun),
       0.5,
     );
-    setModelName(currentRegistryEntry?.model_name || getJobName(activeRun, currentRegistryEntry));
+    setModelName(currentRegistryEntry?.model_name || deriveReleaseModelName({
+      run: activeRun,
+      registryEntry: currentRegistryEntry,
+      pipelineName: activePipelineName,
+      pipelineId: activePipelineId,
+    }));
     setVersion(releaseMeta.version || 'v1.0');
     setLifecycleStage(String(currentRegistryEntry?.stage || 'candidate').toLowerCase() || 'candidate');
     setRegistrationNotes(releaseMeta.registrationNotes || '');
@@ -724,22 +813,22 @@ const ModelReleaseScreen = ({
     setChangedVsPrior(releaseMeta.changedVsPrior || '');
     setRegistrationThreshold(lockedThreshold);
     setDeploymentThreshold(lockedThreshold);
-    setDeploymentVersionName(currentJobId ? `release_${currentJobId.slice(0, 8)}` : 'release_v1');
+    setDeploymentVersionName(effectiveCurrentJobId ? `release_${effectiveCurrentJobId.slice(0, 8)}` : 'release_v1');
     setDeploymentNotes(releaseMeta.deploymentNotes || '');
     setImportTarget(targetColumn || activeRun?.target_column || '');
-  }, [activeRun, currentJobId, currentRegistryEntry, releaseMeta, targetColumn, validationDetail?.selected_threshold, validationReport?.selected_threshold]);
+  }, [activePipelineId, activePipelineName, activeRun, effectiveCurrentJobId, currentRegistryEntry, releaseMeta, targetColumn, validationDetail?.selected_threshold, effectiveValidationReport?.selected_threshold]);
 
   const currentSnapshot = useMemo(() => metricsSnapshot(activeRun, deploymentThreshold), [activeRun, deploymentThreshold]);
   const lockedValidationThreshold = clampThreshold(
     currentRegistryEntry?.selected_threshold
     ?? validationDetail?.selected_threshold
-    ?? validationReport?.selected_threshold
+    ?? effectiveValidationReport?.selected_threshold
     ?? runThreshold(activeRun),
     0.5,
   );
   const validationThreshold = clampThreshold(
     validationDetail?.recommended_threshold
-    ?? validationReport?.optimal_threshold
+    ?? effectiveValidationReport?.optimal_threshold
     ?? activeRun?.metrics?.optimal_threshold
     ?? lockedValidationThreshold,
     lockedValidationThreshold,
@@ -747,13 +836,13 @@ const ModelReleaseScreen = ({
   const registeredThreshold = num(currentRegistryEntry?.selected_threshold);
 
   const currentJobDeployments = useMemo(
-    () => deploymentHistory.filter((row) => String(row?.job_id || '') === currentJobId),
-    [currentJobId, deploymentHistory],
+    () => deploymentHistory.filter((row) => String(row?.job_id || '') === effectiveCurrentJobId),
+    [effectiveCurrentJobId, deploymentHistory],
   );
   const latestCurrentDeployment = currentJobDeployments[0] || null;
   const activeCurrentDeployment = currentJobDeployments.find((row) => row?.active) || null;
 
-  const guardrailLimit = num(currentRegistryEntry?.max_event_loss_pct ?? validationReport?.max_event_loss_pct ?? 5) ?? 5;
+  const guardrailLimit = num(currentRegistryEntry?.max_event_loss_pct ?? effectiveValidationReport?.max_event_loss_pct ?? 5) ?? 5;
   const qualityBlocking = Boolean(activeRun?.quality_review?.blocking);
   const guardrail = useMemo(() => guardrailStatus({
     eventLossPct: currentSnapshot.eventLoss,
@@ -761,7 +850,7 @@ const ModelReleaseScreen = ({
     qualityBlocking,
   }), [currentSnapshot.eventLoss, guardrailLimit, qualityBlocking]);
 
-  const hasValidation = Boolean(validationReport?.job_id || validationDetail?.job_id || metricsForRun(activeRun)?.roc_auc != null);
+  const hasValidation = Boolean(effectiveValidationReport?.job_id || validationDetail?.job_id || metricsForRun(activeRun)?.roc_auc != null);
   const recommendation = useMemo(
     () => recommendationStatus({
       hasValidation,
@@ -788,9 +877,8 @@ const ModelReleaseScreen = ({
     && Math.abs(clampThreshold(currentProductionThreshold) - clampThreshold(lockedValidationThreshold)) > 0.0001;
   const deploymentLockedForCurrentVersion = activeCurrentDeployment?.active && currentProductionThreshold != null;
   const approvalsReady = true;
-  const registrationReady = Boolean(currentRegistryEntry);
-  const deployDisabledReason = !registrationReady
-    ? 'Deployment cannot happen before registration.'
+  const deployDisabledReason = !effectiveCurrentJobId
+    ? 'Deployment needs a trained model run.'
     : !hasValidation
       ? 'Deployment is blocked until validation is complete.'
       : guardrail.status === 'Blocked'
@@ -812,7 +900,7 @@ const ModelReleaseScreen = ({
     const retentionLabel = persona === 'business' ? 'Critical Risk Retention' : 'Case Retention / STR Retention';
     const selectedThreshold = clampThreshold(currentRegistryEntry?.selected_threshold ?? lockedValidationThreshold, lockedValidationThreshold);
     const cards = [
-      { label: 'Run ID', value: currentJobId ? currentJobId.slice(0, 12) : '-', helper: currentJobId || 'No active run', mono: true },
+      { label: 'Run ID', value: effectiveCurrentJobId ? effectiveCurrentJobId.slice(0, 12) : '-', helper: effectiveCurrentJobId || 'No active run', mono: true },
       { label: 'Model Name', value: modelName || '-', helper: activeRun?.algorithm_display || activeRun?.algorithm || '' },
       { label: 'Algorithm', value: activeRun?.algorithm_display || activeRun?.algorithm || '-', helper: activeRun?.grain ? `${String(activeRun.grain).toUpperCase()} grain` : '' },
       { label: 'Version', value: version || '-', helper: releaseMeta.artifactVersion ? `Artifact ${releaseMeta.artifactVersion}` : '' },
@@ -836,7 +924,7 @@ const ModelReleaseScreen = ({
   }, [
     activeCurrentDeployment,
     activeRun,
-    currentJobId,
+    effectiveCurrentJobId,
     currentRegistryEntry,
     currentSnapshot.eventLoss,
     currentSnapshot.fn,
@@ -886,11 +974,11 @@ const ModelReleaseScreen = ({
   }, [businessSummaryFallback]);
 
   useEffect(() => {
-    if (!currentJobId) return undefined;
+    if (!effectiveCurrentJobId) return undefined;
     let cancelled = false;
     setBusinessSummaryLoading(true);
     mlopsApi.releaseBusinessSummary({
-      job_id: currentJobId,
+      job_id: effectiveCurrentJobId,
       model_name: modelName,
       algorithm: activeRun?.algorithm_display || activeRun?.algorithm || '',
       threshold: deploymentThreshold,
@@ -935,7 +1023,7 @@ const ModelReleaseScreen = ({
     activeRun?.algorithm,
     activeRun?.algorithm_display,
     businessSummaryFallback,
-    currentJobId,
+    effectiveCurrentJobId,
     currentRegistryEntry?.stage,
     currentSnapshot.eventLoss,
     currentSnapshot.fn,
@@ -969,14 +1057,14 @@ const ModelReleaseScreen = ({
 
   useEffect(() => {
     const recommended = [];
-    if (currentJobId) recommended.push(currentJobId);
+    if (effectiveCurrentJobId) recommended.push(effectiveCurrentJobId);
     const champion = registryRows.find((row) => String(row?.stage || '').toLowerCase() === 'champion');
     if (champion?.job_id && !recommended.includes(champion.job_id)) recommended.push(champion.job_id);
     const latestCandidate = registryRows.find((row) => ['candidate', 'challenger'].includes(String(row?.stage || '').toLowerCase()));
     if (latestCandidate?.job_id && !recommended.includes(latestCandidate.job_id)) recommended.push(latestCandidate.job_id);
     if (activeDeployment?.job_id && !recommended.includes(activeDeployment.job_id)) recommended.push(activeDeployment.job_id);
     setCompareIds((previous) => previous.length ? previous : recommended.slice(0, 4));
-  }, [activeDeployment?.job_id, currentJobId, registryRows]);
+  }, [activeDeployment?.job_id, effectiveCurrentJobId, registryRows]);
 
   useEffect(() => {
     if (!compareIds.length) {
@@ -1000,7 +1088,7 @@ const ModelReleaseScreen = ({
   }, [compareIds]);
 
   const handleRegisterAction = useCallback(async (stageOverride) => {
-    if (!currentJobId) {
+    if (!effectiveCurrentJobId) {
       setReleaseError('Select a trained model before registering a release.');
       return;
     }
@@ -1012,7 +1100,7 @@ const ModelReleaseScreen = ({
     try {
       setLoading(true);
       const validationPayload = {
-        ...(validationReport || {}),
+        ...(effectiveValidationReport || {}),
         release_metadata: {
           version,
           owner,
@@ -1030,8 +1118,13 @@ const ModelReleaseScreen = ({
       };
       const tags = tagsInput.split(',').map((item) => item.trim()).filter(Boolean);
       const response = await mlopsApi.registerModel({
-        job_id: currentJobId,
-        model_name: modelName || getJobName(activeRun, currentRegistryEntry),
+        job_id: effectiveCurrentJobId,
+        model_name: modelName || deriveReleaseModelName({
+          run: activeRun,
+          registryEntry: currentRegistryEntry,
+          pipelineName: activePipelineName,
+          pipelineId: activePipelineId,
+        }),
         stage: finalStage,
         selected_threshold: clampThreshold(registrationThreshold, lockedValidationThreshold),
         max_event_loss_pct: guardrailLimit,
@@ -1051,7 +1144,7 @@ const ModelReleaseScreen = ({
     } finally {
       setLoading(false);
     }
-  }, [actionsDisabled, activeRun, approvalsReady, businessApprovalNotes, changedVsPrior, currentJobId, currentRegistryEntry, deploymentNotes, gatingMessage, guardrailLimit, lifecycleStage, modelName, onRegistered, owner, preprocessedDataset?.dataset_id, refreshReleaseData, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, validationReport, validationThreshold, version]);
+  }, [actionsDisabled, activePipelineId, activePipelineName, activeRun, approvalsReady, businessApprovalNotes, changedVsPrior, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, effectiveValidationReport, gatingMessage, guardrailLimit, lifecycleStage, modelName, onRegistered, owner, preprocessedDataset?.dataset_id, refreshReleaseData, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, validationThreshold, version]);
 
   const handlePromoteStage = useCallback(async (jobId, nextStage) => {
     if (!jobId) return;
@@ -1093,14 +1186,14 @@ const ModelReleaseScreen = ({
   }, [actionsDisabled, archiveDialog.row, gatingMessage, owner, refreshReleaseData, registrationNotes]);
 
   const handleExportModel = useCallback(async (kind) => {
-    if (!currentJobId) return;
+    if (!effectiveCurrentJobId) return;
     if (actionsDisabled) {
       setReleaseError(gatingMessage);
       return;
     }
     setDownloading(kind);
     try {
-      const response = await mlopsApi.exportModel({ job_id: currentJobId });
+      const response = await mlopsApi.exportModel({ job_id: effectiveCurrentJobId });
       const payload = unwrap(response) || {};
       if (kind === 'card' && payload.model_card) {
         downloadBlob(JSON.stringify(payload.model_card, null, 2), `${modelName || 'model'}_card.json`);
@@ -1116,14 +1209,14 @@ const ModelReleaseScreen = ({
     } finally {
       setDownloading('');
     }
-  }, [actionsDisabled, currentJobId, gatingMessage, modelName]);
+  }, [actionsDisabled, effectiveCurrentJobId, gatingMessage, modelName]);
 
   const handleExportDeploymentConfig = useCallback(() => {
     const payload = {
       model_name: modelName,
       version,
       lifecycle_stage: lifecycleStage,
-      run_id: currentJobId,
+      run_id: effectiveCurrentJobId,
       locked_validation_threshold: lockedValidationThreshold,
       recommended_threshold: validationThreshold,
       registered_threshold: registeredThreshold,
@@ -1134,11 +1227,11 @@ const ModelReleaseScreen = ({
       active_deployment: activeCurrentDeployment,
     };
     downloadBlob(JSON.stringify(payload, null, 2), `${modelName || 'model'}_deployment_config.json`);
-  }, [activeCurrentDeployment, currentJobId, currentProductionThreshold, deploymentNotes, deploymentThreshold, deploymentVersionName, lifecycleStage, lockedValidationThreshold, modelName, registeredThreshold, validationThreshold, version]);
+  }, [activeCurrentDeployment, effectiveCurrentJobId, currentProductionThreshold, deploymentNotes, deploymentThreshold, deploymentVersionName, lifecycleStage, lockedValidationThreshold, modelName, registeredThreshold, validationThreshold, version]);
 
   const handleExportRegistrationMetadata = useCallback(() => {
     const payload = {
-      job_id: currentJobId,
+      job_id: effectiveCurrentJobId,
       model_name: modelName,
       version,
       owner,
@@ -1153,26 +1246,59 @@ const ModelReleaseScreen = ({
       registry_entry: currentRegistryEntry,
     };
     downloadBlob(JSON.stringify(payload, null, 2), `${modelName || 'model'}_registration_metadata.json`);
-  }, [businessApprovalNotes, changedVsPrior, currentJobId, currentRegistryEntry, lifecycleStage, modelName, owner, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, version]);
+  }, [businessApprovalNotes, changedVsPrior, effectiveCurrentJobId, currentRegistryEntry, lifecycleStage, modelName, owner, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, version]);
 
   const executeDeploy = useCallback(async () => {
-    if (!currentJobId) return;
+    if (!effectiveCurrentJobId) return;
     if (actionsDisabled) {
       setReleaseError(gatingMessage);
       return;
     }
     setDeploying(true);
     try {
+      if (!currentRegistryEntry) {
+        const autoRegisterResponse = await mlopsApi.registerModel({
+          job_id: effectiveCurrentJobId,
+          model_name: modelName || deriveReleaseModelName({
+            run: activeRun,
+            registryEntry: currentRegistryEntry,
+            pipelineName: activePipelineName,
+            pipelineId: activePipelineId,
+          }),
+          stage: 'candidate',
+          selected_threshold: clampThreshold(lockedValidationThreshold, lockedValidationThreshold),
+          max_event_loss_pct: guardrailLimit,
+          validation: {
+            ...(effectiveValidationReport || {}),
+            release_metadata: {
+              version,
+              owner,
+              requestor: owner,
+              registrationNotes,
+              businessApprovalNotes,
+              technicalApprovalNotes,
+              deploymentNotes,
+              artifactVersion: version,
+            },
+          },
+          notes: registrationNotes || 'Auto-registered during deployment from Model Release.',
+          tags: tagsInput.split(',').map((item) => item.trim()).filter(Boolean),
+          label: modelName,
+          changed_by: owner,
+          reason: 'Auto-registered as candidate during deployment',
+        });
+        onRegistered?.(unwrap(autoRegisterResponse));
+      }
       const payload = {
         threshold: clampThreshold(deploymentThreshold, lockedValidationThreshold),
-        deployment_name: deploymentVersionName || `release_${currentJobId.slice(0, 8)}`,
+        deployment_name: deploymentVersionName || `release_${effectiveCurrentJobId.slice(0, 8)}`,
         notes: deploymentNotes,
         entity_type: String(activeRun?.grain || 'alert'),
         scoring_mode: 'governed_release',
       };
       const response = activeDeployment?.deployment_id
-        ? await mlopsApi.swapDeployment({ new_job_id: currentJobId, ...payload })
-        : await mlopsApi.deployModel(currentJobId, payload.threshold, payload);
+        ? await mlopsApi.swapDeployment({ new_job_id: effectiveCurrentJobId, ...payload })
+        : await mlopsApi.deployModel(effectiveCurrentJobId, payload.threshold, payload);
       onDeploy?.(unwrap(response), { navigateToDashboard: false });
       await refreshReleaseData();
       setDeployDialogOpen(false);
@@ -1183,14 +1309,14 @@ const ModelReleaseScreen = ({
     } finally {
       setDeploying(false);
     }
-  }, [actionsDisabled, activeDeployment?.deployment_id, activeRun?.grain, currentJobId, deploymentNotes, deploymentThreshold, deploymentVersionName, gatingMessage, lockedValidationThreshold, onDeploy, refreshReleaseData]);
+  }, [actionsDisabled, activeDeployment?.deployment_id, activePipelineId, activePipelineName, activeRun, businessApprovalNotes, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, deploymentThreshold, deploymentVersionName, effectiveValidationReport, gatingMessage, guardrailLimit, lockedValidationThreshold, modelName, onDeploy, onRegistered, owner, refreshReleaseData, registrationNotes, tagsInput, technicalApprovalNotes, version]);
 
   const handleScoreSingleRecord = useCallback(async () => {
     if (actionsDisabled) {
       setTestError(gatingMessage);
       return;
     }
-    if (!currentJobId) {
+    if (!effectiveCurrentJobId) {
       setTestError('Select a model run before scoring a test record.');
       return;
     }
@@ -1199,7 +1325,7 @@ const ModelReleaseScreen = ({
     try {
       const record = JSON.parse(testInput || '{}');
       const response = await mlopsApi.inferenceExplain({
-        run_id: currentJobId,
+        run_id: effectiveCurrentJobId,
         record,
         threshold: clampThreshold(deploymentThreshold, lockedValidationThreshold),
         top_n: 8,
@@ -1210,7 +1336,7 @@ const ModelReleaseScreen = ({
     } finally {
       setTestLoading(false);
     }
-  }, [actionsDisabled, currentJobId, deploymentThreshold, gatingMessage, lockedValidationThreshold, testInput]);
+  }, [actionsDisabled, effectiveCurrentJobId, deploymentThreshold, gatingMessage, lockedValidationThreshold, testInput]);
 
   const parseCsvRows = useCallback(async (file) => {
     const text = await file.text();
@@ -1235,7 +1361,7 @@ const ModelReleaseScreen = ({
       setSandboxError(gatingMessage);
       return;
     }
-    if (!currentJobId) {
+    if (!effectiveCurrentJobId) {
       setSandboxError('Select a model run before sandbox scoring.');
       return;
     }
@@ -1246,7 +1372,7 @@ const ModelReleaseScreen = ({
       const highThreshold = Math.max(num(activeRun?.hml_high_threshold) ?? 0.65, clampThreshold(deploymentThreshold, lockedValidationThreshold));
       const lowThreshold = clampThreshold(deploymentThreshold, lockedValidationThreshold);
       const response = await mlopsApi.ledgerScore({
-        job_id: currentJobId,
+        job_id: effectiveCurrentJobId,
         rows,
         grain: String(activeRun?.grain || 'alert'),
         hml_high_threshold: highThreshold,
@@ -1275,7 +1401,7 @@ const ModelReleaseScreen = ({
     } finally {
       setSandboxLoading(false);
     }
-  }, [actionsDisabled, activeRun?.grain, activeRun?.hml_high_threshold, currentJobId, deploymentThreshold, gatingMessage, lockedValidationThreshold, parseCsvRows, sandboxFile]);
+  }, [actionsDisabled, activeRun?.grain, activeRun?.hml_high_threshold, effectiveCurrentJobId, deploymentThreshold, gatingMessage, lockedValidationThreshold, parseCsvRows, sandboxFile]);
 
   const handleDownloadSandbox = useCallback(() => {
     if (!sandboxResult?.rows?.length) return;
@@ -1512,6 +1638,29 @@ const ModelReleaseScreen = ({
           </Box>
           {loading ? <CircularProgress size={18} sx={{ color: T.orange }} /> : null}
         </Stack>
+        <Box sx={{ display: 'grid', gap: 1.2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(280px, 420px) 1fr' }, mb: 1.5 }}>
+          <Select
+            size="small"
+            displayEmpty
+            value={effectiveCurrentJobId || ''}
+            onChange={(event) => {
+              setSelectedReleaseJobId(String(event.target.value || '').trim());
+              setReleaseError(null);
+            }}
+          >
+            {(trainingRuns || []).map((run) => (
+              <MenuItem key={run.job_id} value={run.job_id}>
+                {(run.model_name || run.label || run.algorithm_display || run.algorithm || String(run.job_id).slice(0, 8))}
+                {` · ${fmtDate(run.trained_at)}`}
+              </MenuItem>
+            ))}
+          </Select>
+          <Alert severity={hasValidation ? 'success' : 'warning'} sx={{ borderRadius: 1.5 }}>
+            {hasValidation
+              ? 'This release is bound to a saved trained model run and can be reopened after restart without retraining.'
+              : 'This saved trained model exists, but its validation evidence is incomplete. Open it in Model Validation first if you need a locked threshold before deployment.'}
+          </Alert>
+        </Box>
         <Box sx={{ display: 'grid', gap: 1.35, gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(5, minmax(0, 1fr))' } }}>
           {releaseSummaryCards.map((card) => (
             <SummaryCard key={`${card.label}-${card.helper}`} label={card.label} value={card.value} helper={card.helper} tone={card.tone} mono={card.mono} />
@@ -1579,7 +1728,7 @@ const ModelReleaseScreen = ({
                 <KeyValueRow label="Threshold" value={fmtMetric(deploymentThreshold, 2)} mono highlight />
                 <KeyValueRow label="Training rows" value={fmtCount(resultForRun(activeRun)?.train_rows)} />
                 <KeyValueRow label="Feature count" value={fmtCount(featureNamesForRun(activeRun).length || resultForRun(activeRun)?.features_used)} />
-                <KeyValueRow label="Run / job ID" value={currentJobId || '-'} mono />
+                <KeyValueRow label="Run / job ID" value={effectiveCurrentJobId || '-'} mono />
               </Stack>
             </Paper>
 
@@ -1587,7 +1736,7 @@ const ModelReleaseScreen = ({
               <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Validation details</Typography>
               <Stack spacing={0.3} sx={{ mt: 1.1 }}>
                 <KeyValueRow label="Train / validation split" value={validationDetail?.score_distribution_source === 'stored_scores' ? 'Stored holdout scores available' : 'Random holdout'} helper={validationDetail?.score_distribution_reason || 'Validation detail evidence is sourced from the saved run bundle.'} />
-                <KeyValueRow label="Threshold search method" value={validationReport?.optimization_mode || 'Max suppression under event-loss guardrail'} />
+                <KeyValueRow label="Threshold search method" value={effectiveValidationReport?.optimization_mode || 'Max suppression under event-loss guardrail'} />
                 <KeyValueRow label="Calibration" value={activeRun?.calibration_used ? 'Calibrated' : 'Not captured'} />
                 <KeyValueRow label="Preprocessing pipeline version" value={preprocessedDataset?.dataset_id ? `dataset_${preprocessedDataset.dataset_id}` : releaseMeta.preprocessingVersion || 'Not captured'} mono />
                 <KeyValueRow label="Model artifact version" value={releaseMeta.artifactVersion || version} mono />
@@ -1620,24 +1769,9 @@ const ModelReleaseScreen = ({
               <TextField size="small" label="Owner / Requestor" value={owner} onChange={(event) => setOwner(event.target.value)} />
             </Box>
 
-            <Box sx={{ mt: 1.8, p: 1.6, borderRadius: 2.5, border: `1px solid ${T.border}`, bgcolor: '#FCFCFD' }}>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }}>
-                <Box sx={{ minWidth: 180 }}>
-                  <Typography sx={{ fontSize: 11, color: T.dim, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6 }}>Threshold</Typography>
-                  <TextField size="small" type="number" value={registrationThreshold} InputProps={{ readOnly: true }} sx={{ mt: 0.8, width: 160 }} />
-                </Box>
-                <Box sx={{ flex: 1 }}>
-                  <Slider value={registrationThreshold} min={0} max={1} step={0.01} disabled sx={{ color: T.orange }} />
-                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} justifyContent="space-between">
-                    <Typography sx={{ fontSize: 11, color: T.muted }}>Recommended threshold {fmtMetric(validationThreshold, 2)}</Typography>
-                    <Chip label={`Locked from validation ${fmtMetric(registrationThreshold, 2)}`} size="small" sx={{ height: 22, bgcolor: T.orangeSoft, color: T.orange, border: `1px solid ${T.border}` }} />
-                  </Stack>
-                </Box>
-              </Stack>
-              <Typography sx={{ mt: 1, fontSize: 11.5, color: T.muted, lineHeight: 1.6 }}>
-                The release threshold is locked from Model Validation and carried forward without further edits. Live preview at this threshold: {pct(metricsSnapshot(activeRun, registrationThreshold).suppression, 1)} review reduction with {pct(metricsSnapshot(activeRun, registrationThreshold).eventLoss, 1)} potential risk miss.
-              </Typography>
-            </Box>
+            <Alert severity="info" sx={{ mt: 1.8, borderRadius: 1.5 }}>
+              Model Release does not edit thresholds. The locked validation threshold of {fmtMetric(registrationThreshold, 2)} will be carried into registration and deployment unchanged.
+            </Alert>
 
             <Stack spacing={1.2} sx={{ mt: 1.6 }}>
               <TextField size="small" label="Registration Notes" multiline minRows={3} value={registrationNotes} onChange={(event) => setRegistrationNotes(event.target.value)} />
@@ -1653,10 +1787,10 @@ const ModelReleaseScreen = ({
               <Button variant="contained" startIcon={<FactCheck />} onClick={() => handleRegisterAction('candidate')} sx={{ textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
                 Register as Candidate
               </Button>
-              <Button variant="outlined" startIcon={<CheckCircle />} onClick={() => handlePromoteStage(currentJobId, 'champion')} disabled={!currentRegistryEntry && !currentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+              <Button variant="outlined" startIcon={<CheckCircle />} onClick={() => handlePromoteStage(effectiveCurrentJobId, 'champion')} disabled={!currentRegistryEntry && !effectiveCurrentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
                 Promote to Champion
               </Button>
-              <Button variant="outlined" startIcon={<Archive />} onClick={() => setArchiveDialog({ open: true, row: currentRegistryEntry || { job_id: currentJobId, model_name: modelName } })} disabled={!currentRegistryEntry && !currentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+              <Button variant="outlined" startIcon={<Archive />} onClick={() => setArchiveDialog({ open: true, row: currentRegistryEntry || { job_id: effectiveCurrentJobId, model_name: modelName } })} disabled={!currentRegistryEntry && !effectiveCurrentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
                 Archive Model
               </Button>
             </Stack>
@@ -1666,8 +1800,8 @@ const ModelReleaseScreen = ({
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: T.border }}>
               <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.text }}>Run context</Typography>
               <Stack spacing={0.25} sx={{ mt: 1.1 }}>
-                <KeyValueRow label="Experiment name" value="Experiment 1" />
-                <KeyValueRow label="Run ID" value={currentJobId || '-'} mono />
+                <KeyValueRow label="Pipeline run" value={pipelineRunLabel} />
+                <KeyValueRow label="Run ID" value={effectiveCurrentJobId || '-'} mono />
                 <KeyValueRow label="Training date" value={fmtDate(activeRun?.trained_at)} />
                 <KeyValueRow label="Dataset version" value={preprocessedDataset?.dataset_id ? `dataset_${preprocessedDataset.dataset_id}` : masterDataset?.dataset_id ? `master_${masterDataset.dataset_id}` : '-'} mono />
                 <KeyValueRow label="Target variable" value={targetColumn || activeRun?.target_column || '-'} />
@@ -1678,7 +1812,7 @@ const ModelReleaseScreen = ({
                 <KeyValueRow label="Recommended threshold" value={fmtMetric(validationThreshold, 2)} mono />
                 <KeyValueRow label="Already registered before" value={currentRegistryEntry ? 'Yes' : 'No'} />
                 <KeyValueRow label="Approval requirement state" value={releaseMeta.approvalState || 'No formal gate configured'} />
-                <KeyValueRow label="Deployment eligibility" value={deployDisabledReason ? 'Blocked' : 'Eligible'} helper={deployDisabledReason || 'Registration and validation checks are satisfied.'} />
+                <KeyValueRow label="Deployment eligibility" value={deployDisabledReason ? 'Review Needed' : 'Eligible'} helper={deployDisabledReason || 'Validation is complete. Registration will be created automatically if it is missing.'} />
               </Stack>
             </Paper>
 
@@ -1703,7 +1837,7 @@ const ModelReleaseScreen = ({
                 </Alert>
               )}
               <Box sx={{ mt: 1.5, display: 'grid', gap: 1.2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
-                <TextField size="small" label="Deployment Threshold" type="number" value={deploymentThreshold} InputProps={{ readOnly: true }} disabled={deploymentLockedForCurrentVersion} />
+                <TextField size="small" label="Locked Deployment Threshold" type="number" value={deploymentThreshold} InputProps={{ readOnly: true }} />
                 <TextField size="small" label="Deployment Version Name" value={deploymentVersionName} onChange={(event) => setDeploymentVersionName(event.target.value)} />
                 <TextField size="small" label="Registered Threshold" value={fmtMetric(registeredThreshold, 2)} InputProps={{ readOnly: true }} />
                 <TextField size="small" label="Recommended Threshold" value={fmtMetric(validationThreshold, 2)} InputProps={{ readOnly: true }} />
@@ -1711,7 +1845,6 @@ const ModelReleaseScreen = ({
                 <TextField size="small" label="Threshold Lock Status" value={deploymentLockedForCurrentVersion ? 'Locked for active deployment' : 'Locked from validation'} InputProps={{ readOnly: true }} />
                 <TextField size="small" label="Effective Production Threshold" value={fmtMetric(currentProductionThreshold ?? deploymentThreshold, 2)} InputProps={{ readOnly: true }} />
               </Box>
-              {!deploymentLockedForCurrentVersion ? <Box sx={{ mt: 1.6 }}><Slider value={deploymentThreshold} min={0} max={1} step={0.01} disabled sx={{ color: T.orange }} /></Box> : null}
               <Stack spacing={0.35} sx={{ mt: 1.3 }}>
                 <KeyValueRow label="Guardrail check" value={guardrail.status} helper={guardrail.detail} highlight={guardrail.status !== 'Safe'} />
                 <KeyValueRow label="Deployment notes" value={deploymentNotes || 'No notes added yet'} helper="Release notes recorded with the deployment version" />
@@ -1857,13 +1990,13 @@ const ModelReleaseScreen = ({
       <EnterpriseSection title="Export, approve and deploy" subtitle="Release artifacts, formal review output, and deployment control points">
         <Stack spacing={1.3}>
           <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.1} flexWrap="wrap" useFlexGap>
-            <Button variant="outlined" startIcon={<Visibility />} onClick={() => onViewReport?.(currentJobId)} disabled={!currentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+            <Button variant="outlined" startIcon={<Visibility />} onClick={() => onViewReport?.(effectiveCurrentJobId)} disabled={!effectiveCurrentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
               View Business Report
             </Button>
-            <Button variant="outlined" startIcon={<CloudDownload />} onClick={() => handleExportModel('card')} disabled={!currentJobId || downloading === 'card'} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+            <Button variant="outlined" startIcon={<CloudDownload />} onClick={() => handleExportModel('card')} disabled={!effectiveCurrentJobId || downloading === 'card'} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
               Download Model Card
             </Button>
-            <Button variant="outlined" startIcon={<CloudDownload />} onClick={() => handleExportModel('artifact')} disabled={!currentJobId || downloading === 'artifact'} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+            <Button variant="outlined" startIcon={<CloudDownload />} onClick={() => handleExportModel('artifact')} disabled={!effectiveCurrentJobId || downloading === 'artifact'} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
               Download Model Artifact
             </Button>
             <Button variant="outlined" startIcon={<FileDownload />} onClick={handleExportDeploymentConfig} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
@@ -1922,7 +2055,7 @@ const ModelReleaseScreen = ({
                     </thead>
                     <tbody>
                       {comparisonRows.map((row) => (
-                        <tr key={row.job_id} onClick={() => openDetailsDrawer(row)} style={{ cursor: 'pointer', background: String(row.job_id) === currentJobId ? '#FFF8F3' : '#FFF' }}>
+                        <tr key={row.job_id} onClick={() => openDetailsDrawer(row)} style={{ cursor: 'pointer', background: String(row.job_id) === effectiveCurrentJobId ? '#FFF8F3' : '#FFF' }}>
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>
                             <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>{row.model_name || row.label || row.job_id.slice(0, 8)}</Typography>
                             <Typography sx={{ fontSize: 10.5, color: T.muted }}>{row.algorithm_display || row.algorithm}</Typography>

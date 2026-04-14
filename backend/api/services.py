@@ -9,6 +9,7 @@ import traceback
 import os
 import sys
 import threading
+import sqlite3
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -38,6 +39,31 @@ CalibrationSTREvaluationService = None
 CalibrationKSService = None
 CalibrationKSVisualizationService = None
 CalibrationKSNarrativeService = None
+
+
+def _db_candidate_score(path: str) -> tuple[int, int]:
+    try:
+        if not path or not os.path.exists(path):
+            return (-1, -1)
+
+        size = int(os.path.getsize(path) or 0)
+        useful_tables = 0
+        try:
+            with sqlite3.connect(path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                table_names = {str(row[0] or "").strip().lower() for row in cursor.fetchall()}
+            useful_tables = sum(
+                1
+                for name in ("cases", "alerts", "focus_results", "focus_runs", "fcc_bridge_imports")
+                if name in table_names
+            )
+        except Exception:
+            useful_tables = 0
+
+        return (useful_tables, size)
+    except Exception:
+        return (-1, -1)
 CalibrationATLBTLService = None
 
 # Step 1: Population exploration services
@@ -245,9 +271,10 @@ class ServiceContainer:
             f"backend/data/environments/{env_id}/database.db",
         ]
 
-        for p in paths:
-            if os.path.exists(p):
-                return DatabaseManager(p)
+        existing = [p for p in paths if os.path.exists(p)]
+        if existing:
+            best_path = max(existing, key=_db_candidate_score)
+            return DatabaseManager(best_path)
 
         # Fallback (legacy global)
         if (

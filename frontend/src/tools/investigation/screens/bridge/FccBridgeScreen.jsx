@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppContext } from '@context/AppContext';
 import apiClient from '@services/api';
+import { clearFccSentinelHandoff, mergeFccSentinelHandoff } from '../../../../utils/fccSentinelHandoff';
 import PageContainer from '@investigation-layout/PageContainer';
 import {
   Alert,
@@ -40,6 +41,7 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
     checkDatasetStatus,
     loadCaseList,
     refreshPriorityBuckets,
+    setCaseScopeRemote,
   } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]);
@@ -97,10 +99,61 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
       const importedAlerts = Number(imported?.imported_alert_count || 0).toLocaleString();
       const sourceRows = Number(imported?.source_published_rows || row?.published_rows || 0).toLocaleString();
       const sourcePublishedCases = Number(imported?.source_published_case_count || row?.table_counts?.cases || 0).toLocaleString();
+      const importedCaseIds = Array.isArray(imported?.imported_case_ids) ? imported.imported_case_ids : [];
       setDatasetLoaded(true);
       await checkDatasetStatus();
+      if (importedCaseIds.length) {
+        await setCaseScopeRemote('CUSTOM', importedCaseIds, imported?.focus_result?.run_id || null);
+      }
       await loadCaseList(true);
       await refreshPriorityBuckets();
+      mergeFccSentinelHandoff({
+        source: 'fcc_bridge',
+        handoff_type: 'fcc_to_sentinel',
+        preferred_screen: 'fcc_bridge',
+        env_id: activeEnv,
+        publish_id: publishId,
+        publish_label: row?.publish_label || row?.label || null,
+        pipeline_id: row?.pipeline_id || null,
+        pipeline_name: row?.pipeline_name || null,
+        run_id: row?.run_id || null,
+        deployment_id: row?.deployment_id || null,
+        imported_case_ids: importedCaseIds,
+        imported_case_count: Number(imported?.imported_case_count || importedCaseIds.length || 0),
+        imported_alert_count: Number(imported?.imported_alert_count || 0),
+        selected_case_id: importedCaseIds[0] || null,
+      });
+      apiClient.saveFccWorkflowSession({
+        pipeline_id: row?.pipeline_id || undefined,
+        pipeline_name: row?.pipeline_name || undefined,
+        run_id: row?.run_id || undefined,
+        deployment_id: row?.deployment_id || undefined,
+        publish_id: publishId,
+        current_module: 'investigation',
+        current_step: 'fcc_bridge',
+        current_state: {
+          preferred_screen: 'fcc_bridge',
+          selected_case_id: importedCaseIds[0] || null,
+          run_id: row?.run_id || null,
+          publish_id: publishId,
+        },
+        selected_case_id: importedCaseIds[0] || undefined,
+        handoff_summary: {
+          source: 'fcc_bridge',
+          preferred_screen: 'fcc_bridge',
+          publish_id: publishId,
+          pipeline_id: row?.pipeline_id || null,
+          pipeline_name: row?.pipeline_name || null,
+          run_id: row?.run_id || null,
+          deployment_id: row?.deployment_id || null,
+          imported_case_ids: importedCaseIds,
+          imported_case_count: Number(imported?.imported_case_count || importedCaseIds.length || 0),
+          imported_alert_count: Number(imported?.imported_alert_count || 0),
+          selected_case_id: importedCaseIds[0] || null,
+        },
+        status: 'sentinel_ready',
+      }).catch(() => {});
+      setActiveScreen?.('fcc_bridge');
       setSuccessMessage(
         `Imported ${importedCases} Sentinel cases and ${importedAlerts} alerts from ${sourceRows} FCC retained rows into shared workspace ${activeEnv}. Published case count: ${sourcePublishedCases}.`,
       );
@@ -123,8 +176,10 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
       });
       setDatasetLoaded(false);
       await checkDatasetStatus();
+      await setCaseScopeRemote('GLOBAL', null);
       await loadCaseList(true);
       await refreshPriorityBuckets();
+      clearFccSentinelHandoff();
       setSuccessMessage(`Cleared the imported FCC investigation queue from shared workspace ${activeEnv}. You can now import a new retained run.`);
     } catch (err) {
       setError(err.message || 'Failed to clear the imported FCC queue.');

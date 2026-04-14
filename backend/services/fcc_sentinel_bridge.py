@@ -91,13 +91,36 @@ def _resolve_target_db_path(target_env_root: Path) -> Path:
     """Choose the investigation DB file the live Sentinel routes will read."""
     root = Path(target_env_root)
     existing_candidates = [
-        root / "investigation" / "investigation.db",
         root / "database.db",
+        root / "investigation" / "investigation.db",
         root / "investigation.db",
     ]
+    ranked_candidates = []
     for candidate in existing_candidates:
-        if candidate.exists():
-            return candidate
+        if not candidate.exists():
+            continue
+        try:
+            size = int(candidate.stat().st_size or 0)
+        except Exception:
+            size = 0
+        useful_tables = 0
+        try:
+            import sqlite3
+            with sqlite3.connect(candidate) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                table_names = {str(row[0] or "").strip().lower() for row in cursor.fetchall()}
+            useful_tables = sum(
+                1
+                for name in ("cases", "alerts", "focus_results", "focus_runs", "fcc_bridge_imports")
+                if name in table_names
+            )
+        except Exception:
+            useful_tables = 0
+        ranked_candidates.append(((useful_tables, size), candidate))
+    if ranked_candidates:
+        ranked_candidates.sort(key=lambda item: item[0], reverse=True)
+        return ranked_candidates[0][1]
 
     if (root / "investigation").exists():
         return root / "investigation" / "investigation.db"

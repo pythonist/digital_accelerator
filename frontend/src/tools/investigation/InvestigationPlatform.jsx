@@ -145,7 +145,7 @@ const InvestigationPlatform = () => {
         }
         const nextHandoff = {
           ...summary,
-          preferred_screen: currentState?.preferred_screen || session?.current_step || summary?.preferred_screen || 'casepack',
+          preferred_screen: currentState?.preferred_screen || session?.current_step || summary?.preferred_screen || 'fcc_bridge',
           selected_case_id: session?.selected_case_id || currentState?.selected_case_id || summary?.selected_case_id || null,
           workflow_session_id: session?.session_id || summary?.workflow_session_id || null,
           case_scope: session?.case_scope || summary?.case_scope || null,

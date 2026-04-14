@@ -423,7 +423,7 @@ def handoff_sentinel():
         pipeline_name = str(body.get("pipeline_name") or "").strip() or None
         threshold = float(body.get("threshold") or 0.5)
         force_refresh = _bool_value(body.get("force_refresh"), default=False)
-        preferred_screen = str(body.get("preferred_screen") or "casepack").strip() or "casepack"
+        preferred_screen = str(body.get("preferred_screen") or "fcc_bridge").strip() or "fcc_bridge"
         requested_batch_id = str(body.get("batch_id") or "").strip()
 
         existing_session = report_service.get_workflow_session(

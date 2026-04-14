@@ -5,10 +5,24 @@ import { useAppContext } from '@context/AppContext';
 import SharedWorkbenchLayout from '../../shared/layout/SharedWorkbenchLayout';
 import { getInvestigationNavigationSections } from './navigationConfig';
 import { appTheme } from '../theme';
+import { readFccSentinelHandoff } from '../../../utils/fccSentinelHandoff';
 
 const MainLayout = ({ children, activeScreen, setActiveScreen, headerActions = null }) => {
   const navigate = useNavigate();
-  const { datasetLoaded, username, activeBankName, activeEnv, handleLogout } = useAppContext();
+  const { datasetLoaded, caseList, priorityBuckets, username, activeBankName, activeEnv, handleLogout } = useAppContext();
+  const handoff = readFccSentinelHandoff();
+  const hasFccBridgeSession = Boolean(
+    handoff?.publish_id
+    || handoff?.run_id
+    || handoff?.workflow_session_id
+    || handoff?.imported_case_count,
+  );
+  const hasInvestigationData = Boolean(
+    datasetLoaded
+    || (Array.isArray(caseList) && caseList.length > 0)
+    || (Array.isArray(priorityBuckets?.allCases) && priorityBuckets.allCases.length > 0)
+    || hasFccBridgeSession,
+  );
 
   return (
     <ThemeProvider theme={appTheme}>
@@ -17,7 +31,7 @@ const MainLayout = ({ children, activeScreen, setActiveScreen, headerActions = n
         moduleLabel="Investigation Workbench"
         activeScreen={activeScreen}
         setActiveScreen={setActiveScreen}
-        sections={getInvestigationNavigationSections(datasetLoaded)}
+        sections={getInvestigationNavigationSections(hasInvestigationData)}
         username={username}
         activeEnvironment={activeBankName || activeEnv}
         headerActions={headerActions}

@@ -43,6 +43,7 @@ import {
   getScreenState,
   upsertScreenState,
 } from '../utils/pipelineState';
+import { getStepStatus, isPipelineComplete, loadPipelineRun } from '../utils/pipelineStorage';
 
 const tone = {
   border: T.border,
@@ -85,6 +86,18 @@ const workflowStepLabels = {
   reports: 'Reports',
 };
 const historyStepOrder = ['data', 'master', 'target', 'eda', 'preprocess', 'model', 'validation', 'registry', 'dashboard', 'reports'];
+const fccStorageStepMap = {
+  data: 'data_upload',
+  master: 'master_dataset',
+  target: 'target_variable',
+  eda: 'eda',
+  preprocess: 'preprocessing',
+  model: 'model_run',
+  validation: 'validation',
+  registry: 'registry',
+  dashboard: 'live_dashboard',
+  reports: 'reports',
+};
 
 const pick = (res) => res?.data ?? res;
 const cloneDeepSafe = (value) => {
@@ -187,6 +200,12 @@ const formatDateTime = (value) => {
   return parsed.toLocaleString();
 };
 
+const pipelineFamilyKey = (row) => String(row?.pipeline_type || row?.model_family || 'fcc').trim().toLowerCase() === 'mule' ? 'mule' : 'fcc';
+const pipelineFamilyLabel = (row) => pipelineFamilyKey(row) === 'mule' ? 'Mule Account Detection' : 'FCC False Positive Suppression';
+const pipelineFamilyShort = (row) => pipelineFamilyKey(row) === 'mule' ? 'Mule' : 'FCC';
+const pipelineRunRef = (row) => row?.run_ref || `${pipelineFamilyKey(row).toUpperCase()}-RUN-${row?.pipeline_id ?? 'draft'}`;
+const pipelineWorkspaceLabel = (row) => row?.current_workspace || pipelineFamilyShort(row);
+
 const statusKey = (row) => String(row?.run_status || row?.workflow_status || row?.status || 'draft').toLowerCase();
 const ownerLabel = (row) => String(row?.created_by_label || row?.owner || row?.created_by_persona || 'technical').trim() || 'technical';
 const progressNumber = (row) => {
@@ -238,6 +257,39 @@ const matchesSearch = (row, search) => {
   ].join(' ').toLowerCase().includes(needle);
 };
 
+const deriveFccSavedRunState = (row) => {
+  if (pipelineFamilyKey(row) !== 'fcc') return null;
+  const pipelineId = String(Number(row?.pipeline_id || 0) || '').trim();
+  if (!pipelineId) return null;
+  const savedRun = loadPipelineRun(pipelineId);
+  if (!savedRun) return null;
+  const complete = isPipelineComplete(pipelineId);
+  const completion = historyStepOrder.reduce((acc, stepId) => {
+    const storageKey = fccStorageStepMap[stepId];
+    if (complete) {
+      acc[stepId] = true;
+      return acc;
+    }
+    acc[stepId] = storageKey ? getStepStatus(pipelineId, storageKey) === 'done' : false;
+    return acc;
+  }, {});
+  const statuses = historyStepOrder.reduce((acc, stepId) => {
+    acc[stepId] = completion[stepId] ? 'completed' : 'not_started';
+    return acc;
+  }, {});
+  const doneCount = historyStepOrder.filter((stepId) => completion[stepId]).length;
+  return {
+    savedRun,
+    complete,
+    completion,
+    statuses,
+    doneCount,
+    totalCount: historyStepOrder.length,
+    staleCount: 0,
+    runStatus: complete ? 'completed' : String(row?.run_status || row?.workflow_status || row?.status || 'draft').toLowerCase(),
+  };
+};
+
 const WorkbenchPipelinesScreen = ({
   persona = 'technical',
   activePipelineId = null,
@@ -282,6 +334,7 @@ const WorkbenchPipelinesScreen = ({
   const [searchText, setSearchText] = useState('');
   const [scopeFilter, setScopeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('active');
+  const [familyFilter, setFamilyFilter] = useState('all');
 
   const selected = useMemo(() => {
     if (!selectedPipelineId) return null;
@@ -299,14 +352,24 @@ const WorkbenchPipelinesScreen = ({
   }, [pipelines]);
 
   const effectivePipeline = fullPipeline || selected;
+  const savedPipelineState = useMemo(
+    () => deriveFccSavedRunState(effectivePipeline || {}),
+    [effectivePipeline],
+  );
   const workflowManifest = useMemo(() => getWorkflowManifest(effectivePipeline), [effectivePipeline]);
   const workflowState = effectivePipeline?.workflow_session?.current_state?.mlops_state || {};
   const staleStepSet = useMemo(
-    () => new Set((effectivePipeline?.stale_steps || []).map((step) => String(step))),
-    [effectivePipeline],
+    () => new Set(savedPipelineState?.complete ? [] : (effectivePipeline?.stale_steps || []).map((step) => String(step))),
+    [effectivePipeline, savedPipelineState],
   );
-  const completion = useMemo(() => derivePipelineStepCompletion(effectivePipeline || {}), [effectivePipeline]);
-  const explicitStepStatuses = useMemo(() => derivePipelineStepStatuses(effectivePipeline || {}), [effectivePipeline]);
+  const completion = useMemo(() => {
+    if (savedPipelineState?.completion) return savedPipelineState.completion;
+    return derivePipelineStepCompletion(effectivePipeline || {});
+  }, [effectivePipeline, savedPipelineState]);
+  const explicitStepStatuses = useMemo(() => {
+    if (savedPipelineState?.statuses) return savedPipelineState.statuses;
+    return derivePipelineStepStatuses(effectivePipeline || {});
+  }, [effectivePipeline, savedPipelineState]);
   const filteredPipelines = useMemo(() => {
     return (pipelines || []).filter((row) => {
       const mine = ownerLabel(row).toLowerCase() === String(persona || '').toLowerCase();
@@ -317,9 +380,10 @@ const WorkbenchPipelinesScreen = ({
       if (statusFilter === 'failed' && !isFailed(row)) return false;
       if (statusFilter === 'draft' && statusKey(row) !== 'draft') return false;
       if (statusFilter === 'archived' && !isArchived(row)) return false;
+      if (familyFilter !== 'all' && pipelineFamilyKey(row) !== familyFilter) return false;
       return matchesSearch(row, searchText);
     });
-  }, [persona, pipelines, scopeFilter, searchText, statusFilter]);
+  }, [familyFilter, persona, pipelines, scopeFilter, searchText, statusFilter]);
   const summaryCards = useMemo(() => {
     const mineMatcher = String(persona || '').toLowerCase();
     const all = pipelines || [];
@@ -521,8 +585,10 @@ const WorkbenchPipelinesScreen = ({
     return next;
   }, [explicitStepStatuses, stageDetails, stageOrder, staleStepSet]);
 
-  const latestChange = workflowManifest?.latest_change || effectivePipeline?.latest_change || null;
-  const manifestInconsistencies = Array.isArray(workflowManifest?.inconsistencies) ? workflowManifest.inconsistencies : [];
+  const latestChange = savedPipelineState?.complete ? null : (workflowManifest?.latest_change || effectivePipeline?.latest_change || null);
+  const manifestInconsistencies = savedPipelineState?.complete
+    ? []
+    : (Array.isArray(workflowManifest?.inconsistencies) ? workflowManifest.inconsistencies : []);
   const impactedStepLabels = useMemo(() => {
     const impacted = Array.isArray(latestChange?.impacted_steps) ? latestChange.impacted_steps : [];
     return impacted
@@ -558,7 +624,11 @@ const WorkbenchPipelinesScreen = ({
   const buildSavePayload = useCallback((nextSteps) => {
     const src = fullPipeline || {};
     return {
+      pipeline_id: src.pipeline_id != null ? Number(src.pipeline_id) : null,
+      pipeline_uuid: src.pipeline_uuid || null,
       name: String(src.name || ''),
+      pipeline_type: src.pipeline_type || src.model_family || 'fcc',
+      model_family: src.model_family || src.pipeline_type || null,
       dataset_id: Number(src.dataset_id || 0),
       grain: src.grain || 'transaction',
       anchor_dataset_id: src.anchor_dataset_id || null,
@@ -637,6 +707,8 @@ const WorkbenchPipelinesScreen = ({
         const cloneName = buildCloneName(detail?.name || 'Pipeline');
         const savedRes = await mlopsApi.pipelineSave({
           name: cloneName,
+          pipeline_type: detail?.pipeline_type || detail?.model_family || 'fcc',
+          model_family: detail?.model_family || detail?.pipeline_type || null,
           dataset_id: Number(detail?.dataset_id || 0) || null,
           grain: detail?.grain || 'transaction',
           anchor_dataset_id: detail?.anchor_dataset_id || null,
@@ -906,6 +978,7 @@ const WorkbenchPipelinesScreen = ({
         deletedPipelineId: selected?.pipeline_id != null ? Number(selected.pipeline_id) : null,
         deletedWorkflowSessionId: String(selected?.workflow_session_id || '').trim() || null,
         deletedName: name,
+        deletedPipelineType: pipelineFamilyKey(selected),
         remainingRuns: Array.isArray(remainingRows) ? remainingRows : [],
       }));
       setSelectedPipelineId('');
@@ -1060,7 +1133,7 @@ const WorkbenchPipelinesScreen = ({
     }
   }, [loadPipelineDetail, loadPipelines, scheduleDraft, selected]);
 
-  const currentStatus = statusTone(effectivePipeline?.run_status || effectivePipeline?.status || selected?.run_status || selected?.status);
+  const currentStatus = statusTone(savedPipelineState?.runStatus || effectivePipeline?.run_status || effectivePipeline?.status || selected?.run_status || selected?.status);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%', minHeight: 0 }}>
@@ -1099,7 +1172,7 @@ const WorkbenchPipelinesScreen = ({
                 />
               </Stack>
               <Typography sx={{ fontSize: 11, color: tone.muted, mt: 0.45 }}>
-                Create, track, resume, and manage FCC pipeline runs without losing step progress after restart.
+                Create, track, resume, and manage FCC and Mule pipeline runs without losing step progress after restart.
               </Typography>
             </Box>
             <Stack direction="row" spacing={1}>
@@ -1144,7 +1217,7 @@ const WorkbenchPipelinesScreen = ({
               {selectionNotice}
             </Alert>
           )}
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.2fr 0.9fr 0.9fr' }, gap: 1, mb: 1.5 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.1fr 0.8fr 0.8fr 0.9fr' }, gap: 1, mb: 1.5 }}>
             <TextField
               size="small"
               label="Search runs"
@@ -1158,6 +1231,14 @@ const WorkbenchPipelinesScreen = ({
                 <MenuItem value="all">All runs</MenuItem>
                 <MenuItem value="mine">My runs</MenuItem>
                 <MenuItem value="team">Team runs</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl size="small">
+              <InputLabel>Family</InputLabel>
+              <Select value={familyFilter} label="Family" onChange={(e) => setFamilyFilter(String(e.target.value))}>
+                <MenuItem value="all">All families</MenuItem>
+                <MenuItem value="fcc">FCC</MenuItem>
+                <MenuItem value="mule">Mule</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small">
@@ -1175,15 +1256,15 @@ const WorkbenchPipelinesScreen = ({
           {pipelines.length === 0 ? (
             <Alert severity="info" sx={{ py: 0.5 }}>
               {activeEnvironmentName
-                ? `No saved FCC runs were found in environment "${activeEnvironmentName}".`
-                : 'No saved FCC runs were found for the current environment.'}
+                ? `No saved pipeline runs were found in environment "${activeEnvironmentName}".`
+                : 'No saved pipeline runs were found for the current environment.'}
             </Alert>
           ) : (
               <Box sx={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1120 }}>
                 <thead>
                   <tr style={{ background: '#faf7f4' }}>
-                    {['Pipeline Name', 'Run ID', 'Created By', 'Owner', 'Created On', 'Last Updated', 'Current Step', 'Progress %', 'Status', 'Last Completed Step', 'Next Pending Step', 'Environment', 'Actions'].map((label) => (
+                    {['Pipeline Name', 'Family', 'Run ID', 'Created By', 'Owner', 'Created On', 'Last Updated', 'Current Step', 'Progress %', 'Status', 'Last Completed Step', 'Next Pending Step', 'Environment', 'Actions'].map((label) => (
                       <th
                         key={label}
                         style={{
@@ -1220,7 +1301,22 @@ const WorkbenchPipelinesScreen = ({
                           <div style={{ fontSize: 12.5, fontWeight: 700, color: '#111827' }}>{pipeline.name}</div>
                           <div style={{ fontSize: 10.5, color: '#6b7280', marginTop: 3 }}>{pipeline.pipeline_id != null ? `Pipeline ${pipeline.pipeline_id}` : 'Draft workflow session'}</div>
                         </td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{pipeline.run_ref || pipeline.run_id || '-'}</td>
+                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '3px 8px',
+                              border: `1px solid ${pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.border}`,
+                              color: pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.text,
+                              background: '#fff',
+                              fontSize: 10.5,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {pipelineFamilyShort(pipeline)}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{pipelineRunRef(pipeline) || pipeline.run_id || '-'}</td>
                         <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{pipeline.created_by_label || pipeline.created_by_persona || '-'}</td>
                         <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{ownerLabel(pipeline)}</td>
                         <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{formatDateTime(pipeline.created_at)}</td>
@@ -1296,15 +1392,19 @@ const WorkbenchPipelinesScreen = ({
           <Box sx={{ flex: 1, overflowY: 'auto', px: 1.5, py: 1.5 }}>
             {pipelines.length === 0 ? (
               <Alert severity="info" sx={{ py: 0.5 }}>
-                Select or create a run to view FCC pipeline details.
+                Select or create a run to view pipeline details.
               </Alert>
             ) : (
               <Stack spacing={0.8}>
                 {pipelines.map((pipeline) => {
                   if (!filteredPipelines.some((row) => runKey(row) === runKey(pipeline))) return null;
                   const isSelected = runKey(pipeline) === String(selectedPipelineId);
-                  const st = statusTone(pipeline.run_status || pipeline.workflow_status || pipeline.status);
-                  const staleCount = Array.isArray(pipeline.stale_steps) ? pipeline.stale_steps.length : 0;
+                  const savedState = deriveFccSavedRunState(pipeline);
+                  const st = statusTone(savedState?.runStatus || pipeline.run_status || pipeline.workflow_status || pipeline.status);
+                  const staleCount = savedState?.staleCount ?? (Array.isArray(pipeline.stale_steps) ? pipeline.stale_steps.length : 0);
+                  const stepsDisplay = savedState
+                    ? `${savedState.doneCount}/${savedState.totalCount}`
+                    : (pipeline.steps_completed_display || `${pipeline.completed_steps || 0}/${pipeline.total_steps || 0}`);
                   return (
                     <Box
                       key={pipeline.manager_key || pipeline.pipeline_id || pipeline.workflow_session_id || pipeline.run_ref || pipeline.name}
@@ -1318,9 +1418,23 @@ const WorkbenchPipelinesScreen = ({
                       }}
                     >
                       <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="center">
-                        <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text }}>
-                          {pipeline.name}
-                        </Typography>
+                        <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                          <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text }}>
+                            {pipeline.name}
+                          </Typography>
+                          <Chip
+                            size="small"
+                            label={pipelineFamilyShort(pipeline)}
+                            sx={{
+                              fontSize: 10,
+                              bgcolor: '#ffffff',
+                              color: pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.text,
+                              fontWeight: 700,
+                              border: `1px solid ${pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.border}`,
+                              borderRadius: 0,
+                            }}
+                          />
+                        </Stack>
                         <Chip
                           size="small"
                           label={st.label}
@@ -1328,10 +1442,10 @@ const WorkbenchPipelinesScreen = ({
                         />
                       </Stack>
                       <Typography sx={{ mt: 0.35, fontSize: 10.5, color: tone.muted }}>
-                        {pipeline.run_ref || `FCC-RUN-${pipeline.pipeline_id}`} - {pipeline.steps_completed_display || `${pipeline.completed_steps || 0}/${pipeline.total_steps || 0}`} steps
+                        {pipelineRunRef(pipeline)} - {stepsDisplay} steps
                       </Typography>
                       <Typography sx={{ mt: 0.15, fontSize: 10.5, color: tone.muted }}>
-                        {pipeline.current_workspace || 'FCC'} - {pipeline.workspace_step_label || pipeline.current_step_label || 'Load Data'}
+                        {pipelineWorkspaceLabel(pipeline)} - {pipeline.workspace_step_label || pipeline.current_step_label || 'Load Data'}
                       </Typography>
                       {staleCount > 0 && (
                         <Typography sx={{ mt: 0.45, fontSize: 10.25, color: tone.warn, fontWeight: 600 }}>
@@ -1360,19 +1474,35 @@ const WorkbenchPipelinesScreen = ({
               </Typography>
               {selected && (
                 <Typography sx={{ mt: 0.45, fontSize: 11, color: tone.muted }}>
-                  {(selected.run_ref || `FCC-RUN-${selected.pipeline_id}`)}
+                  {pipelineRunRef(selected)}
                   {selected.current_step_label ? ` - ${selected.current_step_label}` : ''}
                   {selected.current_substep_label ? ` > ${selected.current_substep_label}` : ''}
-                  {selected.completion_pct != null ? ` - ${selected.completion_pct}% complete` : ''}
+                  {savedPipelineState
+                    ? ` - ${Math.round((savedPipelineState.doneCount / Math.max(savedPipelineState.totalCount, 1)) * 100)}% complete`
+                    : (selected.completion_pct != null ? ` - ${selected.completion_pct}% complete` : '')}
                 </Typography>
               )}
             </Box>
             {selected && (
-              <Chip
-                size="small"
-                label={currentStatus.label}
-                sx={{ fontSize: 11, fontWeight: 700, bgcolor: currentStatus.bg, color: currentStatus.color, border: `1px solid ${currentStatus.color}`, borderRadius: 0 }}
-              />
+              <Stack direction="row" spacing={0.8}>
+                <Chip
+                  size="small"
+                  label={pipelineFamilyShort(selected)}
+                  sx={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    bgcolor: '#ffffff',
+                    color: pipelineFamilyKey(selected) === 'mule' ? tone.orange : tone.text,
+                    border: `1px solid ${pipelineFamilyKey(selected) === 'mule' ? tone.orange : tone.border}`,
+                    borderRadius: 0,
+                  }}
+                />
+                <Chip
+                  size="small"
+                  label={currentStatus.label}
+                  sx={{ fontSize: 11, fontWeight: 700, bgcolor: currentStatus.bg, color: currentStatus.color, border: `1px solid ${currentStatus.color}`, borderRadius: 0 }}
+                />
+              </Stack>
             )}
           </Stack>
 
@@ -1504,9 +1634,9 @@ const WorkbenchPipelinesScreen = ({
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1, mb: 1.5 }}>
             {[
               ['Created by', selected ? ownerLabel(selected) : '-'],
-              ['Last completed step', selected ? lastCompletedStepLabel(selected) : '-'],
-              ['Next pending step', selected ? nextPendingStepLabel(selected) : '-'],
-              ['Resume ready', selected ? (isArchived(selected) ? 'No - archived' : workflowManifest?.resume_ready === false ? 'No - inconsistent' : 'Yes') : '-'],
+              ['Last completed step', selected ? lastCompletedStepLabel(savedPipelineState?.complete ? { ...selected, run_status: 'completed' } : selected) : '-'],
+              ['Next pending step', selected ? (savedPipelineState?.complete ? '-' : nextPendingStepLabel(selected)) : '-'],
+              ['Resume ready', selected ? (isArchived(selected) ? 'No - archived' : savedPipelineState?.complete ? 'Yes' : workflowManifest?.resume_ready === false ? 'No - inconsistent' : 'Yes') : '-'],
             ].map(([label, value]) => (
               <Box key={label} sx={{ border: `1px solid ${tone.border}`, bgcolor: '#ffffff', px: 1.1, py: 0.95 }}>
                 <Typography sx={{ fontSize: 10.25, color: tone.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.55 }}>
@@ -1870,13 +2000,13 @@ const WorkbenchPipelinesScreen = ({
           <Typography sx={{ mt: 1.15, fontSize: 11.5, color: tone.muted, lineHeight: 1.65 }}>
             {selected?.pipeline_id != null
               ? 'This removes the saved pipeline, linked workflow session records, and any generated artefacts tracked against it.'
-              : 'This removes the tracked workflow session draft for this run from the FCC run center.'}
+              : 'This removes the tracked workflow session draft for this run from the shared pipeline hub.'}
           </Typography>
           {selected?.pipeline_id != null ? (
             <Stack spacing={1.2} sx={{ mt: 1.75 }}>
               {deleteImpactLoading ? (
                 <Alert severity="info" sx={{ borderRadius: 1.75 }}>
-                  Checking whether this FCC run was published or imported into Sentinel.
+                  Checking whether this run was published or imported into Sentinel.
                 </Alert>
               ) : null}
               {deleteImpactError ? (
@@ -1888,22 +2018,22 @@ const WorkbenchPipelinesScreen = ({
                 <>
                   {deleteImpact.state === 'not_published' ? (
                     <Alert severity="info" sx={{ borderRadius: 1.75 }}>
-                      This FCC run was not published to Sentinel. Deleting it only removes FCC-side data.
+                      This run was not published to Sentinel. Deleting it only removes workbench-side data.
                     </Alert>
                   ) : null}
                   {deleteImpact.state === 'published_only' ? (
                     <Alert severity="info" sx={{ borderRadius: 1.75 }}>
-                      This FCC run was published, but no Sentinel environment has imported it yet.
+                      This run was published, but no Sentinel environment has imported it yet.
                     </Alert>
                   ) : null}
                   {deleteImpact.state === 'imported_no_activity' ? (
                     <Alert severity="warning" sx={{ borderRadius: 1.75 }}>
-                      This FCC run was imported into Sentinel, but no analyst activity was found. You can keep Sentinel for traceability or remove the untouched intake.
+                      This run was imported into Sentinel, but no analyst activity was found. You can keep Sentinel for traceability or remove the untouched intake.
                     </Alert>
                   ) : null}
                   {deleteImpact.state === 'imported_with_activity' ? (
                     <Alert severity="error" sx={{ borderRadius: 1.75 }}>
-                      This FCC run already has downstream Sentinel activity. FCC can be deleted, but Sentinel cases and audit history must be kept.
+                      This run already has downstream Sentinel activity. The workbench run can be deleted, but Sentinel cases and audit history must be kept.
                     </Alert>
                   ) : null}
                   <Box
@@ -1946,13 +2076,13 @@ const WorkbenchPipelinesScreen = ({
                         onChange={(event) => setDeleteSentinelAction(String(event.target.value || 'keep'))}
                       >
                         <MenuItem value="keep">
-                          Delete FCC run only and keep Sentinel history
+                          Delete workbench run only and keep Sentinel history
                         </MenuItem>
                         <MenuItem
                           value="purge_imported_queue"
                           disabled={!Boolean(deleteImpact?.sentinel_purge_allowed)}
                         >
-                          Delete FCC run and remove untouched Sentinel intake
+                          Delete workbench run and remove untouched Sentinel intake
                         </MenuItem>
                       </Select>
                     </FormControl>
