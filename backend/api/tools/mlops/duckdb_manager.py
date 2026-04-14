@@ -26,16 +26,16 @@ from contextlib import contextmanager
 # ─── One lock per database file path ─────────────────────────────────────────
 # This ensures that even if Flask spawns multiple threads, only ONE thread
 # can write to a given DuckDB file at a time.
-_locks: dict[str, threading.Lock] = {}
+_locks: dict[str, threading.RLock] = {}
 _locks_meta = threading.Lock()
 _connections: dict[str, duckdb.DuckDBPyConnection] = {}
 
 
-def _get_lock(db_path: str) -> threading.Lock:
+def _get_lock(db_path: str) -> threading.RLock:
     """Return (or create) the lock for a specific db file path."""
     with _locks_meta:
         if db_path not in _locks:
-            _locks[db_path] = threading.Lock()
+            _locks[db_path] = threading.RLock()
         return _locks[db_path]
 
 

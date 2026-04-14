@@ -594,6 +594,17 @@ const normalizeProgressPct = (progress, status) => {
 // ── Model Grain Config ────────────────────────────────────────────────────────
 const GRAIN_OPTIONS = [
   {
+    id: 'account',
+    label: 'Account-Level Model',
+    icon: 'AC',
+    description: '1 row = 1 account. Learns from account-level mule outcomes and scores accounts for investigator review.',
+    target: 'mule_flag',
+    idColumn: 'ACCOUNT_ID',
+    examples: 'Features: txn_count_30d, total_credit_30d, shared_device_count, graph_degree, complaint_count_90d...',
+    badge: 'Primary',
+    badgeColor: T.textMuted,
+  },
+  {
     id: 'alert',
     label: 'Alert-Level Model',
     icon: 'AL',
@@ -883,7 +894,7 @@ const TabPanel = ({ value, index, children }) =>
   value === index ? <Box sx={{ pt: 2 }}>{children}</Box> : null;
 
 // ── Grain Selector ────────────────────────────────────────────────────────────
-const GrainSelector = ({ grain, setGrain, persona, targetColumn }) => (
+const GrainSelector = ({ grain, setGrain, persona, targetColumn, grainOptions = GRAIN_OPTIONS }) => (
   <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2.5, bgcolor: '#fafbfc' }}>
     <Stack direction="row" alignItems="center" spacing={1} mb={1.5}>
       <TableChart sx={{ fontSize: 15, color: T.orange }} />
@@ -893,7 +904,7 @@ const GrainSelector = ({ grain, setGrain, persona, targetColumn }) => (
       </Tooltip>
     </Stack>
     <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
-      {GRAIN_OPTIONS.map((g) => {
+      {(Array.isArray(grainOptions) && grainOptions.length ? grainOptions : GRAIN_OPTIONS).map((g) => {
         const isSelected = grain === g.id;
         return (
           <Paper key={g.id} variant="outlined" onClick={() => setGrain(g.id)}
@@ -924,6 +935,12 @@ const GrainSelector = ({ grain, setGrain, persona, targetColumn }) => (
       <Alert severity="info" sx={{ ...neutralAlertSx, mt: 1.5, fontSize: 12 }}>
         Case-level model uses <strong>CASE_ID</strong> as the traceability key but <em>never</em> as a training feature.
         Training target is <strong>{targetColumn || 'not selected'}</strong>.
+      </Alert>
+    )}
+    {grain === 'account' && (
+      <Alert severity="info" sx={{ ...neutralAlertSx, mt: 1.5, fontSize: 12 }}>
+        Account-level model uses <strong>ACCOUNT_ID</strong> as the traceability key but <em>never</em> as a training feature.
+        Training target is <strong>{targetColumn || 'mule_flag'}</strong>.
       </Alert>
     )}
   </Paper>
@@ -1414,10 +1431,11 @@ const HMLThresholdEditor = ({ hmlHigh, hmlLow, setHmlHigh, setHmlLow, totalAlert
 };
 
 // ── Scoring Ledger ────────────────────────────────────────────────────────────
-const ScoringLedger = ({ jobId, grain, hmlHigh, hmlLow, results }) => {
+const ScoringLedger = ({ jobId, grain, hmlHigh, hmlLow, results, grainOptions = GRAIN_OPTIONS }) => {
   const [search, setSearch]         = useState('');
   const [tierFilter, setTierFilter] = useState('ALL');
-  const grainConfig = GRAIN_OPTIONS.find((g) => g.id === grain) || GRAIN_OPTIONS[0];
+  const availableGrainOptions = (Array.isArray(grainOptions) && grainOptions.length) ? grainOptions : GRAIN_OPTIONS;
+  const grainConfig = availableGrainOptions.find((g) => g.id === grain) || availableGrainOptions[0] || GRAIN_OPTIONS[0];
 
   // FIX ⑭: replaced Math.random() with deterministic helper
   const mockLedger = useMemo(
@@ -2440,11 +2458,31 @@ const ModelTrainingPanel = ({
   preprocessedDataset,
   masterDataset,
   targetColumn,
+  activePipelineId = null,
+  activePipelineName = '',
   onModelComplete,
   onOpenReport,
   initialActiveTab = 0,
   onActiveTabChange,
+  pipelineVariant = 'fcc',
+  initialGrain = null,
+  allowedTrainingModes = null,
 }) => {
+  const isMuleVariant = String(pipelineVariant || 'fcc').trim().toLowerCase() === 'mule';
+  const normalizedAllowedTrainingModes = useMemo(() => {
+    const requested = Array.isArray(allowedTrainingModes) && allowedTrainingModes.length > 0
+      ? allowedTrainingModes
+      : ['supervised', 'unsupervised', 'deep_learning'];
+    return requested
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((item, index, arr) => ['supervised', 'unsupervised', 'deep_learning'].includes(item) && arr.indexOf(item) === index);
+  }, [allowedTrainingModes]);
+  const defaultTrainingMode = normalizedAllowedTrainingModes[0] || 'supervised';
+  const defaultGrain = initialGrain || (isMuleVariant ? 'account' : 'alert');
+  const grainOptions = useMemo(
+    () => GRAIN_OPTIONS.filter((option) => (isMuleVariant ? option.id === 'account' : option.id !== 'account')),
+    [isMuleVariant],
+  );
   const hasTargetColumn = (ds) => {
     if (!ds || !targetColumn) return false;
     const cols = ds.columns || ds.column_names || [];
@@ -2457,23 +2495,31 @@ const ModelTrainingPanel = ({
         key: 'preprocessed',
         label: 'Model-ready dataset',
         shortLabel: 'Model-ready',
-        description: 'Uses the engineered FCC feature set created in preprocessing.',
+        description: isMuleVariant
+          ? 'Uses the governed Mule feature set created in Preprocessing & Feature Studio.'
+          : 'Uses the engineered FCC feature set created in preprocessing.',
         dataset: preprocessedDataset,
         targetAvailable: hasTargetColumn(preprocessedDataset),
       });
     }
     if (masterDataset) {
+      const masterType = String(masterDataset?.dataset_type || '').trim().toLowerCase();
+      const isFeatureStoreSource = isMuleVariant && masterType === 'feature_store';
       sources.push({
         key: 'master',
-        label: 'Master dataset',
-        shortLabel: 'Master',
-        description: 'Uses the joined FCC master dataset before model-ready transformations.',
+        label: isFeatureStoreSource ? 'Feature store dataset' : 'Master dataset',
+        shortLabel: isFeatureStoreSource ? 'Feature store' : 'Master',
+        description: isFeatureStoreSource
+          ? 'Uses the persisted Mule feature-store output selected for downstream preprocessing and model training.'
+          : isMuleVariant
+            ? 'Uses the Mule analytical base table before model-ready transformations.'
+          : 'Uses the joined FCC master dataset before model-ready transformations.',
         dataset: masterDataset,
         targetAvailable: hasTargetColumn(masterDataset),
       });
     }
     return sources;
-  }, [preprocessedDataset, masterDataset, targetColumn]);
+  }, [isMuleVariant, preprocessedDataset, masterDataset, targetColumn]);
   const preferredSourceKey = useMemo(() => {
     const modelReady = datasetSources.find((source) => source.key === 'preprocessed' && source.targetAvailable);
     if (modelReady) return modelReady.key;
@@ -2481,10 +2527,10 @@ const ModelTrainingPanel = ({
   }, [datasetSources]);
 
   const [activeTab, setActiveTab]           = useState(initialActiveTab);
-  const [trainingMode, setTrainingMode]     = useState('supervised');
-  const [grain, setGrain]                   = useState('alert');
-  const [selectedAlgo, setSelectedAlgo]     = useState('random_forest');
-  const [selectedUnsupervisedAlgo, setSelectedUnsupervisedAlgo] = useState('kmeans');
+  const [trainingMode, setTrainingMode]     = useState(defaultTrainingMode);
+  const [grain, setGrain]                   = useState(defaultGrain);
+  const [selectedAlgo, setSelectedAlgo]     = useState(() => (isMuleVariant ? 'gradient_boosting' : 'random_forest'));
+  const [selectedUnsupervisedAlgo, setSelectedUnsupervisedAlgo] = useState(() => (isMuleVariant ? 'isolation_forest' : 'kmeans'));
   const [selectedDeepLearningAlgo, setSelectedDeepLearningAlgo] = useState('mlp_classifier');
   const [expandedAlgoId, setExpandedAlgoId] = useState(null);
   const [params, setParams] = useState(() => {
@@ -2564,6 +2610,18 @@ const ModelTrainingPanel = ({
   }, [initialActiveTab]);
 
   useEffect(() => {
+    if (!normalizedAllowedTrainingModes.includes(trainingMode)) {
+      setTrainingMode(defaultTrainingMode);
+    }
+  }, [defaultTrainingMode, normalizedAllowedTrainingModes, trainingMode]);
+
+  useEffect(() => {
+    if (!grainOptions.some((option) => option.id === grain)) {
+      setGrain(defaultGrain);
+    }
+  }, [defaultGrain, grain, grainOptions]);
+
+  useEffect(() => {
     onActiveTabChange?.(activeTab);
   }, [activeTab, onActiveTabChange]);
 
@@ -2582,13 +2640,19 @@ const ModelTrainingPanel = ({
     return TRAINING_LIBRARY.find((algo) => algo.id === algoId) || selectedTrainingOption || algoObj || null;
   }, [results?.algorithm, selectedTrainingAlgorithm, selectedTrainingOption, algoObj]);
   const modeGuide = MODE_GUIDE[trainingMode] || MODE_GUIDE.supervised;
-  const trainingLibrary = useMemo(() => (
-    trainingMode === 'supervised'
-      ? ALGORITHMS
-      : trainingMode === 'unsupervised'
-        ? UNSUPERVISED_ALGORITHMS
-        : DEEP_LEARNING_METHODS
-  ), [trainingMode]);
+  const trainingLibrary = useMemo(() => {
+    if (trainingMode === 'supervised') {
+      return isMuleVariant
+        ? ALGORITHMS.filter((algo) => ['gradient_boosting', 'random_forest', 'logistic_regression'].includes(algo.id))
+        : ALGORITHMS;
+    }
+    if (trainingMode === 'unsupervised') {
+      return isMuleVariant
+        ? UNSUPERVISED_ALGORITHMS.filter((algo) => ['isolation_forest', 'one_class_svm'].includes(algo.id))
+        : UNSUPERVISED_ALGORITHMS;
+    }
+    return DEEP_LEARNING_METHODS;
+  }, [isMuleVariant, trainingMode]);
   const visibleAlgorithmOptions = useMemo(() => {
     if (showFullAlgorithmLibrary?.[trainingMode]) return trainingLibrary;
     const shortlist = new Set([...(MODE_SHORTLIST[trainingMode] || []), selectedTrainingAlgorithm]);
@@ -2658,7 +2722,8 @@ const ModelTrainingPanel = ({
   }, []);
 
   const emitModelComplete = useCallback((run, resultData = null, options = {}) => {
-    if (!onModelComplete || !run?.job_id) return;
+    const runRef = String(run?.job_id || run?.run_id || '').trim();
+    if (!onModelComplete || !runRef) return;
     const result = resultData || run?.results || results || null;
     const algorithmId = run?.algorithm_id || run?.algo_id || result?.algorithm || selectedTrainingAlgorithm;
     const metrics = result?.metrics || run?.metrics || {};
@@ -2668,7 +2733,8 @@ const ModelTrainingPanel = ({
       ?? threshold;
     onModelComplete({
       ...run,
-      job_id: run.job_id,
+      job_id: runRef,
+      run_id: run?.run_id || runRef,
       algorithm_id: algorithmId,
       algorithm: run?.algorithm || resolveAlgorithmLabel(algorithmId),
       results: result,
@@ -2681,6 +2747,155 @@ const ModelTrainingPanel = ({
       hml_low_threshold: run?.hml_low_threshold ?? hmlLow,
     }, options);
   }, [onModelComplete, results, selectedTrainingAlgorithm, threshold, resolveAlgorithmLabel, grain, hmlHigh, hmlLow]);
+
+  const buildMulePreviewPayload = useCallback(async (source) => {
+    const pipelineId = Number(activePipelineId || 0);
+    if (!pipelineId || !source?.dataset?.dataset_id) return null;
+    const [preStatusRes, modelStatusRes, sampleRes] = await Promise.all([
+      mlopsApi.mulePreprocessingStatus(pipelineId).catch(() => null),
+      mlopsApi.muleModelBuildStatus(pipelineId).catch(() => null),
+      mlopsApi.datasetRows(source.dataset.dataset_id, { sample_rows: 12 }).catch(() => null),
+    ]);
+    const preStatus = preStatusRes?.data?.data || preStatusRes?.data || preStatusRes || {};
+    const modelStatus = modelStatusRes?.data?.data || modelStatusRes?.data || modelStatusRes || {};
+    const samplePayload = sampleRes?.data || sampleRes || {};
+    const approvedFeatures = Array.isArray(preStatus?.feature_governance?.approved_features)
+      ? preStatus.feature_governance.approved_features
+      : Array.isArray(modelStatus?.approved_features) ? modelStatus.approved_features : [];
+    const blockedFeatures = Array.isArray(preStatus?.feature_governance?.blocked_features)
+      ? preStatus.feature_governance.blocked_features
+      : Array.isArray(modelStatus?.blocked_features) ? modelStatus.blocked_features : [];
+    const splitMode = splitStrategy === 'auto' ? 'time_based' : (splitStrategy === 'temporal' ? 'time_based' : 'random');
+    const totalRows = Number(source?.dataset?.row_count || 0);
+    const testRowsEstimate = Math.max(1, Math.round(totalRows * (testSplit / 100)));
+    const trainRowsEstimate = Math.max(0, totalRows - testRowsEstimate);
+    const eventRate = Number(preStatus?.target_validation?.positive_class_pct || 0);
+    const ready = Boolean(
+      source?.targetAvailable
+      && approvedFeatures.length > 0
+      && !blockedFeatures.some((item) => /leakage|post-outcome/i.test(String(item?.reason || '')))
+    );
+    return {
+      _source_key: source.key,
+      _source_label: source.label,
+      _source_description: source.description,
+      training_readiness: {
+        ready,
+        blocking_reasons: [
+          !source?.targetAvailable ? `Target column "${targetColumn}" is not present in the current Mule training dataset.` : null,
+          approvedFeatures.length === 0 ? 'No approved Mule features are available yet. Finish Preprocessing & Feature Selection first.' : null,
+          blockedFeatures.some((item) => /leakage|post-outcome/i.test(String(item?.reason || ''))) ? 'Leakage-sensitive or post-outcome Mule fields are still blocked in governance.' : null,
+        ].filter(Boolean),
+        warnings: [
+          splitMode === 'random' ? 'Random split is active. Add a reliable snapshot date later if you want time-aware Mule validation.' : null,
+          preStatus?.target_validation?.mule_typology_found ? null : 'mule_typology is not available yet, so typology prediction stays disabled for this run.',
+        ].filter(Boolean),
+      },
+      target_check: {
+        canonical_target_column: targetColumn || 'mule_flag',
+        target_is_separated: !approvedFeatures.includes(targetColumn || 'mule_flag'),
+        labelled_rows: totalRows,
+        positive_rows: eventRate ? Math.round((eventRate / 100) * totalRows) : null,
+        negative_rows: eventRate ? Math.max(0, totalRows - Math.round((eventRate / 100) * totalRows)) : null,
+        dropped_rows: 0,
+        event_rate_pct: eventRate || null,
+        target_aliases_present: [targetColumn || 'mule_flag'],
+        target_proxy_features_present: blockedFeatures.map((item) => item?.feature).filter(Boolean),
+        mapping: {
+          mule_flag: 'Binary Mule outcome used for governed training.',
+          mule_typology: 'Optional category label used for Mule typology prediction.',
+        },
+      },
+      split_preview: {
+        split_strategy: splitMode,
+        train_rows: trainRowsEstimate,
+        test_rows: testRowsEstimate,
+        train_event_rate_pct: eventRate || null,
+        test_event_rate_pct: eventRate || null,
+        available_date_columns: [],
+      },
+      deploy_threshold_policy: {
+        default_threshold: Number(modelStatus?.config?.decision_threshold ?? threshold ?? 0.5),
+        configured_threshold: Number(modelStatus?.config?.decision_threshold ?? threshold ?? 0.5),
+        threshold_band_min: Number(modelStatus?.config?.risk_thresholds?.medium ?? hmlLow ?? 0.35),
+        threshold_band_max: Number(modelStatus?.config?.risk_thresholds?.high ?? hmlHigh ?? 0.65),
+        event_loss_cap_pct: 0,
+      },
+      raw_preview: Array.isArray(samplePayload?.preview) ? samplePayload.preview : [],
+      preprocessed_preview: Array.isArray(samplePayload?.preview) ? samplePayload.preview : [],
+      included_features: approvedFeatures.map((feature) => ({ feature, reason: 'Approved by Mule feature governance' })),
+      excluded_features: blockedFeatures.map((item) => ({
+        feature: item?.feature || '',
+        reason: item?.reason || 'Excluded by Mule feature governance',
+      })),
+      mule_backend_status: modelStatus?.status || 'draft',
+    };
+  }, [activePipelineId, hmlHigh, hmlLow, splitStrategy, targetColumn, testSplit, threshold]);
+
+  const adaptMuleResults = useCallback((payload = {}, algorithmIdHint = selectedTrainingAlgorithm, modeHint = trainingMode) => {
+    const latestRun = payload?.latest_run || payload || {};
+    const metricsRoot = latestRun?.metrics || payload?.metrics || {};
+    const supervised = metricsRoot?.supervised || {};
+    const riskBands = latestRun?.risk_bands || metricsRoot?.risk_bands || payload?.risk_bands || { high: hmlHigh, medium: hmlLow };
+    const sampleOutputs = Array.isArray(payload?.sample_outputs) ? payload.sample_outputs : [];
+    const counts = sampleOutputs.reduce((acc, row) => {
+      const key = String(row?.risk_band || 'Unknown');
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const highCount = Number(counts['High Risk'] || 0);
+    const mediumCount = Number(counts['Medium Risk'] || 0);
+    const lowCount = Number(counts['Low Risk'] || 0);
+    const totalCount = Math.max(sampleOutputs.length, highCount + mediumCount + lowCount, 1);
+    return {
+      mode: modeHint,
+      algorithm: payload?.config?.supervised_algorithm || algorithmIdHint,
+      metrics: {
+        roc_auc: supervised?.roc_auc ?? null,
+        pr_auc: supervised?.pr_auc ?? null,
+        f1: supervised?.f1 ?? null,
+        precision: supervised?.precision ?? null,
+        recall: supervised?.recall ?? null,
+        accuracy: supervised?.accuracy ?? null,
+        specificity: supervised?.specificity ?? null,
+        balanced_accuracy: supervised?.balanced_accuracy ?? null,
+        confusion_matrix: supervised?.confusion_matrix ?? [[0, 0], [0, 0]],
+        roc_curve: supervised?.roc_curve ?? [],
+        pr_curve: supervised?.pr_curve ?? [],
+        threshold_table: [],
+      },
+      feature_importance: latestRun?.feature_importance || payload?.feature_importance || [],
+      deploy_threshold_policy: {
+        default_threshold: Number(payload?.config?.decision_threshold ?? threshold ?? 0.5),
+        configured_threshold: Number(payload?.config?.decision_threshold ?? threshold ?? 0.5),
+        threshold_band_min: Number(riskBands?.medium ?? hmlLow ?? 0.35),
+        threshold_band_max: Number(riskBands?.high ?? hmlHigh ?? 0.65),
+        event_loss_cap_pct: 0,
+      },
+      threshold_band_min: Number(riskBands?.medium ?? hmlLow ?? 0.35),
+      threshold_band_max: Number(riskBands?.high ?? hmlHigh ?? 0.65),
+      hml_summary: {
+        high: { count: highCount, pct: Number(((highCount / totalCount) * 100).toFixed(1)), tp: '-', total_event_loss_pct: '-' },
+        medium: { count: mediumCount, pct: Number(((mediumCount / totalCount) * 100).toFixed(1)), tp: '-', total_event_loss_pct: '-' },
+        low: { count: lowCount, pct: Number(((lowCount / totalCount) * 100).toFixed(1)), tp: '-', total_event_loss_pct: '-' },
+        total_alerts: totalCount,
+        total_positives: '-',
+        total_suppression_pct: 0,
+        total_event_loss_pct: 0,
+      },
+      quality_review: {
+        narrative: 'Mule model run completed. Review PR-AUC, feature drivers, typology output, anomaly flags, and graph signals before promotion.',
+      },
+      decision_reason_summary: {
+        suppressed_case_count: 0,
+        note: 'Mule outputs are investigator risk scores and category probabilities, not FCC suppression decisions.',
+      },
+      suppressed_cases_preview: [],
+      decision_tree: null,
+      sample_outputs: sampleOutputs,
+      typology_enabled: Boolean(payload?.typology_enabled || metricsRoot?.typology?.enabled),
+    };
+  }, [hmlHigh, hmlLow, selectedTrainingAlgorithm, threshold, trainingMode]);
 
   const trainRows = Math.round(rowCount * (1 - testSplit / 100));
   const testRows  = Math.round(rowCount * testSplit / 100);
@@ -2714,9 +2929,20 @@ const ModelTrainingPanel = ({
   }, [trainingMode]);
 
   const fetchResults = useCallback(async (jid) => {
-    if (!jid) return null;
+    if (!jid && !isMuleVariant) return null;
     setResultsError(null);
     try {
+      if (isMuleVariant) {
+        const pipelineId = Number(activePipelineId || 0);
+        if (!pipelineId) return null;
+        const response = await mlopsApi.muleModelBuildStatus(pipelineId);
+        const payload = response?.data?.data || response?.data || response || {};
+        const adapted = adaptMuleResults(payload, payload?.config?.supervised_algorithm || selectedTrainingAlgorithm, trainingMode);
+        setResults(adapted);
+        setTrainingMode(adapted?.mode || trainingMode);
+        setRunsRefreshKey((key) => key + 1);
+        return adapted;
+      }
       const rRes  = await mlopsApi.modelResults(jid);
       const rData = rRes?.data?.data || rRes?.data;
       setResults(rData);
@@ -2735,7 +2961,7 @@ const ModelTrainingPanel = ({
       setResultsError(e?.response?.data?.error || 'Failed to load evaluation results');
       return null;
     }
-  }, []);
+  }, [activePipelineId, adaptMuleResults, isMuleVariant, selectedTrainingAlgorithm, trainingMode]);
 
   const loadTrainingPreview = useCallback(async () => {
     if (!datasetSources.length || !targetColumn) {
@@ -2757,6 +2983,17 @@ const ModelTrainingPanel = ({
     const failures = [];
     for (const source of candidates) {
       try {
+        if (isMuleVariant) {
+          const enriched = await buildMulePreviewPayload(source);
+          if (!enriched || typeof enriched !== 'object') {
+            throw new Error('Mule training check returned no preview payload.');
+          }
+          setTrainingPreview(enriched);
+          setResolvedDataSourceKey(source.key);
+          setPreviewResolutionNote(`${source.label} is now the active Mule source for governed training review.`);
+          setPreviewLoading(false);
+          return enriched;
+        }
         const response = await mlopsApi.trainingWorkbenchPreview({
           dataset_id: source.dataset?.dataset_id,
           target_column: targetColumn,
@@ -2807,7 +3044,7 @@ const ModelTrainingPanel = ({
     setResolvedDataSourceKey('');
     setPreviewLoading(false);
     return null;
-  }, [datasetSources, targetColumn, trainingMode, grain, selectedTrainingAlgorithm, buildHyperparams, testSplit, stratify, trainingDataSource, preferredSourceKey, splitStrategy, selectedSplitDateColumn]);
+  }, [datasetSources, targetColumn, trainingMode, grain, selectedTrainingAlgorithm, buildHyperparams, testSplit, stratify, trainingDataSource, preferredSourceKey, splitStrategy, selectedSplitDateColumn, isMuleVariant, buildMulePreviewPayload]);
 
   useEffect(() => {
     if (logEndRef.current) logEndRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -2991,10 +3228,52 @@ const ModelTrainingPanel = ({
     setJobStatus({ status: 'starting', progress: 0, logs: ['Initiating training job...'], current_stage: 'Preparing dataset' });
     setActiveTab(2);
     try {
+      if (isMuleVariant) {
+        const pipelineId = Number(activePipelineId || 0);
+        if (!pipelineId) throw new Error('Save the Mule pipeline before starting model training.');
+        const config = {
+          supervised_algorithm: algorithm,
+          anomaly_algorithm: selectedUnsupervisedAlgo,
+          anomaly_enabled: trainingMode === 'unsupervised' || normalizedAllowedTrainingModes.includes('unsupervised'),
+          graph_enabled: true,
+          split_strategy: splitStrategy === 'auto' ? 'time_based' : (splitStrategy === 'temporal' ? 'time_based' : 'random'),
+          time_aware_split: splitStrategy !== 'random',
+          decision_threshold: threshold,
+          random_state: 42,
+          risk_thresholds: { high: hmlHigh, medium: hmlLow },
+          hyperparameters: buildHyperparams(algorithm),
+        };
+        const res = await mlopsApi.muleModelBuildTrain(pipelineId, { config });
+        const payload = res?.data?.data || res?.data || res || {};
+        const adapted = adaptMuleResults(payload, algorithm, trainingMode);
+        const runRef = String(payload?.run_id || payload?.latest_run?.run_id || pipelineId);
+        setJobId(runRef);
+        setJobStatus({
+          status: 'complete',
+          progress: 100,
+          logs: ['Mule model training completed successfully.'],
+          current_stage: 'Complete',
+        });
+        setResults(adapted);
+        setRunsRefreshKey((key) => key + 1);
+        emitModelComplete({
+          job_id: runRef,
+          run_id: payload?.run_id || runRef,
+          algorithm,
+          algorithm_id: algorithm,
+          grain,
+          hml_high_threshold: hmlHigh,
+          hml_low_threshold: hmlLow,
+        }, adapted);
+        setActiveTab(3);
+        return;
+      }
       const res  = await mlopsApi.trainModel({
         dataset_id: activeTrainingDataset.dataset_id, target_column: targetColumn, algorithm, mode: trainingMode, grain,
         hyperparams: buildHyperparams(algorithm), test_size: testSplit / 100, cv_folds: cvFolds, stratify,
         hml_high_threshold: hmlHigh, hml_low_threshold: hmlLow,
+        ...(Number.isFinite(Number(activePipelineId)) && Number(activePipelineId) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
+        ...(String(activePipelineName || '').trim() ? { pipeline_name: String(activePipelineName || '').trim() } : {}),
         split_strategy: splitStrategy,
         ...(splitStrategy === 'temporal' && selectedSplitDateColumn ? { date_column: selectedSplitDateColumn } : {}),
       });
@@ -3022,10 +3301,46 @@ const ModelTrainingPanel = ({
     for (const algoId of pipelineSelection) {
       const algoLabel = resolveAlgorithmLabel(algoId);
       try {
+        if (isMuleVariant) {
+          const pipelineId = Number(activePipelineId || 0);
+          if (!pipelineId) throw new Error('Save the Mule pipeline before launching model benchmarking.');
+          const res = await mlopsApi.muleModelBuildTrain(pipelineId, {
+            config: {
+              supervised_algorithm: algoId,
+              anomaly_algorithm: selectedUnsupervisedAlgo,
+              anomaly_enabled: trainingMode === 'unsupervised' || normalizedAllowedTrainingModes.includes('unsupervised'),
+              graph_enabled: true,
+              split_strategy: splitStrategy === 'auto' ? 'time_based' : (splitStrategy === 'temporal' ? 'time_based' : 'random'),
+              time_aware_split: splitStrategy !== 'random',
+              decision_threshold: threshold,
+              random_state: 42,
+              risk_thresholds: { high: hmlHigh, medium: hmlLow },
+              hyperparameters: buildHyperparams(algoId),
+            },
+          });
+          const payload = res?.data?.data || res?.data || res || {};
+          const adapted = adaptMuleResults(payload, algoId, trainingMode);
+          jobs.push({
+            algo_id: algoId,
+            algorithm: algoLabel,
+            algorithm_id: algoId,
+            job_id: String(payload?.run_id || payload?.latest_run?.run_id || algoId),
+            status: 'complete',
+            started_at: new Date().toISOString(),
+            grain,
+            hml_high_threshold: hmlHigh,
+            hml_low_threshold: hmlLow,
+            metrics: adapted?.metrics || {},
+            results: adapted,
+          });
+          continue;
+        }
         const res  = await mlopsApi.trainModel({
           dataset_id: activeTrainingDataset.dataset_id, target_column: targetColumn, algorithm: algoId, grain,
           hyperparams: buildHyperparams(algoId), test_size: testSplit / 100, cv_folds: cvFolds, stratify,
           hml_high_threshold: hmlHigh, hml_low_threshold: hmlLow,
+          ...(Number.isFinite(Number(activePipelineId)) && Number(activePipelineId) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
+          ...(String(activePipelineName || '').trim() ? { pipeline_name: String(activePipelineName || '').trim() } : {}),
           split_strategy: splitStrategy,
           ...(splitStrategy === 'temporal' && selectedSplitDateColumn ? { date_column: selectedSplitDateColumn } : {}),
         });
@@ -3039,8 +3354,10 @@ const ModelTrainingPanel = ({
     const failures = jobs.filter((j) => j.status === 'failed').length;
     if (failures) setPipelineError(`${failures} pipeline job${failures > 1 ? 's' : ''} failed to start.`);
     setPipelineRunning(false);
-    // FIX ④: increment trigger to restart polling even if job count is unchanged
-    setPipelinePollTrigger((n) => n + 1);
+    if (!isMuleVariant) {
+      // FIX ④: increment trigger to restart polling even if job count is unchanged
+      setPipelinePollTrigger((n) => n + 1);
+    }
     if (jobs.length) setActiveTab(2);
   };
 
@@ -3218,7 +3535,7 @@ const ModelTrainingPanel = ({
   const objectiveReason = objectiveReasons[objectiveId] || '';
   const isFocusMetric = (key) => (objective?.focusMetrics || [objective?.metricKey]).includes(key);
   const bestRunId  = useMemo(() => savedRuns.length ? savedRuns.reduce((b, r) => ((r.f1 ?? 0) > (b.f1 ?? 0) ? r : b)).job_id : null, [savedRuns]);
-  const grainConfig = GRAIN_OPTIONS.find((g) => g.id === grain) || GRAIN_OPTIONS[0];
+  const grainConfig = grainOptions.find((g) => g.id === grain) || grainOptions[0] || GRAIN_OPTIONS[0];
   const treeExplanation = results?.mode === 'supervised' ? (results?.decision_tree || null) : null;
   const treePreviewReady = Boolean(
     treeExplanation
@@ -3234,7 +3551,7 @@ const ModelTrainingPanel = ({
       : 'Surrogate tree path will appear after training');
   const modelLabFacts = [
     { label: 'Training rows', value: rowCount.toLocaleString(), detail: `${grainConfig.label} grain` },
-    { label: 'Outcome', value: targetColumn || '-', detail: 'Canonical alert outcome' },
+    { label: 'Outcome', value: targetColumn || '-', detail: isMuleVariant ? 'Canonical mule outcome' : 'Canonical alert outcome' },
     { label: 'Explainability', value: explainabilityLabel, detail: treePreviewReady ? 'Open sample path explorer below' : 'Unlocked when evaluation results arrive' },
     { label: 'Validation split', value: splitStrategy === 'auto' ? 'Auto' : splitStrategy, detail: splitStrategy === 'temporal' ? (selectedSplitDateColumn || 'Pick date column in Check') : `${cvFolds}-fold CV + holdout` },
   ];
@@ -3341,7 +3658,9 @@ const ModelTrainingPanel = ({
                 Modeling flow
               </Typography>
               <Typography sx={{ fontSize: 12.25, color: T.textMuted, mt: 0.35 }}>
-                Choose the modeling track once, then move through configure, check, train, evaluate, compare, and reporting in one continuous shell.
+                {isMuleVariant
+                  ? 'Choose the Mule modeling track once, then move through configure, check, train, evaluate, compare, and reporting in one continuous shell.'
+                  : 'Choose the modeling track once, then move through configure, check, train, evaluate, compare, and reporting in one continuous shell.'}
               </Typography>
             </Box>
             <ToggleButtonGroup
@@ -3366,24 +3685,30 @@ const ModelTrainingPanel = ({
                 },
               }}
             >
+              {normalizedAllowedTrainingModes.includes('supervised') && (
               <ToggleButton value="supervised">
                 <Stack direction="row" spacing={0.6} alignItems="center">
                   <ModelTraining sx={{ fontSize: 15 }} />
                   <span>Supervised</span>
                 </Stack>
               </ToggleButton>
+              )}
+              {normalizedAllowedTrainingModes.includes('unsupervised') && (
               <ToggleButton value="unsupervised">
                 <Stack direction="row" spacing={0.6} alignItems="center">
                   <ScatterPlot sx={{ fontSize: 15 }} />
                   <span>Unsupervised</span>
                 </Stack>
               </ToggleButton>
+              )}
+              {normalizedAllowedTrainingModes.includes('deep_learning') && (
               <ToggleButton value="deep_learning">
                 <Stack direction="row" spacing={0.6} alignItems="center">
                   <Bolt sx={{ fontSize: 15 }} />
                   <span>Deep Learning</span>
                 </Stack>
               </ToggleButton>
+              )}
             </ToggleButtonGroup>
           </Stack>
         </Box>
@@ -3439,7 +3764,7 @@ const ModelTrainingPanel = ({
       {/* ── Configure ── */}
       <TabPanel value={activeTab} index={0}>
         <Stack spacing={3}>
-          <GrainSelector grain={grain} setGrain={setGrain} persona={persona} targetColumn={targetColumn} />
+          <GrainSelector grain={grain} setGrain={setGrain} persona={persona} targetColumn={targetColumn} grainOptions={grainOptions} />
 
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, bgcolor: '#fcfcfd' }}>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', xl: '0.82fr 1.18fr' } }}>
@@ -3782,7 +4107,7 @@ const ModelTrainingPanel = ({
               Open training check
             </Button>
             <Typography sx={{ fontSize: 11, color: T.textDim, mt: 0.75 }}>
-              {grainConfig.label} | {selectedTrainingOption?.label || activeRunOption?.label || 'Model'} | {rowCount.toLocaleString()} rows | {cvFolds}-fold CV{trainingMode === 'unsupervised' ? ' | Labeled holdout evaluation enabled' : ` | HML: High>=${hmlHigh.toFixed(2)} Low<${hmlLow.toFixed(2)}`} | Notebook-parity check required
+              {grainConfig.label} | {selectedTrainingOption?.label || activeRunOption?.label || 'Model'} | {rowCount.toLocaleString()} rows | {cvFolds}-fold CV{trainingMode === 'unsupervised' ? ' | Labeled holdout evaluation enabled' : ` | ${isMuleVariant ? `Risk bands: High>=${hmlHigh.toFixed(2)} Medium>=${hmlLow.toFixed(2)}` : `HML: High>=${hmlHigh.toFixed(2)} Low<${hmlLow.toFixed(2)}`}`} | {isMuleVariant ? 'Governed model check required' : 'Notebook-parity check required'}
             </Typography>
           </Box>
         </Stack>
@@ -3793,8 +4118,8 @@ const ModelTrainingPanel = ({
           {trainingError && (
             <Alert severity="error" sx={neutralAlertSx} action={<IconButton size="small" onClick={() => setTrainingError(null)}><Close /></IconButton>}>{trainingError}</Alert>
           )}
-          {!dataset && <Alert severity="warning" sx={neutralAlertSx}>Complete preprocessing before running the notebook-parity check.</Alert>}
-          {!targetColumn && <Alert severity="warning" sx={neutralAlertSx}>Define the canonical target before running the notebook-parity check.</Alert>}
+          {!dataset && <Alert severity="warning" sx={neutralAlertSx}>{isMuleVariant ? 'Complete Mule preprocessing before running the governed model check.' : 'Complete preprocessing before running the notebook-parity check.'}</Alert>}
+          {!targetColumn && <Alert severity="warning" sx={neutralAlertSx}>{isMuleVariant ? 'Define the canonical Mule target before running the governed model check.' : 'Define the canonical target before running the notebook-parity check.'}</Alert>}
           {previewError && <Alert severity="error" sx={neutralAlertSx}>{previewError}</Alert>}
           {previewResolutionNote && <Alert severity="info" sx={neutralAlertSx}>{previewResolutionNote}</Alert>}
 
@@ -3803,7 +4128,9 @@ const ModelTrainingPanel = ({
               <Box>
                 <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.textPrimary }}>Check controls</Typography>
                 <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.35, lineHeight: 1.7 }}>
-                  Choose the dataset and split policy you want to validate before training. Auto mode prefers the model-ready dataset, but it can fall back safely when the check finds a bad source or split configuration.
+                  {isMuleVariant
+                    ? 'Choose the Mule dataset and split policy you want to validate before training. Auto mode prefers the feature-ready dataset, but it can fall back safely when the check finds a bad source or split configuration.'
+                    : 'Choose the dataset and split policy you want to validate before training. Auto mode prefers the model-ready dataset, but it can fall back safely when the check finds a bad source or split configuration.'}
                 </Typography>
               </Box>
 
@@ -3813,7 +4140,7 @@ const ModelTrainingPanel = ({
                 </Typography>
                 <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                   {[
-                    { key: 'auto', label: 'Auto', description: 'Prefer the model-ready FCC dataset, then fall back if needed.' },
+                    { key: 'auto', label: 'Auto', description: isMuleVariant ? 'Prefer the governed Mule feature dataset, then fall back if needed.' : 'Prefer the model-ready FCC dataset, then fall back if needed.' },
                     ...datasetSources.map((source) => ({
                       key: source.key,
                       label: source.shortLabel,
@@ -3841,7 +4168,7 @@ const ModelTrainingPanel = ({
                   })}
                 </Stack>
                 <Typography sx={{ fontSize: 11.25, color: T.textMuted, mt: 0.7 }}>
-                  {selectedSource?.description || 'Pick a dataset source to validate the notebook-parity check.'}
+                  {selectedSource?.description || (isMuleVariant ? 'Pick a Mule dataset source to validate the governed model check.' : 'Pick a dataset source to validate the notebook-parity check.')}
                 </Typography>
               </Box>
 
@@ -3944,7 +4271,9 @@ const ModelTrainingPanel = ({
               <Box sx={{ maxWidth: 760 }}>
                 <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.textPrimary }}>Training safety check</Typography>
                 <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.5, lineHeight: 1.7 }}>
-                  Review the notebook-v5 label mapping, prove the target is separated from model features, confirm the split policy, and approve the run before training starts.
+                  {isMuleVariant
+                    ? 'Review the Mule target alignment, prove the target is separated from model features, confirm the split policy, and approve the run before training starts.'
+                    : 'Review the notebook-v5 label mapping, prove the target is separated from model features, confirm the split policy, and approve the run before training starts.'}
                 </Typography>
               </Box>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
@@ -4064,7 +4393,9 @@ const ModelTrainingPanel = ({
                   <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.25 }}>Metrics and threshold policy</Typography>
                   <Stack spacing={1}>
                     <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                      Ranking metrics stay visible as ROC-AUC and PR-AUC, but FCC deploy decisions are governed by suppression, event loss, and the approved operating threshold.
+                      {isMuleVariant
+                        ? 'Ranking metrics stay visible as PR-AUC, precision, recall, and lift, while Mule review decisions are governed by approved risk-band thresholds.'
+                        : 'Ranking metrics stay visible as ROC-AUC and PR-AUC, but FCC deploy decisions are governed by suppression, event loss, and the approved operating threshold.'}
                     </Typography>
                     <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
                       Default operating threshold: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{(deployThresholdPolicy?.default_threshold ?? DEFAULT_BUSINESS_THRESHOLD).toFixed(2)}</Box>
@@ -4073,7 +4404,7 @@ const ModelTrainingPanel = ({
                       Deployable range: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{thresholdBandMin.toFixed(2)} to {thresholdBandMax.toFixed(2)}</Box>
                     </Typography>
                     <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                      Event-loss cap for deployable thresholds: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{deployThresholdPolicy?.event_loss_cap_pct ?? 2}%</Box>
+                      {isMuleVariant ? 'Risk bands use the approved Mule score thresholds below.' : 'Event-loss cap for deployable thresholds:'} <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{isMuleVariant ? `${thresholdBandMin.toFixed(2)} / ${thresholdBandMax.toFixed(2)}` : `${deployThresholdPolicy?.event_loss_cap_pct ?? 2}%`}</Box>
                     </Typography>
                     <Divider sx={{ my: 0.5 }} />
                     <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
@@ -4094,7 +4425,7 @@ const ModelTrainingPanel = ({
               </Box>
 
               <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Notebook v5 target mapping</Typography>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1 }}>{isMuleVariant ? 'Mule target mapping' : 'Notebook v5 target mapping'}</Typography>
                 <Box sx={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
@@ -4126,13 +4457,15 @@ const ModelTrainingPanel = ({
           {trainingError && (
             <Alert severity="error" sx={neutralAlertSx} action={<IconButton size="small" onClick={() => { setTrainingError(null); setActiveTab(1); }}><Close /></IconButton>}>{trainingError}</Alert>
           )}
-          {!checkApproved && <Alert severity="info" sx={neutralAlertSx}>Training is gated by the Check tab. Approve the notebook-parity check before launching a model run.</Alert>}
+          {!checkApproved && <Alert severity="info" sx={neutralAlertSx}>{isMuleVariant ? 'Training is gated by the Check tab. Approve the governed Mule review before launching a model run.' : 'Training is gated by the Check tab. Approve the notebook-parity check before launching a model run.'}</Alert>}
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
             <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', lg: 'center' }} justifyContent="space-between">
               <Box>
                 <Typography sx={{ fontSize: 14, fontWeight: 800, color: T.textPrimary }}>Launch training run</Typography>
                 <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.5 }}>
-                  Start the approved FCC run from here. The structured milestones below will update as the job prepares data, splits the holdout, fits the model, and scores the validation set.
+                  {isMuleVariant
+                    ? 'Start the approved Mule run from here. The structured milestones below will update as the job prepares features, fits the model, and produces risk, typology, anomaly, and graph-aware outputs.'
+                    : 'Start the approved FCC run from here. The structured milestones below will update as the job prepares data, splits the holdout, fits the model, and scores the validation set.'}
                 </Typography>
                 {!canStartTraining && (
                   <Typography sx={{ fontSize: 11, color: T.textDim, mt: 0.75 }}>
@@ -4803,7 +5136,7 @@ const ModelTrainingPanel = ({
 
       {/* ── Scoring Ledger ── */}
       <TabPanel value={activeTab} index={6}>
-        <ScoringLedger jobId={jobId} grain={grain} hmlHigh={hmlHigh} hmlLow={hmlLow} results={results} />
+        <ScoringLedger jobId={jobId} grain={grain} hmlHigh={hmlHigh} hmlLow={hmlLow} results={results} grainOptions={grainOptions} />
       </TabPanel>
 
       <TabPanel value={activeTab} index={7}>

@@ -48,6 +48,7 @@ DIST_DIR = os.path.join(BASE_DIR, "dist")
 MLOPS_ONLY_PROFILES = {"mlops", "mlops_only"}
 REQUEST_TRACE_PREFIXES = (
     "/api/mlops",
+    "/api/mule",
     "/api/eda",
     "/api/model-training",
     "/api/deployment-dashboard",
@@ -236,6 +237,58 @@ def _register_blueprints(app: Flask, backend_profile: str):
         status["mlops"] = False
 
     try:
+        from api.routes.mule_master_dataset import mule_master_dataset_bp
+        from api.routes.mule_upload import mule_upload_bp
+
+        app.register_blueprint(mule_upload_bp, url_prefix="/api/mule")
+        app.register_blueprint(mule_master_dataset_bp, url_prefix="/api/mule")
+        status["mule_master_dataset"] = True
+    except Exception as e:
+        print("Mule Master Dataset module import failed:", repr(e))
+        traceback.print_exc()
+        status["mule_master_dataset"] = False
+
+    try:
+        from api.routes.mule_feature_store import mule_feature_store_bp
+
+        app.register_blueprint(mule_feature_store_bp, url_prefix="/api/mule")
+        status["mule_feature_store"] = True
+    except Exception as e:
+        print("Mule Feature Store module import failed:", repr(e))
+        traceback.print_exc()
+        status["mule_feature_store"] = False
+
+    try:
+        from api.routes.mule_preprocessing import mule_preprocessing_bp
+
+        app.register_blueprint(mule_preprocessing_bp, url_prefix="/api/mule")
+        status["mule_preprocessing"] = True
+    except Exception as e:
+        print("Mule Preprocessing module import failed:", repr(e))
+        traceback.print_exc()
+        status["mule_preprocessing"] = False
+
+    try:
+        from api.routes.mule_model_build import mule_model_build_bp
+
+        app.register_blueprint(mule_model_build_bp, url_prefix="/api/mule")
+        status["mule_model_build"] = True
+    except Exception as e:
+        print("Mule Model Build module import failed:", repr(e))
+        traceback.print_exc()
+        status["mule_model_build"] = False
+
+    try:
+        from api.routes.mule_validation import mule_validation_bp
+
+        app.register_blueprint(mule_validation_bp, url_prefix="/api/mule")
+        status["mule_validation"] = True
+    except Exception as e:
+        print("Mule Validation module import failed:", repr(e))
+        traceback.print_exc()
+        status["mule_validation"] = False
+
+    try:
         from api.tools.mlops.autopilot_routes import autopilot_bp
 
         app.register_blueprint(autopilot_bp, url_prefix="/api/mlops/autopilot")
@@ -289,6 +342,7 @@ def _register_blueprints(app: Flask, backend_profile: str):
     print(f"Mule module  : {'ENABLED' if status.get('mule') else 'DISABLED'}")
     print(f"BTSY module  : {'ENABLED' if status.get('btsy') else 'DISABLED'}")
     print(f"MLOps module : {'ENABLED' if status.get('mlops') else 'DISABLED'}")
+    print(f"Mule validate: {'ENABLED' if status.get('mule_validation') else 'DISABLED'}")
     print(f"AutoPilot    : {'ENABLED' if status.get('autopilot') else 'DISABLED'}")
     print(f"EDA module   : {'ENABLED' if status.get('eda') else 'DISABLED'}")
     print(f"Model train  : {'ENABLED' if status.get('model_training') else 'DISABLED'}")

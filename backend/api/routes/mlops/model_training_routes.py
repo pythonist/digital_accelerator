@@ -489,12 +489,12 @@ def _resolve_target_column(dataset: Dict, target_column: str) -> str:
         if mapped:
             return mapped
         if raw.lower() in {"__generated_target__", "generated_target"}:
-            for cand in ("is_generated_target", "target", "final_label", "is_true_pos", "is_str", "case_outcome"):
+            for cand in ("mule_flag", "is_generated_target", "target", "final_label", "is_true_pos", "is_str", "case_outcome"):
                 m = lookup.get(cand)
                 if m:
                     return m
         return raw
-    for cand in ("is_generated_target", "target", "final_label", "is_true_pos", "is_str", "case_outcome"):
+    for cand in ("mule_flag", "is_generated_target", "target", "final_label", "is_true_pos", "is_str", "case_outcome"):
         m = lookup.get(cand)
         if m:
             return m
@@ -772,6 +772,9 @@ def train_model() -> tuple:
         cv_folds       = int(body.get("cv_folds") or 5)
         stratify       = bool(body.get("stratify", True))
         random_state   = int(body.get("random_state") or 42)
+        pipeline_id_raw = body.get("pipeline_id")
+        pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        pipeline_name = str(body.get("pipeline_name") or "").strip()
         grain          = str(body.get("grain") or "alert").strip().lower()
         hml_high       = float(body.get("hml_high_threshold") or 0.65)
         hml_low        = float(body.get("hml_low_threshold")  or 0.35)
@@ -786,9 +789,9 @@ def train_model() -> tuple:
             return jsonify({"success": False,
                             "error": "mode must be one of supervised, unsupervised, deep_learning",
                             "error_code": "VALIDATION_ERROR"}), 400
-        if grain not in {"alert", "case"}:
+        if grain not in {"account", "alert", "case"}:
             return jsonify({"success": False,
-                            "error": f"grain must be 'alert' or 'case', got '{grain}'",
+                            "error": f"grain must be 'account', 'alert', or 'case', got '{grain}'",
                             "error_code": "VALIDATION_ERROR"}), 400
         hml_err = _validate_hml_thresholds(hml_high, hml_low)
         if hml_err:
@@ -818,6 +821,11 @@ def train_model() -> tuple:
                 if cand in [c.lower() for c in columns]:
                     resolved_target = next(c for c in columns if c.lower() == cand)
                     break
+        if not resolved_target and grain == "account":
+            for cand in ("mule_flag", "final_label", "target"):
+                if cand in [c.lower() for c in columns]:
+                    resolved_target = next(c for c in columns if c.lower() == cand)
+                    break
 
         if not resolved_target:
             return jsonify({"success": False,
@@ -837,6 +845,8 @@ def train_model() -> tuple:
             test_size=test_size, cv_folds=cv_folds,
             stratify=stratify, random_state=random_state,
             tenant_id=tenant_id, env_id=env_id,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
             grain=grain,
             hml_high_threshold=hml_high,
             hml_low_threshold=hml_low,
@@ -894,8 +904,8 @@ def training_workbench_preview() -> tuple:
             return jsonify({"success": False, "error": "dataset_id is required", "error_code": "VALIDATION_ERROR"}), 400
         if mode not in {"supervised", "unsupervised", "deep_learning"}:
             return jsonify({"success": False, "error": "mode must be one of supervised, unsupervised, deep_learning", "error_code": "VALIDATION_ERROR"}), 400
-        if grain not in {"alert", "case"}:
-            return jsonify({"success": False, "error": "grain must be 'alert' or 'case'", "error_code": "VALIDATION_ERROR"}), 400
+        if grain not in {"account", "alert", "case"}:
+            return jsonify({"success": False, "error": "grain must be 'account', 'alert', or 'case'", "error_code": "VALIDATION_ERROR"}), 400
 
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
@@ -1634,6 +1644,12 @@ def registry_upload_pkl() -> tuple:
         threshold = _validate_deployable_threshold(request.form.get("threshold"))
         hml_high_threshold = float(request.form.get("hml_high_threshold") or 0.65)
         hml_low_threshold = float(request.form.get("hml_low_threshold") or 0.35)
+        test_size = float(request.form.get("test_size") or 0.2)
+        random_state = int(request.form.get("random_state") or 42)
+        stratify = str(request.form.get("stratify") or "true").strip().lower() not in {"0", "false", "no", "off"}
+        pipeline_id_raw = request.form.get("pipeline_id")
+        pipeline_id = int(pipeline_id_raw) if str(pipeline_id_raw or "").strip() else None
+        pipeline_name = str(request.form.get("pipeline_name") or "").strip()
         dataset_id_raw = request.form.get("dataset_id")
         dataset_id = int(dataset_id_raw) if str(dataset_id_raw or "").strip() else None
 
@@ -1707,6 +1723,11 @@ def registry_upload_pkl() -> tuple:
             grain=grain,
             hml_high_threshold=hml_high_threshold,
             hml_low_threshold=hml_low_threshold,
+            test_size=test_size,
+            stratify=stratify,
+            random_state=random_state,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
             changed_by=str(request.form.get("changed_by") or request.form.get("uploaded_by") or ""),
         )
 
@@ -1966,14 +1987,28 @@ def list_runs() -> tuple:
         tenant_id, env_id = _get_env_ids()
         env_root   = _resolve_env_path(env_id, tenant_id)
         trainer    = _get_training_service(env_root)
+        dataset_svc = _get_dataset_service(env_root)
         labels     = _get_labels(tenant_id, env_id)
         dataset_id = request.args.get("dataset_id")
+        pipeline_id = request.args.get("pipeline_id")
         limit      = int(request.args.get("limit") or 200)
         result     = trainer.list_runs(
             tenant_id=tenant_id, env_id=env_id,
             dataset_id=int(dataset_id) if dataset_id else None,
             limit=limit,
         )
+        if pipeline_id:
+            pipeline_job_ids = set(
+                dataset_svc.list_pipeline_training_job_ids(
+                    tenant_id=tenant_id,
+                    env_id=env_id,
+                    pipeline_id=int(pipeline_id),
+                )
+            )
+            result = [
+                row for row in result
+                if str(row.get("job_id") or row.get("run_id") or "").strip() in pipeline_job_ids
+            ]
         for r in result:
             _enrich_run_with_label(r, labels)
         return jsonify({"success": True, "data": result}), 200

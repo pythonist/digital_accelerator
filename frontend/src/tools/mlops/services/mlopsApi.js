@@ -23,16 +23,32 @@ const mlopsApi = {
     if (Number.isFinite(pipelineId) && pipelineId > 0) {
       formData.append('pipeline_id', String(pipelineId));
     }
+    const pipelineType = String(options?.pipeline_type || '').trim().toLowerCase();
+    if (pipelineType) {
+      formData.append('pipeline_type', pipelineType);
+    }
     return apiClient.postForm(`/api/mlops/upload/${encodeURIComponent(String(datasetType))}`, formData);
   },
   listDatasets: async (params = {}) => {
     return apiClient.get('/api/mlops/datasets', params);
   },
+  muleImportBundle: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${encodeURIComponent(String(pipelineId))}/mule/import-bundle`, {
+      bundle_path: payload?.bundle_path,
+      source_dir: payload?.source_dir,
+    });
+  },
   getDataset: async (datasetId) => {
     return apiClient.get(`/api/mlops/datasets/${datasetId}`);
   },
+  getDatasetProfile: async (datasetId) => {
+    return apiClient.get(`/api/mlops/datasets/${datasetId}/profile`);
+  },
   datasetRows: async (datasetId, params = {}) => {
     return apiClient.get(`/api/mlops/datasets/${datasetId}/rows`, params);
+  },
+  muleUploadSources: async (pipelineId) => {
+    return apiClient.get(`/api/mule/upload/sources/${encodeURIComponent(String(pipelineId))}`);
   },
   deleteDataset: async (datasetId) => {
     return apiClient.post(`/api/mlops/datasets/${datasetId}/delete`, {});
@@ -268,6 +284,223 @@ const mlopsApi = {
   pipelineSaveScreenState: async (pipelineId, payload) => {
     return apiClient.post(`/api/mlops/pipeline/${pipelineId}/screen-state`, payload);
   },
+  muleBuildAnalyticalDataset: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/analytical-dataset`, payload);
+  },
+  muleDefineOutcome: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/target`, payload);
+  },
+  muleGenerateRiskIndicators: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/features`, payload);
+  },
+  muleTrainModel: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/model`, payload);
+  },
+  muleReviewTypology: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/typology`, payload);
+  },
+  mulePublishBatch: async (pipelineId, payload = {}) => {
+    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/publish`, payload);
+  },
+  muleMasterDatasetConfig: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/master-dataset/config?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/master-dataset/config', { pipeline_id: pipelineId });
+  },
+  muleMasterDatasetPreview: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/master-dataset/preview?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  muleMasterDatasetBuild: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/master-dataset/build?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  muleMasterDatasetStatus: async (pipelineId) => {
+    return apiClient.get(`/api/mule/master-dataset/status/${pipelineId}`);
+  },
+  muleRunWorkspace: async (pipelineId) => {
+    return apiClient.get(`/api/mule/runs/${encodeURIComponent(String(pipelineId))}/workspace`);
+  },
+  muleFeatureStoreConfig: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/feature-store/config?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/feature-store/config', { pipeline_id: pipelineId });
+  },
+  muleFeatureStoreGenerate: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/feature-store/generate?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  muleFeatureStoreStatus: async (pipelineId) => {
+    return apiClient.get(`/api/mule/feature-store/status/${pipelineId}`);
+  },
+  mulePreprocessingConfig: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/preprocessing/config?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/preprocessing/config', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingPreview: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/preview?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingRun: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/run?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingStatus: async (pipelineId) => {
+    return apiClient.get(`/api/mule/preprocessing/status/${pipelineId}`);
+  },
+  mulePreprocessingOverview: async (pipelineId) => {
+    return apiClient.get('/api/mule/preprocessing/overview', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingTransform: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/preprocessing/transform?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/preprocessing/transform', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingTransformAuto: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/transform/auto?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingTransformValidate: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/transform/validate?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingTransformPreview: async (pipelineId) => {
+    return apiClient.get('/api/mule/preprocessing/transform/preview', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingFeatureBuilder: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/preprocessing/feature-builder?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/preprocessing/feature-builder', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingFeatureBuilderValidate: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/feature-builder/validate?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingFeatureSelection: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/preprocessing/feature-selection?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/preprocessing/feature-selection', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingFeatureSelectionAnalyze: async (pipelineId) => {
+    return apiClient.get('/api/mule/preprocessing/feature-selection/analyze', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingPipelineRunStatus: async (pipelineId) => {
+    return apiClient.get('/api/mule/preprocessing/pipeline-run', { pipeline_id: pipelineId });
+  },
+  mulePreprocessingPipelineRunStart: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/pipeline-run/start?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingPipelineRunRetry: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/pipeline-run/retry?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingPipelineRunCancel: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/preprocessing/pipeline-run/cancel?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  mulePreprocessingSummary: async (pipelineId) => {
+    return apiClient.get('/api/mule/preprocessing/summary', { pipeline_id: pipelineId });
+  },
+  muleModelBuildConfig: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/config?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/config', { pipeline_id: pipelineId });
+  },
+  muleModelBuildTrain: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/model-build/train?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  muleModelBuildStatus: async (pipelineId) => {
+    return apiClient.get(`/api/mule/model-build/status/${pipelineId}`);
+  },
+  muleModelValidationCheck: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/validation?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/validation', { pipeline_id: pipelineId });
+  },
+  muleModelSupervised: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/supervised?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/supervised', { pipeline_id: pipelineId });
+  },
+  muleModelSequence: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/sequence?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/sequence', { pipeline_id: pipelineId });
+  },
+  muleModelGraph: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/graph?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/graph', { pipeline_id: pipelineId });
+  },
+  muleModelTuning: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/tuning?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/tuning', { pipeline_id: pipelineId });
+  },
+  muleModelEvaluation: async (pipelineId) => {
+    return apiClient.get('/api/mule/model-build/evaluation', { pipeline_id: pipelineId });
+  },
+  muleModelExplainability: async (pipelineId) => {
+    return apiClient.get('/api/mule/model-build/explainability', { pipeline_id: pipelineId });
+  },
+  muleModelChampion: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/champion?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/champion', { pipeline_id: pipelineId });
+  },
+  muleModelPolicy: async (pipelineId, payload = null) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    if (payload && typeof payload === 'object') {
+      return apiClient.post(`/api/mule/model-build/policy?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    }
+    return apiClient.get('/api/mule/model-build/policy', { pipeline_id: pipelineId });
+  },
+  muleModelSummary: async (pipelineId) => {
+    return apiClient.get('/api/mule/model-build/summary', { pipeline_id: pipelineId });
+  },
+  muleModelWorkbenchTrain: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/model-build/workbench-train?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  muleModelValidationRun: async (pipelineId, payload = {}) => {
+    const pid = encodeURIComponent(String(pipelineId));
+    return apiClient.post(`/api/mule/model-validation/run?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+  },
+  muleModelValidationStatus: async (pipelineId) => {
+    return apiClient.get(`/api/mule/model-validation/status/${pipelineId}`);
+  },
+  muleModelValidationGraph: async (pipelineId) => {
+    return apiClient.get(`/api/mule/model-validation/graph/${pipelineId}`);
+  },
 
   /** Fetch pipeline version history. */
   pipelineVersions: async (pipelineId) => {
@@ -495,6 +728,10 @@ const mlopsApi = {
   /** List all registered models. */
   listModelRegistry: async () => {
     return apiClient.get('/api/model-training/registry');
+  },
+
+  getRegistryEntry: async (jobId) => {
+    return apiClient.get(`/api/model-training/registry/${encodeURIComponent(String(jobId))}`);
   },
 
   /** Upload an external .pkl model and register it in the model registry. */

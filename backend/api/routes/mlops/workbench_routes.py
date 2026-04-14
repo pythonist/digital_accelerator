@@ -16,6 +16,8 @@ from pathlib import Path
 import os
 import re
 import json
+import shutil
+import traceback
 from datetime import datetime
 
 from api.service_locator import services
@@ -49,7 +51,7 @@ ALLOWED_UPLOAD_TYPES = frozenset({
 # â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _resolve_env_path(env_id: str, tenant_id: str) -> str:
-    return str(resolve_env_root(env_id, tenant_id, create_if_missing=True))
+    return str(resolve_env_root(env_id, tenant_id, create_if_missing=False))
 
 
 def _get_env_ids():
@@ -422,9 +424,33 @@ def mlops_upload_dataset(dataset_type):
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
         data_dir = resolve_mlops_data_dir(env_root, create_if_missing=True)
+        mlops_svc = _get_mlops_service(env_root)
+
+        pipeline_id_raw = request.args.get("pipeline_id") or (request.form.get("pipeline_id") if request.form else None)
+        try:
+            pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        except Exception:
+            pipeline_id = None
+        if pipeline_id is not None and pipeline_id <= 0:
+            pipeline_id = None
+
+        pipeline_type = (
+            request.args.get("pipeline_type")
+            or (request.form.get("pipeline_type") if request.form else None)
+            or None
+        )
+        if not pipeline_type and pipeline_id:
+            try:
+                pipeline_identity = mlops_svc.get_pipeline_identity(tenant_id, env_id, int(pipeline_id))
+                pipeline_type = pipeline_identity.get("pipeline_type") or "fcc"
+            except Exception:
+                pipeline_type = None
+        pipeline_type = pipeline_type or "fcc"
 
         ext = Path(file.filename).suffix.lower()
-        save_path = data_dir / f"{effective_type}{ext}"
+        scope_dir = data_dir / (f"pipeline_{int(pipeline_id)}" if pipeline_id else f"shared_{pipeline_type}")
+        scope_dir.mkdir(parents=True, exist_ok=True)
+        save_path = scope_dir / f"{effective_type}{ext}"
         file.save(str(save_path))
 
         # Cross-module ingestion is disabled. MLOps uploads stay in the MLOps workspace only.
@@ -439,19 +465,15 @@ def mlops_upload_dataset(dataset_type):
                 "The dataset was kept inside the isolated MLOps workspace."
             )
 
-        mlops_svc = _get_mlops_service(env_root)
         dataset = mlops_svc.register_dataset(
             tenant_id=tenant_id,
             env_id=env_id,
+            pipeline_type=pipeline_type,
+            pipeline_id=int(pipeline_id) if pipeline_id else None,
             dataset_type=effective_type,
             filename=f"{effective_type}{ext}",
             file_path=save_path,
         )
-        pipeline_id_raw = request.args.get("pipeline_id") or (request.form.get("pipeline_id") if request.form else None)
-        try:
-            pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
-        except Exception:
-            pipeline_id = None
         if pipeline_id:
             try:
                 mlops_svc.attach_pipeline_asset(
@@ -472,6 +494,8 @@ def mlops_upload_dataset(dataset_type):
             "success": True,
             "data": {
                 "dataset_id": dataset["dataset_id"],
+                "pipeline_id": dataset.get("pipeline_id"),
+                "pipeline_type": dataset.get("pipeline_type", pipeline_type),
                 "dataset_type": dataset["dataset_type"],
                 "filename": dataset["filename"],
                 "file_path": dataset["file_path"],
@@ -510,6 +534,14 @@ def mlops_list_datasets():
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
         mlops_svc = _get_mlops_service(env_root)
+        pipeline_type = str(request.args.get("pipeline_type") or "").strip().lower() or None
+        pipeline_id = request.args.get("pipeline_id")
+        try:
+            pipeline_id = int(pipeline_id) if pipeline_id not in (None, "", []) else None
+        except Exception:
+            pipeline_id = None
+        if pipeline_id is not None and pipeline_id <= 0:
+            pipeline_id = None
 
         sync_param = str(request.args.get("sync") or "").strip().lower()
         do_sync = sync_param in {"1", "true", "yes", "on", "force", "full"}
@@ -524,9 +556,15 @@ def mlops_list_datasets():
                     env_id=env_id,
                     data_dir=data_dir,
                     force=force_sync,
+                    pipeline_type=pipeline_type or "fcc",
                 )
 
-        datasets = mlops_svc.list_datasets(tenant_id, env_id)
+        datasets = mlops_svc.list_datasets(
+            tenant_id,
+            env_id,
+            pipeline_type=pipeline_type,
+            pipeline_id=int(pipeline_id) if pipeline_id else None,
+        )
 
         # â”€â”€ Split into raw uploads vs pipeline artefacts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # The frontend Upload screen shows only raw_datasets.
@@ -539,6 +577,8 @@ def mlops_list_datasets():
             "data":       datasets,            # full list for backward-compat
             "raw":        raw_datasets,        # only user-uploaded tables
             "artefacts":  artefact_datasets,   # workbench-generated artefacts
+            "pipeline_type": pipeline_type or "all",
+            "pipeline_id": int(pipeline_id) if pipeline_id else None,
             "sync_applied": bool(do_sync),
             "sync_mode": "force" if force_sync else ("incremental" if do_sync else "none"),
             "sync_count": int(len(synced)),
@@ -695,6 +735,117 @@ def mlops_metadata_profile():
         result = mlops_svc.profile_metadata(dataset, sample)
         return jsonify({"success": True, "data": result}), 200
     except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/import-bundle", methods=["POST"])
+def mlops_pipeline_mule_import_bundle(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/import-bundle
+
+    Import a server-side Mule bundle folder into the isolated MLOps workspace and
+    register all discovered source tables as Mule-family datasets.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        bundle_path_raw = str(body.get("bundle_path") or body.get("source_dir") or "").strip()
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+
+        repo_root = Path(__file__).resolve().parents[4]
+        default_source = repo_root / "data_generation_scripts" / "mule_data" / "mule_output"
+        candidate_paths = []
+        if bundle_path_raw:
+            candidate = Path(bundle_path_raw).expanduser()
+            if candidate.is_absolute():
+                candidate_paths.append(candidate)
+            else:
+                candidate_paths.extend([
+                    Path.cwd() / candidate,
+                    repo_root / candidate,
+                    default_source,
+                ])
+        else:
+            candidate_paths.append(default_source)
+
+        source_dir = next((p for p in candidate_paths if p.exists() and p.is_dir()), None)
+        if source_dir is None:
+            return jsonify({
+                "success": False,
+                "error": f"Bundle directory not found: {bundle_path_raw or str(default_source)}",
+                "error_code": "BUNDLE_NOT_FOUND",
+            }), 404
+
+        target_root = resolve_mlops_data_dir(env_root, create_if_missing=True) / "mule_bundle" / f"pipeline_{int(pipeline_id)}"
+        target_root.mkdir(parents=True, exist_ok=True)
+
+        imported = []
+        source_files = [*sorted(source_dir.glob("*.csv")), *sorted(source_dir.glob("*.parquet"))]
+        if not source_files:
+            return jsonify({
+                "success": False,
+                "error": "No CSV or Parquet files found in the Mule bundle.",
+                "error_code": "EMPTY_BUNDLE",
+            }), 400
+
+        for file_path in source_files:
+            target_path = target_root / file_path.name
+            try:
+                if file_path.resolve() != target_path.resolve():
+                    shutil.copy2(file_path, target_path)
+            except Exception:
+                # If source and target are effectively the same file, just reuse in-place.
+                if str(file_path) != str(target_path):
+                    raise
+            dataset = mlops_svc.register_dataset(
+                tenant_id=tenant_id,
+                env_id=env_id,
+                dataset_type=str(file_path.stem or "").strip().lower(),
+                filename=file_path.name,
+                file_path=target_path,
+                pipeline_type="mule",
+                pipeline_id=int(pipeline_id),
+            )
+            imported.append(dataset)
+
+        try:
+            mlops_svc.save_pipeline_screen_state(
+                tenant_id,
+                env_id,
+                int(pipeline_id),
+                "mule_load",
+                {
+                    "current_screen": "data",
+                    "source_dataset_ids": [int(item["dataset_id"]) for item in imported if item.get("dataset_id")],
+                    "selected_sources": [
+                        {
+                            "dataset_id": int(item["dataset_id"]),
+                            "dataset_type": item.get("dataset_type"),
+                            "filename": item.get("filename"),
+                        }
+                        for item in imported
+                    ],
+                    "bundle_path": str(source_dir),
+                },
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "pipeline_id": int(pipeline_id),
+                "bundle_path": str(source_dir),
+                "target_path": str(target_root),
+                "imported_count": len(imported),
+                "datasets": imported,
+            },
+        }), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
 
@@ -1351,7 +1502,12 @@ def _save_pipeline_from_request():
 
     return mlops_svc.save_pipeline(
         tenant_id, env_id, dataset_id, name, steps,
+        pipeline_id=int(body["pipeline_id"]) if body.get("pipeline_id") else None,
+        pipeline_uuid=str(body.get("pipeline_uuid") or "").strip() or None,
+        pipeline_type=str(body.get("pipeline_type") or body.get("model_family") or "fcc"),
+        model_family=str(body.get("model_family") or body.get("pipeline_type") or "").strip() or None,
         grain=str(body.get("grain") or "transaction"),
+        prediction_grain=str(body.get("prediction_grain") or body.get("grain") or "").strip() or None,
         anchor_dataset_id=int(body["anchor_dataset_id"]) if body.get("anchor_dataset_id") else None,
         dataset_ids=[int(d) for d in (body.get("dataset_ids") or []) if d],
         joins=list(body.get("joins") or []),
@@ -1359,6 +1515,10 @@ def _save_pipeline_from_request():
         str_config=dict(body.get("str_config") or {}),
         schedule=dict(body.get("schedule") or {}),
         output_name=str(body.get("output_name") or "master_dataset"),
+        lookback_days=int(body["lookback_days"]) if body.get("lookback_days") not in (None, "", []) else None,
+        lookforward_days=int(body["lookforward_days"]) if body.get("lookforward_days") not in (None, "", []) else None,
+        target_definition_type=str(body.get("target_definition_type") or "").strip() or None,
+        pipeline_config=dict(body.get("pipeline_config") or {}),
         created_by_persona=str(body.get("created_by_persona") or "technical"),
     )
 
@@ -1376,8 +1536,14 @@ def mlops_pipeline_save():
     """
     try:
         result = _save_pipeline_from_request()
-        return jsonify({"success": True, "data": result}), 200
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        pipeline_id = int(result.get("pipeline_id") or 0)
+        hydrated = mlops_svc.load_pipeline(tenant_id, env_id, pipeline_id) if pipeline_id > 0 else result
+        return jsonify({"success": True, "data": hydrated}), 200
     except Exception as exc:
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 
 
@@ -1467,6 +1633,175 @@ def mlops_pipeline_screen_state(pipeline_id):
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/analytical-dataset", methods=["POST"])
+def mlops_pipeline_mule_analytical_dataset(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/analytical-dataset
+
+    Build Mule's account-level analytical dataset from the uploaded source tables.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.build_mule_analytical_dataset(
+            tenant_id,
+            env_id,
+            int(pipeline_id),
+            source_dataset_ids=body.get("source_dataset_ids") or body.get("dataset_ids") or [],
+            dataset_name=body.get("dataset_name"),
+            config=body.get("config") if isinstance(body.get("config"), dict) else body,
+        )
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/target", methods=["POST"])
+def mlops_pipeline_mule_target(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/target
+
+    Persist Mule outcome definition settings and optionally summarize the selected dataset.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.define_mule_outcome(
+            tenant_id,
+            env_id,
+            int(pipeline_id),
+            dataset_id=body.get("dataset_id"),
+            target_definition_type=body.get("target_definition_type"),
+            lookback_days=body.get("lookback_days"),
+            lookforward_days=body.get("lookforward_days"),
+            prediction_grain=body.get("prediction_grain"),
+            config=body.get("config") if isinstance(body.get("config"), dict) else body,
+        )
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/features", methods=["POST"])
+def mlops_pipeline_mule_features(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/features
+
+    Persist the Mule risk-indicator family selection and feature readiness summary.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.generate_mule_risk_indicators(
+            tenant_id,
+            env_id,
+            int(pipeline_id),
+            dataset_id=body.get("dataset_id"),
+            feature_families=body.get("feature_families") or body.get("families") or [],
+            config=body.get("config") if isinstance(body.get("config"), dict) else body,
+        )
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/model", methods=["POST"])
+def mlops_pipeline_mule_model(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/model
+
+    Persist the Mule detection model configuration and summary metrics.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.train_mule_detection_model(
+            tenant_id,
+            env_id,
+            int(pipeline_id),
+            dataset_id=body.get("dataset_id"),
+            model_kind=body.get("model_kind"),
+            benchmark_enabled=bool(body.get("benchmark_enabled", True)),
+            anomaly_enabled=bool(body.get("anomaly_enabled", True)),
+            config=body.get("config") if isinstance(body.get("config"), dict) else body,
+        )
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/typology", methods=["POST"])
+def mlops_pipeline_mule_typology(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/typology
+
+    Persist the typology propensity review for Mule detection.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.review_mule_typology_signals(
+            tenant_id,
+            env_id,
+            int(pipeline_id),
+            model_run_id=body.get("model_run_id"),
+            config=body.get("config") if isinstance(body.get("config"), dict) else body,
+        )
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/pipeline/<int:pipeline_id>/mule/publish", methods=["POST"])
+def mlops_pipeline_mule_publish(pipeline_id):
+    """
+    POST /api/mlops/pipeline/<id>/mule/publish
+
+    Persist a Mule publish batch for Sentinel intake.
+    """
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root = _resolve_env_path(env_id, tenant_id)
+        mlops_svc = _get_mlops_service(env_root)
+        result = mlops_svc.publish_mule_high_risk_accounts(
+            tenant_id,
+            env_id,
+            int(pipeline_id),
+            model_run_id=body.get("model_run_id"),
+            threshold=float(body.get("threshold", 0.72)),
+            capacity=int(body.get("capacity", 250)),
+            source_record_type=str(body.get("source_record_type") or "high_risk_account"),
+            destination_queue=str(body.get("destination_queue") or "Sentinel Mule Intake"),
+            config=body.get("config") if isinstance(body.get("config"), dict) else body,
+        )
+        return jsonify({"success": True, "data": result}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 

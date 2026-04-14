@@ -69,7 +69,21 @@ const PRESET_TYPES = [
   { value: 'counterparties', label: 'Counterparties',   desc: 'Beneficiary / sender entities',    icon: '⇌',  color: PwC.cloud,          bizHint: 'Third-party entities' },
   { value: 'custom',         label: '+ Custom',         desc: 'Enter any table name',             icon: '✎',  color: PwC.surfaceAlt,     bizHint: 'Custom data type' },
 ];
-const TYPE_META = Object.fromEntries(PRESET_TYPES.map(t => [t.value, t]));
+const MULE_PRESET_TYPES = [
+  { value: 'device_logs', label: 'Device Logs', desc: 'Device and channel access activity', icon: 'DEV', color: PwC.cloud, bizHint: 'Digital access signals' },
+  { value: 'external_signals', label: 'External Signals', desc: 'External risk and intelligence signals', icon: 'EXT', color: PwC.cloud, bizHint: 'External intelligence' },
+  { value: 'graph_nodes', label: 'Graph Nodes', desc: 'Entity nodes for network analytics', icon: 'NODE', color: PwC.cloud, bizHint: 'Network entities' },
+  { value: 'graph_edges', label: 'Graph Edges', desc: 'Relationship edges for network analytics', icon: 'EDGE', color: PwC.cloud, bizHint: 'Network relationships' },
+  { value: 'account_daily_summary', label: 'Account Daily Summary', desc: 'Daily account-level aggregates', icon: 'DAY', color: PwC.cloud, bizHint: 'Historical account behavior' },
+  { value: 'mule_labels', label: 'Mule Outcome Labels', desc: 'Confirmed or proxy mule outcomes', icon: 'LBL', color: PwC.roseLight, bizHint: 'Outcome reference data' },
+  { value: 'mule_typology', label: 'Mule Typology', desc: 'Typology propensity reference data', icon: 'TYP', color: PwC.violetLight, bizHint: 'Typology scoring context' },
+];
+const ALL_PRESET_TYPES = [
+  ...PRESET_TYPES.slice(0, -1),
+  ...MULE_PRESET_TYPES,
+  PRESET_TYPES[PRESET_TYPES.length - 1],
+];
+const TYPE_META = Object.fromEntries(ALL_PRESET_TYPES.map(t => [t.value, t]));
 
 // Type badge colors — muted, catalog-style
 const TYPE_BADGE = {
@@ -82,7 +96,15 @@ const TYPE_BADGE = {
   sanctions:      { bg: '#FEF2F2', fg: '#B91C1C', label: 'SANC' },
   counterparties: { bg: '#F0F9FF', fg: '#0369A1', label: 'CP' },
 };
-const typeBadge = (type) => TYPE_BADGE[type] || { bg: PwC.cloud, fg: PwC.ash, label: (type || 'DATA').slice(0, 4).toUpperCase() };
+const typeBadge = (type) => ({
+  device_logs: { bg: '#ECFEFF', fg: '#0F766E', label: 'DEV' },
+  external_signals: { bg: '#FFF7ED', fg: '#C2410C', label: 'EXT' },
+  graph_nodes: { bg: '#EEF2FF', fg: '#4338CA', label: 'NODE' },
+  graph_edges: { bg: '#F5F3FF', fg: '#7C3AED', label: 'EDGE' },
+  account_daily_summary: { bg: '#F8FAFC', fg: '#475569', label: 'DAY' },
+  mule_labels: { bg: '#FFF1F2', fg: '#BE123C', label: 'LBL' },
+  mule_typology: { bg: '#F5F3FF', fg: '#6D28D9', label: 'TYP' },
+}[type] || TYPE_BADGE[type] || { bg: PwC.cloud, fg: PwC.ash, label: (type || 'DATA').slice(0, 4).toUpperCase() });
 
 const MAX_MB = 500;
 const fmtBytes  = (b) => b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`;
@@ -138,10 +160,18 @@ const colChip = (dtype) => {
 };
 const autoDetectType = (filename) => {
   const lower = filename.toLowerCase();
-  for (const { value } of PRESET_TYPES.slice(0, -1)) { if (lower.includes(value)) return value; }
+  for (const { value } of ALL_PRESET_TYPES.slice(0, -1)) { if (lower.includes(value)) return value; }
   if (lower.includes('txn') || lower.includes('payment')) return 'transactions';
   if (lower.includes('acct') || lower.includes('account')) return 'accounts';
   if (lower.includes('cust') || lower.includes('client')) return 'customers';
+  if (lower.includes('counterpart')) return 'counterparties';
+  if (lower.includes('device')) return 'device_logs';
+  if (lower.includes('external') || lower.includes('intel') || lower.includes('signal')) return 'external_signals';
+  if (lower.includes('graph_node')) return 'graph_nodes';
+  if (lower.includes('graph_edge')) return 'graph_edges';
+  if (lower.includes('daily_summary') || lower.includes('daily')) return 'account_daily_summary';
+  if (lower.includes('mule_label') || lower.includes('outcome_label') || lower.includes('labels')) return 'mule_labels';
+  if (lower.includes('typology')) return 'mule_typology';
   if (lower.includes('sar') || lower.includes('suspi')) return 'str';
   return 'transactions';
 };
@@ -361,7 +391,7 @@ const QueueItem = ({ item, persona, uploadDisabled = false, onTypeChange, onCust
             <InputLabel sx={{ fontSize: 11 }}>Dataset type</InputLabel>
             <Select value={item.type} label="Dataset type" onChange={(e) => onTypeChange(e.target.value)}
               sx={{ fontSize: 11.5, '& .MuiSelect-select': { py: 0.65 } }}>
-              {PRESET_TYPES.map((t) => (
+              {ALL_PRESET_TYPES.map((t) => (
                 <MenuItem key={t.value} value={t.value} sx={{ fontSize: 11.5 }}>
                   <Stack direction="row" spacing={0.75} alignItems="center">
                     <Box>
@@ -405,9 +435,9 @@ const QueueItem = ({ item, persona, uploadDisabled = false, onTypeChange, onCust
 
 // ─── Pipeline Run Panel ────────────────────────────────────────────────────────
 const PipelineRunPanel = ({
-  activePipelineId, activePipelineName, pipelineName, savedRuns,
+  activePipelineId, activePipelineName, pipelineName, pipelineType, savedRuns,
   selectedRunId, loadingRuns, creatingRun, openingRun,
-  onPipelineNameChange, onCreateRun, onSelectedRunChange, onOpenRun, onRefresh,
+  onPipelineNameChange, onPipelineTypeChange, onCreateRun, onSelectedRunChange, onOpenRun, onRefresh,
   summaryItems = [],
 }) => (
   <Box sx={{
@@ -460,6 +490,19 @@ const PipelineRunPanel = ({
         InputLabelProps={{ sx: { fontSize: 11.5, fontWeight: 600 } }}
         sx={{ '& .MuiInputBase-input': { fontSize: 13, fontWeight: 600, color: PwC.midnight } }}
       />
+
+      <FormControl size="small" fullWidth>
+        <InputLabel sx={{ fontSize: 11.5, fontWeight: 600 }}>Model family</InputLabel>
+        <Select
+          value={pipelineType}
+          label="Model family"
+          onChange={(e) => onPipelineTypeChange(String(e.target.value || 'fcc'))}
+          sx={{ '& .MuiSelect-select': { fontSize: 12.5, fontWeight: 600, color: PwC.midnight } }}
+        >
+          <MenuItem value="fcc" sx={{ fontSize: 12 }}>FCC False Positive Suppression</MenuItem>
+          <MenuItem value="mule" sx={{ fontSize: 12 }}>Mule Account Detection</MenuItem>
+        </Select>
+      </FormControl>
 
       <Button
         variant="contained"
@@ -1115,10 +1158,12 @@ const DataUploadScreen = ({
   onDatasetsRefresh,
   activePipelineId = null,
   activePipelineName = '',
+  activePipelineType = 'fcc',
   onPipelineActivated,
   onCreatePipeline,
   onResumePipeline,
   onWorkspaceReset,
+  onStepAdvance,
 }) => {
   const [queue, setQueue]                       = useState([]);
   const [dragOver, setDragOver]                 = useState(false);
@@ -1136,11 +1181,21 @@ const DataUploadScreen = ({
   const [loadingRuns, setLoadingRuns]           = useState(false);
   const [creatingRun, setCreatingRun]           = useState(false);
   const [openingRun, setOpeningRun]             = useState(false);
+  const [uploadingAll, setUploadingAll]         = useState(false);
   const [queueExpanded, setQueueExpanded]       = useState(true);
   const [selectedRunId, setSelectedRunId]       = useState('');
   const [pipelineName, setPipelineName]         = useState(activePipelineName || 'Experiment 1');
+  const [pipelineType, setPipelineType]         = useState(activePipelineType || 'fcc');
   const fileInputRef = useRef();
+  const screenStateSaveSignatureRef = useRef('');
+  const screenStateSaveInFlightRef = useRef(false);
   const hasActivePipeline = Number(activePipelineId || 0) > 0;
+  const hasUploadedData = datasets.length > 0;
+  const isMulePipeline = pipelineType === 'mule';
+
+  useEffect(() => {
+    setPipelineType(String(activePipelineType || 'fcc').trim().toLowerCase() === 'mule' ? 'mule' : 'fcc');
+  }, [activePipelineType]);
 
   // ── Data loaders (all logic preserved) ──────────────────────────────────────
   const loadSavedRuns = useCallback(async () => {
@@ -1169,25 +1224,47 @@ const DataUploadScreen = ({
 
   useEffect(() => {
     if (!hasActivePipeline) return undefined;
+    const hasLiveQueue = queue.some((item) => item.status === 'pending' || item.status === 'uploading');
+    if (hasLiveQueue) return undefined;
     const timeoutId = window.setTimeout(async () => {
+      const snapshot = {
+        activePipelineId: Number(activePipelineId || 0) || null,
+        completed: hasUploadedData,
+        status: hasUploadedData ? 'completed' : 'not_started',
+        expected_dataset_types: queue.map((q) => ({
+          type: q.type,
+          custom_name: q.customName || '',
+          file_name: q.file?.name || '',
+        })),
+        dataset_ids: datasets.map((d) => Number(d.dataset_id)).filter((id) => Number.isFinite(id) && id > 0),
+        uploaded_dataset_types: datasets.map((d) => d.dataset_type),
+        has_str_dataset: datasets.some((d) => ['str', 'sar'].includes(safe(d.dataset_type))),
+        total_tables: datasets.length,
+        total_rows: datasets.reduce((sum, d) => sum + (d.row_count || 0), 0),
+      };
+      const signature = JSON.stringify(snapshot);
+      if (screenStateSaveInFlightRef.current || screenStateSaveSignatureRef.current === signature) {
+        return;
+      }
+      screenStateSaveInFlightRef.current = true;
       try {
-        await mlopsApi.pipelineSaveScreenState(activePipelineId, {
+        const res = await mlopsApi.pipelineSaveScreenState(activePipelineId, {
           screen: 'data_upload',
-          state: {
-            expected_dataset_types: queue.map((q) => ({
-              type: q.type, custom_name: q.customName || '', file_name: q.file?.name || '',
-            })),
-            dataset_ids: datasets.map((d) => Number(d.dataset_id)).filter((id) => Number.isFinite(id) && id > 0),
-            uploaded_dataset_types: datasets.map((d) => d.dataset_type),
-            has_str_dataset: datasets.some((d) => ['str', 'sar'].includes(safe(d.dataset_type))),
-            total_tables: datasets.length,
-            total_rows: datasets.reduce((sum, d) => sum + (d.row_count || 0), 0),
-          },
+          state: snapshot,
         });
+        const payload = res?.data || res;
+        screenStateSaveSignatureRef.current = signature;
+        const nextPipelineId = Number(payload?.pipeline_id || 0) || null;
+        if (nextPipelineId && nextPipelineId !== Number(activePipelineId || 0)) {
+          onPipelineActivated?.(payload);
+        }
       } catch (e) { console.error('Failed to persist data upload state', e); }
+      finally {
+        screenStateSaveInFlightRef.current = false;
+      }
     }, 250);
     return () => window.clearTimeout(timeoutId);
-  }, [activePipelineId, datasets, hasActivePipeline, queue]);
+  }, [activePipelineId, datasets, hasActivePipeline, hasUploadedData, onPipelineActivated, queue]);
 
   const requireActivePipeline = useCallback(() => {
     if (hasActivePipeline) return true;
@@ -1237,7 +1314,10 @@ const DataUploadScreen = ({
     try {
       let prog = 10;
       const tick = setInterval(() => { prog = Math.min(prog + 15, 85); updateItem(item.id, { progress: prog }); }, 400);
-      const res = await mlopsApi.uploadDataset(resolvedType, item.file, { pipeline_id: activePipelineId });
+      const res = await mlopsApi.uploadDataset(resolvedType, item.file, {
+        pipeline_id: activePipelineId,
+        pipeline_type: activePipelineType || pipelineType,
+      });
       clearInterval(tick);
       updateItem(item.id, { status: 'done', progress: 100, result: res.data || res });
       onDatasetsRefresh?.();
@@ -1246,10 +1326,21 @@ const DataUploadScreen = ({
     }
   };
 
-  const uploadAll = () => {
-    if (!requireActivePipeline()) return;
-    queue.filter((i) => i.status === 'pending').forEach(uploadItem);
-  };
+  const uploadAll = useCallback(async () => {
+    if (!requireActivePipeline() || uploadingAll) return;
+    const pendingItems = queue.filter((item) => item.status === 'pending');
+    if (!pendingItems.length) return;
+    setUploadingAll(true);
+    try {
+      for (const item of pendingItems) {
+        // Upload one file at a time so the backend can complete each dataset registration deterministically.
+        // Parallel uploads were leaving the screen stuck in a half-uploaded state.
+        await uploadItem(item);
+      }
+    } finally {
+      setUploadingAll(false);
+    }
+  }, [queue, requireActivePipeline, uploadItem, uploadingAll]);
 
   const loadSchema = async (dataset) => {
     if (schemaMap[dataset.dataset_id]) return;
@@ -1346,6 +1437,8 @@ const DataUploadScreen = ({
   const pendingCount   = queue.filter((i) => i.status === 'pending').length;
   const strDataset     = datasets.find((d) => ['str', 'sar'].includes(safe(d.dataset_type)));
   const alertDataset   = datasets.find((d) => safe(d.dataset_type) === 'alerts');
+  const muleOutcomeDataset = datasets.find((d) => ['mule_labels', 'mule_typology'].includes(safe(d.dataset_type)));
+  const muleEnrichmentLoaded = datasets.some((d) => ['counterparties', 'device_logs', 'external_signals', 'graph_nodes', 'graph_edges', 'account_daily_summary'].includes(safe(d.dataset_type)));
 
   const avgQuality = useMemo(() => {
     const scores = Object.values(profileMap).map((p) => Number(p?.quality_score)).filter((n) => Number.isFinite(n));
@@ -1361,9 +1454,16 @@ const DataUploadScreen = ({
   const uploadSummaryItems = useMemo(() => ([
     `Uploaded tables: ${datasets.length}`,
     `Queued files: ${queue.length}`,
-    `STR linked: ${strDataset ? 'yes' : 'no'}`,
+    isMulePipeline
+      ? `Mule outcome data: ${muleOutcomeDataset ? 'yes' : 'no'}`
+      : `STR linked: ${strDataset ? 'yes' : 'no'}`,
     `Total rows: ${fmtNum(totalRows)}`,
-  ]), [datasets.length, queue.length, strDataset, totalRows]);
+  ]), [datasets.length, isMulePipeline, muleOutcomeDataset, queue.length, strDataset, totalRows]);
+  const sourceStatusLabel = isMulePipeline
+    ? ((muleEnrichmentLoaded || muleOutcomeDataset)
+      ? `Mule sources ready${muleOutcomeDataset ? ' · outcome tables loaded' : ''}`
+      : 'Optional Mule enrichment not loaded')
+    : (strDataset ? `STR linked - ${fmtNum(strDataset.row_count)} records` : 'No STR/SAR dataset');
 
   const uploadedQueueCount  = useMemo(() => queue.filter((i) => i.status === 'done').length, [queue]);
   const completedQueueOnly  = queue.length > 0 && pendingCount === 0 && queue.every((i) => i.status === 'done');
@@ -1410,25 +1510,34 @@ const DataUploadScreen = ({
     setCreatingRun(true); setUiError('');
     try {
       const created = typeof onCreatePipeline === 'function'
-        ? await onCreatePipeline(trimmed)
+        ? await onCreatePipeline(trimmed, { pipeline_type: pipelineType })
         : ((await mlopsApi.pipelineSave({
             name: trimmed, dataset_id: 0, dataset_ids: [],
+            pipeline_type: pipelineType,
             created_by_persona: persona || 'technical',
             steps: [{ type: 'screen_state', screen: 'pipeline_hub', state: {
-              stage_order: ['data','master','target','eda','preprocess','model','validation','registry'],
+              stage_order: pipelineType === 'mule'
+                ? ['data', 'master', 'preprocess', 'model', 'validation']
+                : ['data', 'master', 'target', 'eda', 'preprocess', 'model', 'validation', 'registry'],
               created_from: 'data_upload',
             }}],
           }))?.data || null);
       if (created?.pipeline_id) {
         setSelectedRunId(String(created.pipeline_id));
-        onPipelineActivated?.({ pipeline_id: created.pipeline_id, name: trimmed });
+        onPipelineActivated?.({
+          ...created,
+          pipeline_id: created.pipeline_id,
+          name: created.name || trimmed,
+          pipeline_type: created.pipeline_type || pipelineType,
+          model_family: created.model_family || pipelineType,
+        });
       }
       setUiInfo(`Run "${trimmed}" created. Upload source tables below.`);
       await loadSavedRuns();
     } catch (e) {
       setUiError(e?.response?.data?.error || e?.message || 'Could not create pipeline run.');
     } finally { setCreatingRun(false); }
-  }, [loadSavedRuns, onCreatePipeline, onPipelineActivated, persona, pipelineName]);
+  }, [loadSavedRuns, onCreatePipeline, onPipelineActivated, persona, pipelineName, pipelineType]);
 
   const handleOpenRun = useCallback(async () => {
     const selected = savedRuns.find((r) => String(r?.pipeline_id || '') === String(selectedRunId || '')) || null;
@@ -1449,13 +1558,21 @@ const DataUploadScreen = ({
   }, [onPipelineActivated, onResumePipeline, savedRuns, selectedRunId]);
 
   // ── Readiness checks ─────────────────────────────────────────────────────────
-  const readinessChecks = [
-    { label: 'Transaction data',    ok: datasets.some((d) => ['transactions','txn'].includes(safe(d.dataset_type))) },
-    { label: 'Customer / Account',  ok: datasets.some((d) => ['accounts','customers'].includes(safe(d.dataset_type))) },
-    { label: 'Alert / Case data',   ok: datasets.some((d) => ['alerts','cases'].includes(safe(d.dataset_type))) },
-    { label: 'STR labels',          ok: Boolean(strDataset) },
-  ];
+  const readinessChecks = isMulePipeline
+    ? [
+        { label: 'Accounts', ok: datasets.some((d) => ['accounts', 'account'].includes(safe(d.dataset_type))) },
+        { label: 'Customers', ok: datasets.some((d) => ['customers', 'customer'].includes(safe(d.dataset_type))) },
+        { label: 'Transactions', ok: datasets.some((d) => ['transactions', 'txn', 'transaction'].includes(safe(d.dataset_type))) },
+        { label: 'Enrichment / network', ok: muleEnrichmentLoaded || Boolean(muleOutcomeDataset) },
+      ]
+    : [
+        { label: 'Transaction data', ok: datasets.some((d) => ['transactions','txn'].includes(safe(d.dataset_type))) },
+        { label: 'Customer / Account', ok: datasets.some((d) => ['accounts','customers'].includes(safe(d.dataset_type))) },
+        { label: 'Alert / Case data', ok: datasets.some((d) => ['alerts','cases'].includes(safe(d.dataset_type))) },
+        { label: 'STR labels', ok: Boolean(strDataset) },
+      ];
   const readinessScore = readinessChecks.filter((c) => c.ok).length;
+  const canAdvanceToMaster = hasActivePipeline && hasUploadedData;
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
@@ -1482,12 +1599,14 @@ const DataUploadScreen = ({
             activePipelineId={activePipelineId}
             activePipelineName={activePipelineName}
             pipelineName={pipelineName}
+            pipelineType={pipelineType}
             savedRuns={savedRuns}
             selectedRunId={selectedRunId}
             loadingRuns={loadingRuns}
             creatingRun={creatingRun}
             openingRun={openingRun}
             onPipelineNameChange={setPipelineName}
+            onPipelineTypeChange={setPipelineType}
             onCreateRun={handleCreateRun}
             onSelectedRunChange={setSelectedRunId}
             onOpenRun={handleOpenRun}
@@ -1507,11 +1626,15 @@ const DataUploadScreen = ({
           {/* Section label */}
           <Box>
             <Typography sx={{ fontSize: 11, fontWeight: 700, color: PwC.midnight, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-              {persona === 'business' ? 'Load source tables' : 'Upload data tables'}
+              {isMulePipeline
+                ? 'Upload Mule source tables'
+                : (persona === 'business' ? 'Load source tables' : 'Upload data tables')}
             </Typography>
             <Typography sx={{ fontSize: 11.5, color: PwC.mist, mt: 0.3, lineHeight: 1.55 }}>
               {hasActivePipeline
-                ? 'Drop CSV or Parquet files. Auto-type detection enabled.'
+                ? (isMulePipeline
+                  ? 'Drop CSV or Parquet files for the Mule run. Accounts, customers, transactions, graph, device, external signals, and outcome tables are supported.'
+                  : 'Drop CSV or Parquet files. Auto-type detection enabled.')
                 : 'Create or open a pipeline run first to unlock upload.'}
             </Typography>
           </Box>
@@ -1527,6 +1650,12 @@ const DataUploadScreen = ({
             <Alert severity="success" onClose={() => setUiInfo('')}
               sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
               {uiInfo}
+            </Alert>
+          )}
+          {isMulePipeline && (
+            <Alert severity="info"
+              sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
+              This run is building a Mule Account Detection model. After upload, the next step is to build the account-level analytical dataset.
             </Alert>
           )}
           {!hasActivePipeline && (
@@ -1608,13 +1737,13 @@ const DataUploadScreen = ({
                     </Button>
                   )}
                   {pendingCount > 1 && (
-                    <Button size="small" variant="contained" onClick={uploadAll} disabled={!hasActivePipeline}
+                    <Button size="small" variant="contained" onClick={uploadAll} disabled={!hasActivePipeline || uploadingAll}
                       sx={{
                         bgcolor: PwC.tangerine, '&:hover': { bgcolor: PwC.midnight },
                         fontSize: 11, py: 0.35, height: 26,
                         textTransform: 'none', borderRadius: '4px', boxShadow: 'none',
                       }}>
-                      Upload all ({pendingCount})
+                      {uploadingAll ? `Uploading... (${pendingCount})` : `Upload all (${pendingCount})`}
                     </Button>
                   )}
                 </Stack>
@@ -1689,18 +1818,20 @@ const DataUploadScreen = ({
               <Box sx={{
                 display: 'flex', alignItems: 'center', gap: 0.75,
                 px: 1.1, py: 0.45,
-                bgcolor: strDataset ? PwC.emeraldLight : PwC.amberLight,
+                bgcolor: isMulePipeline
+                  ? ((muleEnrichmentLoaded || muleOutcomeDataset) ? PwC.emeraldLight : PwC.amberLight)
+                  : (strDataset ? PwC.emeraldLight : PwC.amberLight),
                 borderRadius: '4px',
-                border: `1px solid ${strDataset ? '#A7F3D0' : '#FDE68A'}`,
+                border: `1px solid ${isMulePipeline
+                  ? ((muleEnrichmentLoaded || muleOutcomeDataset) ? '#A7F3D0' : '#FDE68A')
+                  : (strDataset ? '#A7F3D0' : '#FDE68A')}`,
               }}>
-                {strDataset
+                {(isMulePipeline ? (muleEnrichmentLoaded || muleOutcomeDataset) : strDataset)
                   ? <CheckCircle sx={{ fontSize: 11, color: PwC.emerald }} />
                   : <Warning sx={{ fontSize: 11, color: PwC.amber }} />
                 }
-                <Typography sx={{ fontSize: 10.5, fontWeight: 600, color: strDataset ? '#065F46' : '#78350F' }}>
-                  {strDataset
-                    ? `STR linked · ${fmtNum(strDataset.row_count)} records`
-                    : 'No STR/SAR dataset'}
+                <Typography sx={{ fontSize: 10.5, fontWeight: 600, color: (isMulePipeline ? (muleEnrichmentLoaded || muleOutcomeDataset) : strDataset) ? '#065F46' : '#78350F' }}>
+                  {sourceStatusLabel}
                 </Typography>
               </Box>
 
@@ -1799,6 +1930,32 @@ const DataUploadScreen = ({
                   </Stack>
                 ))}
               </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mt: 1.5 }}>
+                <Typography sx={{ fontSize: 11, color: canAdvanceToMaster ? PwC.slate : PwC.mist }}>
+                  {canAdvanceToMaster
+                    ? (isMulePipeline
+                      ? 'Data upload is complete. Continue to Analytical Dataset to build the account-level Mule modeling table.'
+                      : 'Data upload is complete. Continue to Master Dataset to join and shape the source tables.')
+                    : 'Upload at least one source dataset to unlock the next step.'}
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<PlayArrow sx={{ fontSize: 16 }} />}
+                  disabled={!canAdvanceToMaster}
+                  onClick={() => onStepAdvance?.('master')}
+                  sx={{
+                    alignSelf: { xs: 'stretch', sm: 'center' },
+                    textTransform: 'none',
+                    bgcolor: PwC.tangerine,
+                    '&:hover': { bgcolor: PwC.midnight },
+                    borderRadius: '5px',
+                    boxShadow: 'none',
+                    fontWeight: 700,
+                  }}
+                >
+                  {isMulePipeline ? 'Continue to Analytical Dataset' : 'Continue to Master Dataset'}
+                </Button>
+              </Stack>
             </Box>
           )}
         </Box>
@@ -1857,3 +2014,4 @@ const DataUploadScreen = ({
 };
 
 export default DataUploadScreen;
+

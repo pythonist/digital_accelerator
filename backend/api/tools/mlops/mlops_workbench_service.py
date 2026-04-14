@@ -14,6 +14,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 from api.tools.mlops.duckdb_manager import get_connection
+from api.tools.mlops.mule_pipeline_service import MulePipelineService
 from api.tools.mlops.path_utils import resolve_data_file_path, resolve_env_root
 from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 from services.fcc_sentinel_bridge import FCCSentinelBridgeService
@@ -37,6 +38,17 @@ def _normalize_text(value: Any) -> str:
 def _normalize_optional_text(value: Any) -> Optional[str]:
     text = _normalize_text(value)
     return text or None
+
+
+def _normalize_pipeline_type(value: Any) -> str:
+    text = _normalize_text(value).lower()
+    if text in {"mule", "fcc"}:
+        return text
+    return "fcc"
+
+
+def _new_pipeline_uuid() -> str:
+    return str(uuid.uuid4())
 
 
 def _json_safe_value(value: Any) -> Any:
@@ -374,6 +386,37 @@ def _screen_state_is_completed(state: Any) -> bool:
     return status_text in {"completed", "complete", "done", "success", "saved"}
 
 
+def _data_upload_state_is_completed(state: Any) -> bool:
+    if _screen_state_is_completed(state):
+        return True
+    if not isinstance(state, dict) or not state:
+        return False
+    dataset_ids = [
+        int(value)
+        for value in (state.get("dataset_ids") or [])
+        if _coerce_int(value) is not None and int(value) > 0
+    ]
+    uploaded_dataset_types = [
+        str(value).strip().lower()
+        for value in (state.get("uploaded_dataset_types") or [])
+        if str(value).strip()
+    ]
+    total_tables = _coerce_int(state.get("total_tables"), 0) or 0
+    total_rows = _coerce_int(state.get("total_rows"), 0) or 0
+    return bool(dataset_ids or uploaded_dataset_types or total_tables > 0 or total_rows > 0)
+
+
+def _eda_state_is_completed(state: Any) -> bool:
+    if _screen_state_is_completed(state):
+        return True
+    if not isinstance(state, dict) or not state:
+        return False
+    viewed = bool(state.get("viewed_step"))
+    active_tab = _normalize_text(state.get("activeTab") or state.get("tab"))
+    target_column = _normalize_text(state.get("target_column"))
+    return viewed or bool(active_tab) or bool(target_column)
+
+
 def _sort_jsonable(value):
     if isinstance(value, list):
         return [_sort_jsonable(item) for item in value]
@@ -681,10 +724,10 @@ def _derive_substep(screen_key: str, screen_states: Dict[str, Dict]) -> Tuple[st
 def _fallback_progress_summary(steps: List[Dict], status: Optional[str] = None) -> Dict[str, Any]:
     screen_states = _screen_state_map(steps or [])
     completed_flags = {
-        "data": _screen_state_is_completed(screen_states.get("data_upload")),
+        "data": _data_upload_state_is_completed(screen_states.get("data_upload")),
         "master": _screen_state_is_completed(screen_states.get("master")),
         "target": _screen_state_is_completed(screen_states.get("target")),
-        "eda": _screen_state_is_completed(screen_states.get("eda")),
+        "eda": _eda_state_is_completed(screen_states.get("eda")),
         "preprocess": _screen_state_is_completed(screen_states.get("preprocess")),
         "model": _screen_state_is_completed(screen_states.get("model")),
         "validation": _screen_state_is_completed(screen_states.get("validation")),
@@ -841,9 +884,19 @@ def _workflow_step_completed(
 
     if step_key == "data":
         return bool(
-            _workflow_positive_int(current_mlops_state.get("datasets_count"), stable_mlops_state.get("datasets_count"))
+            _data_upload_state_is_completed(screen_state)
+            or _workflow_positive_int(
+                screen_state.get("total_tables"),
+                screen_state.get("total_rows"),
+            )
+            or _workflow_positive_int(
+                current_mlops_state.get("datasets_count"),
+                stable_mlops_state.get("datasets_count"),
+            )
             or current_mlops_state.get("datasets")
             or stable_mlops_state.get("datasets")
+            or screen_state.get("dataset_ids")
+            or screen_state.get("uploaded_dataset_types")
             or record.get("dataset_ids")
             or record.get("dataset_id")
         )
@@ -873,8 +926,7 @@ def _workflow_step_completed(
         return bool(
             current_mlops_state.get("eda_completed")
             or stable_mlops_state.get("eda_completed")
-            or screen_state.get("completed")
-            or screen_state.get("done")
+            or _eda_state_is_completed(screen_state)
         )
 
     if step_key == "preprocess":
@@ -1331,6 +1383,7 @@ class MLOpsWorkbenchService:
                   dataset_id INTEGER PRIMARY KEY DEFAULT nextval('mlops_dataset_seq'),
                   tenant_id TEXT,
                   env_id TEXT,
+                  pipeline_type TEXT DEFAULT 'fcc',
                   dataset_type TEXT,
                   filename TEXT,
                   file_path TEXT,
@@ -1390,9 +1443,16 @@ class MLOpsWorkbenchService:
                   pipeline_id INTEGER PRIMARY KEY DEFAULT nextval('mlops_snapshot_seq'),
                   tenant_id TEXT,
                   env_id TEXT,
+                  pipeline_type TEXT DEFAULT 'fcc',
+                  model_family TEXT,
                   dataset_id INTEGER,
                   name TEXT,
                   steps_json TEXT,
+                  prediction_grain TEXT,
+                  lookback_days INTEGER,
+                  lookforward_days INTEGER,
+                  target_definition_type TEXT,
+                  pipeline_config_json TEXT,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -1405,6 +1465,7 @@ class MLOpsWorkbenchService:
                   journey_key TEXT,
                   tenant_id TEXT,
                   env_id TEXT,
+                  pipeline_type TEXT DEFAULT 'fcc',
                   pipeline_id BIGINT,
                   pipeline_name TEXT,
                   run_id TEXT,
@@ -1439,6 +1500,87 @@ class MLOpsWorkbenchService:
                   status TEXT,
                   checkpoint_key TEXT,
                   state_json TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_pipeline_runs_v2 (
+                  pipeline_uuid TEXT PRIMARY KEY,
+                  legacy_pipeline_id INTEGER,
+                  tenant_id TEXT,
+                  env_id TEXT,
+                  pipeline_type TEXT DEFAULT 'fcc',
+                  model_family TEXT,
+                  name TEXT,
+                  version INTEGER DEFAULT 1,
+                  status TEXT DEFAULT 'draft',
+                  pipeline_config_json TEXT,
+                  runtime_state_json TEXT,
+                  current_step_code TEXT,
+                  current_step_order INTEGER,
+                  created_by_persona TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  last_run_at TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_pipeline_steps_v2 (
+                  step_id TEXT PRIMARY KEY,
+                  pipeline_uuid TEXT,
+                  legacy_pipeline_id INTEGER,
+                  step_order INTEGER,
+                  step_code TEXT,
+                  step_name TEXT,
+                  prev_step_id TEXT,
+                  status TEXT,
+                  config_json TEXT,
+                  input_refs_json TEXT,
+                  output_refs_json TEXT,
+                  artifact_refs_json TEXT,
+                  state_json TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_pipeline_artifacts_v2 (
+                  artifact_id TEXT PRIMARY KEY,
+                  pipeline_uuid TEXT,
+                  legacy_pipeline_id INTEGER,
+                  step_id TEXT,
+                  artifact_type TEXT,
+                  artifact_role TEXT,
+                  storage_backend TEXT,
+                  storage_path TEXT,
+                  schema_json TEXT,
+                  row_count INTEGER,
+                  column_count INTEGER,
+                  checksum TEXT,
+                  metrics_json TEXT,
+                  metadata_json TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mlops_pipeline_metrics_v2 (
+                  metric_id TEXT PRIMARY KEY,
+                  pipeline_uuid TEXT,
+                  legacy_pipeline_id INTEGER,
+                  model_id TEXT,
+                  metric_name TEXT,
+                  metric_value DOUBLE,
+                  metric_group TEXT,
+                  metrics_json TEXT,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
                 """
@@ -1540,6 +1682,9 @@ class MLOpsWorkbenchService:
                 existing_cols = set()
 
             new_cols = {
+                "pipeline_uuid":    "TEXT",
+                "pipeline_type":  "TEXT DEFAULT 'fcc'",
+                "model_family":   "TEXT",
                 "grain":          "TEXT DEFAULT 'transaction'",
                 "anchor_dataset_id": "INTEGER",
                 "dataset_ids_json": "TEXT",
@@ -1548,11 +1693,22 @@ class MLOpsWorkbenchService:
                 "str_config_json": "TEXT",
                 "schedule_json":  "TEXT",
                 "output_name":    "TEXT",
+                "prediction_grain": "TEXT",
+                "lookback_days":  "INTEGER",
+                "lookforward_days": "INTEGER",
+                "target_definition_type": "TEXT",
+                "pipeline_config_json": "TEXT",
                 "status":         "TEXT DEFAULT 'draft'",
                 "version":        "INTEGER DEFAULT 1",
                 "last_run_at":    "TIMESTAMP",
                 "output_dataset_id": "INTEGER",
                 "created_by_persona": "TEXT",
+                "active_training_job_id": "TEXT",
+                "active_validation_job_id": "TEXT",
+                "active_registry_job_id": "TEXT",
+                "active_deployment_id": "TEXT",
+                "locked_threshold": "DOUBLE",
+                "runtime_state_json": "TEXT",
             }
             for col, typedef in new_cols.items():
                 if col not in existing_cols:
@@ -1562,6 +1718,70 @@ class MLOpsWorkbenchService:
                         )
                     except Exception:
                         pass  # column may have been added by a concurrent thread
+
+            try:
+                session_rows = conn.execute("PRAGMA table_info(mlops_workflow_sessions)").fetchall()
+                session_cols = {r[1] for r in session_rows}
+            except Exception:
+                session_cols = set()
+            session_new_cols = {
+                "pipeline_type": "TEXT DEFAULT 'fcc'",
+            }
+            for col, typedef in session_new_cols.items():
+                if col not in session_cols:
+                    try:
+                        conn.execute(
+                            f"ALTER TABLE mlops_workflow_sessions ADD COLUMN {col} {typedef}"
+                        )
+                    except Exception:
+                        pass
+
+            try:
+                dataset_rows = conn.execute("PRAGMA table_info(mlops_dataset_registry)").fetchall()
+                dataset_cols = {r[1] for r in dataset_rows}
+            except Exception:
+                dataset_cols = set()
+            dataset_new_cols = {
+                "pipeline_id": "INTEGER",
+            }
+            for col, typedef in dataset_new_cols.items():
+                if col not in dataset_cols:
+                    try:
+                        conn.execute(
+                            f"ALTER TABLE mlops_dataset_registry ADD COLUMN {col} {typedef}"
+                        )
+                    except Exception:
+                        pass
+
+            try:
+                pipeline_uuid_rows = conn.execute("PRAGMA table_info(mlops_pipeline_runs_v2)").fetchall()
+                pipeline_uuid_cols = {r[1] for r in pipeline_uuid_rows}
+            except Exception:
+                pipeline_uuid_cols = set()
+            for col, typedef in {
+                "pipeline_uuid": "TEXT PRIMARY KEY",
+                "legacy_pipeline_id": "INTEGER",
+                "tenant_id": "TEXT",
+                "env_id": "TEXT",
+                "pipeline_type": "TEXT DEFAULT 'fcc'",
+                "model_family": "TEXT",
+                "name": "TEXT",
+                "version": "INTEGER DEFAULT 1",
+                "status": "TEXT DEFAULT 'draft'",
+                "pipeline_config_json": "TEXT",
+                "runtime_state_json": "TEXT",
+                "current_step_code": "TEXT",
+                "current_step_order": "INTEGER",
+                "created_by_persona": "TEXT",
+                "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                "last_run_at": "TIMESTAMP",
+            }.items():
+                if col not in pipeline_uuid_cols and col != "pipeline_uuid":
+                    try:
+                        conn.execute(f"ALTER TABLE mlops_pipeline_runs_v2 ADD COLUMN {col} {typedef}")
+                    except Exception:
+                        pass
 
             # Pipeline version snapshots
             conn.execute(
@@ -2017,6 +2237,568 @@ class MLOpsWorkbenchService:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def _load_training_run_row(
+        self,
+        tenant_id: str,
+        env_id: str,
+        run_id: str,
+    ) -> Dict[str, Any]:
+        run_id_text = _normalize_text(run_id)
+        if not run_id_text:
+            return {}
+
+        columns = [
+            "job_id",
+            "run_id",
+            "tenant_id",
+            "env_id",
+            "dataset_id",
+            "target_column",
+            "algorithm",
+            "metrics_json",
+            "result_json",
+            "validation_json",
+            "selected_threshold",
+            "artifact_path",
+            "trained_at",
+            "updated_at",
+            "grain",
+            "hml_high_threshold",
+            "hml_low_threshold",
+            "feature_diagnostics_json",
+            "hyperparams_json",
+            "training_config_json",
+            "feature_columns_json",
+            "pipeline_id",
+            "pipeline_name",
+        ]
+
+        def _fetch(db_file: Any) -> Dict[str, Any]:
+            try:
+                with get_connection(db_file) as conn:
+                    row = self._report_fetch_row(
+                        conn,
+                        table="model_training_runs",
+                        key_column="job_id",
+                        key_value=run_id_text,
+                        columns=columns,
+                    )
+                    if row:
+                        return row
+                    return self._report_fetch_row(
+                        conn,
+                        table="model_training_runs",
+                        key_column="run_id",
+                        key_value=run_id_text,
+                        columns=columns,
+                    ) or {}
+            except Exception:
+                return {}
+
+        row = _fetch(self.db_path)
+        if row:
+            return row
+        sidecar = self._model_training_db_path()
+        if sidecar.exists():
+            row = _fetch(str(sidecar))
+            if row:
+                return row
+        return {}
+
+    def _build_pipeline_training_snapshot(
+        self,
+        tenant_id: str,
+        env_id: str,
+        run_id: str,
+    ) -> Dict[str, Any]:
+        run_id_text = _normalize_text(run_id)
+        if not run_id_text:
+            return {}
+        row = self._load_training_run_row(tenant_id, env_id, run_id_text)
+        report_row = self._load_run_for_report(tenant_id=tenant_id, env_id=env_id, run_id=run_id_text) or {}
+        result_payload = self._report_json_load(row.get("result_json"), {})
+        metrics_payload = self._report_json_load(row.get("metrics_json"), {})
+        feature_diag = self._report_json_load(row.get("feature_diagnostics_json"), {})
+        hyperparams = self._report_json_load(row.get("hyperparams_json"), {})
+        training_config = self._report_json_load(row.get("training_config_json"), {})
+        feature_columns = self._report_json_load(row.get("feature_columns_json"), [])
+        metrics = report_row.get("metrics") if isinstance(report_row.get("metrics"), dict) else {}
+        if not metrics:
+            metrics = result_payload.get("metrics") if isinstance(result_payload.get("metrics"), dict) else {}
+        if not metrics:
+            metrics = metrics_payload if isinstance(metrics_payload, dict) else {}
+        split_summary = result_payload.get("split_summary") if isinstance(result_payload.get("split_summary"), dict) else {}
+        if not isinstance(training_config, dict):
+            training_config = {}
+        merged_training_config = {
+            **split_summary,
+            **training_config,
+        }
+        for key in ("mode", "test_size", "cv_folds", "stratify", "random_state", "train_rows", "test_rows", "features_used"):
+            if key in result_payload and merged_training_config.get(key) in (None, "", []):
+                merged_training_config[key] = result_payload.get(key)
+        return {
+            "job_id": run_id_text,
+            "run_id": run_id_text,
+            "pipeline_id": _coerce_int(row.get("pipeline_id")),
+            "pipeline_name": _normalize_optional_text(row.get("pipeline_name")),
+            "model_name": _workflow_first_text(
+                result_payload.get("model_name"),
+                report_row.get("run_name"),
+                str(row.get("algorithm") or "").replace("_", " ").title(),
+            ),
+            "algorithm": _workflow_first_text(row.get("algorithm"), report_row.get("algorithm")),
+            "target_column": _workflow_first_text(row.get("target_column"), report_row.get("target_column")),
+            "dataset_id": _coerce_int(row.get("dataset_id")) or _coerce_int(report_row.get("dataset_id")),
+            "trained_at": _workflow_first_text(report_row.get("finished_at"), report_row.get("created_at"), row.get("trained_at")),
+            "artifact_path": _workflow_first_text(row.get("artifact_path"), report_row.get("artifact_path")),
+            "selected_threshold": row.get("selected_threshold") if row.get("selected_threshold") is not None else report_row.get("selected_threshold"),
+            "grain": _workflow_first_text(row.get("grain"), report_row.get("grain"), result_payload.get("grain"), "alert"),
+            "hml_high_threshold": row.get("hml_high_threshold") if row.get("hml_high_threshold") is not None else report_row.get("hml_high_threshold"),
+            "hml_low_threshold": row.get("hml_low_threshold") if row.get("hml_low_threshold") is not None else report_row.get("hml_low_threshold"),
+            "metrics": metrics if isinstance(metrics, dict) else {},
+            "feature_diagnostics": feature_diag if isinstance(feature_diag, dict) else {},
+            "feature_columns": feature_columns if isinstance(feature_columns, list) else (result_payload.get("feature_columns") or []),
+            "feature_importance": result_payload.get("feature_importance") if isinstance(result_payload.get("feature_importance"), list) else [],
+            "hyperparams": hyperparams if isinstance(hyperparams, dict) and hyperparams else (result_payload.get("hyperparams") if isinstance(result_payload.get("hyperparams"), dict) else {}),
+            "training_config": merged_training_config,
+            "result_summary": {
+                "train_rows": result_payload.get("train_rows"),
+                "test_rows": result_payload.get("test_rows"),
+                "cv_folds": result_payload.get("cv_folds"),
+                "split_strategy": result_payload.get("split_strategy") or merged_training_config.get("split_strategy"),
+                "split_date": result_payload.get("split_date") or merged_training_config.get("split_date"),
+                "date_column": result_payload.get("date_column") or merged_training_config.get("date_column"),
+            },
+        }
+
+    def _build_pipeline_validation_snapshot(
+        self,
+        tenant_id: str,
+        env_id: str,
+        run_id: str,
+        screen_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        run_id_text = _normalize_text(run_id)
+        row = self._load_training_run_row(tenant_id, env_id, run_id_text) if run_id_text else {}
+        training_snapshot = self._build_pipeline_training_snapshot(tenant_id, env_id, run_id_text) if run_id_text else {}
+        stored_validation = self._report_json_load(row.get("validation_json"), {})
+        result_payload = self._report_json_load(row.get("result_json"), {})
+        if not stored_validation and isinstance(result_payload.get("validation"), dict):
+            stored_validation = result_payload.get("validation") or {}
+        screen_state = screen_state if isinstance(screen_state, dict) else {}
+        screen_report = screen_state.get("report") if isinstance(screen_state.get("report"), dict) else {}
+        stored_report = stored_validation.get("report") if isinstance(stored_validation.get("report"), dict) else {}
+        report = {
+            **stored_report,
+            **screen_report,
+        }
+        metrics = training_snapshot.get("metrics") if isinstance(training_snapshot.get("metrics"), dict) else {}
+        return {
+            "job_id": run_id_text or _workflow_first_text(screen_state.get("job_id")),
+            "run_id": run_id_text or _workflow_first_text(screen_state.get("job_id")),
+            "report_id": _workflow_first_text(screen_state.get("report_id"), stored_validation.get("report_id"), stored_validation.get("validation_id")),
+            "algorithm": training_snapshot.get("algorithm"),
+            "model_name": training_snapshot.get("model_name"),
+            "selected_threshold": screen_state.get("selected_threshold")
+            if screen_state.get("selected_threshold") is not None
+            else stored_validation.get("selected_threshold"),
+            "locked_threshold": screen_state.get("locked_threshold")
+            if screen_state.get("locked_threshold") is not None
+            else stored_validation.get("locked_threshold"),
+            "optimal_threshold": screen_state.get("optimal_threshold")
+            if screen_state.get("optimal_threshold") is not None
+            else report.get("optimal_threshold"),
+            "recommended_threshold": report.get("optimal_threshold"),
+            "configured_threshold": report.get("configured_threshold"),
+            "max_event_loss_pct": stored_validation.get("max_event_loss_pct"),
+            "metrics": metrics,
+            "threshold_table": report.get("threshold_table") or metrics.get("threshold_table") or [],
+            "business_summary": stored_validation.get("business_summary"),
+            "report": report if isinstance(report, dict) else {},
+        }
+
+    def _build_pipeline_registry_snapshot(
+        self,
+        tenant_id: str,
+        env_id: str,
+        run_id: str,
+        deployment_id: Optional[str] = None,
+        screen_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        run_id_text = _normalize_text(run_id)
+        deployment_id_text = _normalize_text(deployment_id)
+        training_snapshot = self._build_pipeline_training_snapshot(tenant_id, env_id, run_id_text) if run_id_text else {}
+        screen_state = screen_state if isinstance(screen_state, dict) else {}
+        entry = {}
+        training_db = self._model_training_db_path()
+        if run_id_text and training_db.exists():
+            try:
+                with get_connection(str(training_db)) as conn:
+                    row = conn.execute(
+                        """
+                        SELECT job_id, model_name, stage, selected_threshold, validation_json,
+                               tags_json, notes, created_at, updated_at, source
+                        FROM model_registry
+                        WHERE job_id = ? AND tenant_id = ? AND env_id = ?
+                        """,
+                        [run_id_text, tenant_id, env_id],
+                    ).fetchone()
+                if row:
+                    entry = {
+                        "job_id": _normalize_text(row[0]),
+                        "model_name": _normalize_text(row[1]),
+                        "stage": _normalize_text(row[2]) or "candidate",
+                        "selected_threshold": row[3],
+                        "validation": self._report_json_load(row[4], {}),
+                        "tags": self._report_json_load(row[5], []),
+                        "notes": _normalize_text(row[6]),
+                        "created_at": row[7].isoformat() if hasattr(row[7], "isoformat") else row[7],
+                        "updated_at": row[8].isoformat() if hasattr(row[8], "isoformat") else row[8],
+                        "source": _normalize_text(row[9]) or "trained",
+                    }
+            except Exception:
+                entry = {}
+
+        deployment = {}
+        try:
+            with get_connection(self.db_path) as conn:
+                dep_row = None
+                if deployment_id_text:
+                    dep_row = conn.execute(
+                        """
+                        SELECT deployment_id, run_id, threshold, bundle_path, model_card_path, created_at
+                        FROM mlops_deployments
+                        WHERE deployment_id = ?
+                        LIMIT 1
+                        """,
+                        [deployment_id_text],
+                    ).fetchone()
+                elif run_id_text:
+                    dep_row = conn.execute(
+                        """
+                        SELECT deployment_id, run_id, threshold, bundle_path, model_card_path, created_at
+                        FROM mlops_deployments
+                        WHERE run_id = ?
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        [run_id_text],
+                    ).fetchone()
+                if dep_row:
+                    deployment = {
+                        "deployment_id": _normalize_text(dep_row[0]),
+                        "job_id": _normalize_text(dep_row[1]),
+                        "threshold": dep_row[2],
+                        "bundle_path": _normalize_text(dep_row[3]),
+                        "model_card_path": _normalize_text(dep_row[4]),
+                        "created_at": dep_row[5].isoformat() if hasattr(dep_row[5], "isoformat") else dep_row[5],
+                    }
+            if deployment and not deployment_id_text:
+                deployment_id_text = _normalize_text(deployment.get("deployment_id"))
+        except Exception:
+            deployment = {}
+
+        screen_entry = screen_state.get("entry") if isinstance(screen_state.get("entry"), dict) else {}
+        return {
+            **entry,
+            **screen_entry,
+            "job_id": _workflow_first_text(run_id_text, entry.get("job_id"), screen_state.get("job_id")),
+            "model_name": _workflow_first_text(screen_state.get("model_name"), screen_entry.get("model_name"), entry.get("model_name"), training_snapshot.get("model_name")),
+            "stage": _workflow_first_text(screen_state.get("stage"), screen_entry.get("stage"), entry.get("stage"), "candidate"),
+            "selected_threshold": screen_state.get("selected_threshold")
+            if screen_state.get("selected_threshold") is not None
+            else screen_state.get("threshold")
+            if screen_state.get("threshold") is not None
+            else entry.get("selected_threshold")
+            if entry.get("selected_threshold") is not None
+            else deployment.get("threshold"),
+            "deployment_id": _workflow_first_text(deployment_id_text, screen_state.get("deployment_id"), screen_entry.get("deployment_id")),
+            "deployment": deployment if isinstance(deployment, dict) else {},
+            "algorithm": training_snapshot.get("algorithm"),
+            "metrics": training_snapshot.get("metrics") if isinstance(training_snapshot.get("metrics"), dict) else {},
+        }
+
+    def _build_pipeline_runtime_state(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        pipeline_name: str,
+        steps: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        screen_states = _screen_state_map(steps or [])
+        data_state = screen_states.get("data_upload") or {}
+        master_state = screen_states.get("master") or {}
+        target_state = screen_states.get("target") or {}
+        eda_state = screen_states.get("eda") or {}
+        preprocess_state = screen_states.get("preprocess") or {}
+        model_state = screen_states.get("model") or {}
+        validation_state = screen_states.get("validation") or {}
+        registry_state = screen_states.get("registry") or {}
+        journey_state = screen_states.get("workbench_journey") or {}
+        dashboard_state = screen_states.get("dashboard") or {}
+
+        model_job_id = _workflow_first_text(
+            _screen_job_id(screen_states, "model"),
+            _screen_job_id(screen_states, "validation"),
+            _screen_job_id(screen_states, "registry"),
+        )
+        validation_job_id = _workflow_first_text(
+            _screen_job_id(screen_states, "validation"),
+            model_job_id,
+        )
+        registry_job_id = _workflow_first_text(
+            _screen_job_id(screen_states, "registry"),
+            validation_job_id,
+            model_job_id,
+        )
+        deployment_id = _workflow_first_text(
+            _screen_deployment_id(screen_states, "registry"),
+            _screen_deployment_id(screen_states, "ready"),
+            dashboard_state.get("deployment_id"),
+        )
+        training_snapshot = self._build_pipeline_training_snapshot(tenant_id, env_id, model_job_id)
+        validation_snapshot = self._build_pipeline_validation_snapshot(
+            tenant_id,
+            env_id,
+            validation_job_id or model_job_id,
+            validation_state,
+        )
+        registry_snapshot = self._build_pipeline_registry_snapshot(
+            tenant_id,
+            env_id,
+            registry_job_id or validation_job_id or model_job_id,
+            deployment_id=deployment_id,
+            screen_state=registry_state,
+        )
+        locked_threshold = (
+            validation_snapshot.get("locked_threshold")
+            if validation_snapshot.get("locked_threshold") is not None
+            else validation_snapshot.get("selected_threshold")
+            if validation_snapshot.get("selected_threshold") is not None
+            else registry_snapshot.get("selected_threshold")
+        )
+        return {
+            "pipeline_id": int(pipeline_id),
+            "pipeline_name": _normalize_text(pipeline_name),
+            "current_step": _workflow_first_text(journey_state.get("current_step"), journey_state.get("preferred_screen"), "data"),
+            "preferred_screen": _workflow_first_text(journey_state.get("current_step"), journey_state.get("preferred_screen"), "data"),
+            "datasets": list(data_state.get("datasets") or []),
+            "datasets_count": len(data_state.get("dataset_ids") or []),
+            "master_dataset_id": _coerce_int(master_state.get("builtMasterDatasetId")),
+            "target_column": _workflow_first_text(target_state.get("currentTargetColumn"), target_state.get("selectedTargetColumn"), data_state.get("target_column")),
+            "eda_completed": bool(eda_state.get("completed") or eda_state.get("viewed_step") or eda_state.get("status") == "completed"),
+            "preprocess_dataset_id": _coerce_int(preprocess_state.get("preprocessedDatasetId")),
+            "preprocess_steps": list(preprocess_state.get("steps") or []),
+            "preprocess_plan": list(preprocess_state.get("plan") or preprocess_state.get("suggestions") or []),
+            "model_job_id": _workflow_first_text(model_job_id),
+            "active_model_run": training_snapshot,
+            "validation_report_id": _workflow_first_text(validation_snapshot.get("report_id")),
+            "validation_report": validation_snapshot,
+            "registry_entry": registry_snapshot,
+            "registry_stage": _workflow_first_text(registry_snapshot.get("stage")),
+            "deployment_id": _workflow_first_text(deployment_id, registry_snapshot.get("deployment_id")),
+            "locked_threshold": locked_threshold,
+            "report_run_id": _workflow_first_text(model_job_id, validation_job_id, registry_job_id),
+            "model_state": {
+                "activeTab": model_state.get("activeTab"),
+                "activeTabLabel": model_state.get("activeTabLabel"),
+            },
+            "validation_state": {
+                "activeTab": validation_state.get("activeTab"),
+                "activeTabLabel": validation_state.get("activeTabLabel"),
+            },
+            "target_state": {
+                "activeTab": target_state.get("activeTab"),
+                "activeTabLabel": target_state.get("activeTabLabel"),
+            },
+            "eda_state": {
+                "activeTab": eda_state.get("activeTab"),
+                "activeTabLabel": eda_state.get("activeTabLabel"),
+            },
+        }
+
+    def _build_mule_runtime_state(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        pipeline_name: str,
+        runtime_state: Optional[Dict[str, Any]] = None,
+        pipeline_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        runtime_state = runtime_state if isinstance(runtime_state, dict) else {}
+        pipeline_config = pipeline_config if isinstance(pipeline_config, dict) else {}
+        mule_state = runtime_state.get("mule_state") if isinstance(runtime_state.get("mule_state"), dict) else {}
+        if not mule_state:
+            mule_state = pipeline_config.get("mule_state") if isinstance(pipeline_config.get("mule_state"), dict) else {}
+
+        with get_connection(self.db_path) as conn:
+            def _safe_fetchone(sql: str, params: List[Any]):
+                try:
+                    return conn.execute(sql, params).fetchone()
+                except Exception:
+                    return None
+
+            feature_row = _safe_fetchone(
+                """
+                SELECT feature_run_id, dataset_id, feature_family_summary_json, config_json, created_at
+                FROM mule_feature_generation_runs
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                ORDER BY created_at DESC, feature_run_id DESC
+                LIMIT 1
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            )
+            model_row = _safe_fetchone(
+                """
+                SELECT model_run_id, dataset_id, model_kind, benchmark_enabled, anomaly_enabled,
+                       performance_summary_json, model_config_json, artifact_ref, created_at
+                FROM mule_model_runs
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                ORDER BY created_at DESC, model_run_id DESC
+                LIMIT 1
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            )
+            typology_row = _safe_fetchone(
+                """
+                SELECT typology_output_id, model_run_id, overall_mule_score, top_typology,
+                       typology_scores_json, explanation_summary_json, created_at
+                FROM mule_typology_outputs
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                ORDER BY created_at DESC, typology_output_id DESC
+                LIMIT 1
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            )
+            publish_row = _safe_fetchone(
+                """
+                SELECT publish_id, model_run_id, source_record_type, selected_count, threshold,
+                       capacity, destination_system, destination_queue, publish_status, publish_summary_json, created_at
+                FROM mule_publish_batches
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                ORDER BY created_at DESC, publish_id DESC
+                LIMIT 1
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            )
+            target_row = _safe_fetchone(
+                """
+                SELECT target_definition_id, dataset_id, target_definition_type, lookback_days,
+                       lookforward_days, prediction_grain, config_json, summary_json, created_at
+                FROM mule_target_definitions
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                ORDER BY created_at DESC, target_definition_id DESC
+                LIMIT 1
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            )
+
+        feature_summary = _safe_json_loads(feature_row[2], {}) if feature_row else {}
+        feature_config = _safe_json_loads(feature_row[3], {}) if feature_row else {}
+        model_config = _safe_json_loads(model_row[6], {}) if model_row else {}
+        performance_summary = _safe_json_loads(model_row[5], {}) if model_row else {}
+        typology_scores = _safe_json_loads(typology_row[4], {}) if typology_row else {}
+        explanation_summary = _safe_json_loads(typology_row[5], {}) if typology_row else {}
+        publish_summary = _safe_json_loads(publish_row[9], {}) if publish_row else {}
+        target_config = _safe_json_loads(target_row[6], {}) if target_row else {}
+        target_summary = _safe_json_loads(target_row[7], {}) if target_row else {}
+
+        current_screen = _normalize_optional_text(
+            mule_state.get("current_screen")
+            or (pipeline_config.get("mule_state") or {}).get("current_screen") if isinstance(pipeline_config.get("mule_state"), dict) else None
+        ) or (
+            "mule_publish" if publish_row else
+            "mule_typology" if typology_row else
+            "mule_model" if model_row else
+            "mule_features" if feature_row else
+            "mule_target" if target_row else
+            "mule_load"
+        )
+
+        return {
+            "pipeline_id": int(pipeline_id),
+            "pipeline_name": _normalize_text(pipeline_name),
+            "current_step": current_screen,
+            "preferred_screen": current_screen,
+            "mule_state": {
+                **mule_state,
+                "current_screen": current_screen,
+                "feature_run_id": feature_row[0] if feature_row else mule_state.get("feature_run_id"),
+                "feature_dataset_id": feature_row[1] if feature_row else mule_state.get("feature_dataset_id"),
+                "feature_summary": feature_summary,
+                "feature_config": feature_config,
+                "model_run_id": model_row[0] if model_row else mule_state.get("model_run_id"),
+                "model_config": model_config,
+                "performance_summary": performance_summary,
+                "typology_output_id": typology_row[0] if typology_row else mule_state.get("typology_output_id"),
+                "typology": {
+                    "overall_mule_score": typology_row[2] if typology_row else None,
+                    "top_typology": typology_row[3] if typology_row else None,
+                    "scores": typology_scores,
+                    "explanation_summary": explanation_summary,
+                },
+                "publish_id": publish_row[0] if publish_row else mule_state.get("publish_id"),
+                "mule_publish": {
+                    "publish_id": publish_row[0] if publish_row else mule_state.get("publish_id"),
+                    "model_run_id": publish_row[1] if publish_row else None,
+                    "source_record_type": publish_row[2] if publish_row else None,
+                    "selected_count": publish_row[3] if publish_row else None,
+                    "threshold": publish_row[4] if publish_row else None,
+                    "capacity": publish_row[5] if publish_row else None,
+                    "destination_system": publish_row[6] if publish_row else None,
+                    "destination_queue": publish_row[7] if publish_row else None,
+                    "publish_status": publish_row[8] if publish_row else None,
+                    "summary": publish_summary,
+                },
+                "target_definition_id": target_row[0] if target_row else mule_state.get("target_definition_id"),
+                "target_dataset_id": target_row[1] if target_row else mule_state.get("target_dataset_id"),
+                "target_definition": {
+                    "target_definition_id": target_row[0] if target_row else mule_state.get("target_definition_id"),
+                    "dataset_id": target_row[1] if target_row else mule_state.get("target_dataset_id"),
+                    "target_definition_type": target_row[2] if target_row else None,
+                    "lookback_days": target_row[3] if target_row else None,
+                    "lookforward_days": target_row[4] if target_row else None,
+                    "prediction_grain": target_row[5] if target_row else None,
+                    "config": target_config,
+                    "summary": target_summary,
+                },
+                "analytical_dataset": mule_state.get("analytical_dataset") if isinstance(mule_state.get("analytical_dataset"), dict) else {},
+            },
+        }
+
+    def list_pipeline_training_job_ids(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+    ) -> List[str]:
+        ids: set[str] = set()
+        pipeline = self.load_pipeline(tenant_id, env_id, int(pipeline_id))
+        runtime_state = pipeline.get("runtime_state") if isinstance(pipeline.get("runtime_state"), dict) else {}
+        for candidate in (
+            runtime_state.get("model_job_id"),
+            (runtime_state.get("active_model_run") or {}).get("job_id") if isinstance(runtime_state.get("active_model_run"), dict) else "",
+            (runtime_state.get("validation_report") or {}).get("job_id") if isinstance(runtime_state.get("validation_report"), dict) else "",
+            (runtime_state.get("registry_entry") or {}).get("job_id") if isinstance(runtime_state.get("registry_entry"), dict) else "",
+        ):
+            text = _normalize_text(candidate)
+            if text:
+                ids.add(text)
+        for asset in (pipeline.get("asset_links") or []):
+            if _normalize_text(asset.get("asset_kind")).lower() == "training_job":
+                asset_id = _workflow_first_text(asset.get("asset_id"))
+                if asset_id:
+                    ids.add(asset_id)
+        screen_states = _screen_state_map(pipeline.get("steps") if isinstance(pipeline.get("steps"), list) else [])
+        for screen_key in ("model", "validation", "registry"):
+            job_id = _screen_job_id(screen_states, screen_key)
+            if job_id:
+                ids.add(job_id)
+        return sorted(ids)
+
     def register_dataset(
         self,
         tenant_id: str,
@@ -2024,7 +2806,16 @@ class MLOpsWorkbenchService:
         dataset_type: str,
         filename: str,
         file_path: Path,
+        pipeline_type: str = "fcc",
+        pipeline_id: Optional[int] = None,
     ) -> Dict:
+        normalized_pipeline_type = _normalize_pipeline_type(pipeline_type)
+        try:
+            normalized_pipeline_id = int(pipeline_id) if pipeline_id not in (None, "", [], {}) else None
+        except Exception:
+            normalized_pipeline_id = None
+        if normalized_pipeline_id is not None and normalized_pipeline_id <= 0:
+            normalized_pipeline_id = None
         rel = self._relation_expr(file_path, sample_size=20000)
         with duckdb.connect() as meta_conn:
             row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
@@ -2036,24 +2827,36 @@ class MLOpsWorkbenchService:
         column_types_json = json.dumps(column_types, default=str)
 
         with get_connection(self.db_path) as conn:
-            existing = conn.execute(
-                """
-                SELECT dataset_id FROM mlops_dataset_registry
-                WHERE tenant_id = ? AND env_id = ? AND dataset_type = ?
-                """,
-                [tenant_id, env_id, dataset_type],
-            ).fetchone()
+            if normalized_pipeline_id:
+                existing = conn.execute(
+                    """
+                    SELECT dataset_id FROM mlops_dataset_registry
+                    WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ? AND dataset_type = ?
+                    """,
+                    [tenant_id, env_id, int(normalized_pipeline_id), dataset_type],
+                ).fetchone()
+            else:
+                existing = conn.execute(
+                    """
+                    SELECT dataset_id FROM mlops_dataset_registry
+                    WHERE tenant_id = ? AND env_id = ? AND pipeline_id IS NULL
+                      AND pipeline_type = ? AND dataset_type = ?
+                    """,
+                    [tenant_id, env_id, normalized_pipeline_type, dataset_type],
+                ).fetchone()
 
             if existing and existing[0]:
                 dataset_id = int(existing[0])
                 conn.execute(
                     """
                     UPDATE mlops_dataset_registry
-                    SET filename = ?, file_path = ?, row_count = ?,
+                    SET pipeline_id = ?, pipeline_type = ?, filename = ?, file_path = ?, row_count = ?,
                         columns_json = ?, column_types_json = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE dataset_id = ?
                     """,
                     [
+                        int(normalized_pipeline_id) if normalized_pipeline_id else None,
+                        normalized_pipeline_type,
                         filename,
                         str(file_path),
                         int(row_count or 0),
@@ -2063,19 +2866,24 @@ class MLOpsWorkbenchService:
                     ],
                 )
             else:
-                dataset_id = conn.execute("SELECT nextval('mlops_dataset_seq')").fetchone()[0]
+                next_dataset_id_row = conn.execute(
+                    "SELECT COALESCE(MAX(dataset_id), 0) + 1 FROM mlops_dataset_registry"
+                ).fetchone()
+                dataset_id = int(next_dataset_id_row[0] or 1)
                 conn.execute(
                     """
                     INSERT INTO mlops_dataset_registry (
-                      dataset_id, tenant_id, env_id, dataset_type, filename,
-                      file_path, row_count, columns_json, column_types_json
+                      dataset_id, tenant_id, env_id, pipeline_id, pipeline_type, dataset_type,
+                      filename, file_path, row_count, columns_json, column_types_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         int(dataset_id),
                         tenant_id,
                         env_id,
+                        int(normalized_pipeline_id) if normalized_pipeline_id else None,
+                        normalized_pipeline_type,
                         dataset_type,
                         filename,
                         str(file_path),
@@ -2091,16 +2899,68 @@ class MLOpsWorkbenchService:
             "dataset_id": int(dataset_id),
             "file_path": str(file_path),
             "dataset_type": dataset_type,
+            "pipeline_type": normalized_pipeline_type,
         }
         try:
             self._auto_profile_background(dataset_meta, int(row_count or 0))
         except Exception:
             pass  # profiling failure must never break the upload response
 
+        try:
+            with get_connection(self.db_path) as conn:
+                pipeline_rows = conn.execute(
+                    """
+                    SELECT pipeline_id
+                    FROM mlops_pipelines
+                    WHERE tenant_id = ? AND env_id = ?
+                      AND (
+                        (? IS NOT NULL AND pipeline_id = ?)
+                        OR (? IS NULL AND pipeline_type = ?)
+                      )
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    [
+                        tenant_id,
+                        env_id,
+                        int(normalized_pipeline_id) if normalized_pipeline_id else None,
+                        int(normalized_pipeline_id) if normalized_pipeline_id else None,
+                        int(normalized_pipeline_id) if normalized_pipeline_id else None,
+                        normalized_pipeline_type,
+                    ],
+                ).fetchall()
+                if pipeline_rows:
+                    self._record_pipeline_artifact_v2(
+                        conn,
+                        tenant_id,
+                        env_id,
+                        int(pipeline_rows[0][0]),
+                        artifact_type="dataset",
+                        artifact_role="source_table",
+                        storage_backend="filesystem",
+                        storage_path=str(file_path),
+                        schema={
+                            "dataset_type": dataset_type,
+                            "columns": column_names,
+                            "column_types": column_types,
+                        },
+                        row_count=int(row_count or 0),
+                        column_count=len(column_names),
+                        metadata={
+                            "dataset_id": int(dataset_id),
+                            "filename": filename,
+                            "pipeline_type": normalized_pipeline_type,
+                        },
+                    )
+        except Exception:
+            pass
+
         return {
             "dataset_id": int(dataset_id),
+            "pipeline_id": int(normalized_pipeline_id) if normalized_pipeline_id else None,
             "tenant_id": tenant_id,
             "env_id": env_id,
+            "pipeline_type": normalized_pipeline_type,
             "dataset_type": dataset_type,
             "filename": filename,
             "file_path": str(file_path),
@@ -2247,6 +3107,7 @@ class MLOpsWorkbenchService:
         env_id: str,
         data_dir: Path,
         force: bool = False,
+        pipeline_type: str = "fcc",
     ) -> List[Dict]:
         """
         Register CSV/Parquet files discovered in an env data folder.
@@ -2262,7 +3123,7 @@ class MLOpsWorkbenchService:
         existing = {
             str(d.get("dataset_type") or "").strip().lower(): d
             for d in self.list_datasets(tenant_id, env_id)
-            if d.get("dataset_type")
+            if d.get("dataset_type") and _normalize_pipeline_type(d.get("pipeline_type")) == _normalize_pipeline_type(pipeline_type)
         }
 
         files: List[Path] = []
@@ -2282,6 +3143,7 @@ class MLOpsWorkbenchService:
             dataset = self.register_dataset(
                 tenant_id=tenant_id,
                 env_id=env_id,
+                pipeline_type=pipeline_type,
                 dataset_type=dataset_type,
                 filename=file_path.name,
                 file_path=file_path,
@@ -2870,10 +3732,12 @@ class MLOpsWorkbenchService:
             if dataset_id is None:
                 rows = conn.execute(
                     """
-                    SELECT pipeline_id, name, steps_json, created_at, updated_at,
+                    SELECT pipeline_id, pipeline_uuid, name, steps_json, created_at, updated_at,
                            status, version, last_run_at, output_dataset_id,
                            dataset_id, grain, created_by_persona,
-                           dataset_ids_json, schedule_json
+                           dataset_ids_json, schedule_json, pipeline_type, model_family,
+                           prediction_grain, lookback_days, lookforward_days, target_definition_type,
+                           pipeline_config_json
                     FROM mlops_pipelines
                     WHERE tenant_id = ? AND env_id = ?
                     ORDER BY updated_at DESC
@@ -2883,10 +3747,12 @@ class MLOpsWorkbenchService:
             else:
                 rows = conn.execute(
                     """
-                    SELECT pipeline_id, name, steps_json, created_at, updated_at,
+                    SELECT pipeline_id, pipeline_uuid, name, steps_json, created_at, updated_at,
                            status, version, last_run_at, output_dataset_id,
                            dataset_id, grain, created_by_persona,
-                           dataset_ids_json, schedule_json
+                           dataset_ids_json, schedule_json, pipeline_type, model_family,
+                           prediction_grain, lookback_days, lookforward_days, target_definition_type,
+                           pipeline_config_json
                     FROM mlops_pipelines
                     WHERE tenant_id = ? AND env_id = ? AND dataset_id = ?
                     ORDER BY updated_at DESC
@@ -2896,26 +3762,35 @@ class MLOpsWorkbenchService:
         results: List[Dict[str, Any]] = []
         healed_pipelines: List[Tuple[int, List[Dict[str, Any]]]] = []
         for r in rows:
-            steps = json.loads(r[2] or "[]")
+            steps = json.loads(r[3] or "[]")
             steps, healed = _reconcile_dependency_state_steps(steps)
             if healed:
                 healed_pipelines.append((int(r[0]), steps))
+            pipeline_type = _normalize_pipeline_type(r[15] if len(r) > 15 else None)
             record = {
                 "pipeline_id": int(r[0]),
-                "run_ref": f"FCC-RUN-{int(r[0]):05d}",
-                "name": r[1],
+                "pipeline_uuid": _normalize_optional_text(r[1]),
+                "run_ref": f"{pipeline_type.upper()}-RUN-{int(r[0]):05d}",
+                "name": r[2],
                 "steps": steps,
-                "created_at": r[3].isoformat() if hasattr(r[3], "isoformat") else r[3],
-                "updated_at": r[4].isoformat() if hasattr(r[4], "isoformat") else r[4],
-                "status": r[5] or "draft",
-                "version": int(r[6] or 1),
-                "last_run_at": r[7].isoformat() if hasattr(r[7], "isoformat") else r[7],
-                "output_dataset_id": int(r[8]) if r[8] is not None else None,
-                "dataset_id": int(r[9]) if r[9] is not None else None,
-                "grain": r[10] or "transaction",
-                "created_by_persona": r[11] or "technical",
-                "dataset_ids": json.loads(r[12] or "[]"),
-                "schedule": json.loads(r[13] or "{}"),
+                "created_at": r[4].isoformat() if hasattr(r[4], "isoformat") else r[4],
+                "updated_at": r[5].isoformat() if hasattr(r[5], "isoformat") else r[5],
+                "status": r[6] or "draft",
+                "version": int(r[7] or 1),
+                "last_run_at": r[8].isoformat() if hasattr(r[8], "isoformat") else r[8],
+                "output_dataset_id": int(r[9]) if r[9] is not None else None,
+                "dataset_id": int(r[10]) if r[10] is not None else None,
+                "grain": r[11] or "transaction",
+                "created_by_persona": r[12] or "technical",
+                "dataset_ids": json.loads(r[13] or "[]"),
+                "schedule": json.loads(r[14] or "{}"),
+                "pipeline_type": pipeline_type,
+                "model_family": _normalize_optional_text(r[16]) or pipeline_type,
+                "prediction_grain": _normalize_optional_text(r[17]) or r[11] or "transaction",
+                "lookback_days": int(r[18]) if r[18] is not None else None,
+                "lookforward_days": int(r[19]) if r[19] is not None else None,
+                "target_definition_type": _normalize_optional_text(r[20]),
+                "pipeline_config": _safe_json_loads(r[21], {}),
             }
             record.update(_progress_summary_from_steps(steps, status=record["status"]))
             workflow_session = workflow_by_pipeline.get(int(record["pipeline_id"]))
@@ -3038,7 +3913,12 @@ class MLOpsWorkbenchService:
         name: str,
         steps: List[Dict],
         *,
+        pipeline_id: Optional[int] = None,
+        pipeline_uuid: Optional[str] = None,
+        pipeline_type: str = "fcc",
+        model_family: Optional[str] = None,
         grain: str = "transaction",
+        prediction_grain: Optional[str] = None,
         anchor_dataset_id: Optional[int] = None,
         dataset_ids: Optional[List[int]] = None,
         joins: Optional[List[Dict]] = None,
@@ -3046,6 +3926,10 @@ class MLOpsWorkbenchService:
         str_config: Optional[Dict] = None,
         schedule: Optional[Dict] = None,
         output_name: str = "master_dataset",
+        lookback_days: Optional[int] = None,
+        lookforward_days: Optional[int] = None,
+        target_definition_type: Optional[str] = None,
+        pipeline_config: Optional[Dict] = None,
         created_by_persona: str = "technical",
     ) -> Dict:
         """
@@ -3057,17 +3941,40 @@ class MLOpsWorkbenchService:
 
         Returns { pipeline_id, version, name, status }
         """
+        normalized_pipeline_type = _normalize_pipeline_type(model_family or pipeline_type)
+        normalized_model_family = _normalize_optional_text(model_family) or normalized_pipeline_type
+        normalized_prediction_grain = _normalize_optional_text(prediction_grain) or _normalize_optional_text(grain)
+        pipeline_config_json = json.dumps(pipeline_config or {}, default=str)
+        requested_pipeline_uuid = _normalize_optional_text(pipeline_uuid)
+        try:
+            requested_pipeline_id = int(pipeline_id) if pipeline_id not in (None, "", [], {}) else None
+        except Exception:
+            requested_pipeline_id = None
+        if requested_pipeline_id is not None and requested_pipeline_id <= 0:
+            requested_pipeline_id = None
+
         with get_connection(self.db_path) as conn:
-            # Check for an existing pipeline for this env with the same name
-            existing = conn.execute(
-                """
-                SELECT pipeline_id, version
-                FROM mlops_pipelines
-                WHERE tenant_id = ? AND env_id = ? AND name = ?
-                LIMIT 1
-                """,
-                [tenant_id, env_id, name],
-            ).fetchone()
+            existing = None
+            if requested_pipeline_id:
+                existing = conn.execute(
+                    """
+                    SELECT pipeline_id, version, pipeline_uuid
+                    FROM mlops_pipelines
+                    WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                    LIMIT 1
+                    """,
+                    [tenant_id, env_id, int(requested_pipeline_id)],
+                ).fetchone()
+            elif requested_pipeline_uuid:
+                existing = conn.execute(
+                    """
+                    SELECT pipeline_id, version, pipeline_uuid
+                    FROM mlops_pipelines
+                    WHERE tenant_id = ? AND env_id = ? AND pipeline_uuid = ?
+                    LIMIT 1
+                    """,
+                    [tenant_id, env_id, requested_pipeline_uuid],
+                ).fetchone()
 
             full_steps_json = json.dumps(steps or [], default=str)
             joins_json      = json.dumps(joins or [], default=str)
@@ -3079,46 +3986,68 @@ class MLOpsWorkbenchService:
             if existing:
                 pipeline_id = int(existing[0])
                 new_version = int(existing[1] or 1) + 1
+                pipeline_uuid = _normalize_optional_text(existing[2]) or requested_pipeline_uuid or _new_pipeline_uuid()
                 conn.execute(
                     """
                     UPDATE mlops_pipelines SET
-                      dataset_id = ?, steps_json = ?, grain = ?,
+                      pipeline_uuid = ?, dataset_id = ?, steps_json = ?, pipeline_type = ?, model_family = ?,
+                      grain = ?, prediction_grain = ?,
                       anchor_dataset_id = ?, dataset_ids_json = ?,
                       joins_json = ?, transforms_json = ?, str_config_json = ?,
                       schedule_json = ?, output_name = ?,
+                      lookback_days = ?, lookforward_days = ?, target_definition_type = ?,
+                      pipeline_config_json = ?,
                       created_by_persona = ?, status = 'saved',
                       version = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE pipeline_id = ?
                     """,
                     [
+                        pipeline_uuid,
                         int(dataset_id) if dataset_id else None,
-                        full_steps_json, grain,
+                        full_steps_json, normalized_pipeline_type, normalized_model_family,
+                        grain, normalized_prediction_grain,
                         int(anchor_dataset_id) if anchor_dataset_id else None,
                         dataset_ids_json, joins_json, transforms_json,
                         str_config_json, schedule_json, output_name,
+                        int(lookback_days) if lookback_days is not None else None,
+                        int(lookforward_days) if lookforward_days is not None else None,
+                        _normalize_optional_text(target_definition_type),
+                        pipeline_config_json,
                         created_by_persona, new_version, pipeline_id,
                     ],
                 )
             else:
-                pipeline_id = conn.execute("SELECT nextval('mlops_snapshot_seq')").fetchone()[0]
+                next_pipeline_id_row = conn.execute(
+                    "SELECT COALESCE(MAX(pipeline_id), 0) + 1 FROM mlops_pipelines"
+                ).fetchone()
+                pipeline_id = int(next_pipeline_id_row[0] or 1)
                 new_version = 1
+                pipeline_uuid = requested_pipeline_uuid or _new_pipeline_uuid()
                 conn.execute(
                     """
                     INSERT INTO mlops_pipelines (
-                      pipeline_id, tenant_id, env_id, dataset_id, name, steps_json,
-                      grain, anchor_dataset_id, dataset_ids_json,
+                      pipeline_id, pipeline_uuid, tenant_id, env_id, pipeline_type, model_family,
+                      dataset_id, name, steps_json, grain, prediction_grain,
+                      anchor_dataset_id, dataset_ids_json,
                       joins_json, transforms_json, str_config_json,
-                      schedule_json, output_name, created_by_persona, status, version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)
+                      schedule_json, output_name, lookback_days, lookforward_days,
+                      target_definition_type, pipeline_config_json,
+                      created_by_persona, status, version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
-                        int(pipeline_id), tenant_id, env_id,
+                        int(pipeline_id), pipeline_uuid, tenant_id, env_id,
+                        normalized_pipeline_type, normalized_model_family,
                         int(dataset_id) if dataset_id else None,
-                        name, full_steps_json, grain,
+                        name, full_steps_json, grain, normalized_prediction_grain,
                         int(anchor_dataset_id) if anchor_dataset_id else None,
                         dataset_ids_json, joins_json, transforms_json,
                         str_config_json, schedule_json, output_name,
-                        created_by_persona, new_version,
+                        int(lookback_days) if lookback_days is not None else None,
+                        int(lookforward_days) if lookforward_days is not None else None,
+                        _normalize_optional_text(target_definition_type),
+                        pipeline_config_json,
+                        created_by_persona, "saved", new_version,
                     ],
                 )
 
@@ -3139,6 +4068,34 @@ class MLOpsWorkbenchService:
             except Exception:
                 pass  # version snapshot is best-effort
 
+            try:
+                self._append_pipeline_step_v2(
+                    conn,
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id),
+                    step_code="pipeline_saved",
+                    step_name="Pipeline Saved",
+                    status="saved",
+                    config={
+                        "pipeline_type": normalized_pipeline_type,
+                        "model_family": normalized_model_family,
+                        "grain": grain,
+                        "prediction_grain": normalized_prediction_grain,
+                        "lookback_days": lookback_days,
+                        "lookforward_days": lookforward_days,
+                        "target_definition_type": _normalize_optional_text(target_definition_type),
+                    },
+                    state={
+                        "name": name,
+                        "dataset_id": int(dataset_id) if dataset_id else None,
+                        "dataset_ids": list(dataset_ids or []),
+                    },
+                    pipeline_uuid=pipeline_uuid,
+                )
+            except Exception:
+                pass
+
             self._sync_pipeline_asset_links_for_pipeline(
                 conn,
                 tenant_id,
@@ -3155,21 +4112,29 @@ class MLOpsWorkbenchService:
 
         return {
             "pipeline_id": int(pipeline_id),
+            "pipeline_uuid": pipeline_uuid,
             "version": new_version,
             "name": name,
             "status": "saved",
+            "pipeline_type": normalized_pipeline_type,
+            "model_family": normalized_model_family,
         }
 
     def load_pipeline(self, tenant_id: str, env_id: str, pipeline_id: int) -> Dict:
         """Return the full pipeline definition record."""
+        workflow_session = None
         with get_connection(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT pipeline_id, name, steps_json, dataset_id, grain, anchor_dataset_id,
+                SELECT pipeline_id, pipeline_uuid, name, steps_json, dataset_id, grain, anchor_dataset_id,
                        dataset_ids_json, joins_json, transforms_json, str_config_json,
                        schedule_json, output_name, status, version,
                        created_by_persona, created_at, updated_at,
-                       last_run_at, output_dataset_id
+                       last_run_at, output_dataset_id,
+                       active_training_job_id, active_validation_job_id, active_registry_job_id,
+                       active_deployment_id, locked_threshold, runtime_state_json,
+                       pipeline_type, model_family, prediction_grain, lookback_days,
+                       lookforward_days, target_definition_type, pipeline_config_json
                 FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -3191,7 +4156,7 @@ class MLOpsWorkbenchService:
             asset_link_rows = self._list_pipeline_asset_links(conn, tenant_id, env_id, int(pipeline_id)) if row else []
         if not row:
             raise ValueError(f"Pipeline {pipeline_id} not found")
-        healed_steps, healed = _reconcile_dependency_state_steps(json.loads(row[2] or "[]"))
+        healed_steps, healed = _reconcile_dependency_state_steps(json.loads(row[3] or "[]"))
         if healed:
             with get_connection(self.db_path) as conn:
                 conn.execute(
@@ -3204,25 +4169,39 @@ class MLOpsWorkbenchService:
                 )
         result = {
             "pipeline_id": int(row[0]),
-            "run_ref": f"FCC-RUN-{int(row[0]):05d}",
-            "name": row[1],
-            "steps": healed_steps if healed else json.loads(row[2] or "[]"),
-            "dataset_id": int(row[3]) if row[3] is not None else None,
-            "grain": row[4] or "transaction",
-            "anchor_dataset_id": int(row[5]) if row[5] is not None else None,
-            "dataset_ids": json.loads(row[6] or "[]"),
-            "joins": json.loads(row[7] or "[]"),
-            "transforms": json.loads(row[8] or "[]"),
-            "str_config": json.loads(row[9] or "{}"),
-            "schedule": json.loads(row[10] or "{}"),
-            "output_name": row[11] or "master_dataset",
-            "status": row[12] or "draft",
-            "version": int(row[13] or 1),
-            "created_by_persona": row[14] or "technical",
-            "created_at": row[15].isoformat() if hasattr(row[15], "isoformat") else row[15],
-            "updated_at": row[16].isoformat() if hasattr(row[16], "isoformat") else row[16],
-            "last_run_at": row[17].isoformat() if hasattr(row[17], "isoformat") else row[17],
-            "output_dataset_id": int(row[18]) if row[18] is not None else None,
+            "pipeline_uuid": _normalize_optional_text(row[1]),
+            "run_ref": f"{_normalize_pipeline_type(row[26]).upper()}-RUN-{int(row[0]):05d}",
+            "name": row[2],
+            "steps": healed_steps if healed else json.loads(row[3] or "[]"),
+            "dataset_id": int(row[4]) if row[4] is not None else None,
+            "grain": row[5] or "transaction",
+            "anchor_dataset_id": int(row[6]) if row[6] is not None else None,
+            "dataset_ids": json.loads(row[7] or "[]"),
+            "joins": json.loads(row[8] or "[]"),
+            "transforms": json.loads(row[9] or "[]"),
+            "str_config": json.loads(row[10] or "{}"),
+            "schedule": json.loads(row[11] or "{}"),
+            "output_name": row[12] or "master_dataset",
+            "status": row[13] or "draft",
+            "version": int(row[14] or 1),
+            "created_by_persona": row[15] or "technical",
+            "created_at": row[16].isoformat() if hasattr(row[16], "isoformat") else row[16],
+            "updated_at": row[17].isoformat() if hasattr(row[17], "isoformat") else row[17],
+            "last_run_at": row[18].isoformat() if hasattr(row[18], "isoformat") else row[18],
+            "output_dataset_id": int(row[19]) if row[19] is not None else None,
+            "active_training_job_id": _normalize_optional_text(row[20]),
+            "active_validation_job_id": _normalize_optional_text(row[21]),
+            "active_registry_job_id": _normalize_optional_text(row[22]),
+            "active_deployment_id": _normalize_optional_text(row[23]),
+            "locked_threshold": float(row[24]) if row[24] is not None else None,
+            "runtime_state": _safe_json_loads(row[25], {}),
+            "pipeline_type": _normalize_pipeline_type(row[26]),
+            "model_family": _normalize_optional_text(row[27]) or _normalize_pipeline_type(row[26]),
+            "prediction_grain": _normalize_optional_text(row[28]) or row[5] or "transaction",
+            "lookback_days": int(row[29]) if row[29] is not None else None,
+            "lookforward_days": int(row[30]) if row[30] is not None else None,
+            "target_definition_type": _normalize_optional_text(row[31]),
+            "pipeline_config": _safe_json_loads(row[32], {}),
             "step_events": [
                 {
                     "event_id": int(event_row[0]),
@@ -3239,6 +4218,68 @@ class MLOpsWorkbenchService:
             ],
             "asset_links": asset_link_rows,
         }
+        runtime_state_missing = not isinstance(result.get("runtime_state"), dict) or not result.get("runtime_state")
+        if runtime_state_missing:
+            result["runtime_state"] = self._build_pipeline_runtime_state(
+                tenant_id,
+                env_id,
+                int(row[0]),
+                row[1] or "",
+                result["steps"],
+            )
+        runtime_state = result.get("runtime_state") if isinstance(result.get("runtime_state"), dict) else {}
+        if _normalize_pipeline_type(row[26]) == "mule":
+            mule_runtime_state = self._build_mule_runtime_state(
+                tenant_id,
+                env_id,
+                int(row[0]),
+                row[1] or "",
+                runtime_state,
+                result.get("pipeline_config") if isinstance(result.get("pipeline_config"), dict) else _safe_json_loads(row[31], {}),
+            )
+            result["runtime_state"] = mule_runtime_state
+            runtime_state = mule_runtime_state
+        if runtime_state:
+            result["active_training_job_id"] = result.get("active_training_job_id") or _normalize_optional_text(
+                runtime_state.get("model_job_id")
+                or (runtime_state.get("active_model_run") or {}).get("job_id")
+            )
+            result["active_validation_job_id"] = result.get("active_validation_job_id") or _normalize_optional_text(
+                (runtime_state.get("validation_report") or {}).get("job_id")
+            )
+            result["active_registry_job_id"] = result.get("active_registry_job_id") or _normalize_optional_text(
+                (runtime_state.get("registry_entry") or {}).get("job_id")
+            )
+            result["active_deployment_id"] = result.get("active_deployment_id") or _normalize_optional_text(
+                runtime_state.get("deployment_id")
+                or (runtime_state.get("registry_entry") or {}).get("deployment_id")
+            )
+            if result.get("locked_threshold") in (None, ""):
+                result["locked_threshold"] = runtime_state.get("locked_threshold")
+        if runtime_state_missing or not row[19] or not row[20] or not row[21] or not row[22] or row[24] in (None, ""):
+            try:
+                with get_connection(self.db_path) as conn:
+                    conn.execute(
+                        """
+                        UPDATE mlops_pipelines
+                        SET active_training_job_id = ?, active_validation_job_id = ?, active_registry_job_id = ?,
+                            active_deployment_id = ?, locked_threshold = ?, runtime_state_json = ?
+                        WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                        """,
+                        [
+                            result.get("active_training_job_id"),
+                            result.get("active_validation_job_id"),
+                            result.get("active_registry_job_id"),
+                            result.get("active_deployment_id"),
+                            float(result.get("locked_threshold")) if result.get("locked_threshold") not in (None, "") else None,
+                            json.dumps(runtime_state or {}, default=str),
+                            int(row[0]),
+                            tenant_id,
+                            env_id,
+                        ],
+                    )
+            except Exception:
+                pass
         result.update(_progress_summary_from_steps(result["steps"], status=result["status"]))
         workflow_session = self.get_workflow_session(tenant_id, env_id, pipeline_id=int(pipeline_id))
         hydrated = self._apply_workflow_summary(result, workflow_session)
@@ -3278,6 +4319,227 @@ class MLOpsWorkbenchService:
                 sessions.append(session)
         return sessions
 
+    def _ensure_pipeline_uuid(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        pipeline_type: str = "fcc",
+        model_family: Optional[str] = None,
+        name: Optional[str] = None,
+        pipeline_config_json: str = "{}",
+        runtime_state_json: str = "{}",
+        created_by_persona: str = "technical",
+    ) -> str:
+        row = conn.execute(
+            """
+            SELECT pipeline_uuid
+            FROM mlops_pipelines
+            WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+            """,
+            [int(pipeline_id), tenant_id, env_id],
+        ).fetchone()
+        current_uuid = _normalize_optional_text(row[0]) if row else None
+        if not current_uuid:
+            current_uuid = _new_pipeline_uuid()
+            conn.execute(
+                """
+                UPDATE mlops_pipelines
+                SET pipeline_uuid = ?, pipeline_type = ?, model_family = COALESCE(?, model_family),
+                    pipeline_config_json = COALESCE(NULLIF(?, ''), pipeline_config_json),
+                    runtime_state_json = COALESCE(NULLIF(?, ''), runtime_state_json),
+                    created_by_persona = COALESCE(?, created_by_persona),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                """,
+                [
+                    current_uuid,
+                    _normalize_pipeline_type(pipeline_type),
+                    _normalize_optional_text(model_family),
+                    pipeline_config_json,
+                    runtime_state_json,
+                    _normalize_optional_text(created_by_persona) or "technical",
+                    int(pipeline_id),
+                    tenant_id,
+                    env_id,
+                ],
+            )
+        conn.execute(
+            """
+            INSERT INTO mlops_pipeline_runs_v2 (
+              pipeline_uuid, legacy_pipeline_id, tenant_id, env_id, pipeline_type,
+              model_family, name, version, status, pipeline_config_json,
+              runtime_state_json, created_by_persona, current_step_code, current_step_order,
+              updated_at
+            )
+            SELECT ?, pipeline_id, tenant_id, env_id, pipeline_type, model_family, name,
+                   version, status, pipeline_config_json, runtime_state_json,
+                   created_by_persona, current_step_code, current_step_order, CURRENT_TIMESTAMP
+            FROM mlops_pipelines
+            WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+            ON CONFLICT (pipeline_uuid) DO UPDATE SET
+              legacy_pipeline_id = excluded.legacy_pipeline_id,
+              tenant_id = excluded.tenant_id,
+              env_id = excluded.env_id,
+              pipeline_type = excluded.pipeline_type,
+              model_family = excluded.model_family,
+              name = excluded.name,
+              version = excluded.version,
+              status = excluded.status,
+              pipeline_config_json = excluded.pipeline_config_json,
+              runtime_state_json = excluded.runtime_state_json,
+              created_by_persona = excluded.created_by_persona,
+              current_step_code = excluded.current_step_code,
+              current_step_order = excluded.current_step_order,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            [current_uuid, int(pipeline_id), tenant_id, env_id],
+        )
+        return current_uuid
+
+    def _append_pipeline_step_v2(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        step_code: str,
+        step_name: Optional[str] = None,
+        status: str = "saved",
+        config: Optional[Dict[str, Any]] = None,
+        input_refs: Optional[List[Dict[str, Any]]] = None,
+        output_refs: Optional[List[Dict[str, Any]]] = None,
+        artifact_refs: Optional[List[Dict[str, Any]]] = None,
+        state: Optional[Dict[str, Any]] = None,
+        prev_step_id: Optional[str] = None,
+        pipeline_uuid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        step_code_key = _normalize_text(step_code).lower() or "unknown"
+        pipeline_uuid = _normalize_optional_text(pipeline_uuid) or self._ensure_pipeline_uuid(
+            conn,
+            tenant_id,
+            env_id,
+            pipeline_id,
+        )
+        last_row = conn.execute(
+            """
+            SELECT step_id, step_order
+            FROM mlops_pipeline_steps_v2
+            WHERE pipeline_uuid = ?
+            ORDER BY step_order DESC, created_at DESC
+            LIMIT 1
+            """,
+            [pipeline_uuid],
+        ).fetchone()
+        step_order = int(last_row[1] or 0) + 1 if last_row else 1
+        step_id = _new_pipeline_uuid()
+        prev_step_id = _normalize_optional_text(prev_step_id) or (str(last_row[0]) if last_row and last_row[0] else None)
+        conn.execute(
+            """
+            INSERT INTO mlops_pipeline_steps_v2 (
+              step_id, pipeline_uuid, legacy_pipeline_id, step_order, step_code, step_name,
+              prev_step_id, status, config_json, input_refs_json, output_refs_json,
+              artifact_refs_json, state_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                step_id,
+                pipeline_uuid,
+                int(pipeline_id),
+                int(step_order),
+                step_code_key,
+                _normalize_optional_text(step_name) or step_code_key,
+                prev_step_id,
+                _normalize_optional_text(status) or "saved",
+                json.dumps(config or {}, default=str),
+                json.dumps(input_refs or [], default=str),
+                json.dumps(output_refs or [], default=str),
+                json.dumps(artifact_refs or [], default=str),
+                json.dumps(state or {}, default=str),
+            ],
+        )
+        conn.execute(
+            """
+            UPDATE mlops_pipeline_runs_v2
+            SET current_step_code = ?, current_step_order = ?, status = ?, updated_at = CURRENT_TIMESTAMP,
+                last_run_at = CURRENT_TIMESTAMP
+            WHERE pipeline_uuid = ?
+            """,
+            [step_code_key, int(step_order), _normalize_optional_text(status) or "saved", pipeline_uuid],
+        )
+        return {
+            "pipeline_uuid": pipeline_uuid,
+            "step_id": step_id,
+            "step_order": int(step_order),
+            "step_code": step_code_key,
+            "status": _normalize_optional_text(status) or "saved",
+        }
+
+    def _record_pipeline_artifact_v2(
+        self,
+        conn,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        artifact_type: str,
+        artifact_role: str,
+        storage_backend: str,
+        storage_path: str,
+        schema: Optional[Dict[str, Any]] = None,
+        row_count: Optional[int] = None,
+        column_count: Optional[int] = None,
+        checksum: Optional[str] = None,
+        metrics: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        step_id: Optional[str] = None,
+        pipeline_uuid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        pipeline_uuid = _normalize_optional_text(pipeline_uuid) or self._ensure_pipeline_uuid(
+            conn,
+            tenant_id,
+            env_id,
+            pipeline_id,
+        )
+        artifact_id = _new_pipeline_uuid()
+        conn.execute(
+            """
+            INSERT INTO mlops_pipeline_artifacts_v2 (
+              artifact_id, pipeline_uuid, legacy_pipeline_id, step_id, artifact_type, artifact_role,
+              storage_backend, storage_path, schema_json, row_count, column_count, checksum,
+              metrics_json, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                artifact_id,
+                pipeline_uuid,
+                int(pipeline_id),
+                _normalize_optional_text(step_id),
+                _normalize_optional_text(artifact_type) or "unknown",
+                _normalize_optional_text(artifact_role) or "reference",
+                _normalize_optional_text(storage_backend) or "filesystem",
+                str(storage_path),
+                json.dumps(schema or {}, default=str),
+                int(row_count) if row_count is not None else None,
+                int(column_count) if column_count is not None else None,
+                _normalize_optional_text(checksum),
+                json.dumps(metrics or {}, default=str),
+                json.dumps(metadata or {}, default=str),
+            ],
+        )
+        return {
+            "artifact_id": artifact_id,
+            "pipeline_uuid": pipeline_uuid,
+            "artifact_type": _normalize_optional_text(artifact_type) or "unknown",
+            "artifact_role": _normalize_optional_text(artifact_role) or "reference",
+            "storage_backend": _normalize_optional_text(storage_backend) or "filesystem",
+            "storage_path": str(storage_path),
+        }
+
     def _apply_workflow_summary(
         self,
         record: Dict[str, Any],
@@ -3306,6 +4568,17 @@ class MLOpsWorkbenchService:
         next_record["steps_completed_display"] = (
             f"{int(next_record.get('completed_steps') or 0)}/{int(next_record.get('total_steps') or len(_PROGRESS_STAGE_ORDER))}"
         )
+        runtime_state = next_record.get("runtime_state") if isinstance(next_record.get("runtime_state"), dict) else {}
+        if runtime_state:
+            next_record["run_id"] = next_record.get("run_id") or _workflow_first_text(
+                runtime_state.get("model_job_id"),
+                (runtime_state.get("active_model_run") or {}).get("job_id") if isinstance(runtime_state.get("active_model_run"), dict) else "",
+                (runtime_state.get("validation_report") or {}).get("job_id") if isinstance(runtime_state.get("validation_report"), dict) else "",
+            )
+            next_record["deployment_id"] = next_record.get("deployment_id") or _workflow_first_text(
+                runtime_state.get("deployment_id"),
+                (runtime_state.get("registry_entry") or {}).get("deployment_id") if isinstance(runtime_state.get("registry_entry"), dict) else "",
+            )
 
         if not session:
             return next_record
@@ -3597,6 +4870,7 @@ class MLOpsWorkbenchService:
             "status": _normalize_optional_text(row[18]) or "draft",
             "created_at": row[19].isoformat() if hasattr(row[19], "isoformat") else row[19],
             "updated_at": row[20].isoformat() if hasattr(row[20], "isoformat") else row[20],
+            "pipeline_type": _normalize_pipeline_type(row[21]) if len(row) > 21 else "fcc",
         }
 
     def _derive_workflow_journey_key(
@@ -3666,7 +4940,7 @@ class MLOpsWorkbenchService:
                        run_id, deployment_id, publish_id, current_module, current_step,
                        current_state_json, last_stable_step, last_stable_state_json,
                        case_scope_json, selected_case_id, handoff_summary_json,
-                       checkpoint_key, status, created_at, updated_at
+                       checkpoint_key, status, created_at, updated_at, pipeline_type
                 FROM mlops_workflow_sessions
                 WHERE {where_clause}
                 ORDER BY updated_at DESC
@@ -3695,6 +4969,7 @@ class MLOpsWorkbenchService:
         deployment_id_explicit = "deployment_id" in body
         publish_id_explicit = "publish_id" in body
         current_step_explicit = "current_step" in body
+        pipeline_type_explicit = "pipeline_type" in body or "model_family" in body
 
         pipeline_id_raw = body.get("pipeline_id")
         pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
@@ -3722,15 +4997,41 @@ class MLOpsWorkbenchService:
             if should_lookup_existing
             else None
         ) or {}
+        reset_session_identity = False
 
         if lookup_session_id and not session.get("session_id"):
-            raise ValueError(f"Workflow session {lookup_session_id} not found")
+            # Browsers can hold an older workflow session id across refreshes
+            # or backend restarts. Recover by creating/reseeding a session
+            # instead of hard-failing the save with a 400.
+            session = {}
+            reset_session_identity = True
+
+        if session and pipeline_id_explicit:
+            session_pipeline_id = session.get("pipeline_id")
+            try:
+                session_pipeline_id = int(session_pipeline_id) if session_pipeline_id not in (None, "", []) else None
+            except Exception:
+                session_pipeline_id = None
+            if (
+                session_pipeline_id is not None
+                and pipeline_id is not None
+                and session_pipeline_id != int(pipeline_id)
+            ):
+                # A workflow session must never hop from one pipeline to another.
+                # Reusing the same session id would leak completed-step state,
+                # datasets, and runtime metadata into a brand-new run.
+                session = {}
+                reset_session_identity = True
 
         if not pipeline_id_explicit:
             session_pipeline_id = session.get("pipeline_id")
             pipeline_id = int(session_pipeline_id) if session_pipeline_id not in (None, "", []) else None
 
-        session_id = _normalize_optional_text(body.get("session_id")) or session.get("session_id") or f"WFS-{uuid.uuid4().hex[:12]}"
+        session_id = (
+            f"WFS-{uuid.uuid4().hex[:12]}"
+            if reset_session_identity
+            else _normalize_optional_text(body.get("session_id")) or session.get("session_id") or f"WFS-{uuid.uuid4().hex[:12]}"
+        )
         pipeline_name = (
             _normalize_optional_text(body.get("pipeline_name"))
             if pipeline_name_explicit
@@ -3757,6 +5058,12 @@ class MLOpsWorkbenchService:
             if current_step_explicit
             else session.get("current_step")
         )
+        pipeline_type = _normalize_pipeline_type(
+            body.get("pipeline_type")
+            or body.get("model_family")
+            or session.get("pipeline_type")
+            or "fcc"
+        )
         selected_case_id = _normalize_optional_text(body.get("selected_case_id")) or session.get("selected_case_id")
         checkpoint_key = _normalize_optional_text(body.get("checkpoint_key")) or session.get("checkpoint_key")
         status = _normalize_optional_text(body.get("status")) or session.get("status") or "draft"
@@ -3768,7 +5075,7 @@ class MLOpsWorkbenchService:
             with get_connection(self.db_path) as conn:
                 pipeline_row = conn.execute(
                     """
-                    SELECT pipeline_id, name
+                    SELECT pipeline_id, name, pipeline_type, model_family
                     FROM mlops_pipelines
                     WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                     """,
@@ -3778,6 +5085,8 @@ class MLOpsWorkbenchService:
                 raise ValueError(f"Pipeline {pipeline_id} not found")
             if not pipeline_name:
                 pipeline_name = _normalize_optional_text(pipeline_row[1])
+            if not pipeline_type_explicit:
+                pipeline_type = _normalize_pipeline_type(pipeline_row[2] or pipeline_row[3])
 
         current_state = _merge_state_dicts(session.get("current_state") or {}, current_state_patch or {})
         handoff_summary = _merge_state_dicts(session.get("handoff_summary") or {}, handoff_summary_patch or {})
@@ -3797,6 +5106,7 @@ class MLOpsWorkbenchService:
         if isinstance(current_state, dict):
             current_state["pipeline_id"] = pipeline_id
             current_state["pipeline_name"] = pipeline_name
+            current_state["pipeline_type"] = pipeline_type
             current_state["run_id"] = run_id
             current_state["deployment_id"] = deployment_id
             current_state["publish_id"] = publish_id
@@ -3814,6 +5124,7 @@ class MLOpsWorkbenchService:
             "session_id": session.get("session_id") or session_id,
             "pipeline_id": pipeline_id,
             "pipeline_name": pipeline_name,
+            "pipeline_type": pipeline_type,
             "run_id": run_id,
             "deployment_id": deployment_id,
             "publish_id": publish_id,
@@ -3852,19 +5163,20 @@ class MLOpsWorkbenchService:
             conn.execute(
                 """
                 INSERT INTO mlops_workflow_sessions (
-                  session_id, journey_key, tenant_id, env_id, pipeline_id, pipeline_name,
+                  session_id, journey_key, tenant_id, env_id, pipeline_type, pipeline_id, pipeline_name,
                   run_id, deployment_id, publish_id, current_module, current_step,
                   current_state_json, last_stable_step, last_stable_state_json,
                   case_scope_json, selected_case_id, handoff_summary_json,
                   checkpoint_key, status, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 [
                     session_id,
                     journey_key,
                     tenant_id,
                     env_id,
+                    pipeline_type,
                     pipeline_id,
                     pipeline_name,
                     run_id,
@@ -4001,7 +5313,7 @@ class MLOpsWorkbenchService:
         with get_connection(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT steps_json
+                SELECT steps_json, name, pipeline_uuid
                 FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -4011,6 +5323,16 @@ class MLOpsWorkbenchService:
                 raise ValueError(f"Pipeline {pipeline_id} not found")
 
             steps = json.loads(row[0] or "[]")
+            pipeline_name = _normalize_text(row[1] or "")
+            pipeline_uuid = _normalize_optional_text(row[2]) or self._ensure_pipeline_uuid(
+                conn,
+                tenant_id,
+                env_id,
+                int(pipeline_id),
+                pipeline_type="mule" if screen_key.startswith("mule_") else "fcc",
+                model_family="mule" if screen_key.startswith("mule_") else "fcc",
+                name=pipeline_name,
+            )
             screen_states = _screen_state_map(steps or [])
             prior_state = screen_states.get(screen_key) or {}
             dependency_state = _dependency_state_payload(steps or {})
@@ -4027,8 +5349,15 @@ class MLOpsWorkbenchService:
             if next_fp:
                 fingerprints[screen_key] = next_fp
 
+            impacted_steps: List[str] = []
+            impacted_screens: set[str] = set()
             if screen_key in _DEPENDENCY_GRAPH and previous_fp and next_fp and previous_fp != next_fp:
                 impacted_steps = list(_DEPENDENCY_GRAPH.get(screen_key) or [])
+                impacted_screens = {
+                    str(_STEP_TO_SCREEN.get(step_id, step_id) or "").strip().lower()
+                    for step_id in impacted_steps
+                    if str(_STEP_TO_SCREEN.get(step_id, step_id) or "").strip()
+                }
                 changed_at = datetime.utcnow().isoformat()
                 message = _build_dependency_message(screen_key, impacted_steps)
                 source_step = _SCREEN_TO_STEP.get(screen_key, screen_key)
@@ -4057,7 +5386,7 @@ class MLOpsWorkbenchService:
                 step for step in (steps or [])
                 if not (
                     str(step.get("type") or "").strip().lower() == "screen_state"
-                    and str(step.get("screen") or "").strip().lower() in {screen_key, "workbench_dependencies"}
+                    and str(step.get("screen") or "").strip().lower() in {screen_key, "workbench_dependencies", *impacted_screens}
                 )
             ]
             next_steps.append({
@@ -4075,14 +5404,193 @@ class MLOpsWorkbenchService:
                 },
             })
 
-            conn.execute(
-                """
-                UPDATE mlops_pipelines
-                SET steps_json = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
-                """,
-                [json.dumps(next_steps, default=str), int(pipeline_id), tenant_id, env_id],
+            pipeline_dataset_ids = None
+            pipeline_dataset_id = None
+            if screen_key == "data_upload":
+                pipeline_dataset_ids = sorted({
+                    int(value)
+                    for value in (state.get("dataset_ids") or [])
+                    if _coerce_int(value) is not None and int(value) > 0
+                })
+                pipeline_dataset_id = pipeline_dataset_ids[0] if pipeline_dataset_ids else None
+
+                conn.execute(
+                    """
+                    UPDATE mlops_pipelines
+                    SET steps_json = ?, dataset_ids_json = ?, dataset_id = COALESCE(?, dataset_id),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                    """,
+                    [
+                        json.dumps(next_steps, default=str),
+                        json.dumps(pipeline_dataset_ids or [], default=str),
+                        pipeline_dataset_id,
+                        int(pipeline_id),
+                        tenant_id,
+                        env_id,
+                    ],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO mlops_pipeline_step_events (
+                      tenant_id, env_id, pipeline_id, session_id, screen, step_id,
+                      event_type, status, checkpoint_key, state_json
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        tenant_id,
+                        env_id,
+                        int(pipeline_id),
+                        None,
+                        screen_key,
+                        stage_id or screen_key,
+                        "screen_state_saved",
+                        "saved",
+                        str(fingerprints.get(screen_key) or ""),
+                        json.dumps(
+                            {
+                                "screen": screen_key,
+                                "state": state if isinstance(state, dict) else {},
+                                "stale_steps": stale_steps,
+                                "latest_change": latest_change,
+                            },
+                            default=str,
+                        ),
+                    ],
+                )
+                return {
+                    "pipeline_id": int(pipeline_id),
+                    "pipeline_name": pipeline_name,
+                    "screen": screen_key,
+                    "status": "saved",
+                }
+
+            active_training_job_id = _normalize_optional_text(
+                state.get("job_id")
+                or state.get("run_id")
+                or (state.get("active_model_run") or {}).get("job_id")
+                or (state.get("entry") or {}).get("job_id")
             )
+            active_validation_job_id = _normalize_optional_text(
+                state.get("validation_job_id")
+                or (state.get("validation_report") or {}).get("job_id")
+                or (state.get("report") or {}).get("job_id")
+                or (state.get("report") or {}).get("run_id")
+            )
+            active_registry_job_id = _normalize_optional_text(
+                state.get("registry_job_id")
+                or (state.get("registry_entry") or {}).get("job_id")
+                or (state.get("entry") or {}).get("job_id")
+            )
+            active_deployment_id = _normalize_optional_text(
+                state.get("deployment_id")
+                or (state.get("registry_entry") or {}).get("deployment_id")
+                or (state.get("entry") or {}).get("deployment_id")
+            )
+            locked_threshold = (
+                state.get("locked_threshold")
+                if state.get("locked_threshold") is not None
+                else state.get("selected_threshold")
+                if state.get("selected_threshold") is not None
+                else state.get("threshold")
+            )
+
+            mule_state_patch: Dict[str, Any] = {}
+            if screen_key.startswith("mule_") or screen_key in {
+                "mule_load",
+                "mule_dataset",
+                "mule_target",
+                "mule_features",
+                "mule_model",
+                "mule_validation",
+                "mule_typology",
+                "mule_publish",
+            }:
+                mule_state_patch = {
+                    screen_key: state if isinstance(state, dict) else {},
+                    "current_screen": screen_key,
+                }
+                try:
+                    pipeline_row = conn.execute(
+                        """
+                        SELECT pipeline_config_json, runtime_state_json
+                        FROM mlops_pipelines
+                        WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                        """,
+                        [int(pipeline_id), tenant_id, env_id],
+                    ).fetchone()
+                except Exception:
+                    pipeline_row = None
+                if pipeline_row:
+                    pipeline_config = _safe_json_loads(pipeline_row[0], {}) if pipeline_row[0] else {}
+                    runtime_state = _safe_json_loads(pipeline_row[1], {}) if pipeline_row[1] else {}
+                    mule_config_state = pipeline_config.get("mule_state") if isinstance(pipeline_config.get("mule_state"), dict) else {}
+                    mule_runtime_state = runtime_state.get("mule_state") if isinstance(runtime_state.get("mule_state"), dict) else {}
+                    mule_config_state.update(mule_state_patch)
+                    mule_runtime_state.update(mule_state_patch)
+                    pipeline_config["mule_state"] = mule_config_state
+                    runtime_state["mule_state"] = mule_runtime_state
+                    conn.execute(
+                        """
+                        UPDATE mlops_pipelines
+                        SET pipeline_config_json = ?, runtime_state_json = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                        """,
+                        [
+                            json.dumps(pipeline_config, default=str),
+                            json.dumps(runtime_state, default=str),
+                            int(pipeline_id),
+                            tenant_id,
+                            env_id,
+                        ],
+                    )
+
+            if screen_key == "data_upload":
+                conn.execute(
+                    """
+                    UPDATE mlops_pipelines
+                    SET steps_json = ?, dataset_ids_json = ?, dataset_id = COALESCE(?, dataset_id),
+                        active_training_job_id = ?, active_validation_job_id = ?, active_registry_job_id = ?,
+                        active_deployment_id = ?, locked_threshold = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                    """,
+                    [
+                        json.dumps(next_steps, default=str),
+                        json.dumps(pipeline_dataset_ids or [], default=str),
+                        pipeline_dataset_id,
+                        active_training_job_id,
+                        active_validation_job_id,
+                        active_registry_job_id,
+                        active_deployment_id,
+                        float(locked_threshold) if locked_threshold not in (None, "") else None,
+                        int(pipeline_id),
+                        tenant_id,
+                        env_id,
+                    ],
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE mlops_pipelines
+                    SET steps_json = ?, active_training_job_id = ?, active_validation_job_id = ?,
+                        active_registry_job_id = ?, active_deployment_id = ?, locked_threshold = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                    """,
+                    [
+                        json.dumps(next_steps, default=str),
+                        active_training_job_id,
+                        active_validation_job_id,
+                        active_registry_job_id,
+                        active_deployment_id,
+                        float(locked_threshold) if locked_threshold not in (None, "") else None,
+                        int(pipeline_id),
+                        tenant_id,
+                        env_id,
+                    ],
+                )
             conn.execute(
                 """
                 INSERT INTO mlops_pipeline_step_events (
@@ -4112,6 +5620,21 @@ class MLOpsWorkbenchService:
                     ),
                 ],
             )
+            try:
+                self._append_pipeline_step_v2(
+                    conn,
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id),
+                    step_code=screen_key,
+                    step_name=_PIPELINE_STEP_LABELS.get(stage_id or screen_key, screen_key.replace("_", " ").title()),
+                    status="saved",
+                    config={"screen": screen_key},
+                    state=state if isinstance(state, dict) else {},
+                    pipeline_uuid=pipeline_uuid,
+                )
+            except Exception:
+                pass
             self._replace_pipeline_stage_asset_links(
                 conn,
                 tenant_id,
@@ -4123,8 +5646,37 @@ class MLOpsWorkbenchService:
                     state if isinstance(state, dict) else {},
                 ),
             )
+            for impacted_screen in impacted_screens:
+                self._replace_pipeline_stage_asset_links(
+                    conn,
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id),
+                impacted_screen,
+                [],
+            )
+            try:
+                self._append_pipeline_step_v2(
+                    conn,
+                    tenant_id,
+                    env_id,
+                    int(pipeline_id),
+                    step_code=screen_key,
+                    step_name=_PIPELINE_STEP_LABELS.get(stage_id or screen_key, screen_key.replace("_", " ").title()),
+                    status="saved",
+                    config={"screen": screen_key},
+                    state=state if isinstance(state, dict) else {},
+                    pipeline_uuid=pipeline_uuid,
+                )
+            except Exception:
+                pass
 
-        return self.load_pipeline(tenant_id, env_id, int(pipeline_id))
+        return {
+            "pipeline_id": int(pipeline_id),
+            "pipeline_name": pipeline_name,
+            "screen": screen_key,
+            "status": "saved",
+        }
 
     def attach_pipeline_asset(
         self,
@@ -4979,32 +6531,93 @@ class MLOpsWorkbenchService:
             "preview": df.head(25).fillna("").to_dict(orient="records"),
         }
 
-    def list_datasets(self, tenant_id: str, env_id: str) -> List[Dict]:
+    def get_pipeline_identity(self, tenant_id: str, env_id: str, pipeline_id: int) -> Dict[str, Any]:
         with get_connection(self.db_path) as conn:
-            rows = conn.execute(
+            row = conn.execute(
                 """
-                SELECT dataset_id, dataset_type, filename, file_path, row_count, columns_json, column_types_json, created_at, updated_at
+                SELECT pipeline_id, pipeline_uuid, name, pipeline_type, model_family
+                FROM mlops_pipelines
+                WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                """,
+                [tenant_id, env_id, int(pipeline_id)],
+            ).fetchone()
+        if not row:
+            raise ValueError(f"Pipeline {pipeline_id} not found")
+        return {
+            "pipeline_id": int(row[0]),
+            "pipeline_uuid": _normalize_optional_text(row[1]),
+            "name": _normalize_optional_text(row[2]) or f"Pipeline {int(row[0])}",
+            "pipeline_type": _normalize_pipeline_type(row[3]),
+            "model_family": _normalize_optional_text(row[4]) or _normalize_pipeline_type(row[3]),
+        }
+
+    def list_datasets(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_type: Optional[str] = None,
+        pipeline_id: Optional[int] = None,
+    ) -> List[Dict]:
+        normalized_pipeline_type = _normalize_pipeline_type(pipeline_type) if pipeline_type else None
+        normalized_pipeline_id = None
+        try:
+            normalized_pipeline_id = int(pipeline_id) if pipeline_id not in (None, "", [], {}) else None
+        except Exception:
+            normalized_pipeline_id = None
+        if normalized_pipeline_id is not None and normalized_pipeline_id <= 0:
+            normalized_pipeline_id = None
+
+        query = """
+                SELECT dataset_id, pipeline_id, pipeline_type, dataset_type, filename, file_path, row_count, columns_json, column_types_json, created_at, updated_at
                 FROM mlops_dataset_registry
                 WHERE tenant_id = ? AND env_id = ?
-                ORDER BY updated_at DESC
-                """,
-                [tenant_id, env_id],
-            ).fetchall()
+                """
+        params: List[Any] = [tenant_id, env_id]
+        with get_connection(self.db_path) as conn:
+            if normalized_pipeline_id:
+                self._backfill_pipeline_asset_links(conn, tenant_id, env_id, [int(normalized_pipeline_id)])
+                linked_rows = conn.execute(
+                    """
+                    SELECT DISTINCT CAST(asset_id AS INTEGER)
+                    FROM mlops_pipeline_asset_links
+                    WHERE tenant_id = ? AND env_id = ? AND pipeline_id = ?
+                      AND asset_kind = 'dataset' AND asset_id IS NOT NULL
+                    """,
+                    [tenant_id, env_id, int(normalized_pipeline_id)],
+                ).fetchall()
+                linked_ids = sorted({
+                    int(row[0])
+                    for row in (linked_rows or [])
+                    if row and row[0] is not None
+                })
+                query += " AND (pipeline_id = ?"
+                params.append(int(normalized_pipeline_id))
+                if linked_ids:
+                    query += f" OR dataset_id IN ({', '.join(['?'] * len(linked_ids))})"
+                    params.extend(linked_ids)
+                query += ")"
+            if normalized_pipeline_type:
+                query += " AND pipeline_type = ?"
+                params.append(normalized_pipeline_type)
+            query += " ORDER BY updated_at DESC"
+            rows = conn.execute(query, params).fetchall()
 
         results = []
         for r in rows:
-            resolved_file_path = self._resolve_file_path(Path(r[3]))
+            resolved_file_path = self._resolve_file_path(Path(r[5]))
             results.append(
                 {
                     "dataset_id": int(r[0]),
-                    "dataset_type": r[1],
-                    "filename": r[2],
-                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[3]),
-                    "row_count": int(r[4] or 0),
-                    "columns": json.loads(r[5] or "[]"),
-                    "column_types": json.loads(r[6] or "{}"),
-                    "created_at": r[7].isoformat() if hasattr(r[7], "isoformat") else r[7],
-                    "updated_at": r[8].isoformat() if hasattr(r[8], "isoformat") else r[8],
+                    "pipeline_id": int(r[1]) if r[1] is not None else None,
+                    "pipeline_type": _normalize_text(r[2]).lower() or "fcc",
+                    "dataset_type": r[3],
+                    "filename": r[4],
+                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[5]),
+                    "row_count": int(r[6] or 0),
+                    "columns": json.loads(r[7] or "[]"),
+                    "column_types": json.loads(r[8] or "{}"),
+                    "created_at": r[9].isoformat() if hasattr(r[9], "isoformat") else r[9],
+                    "updated_at": r[10].isoformat() if hasattr(r[10], "isoformat") else r[10],
                 }
             )
         return results
@@ -5064,6 +6677,140 @@ class MLOpsWorkbenchService:
             "created_at": row[9].isoformat() if hasattr(row[9], "isoformat") else row[9],
             "updated_at": row[10].isoformat() if hasattr(row[10], "isoformat") else row[10],
         }
+
+    def build_mule_analytical_dataset(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        source_dataset_ids: Optional[List[int]] = None,
+        dataset_name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mule_service = MulePipelineService(self.db_path)
+        return mule_service.build_analytical_dataset(
+            tenant_id,
+            env_id,
+            pipeline_id,
+            source_dataset_ids=source_dataset_ids,
+            dataset_name=dataset_name,
+            config=config,
+        )
+
+    def define_mule_outcome(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        dataset_id: Optional[int] = None,
+        target_definition_type: Optional[str] = None,
+        lookback_days: Optional[int] = None,
+        lookforward_days: Optional[int] = None,
+        prediction_grain: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mule_service = MulePipelineService(self.db_path)
+        return mule_service.define_outcome(
+            tenant_id,
+            env_id,
+            pipeline_id,
+            dataset_id=dataset_id,
+            target_definition_type=target_definition_type,
+            lookback_days=lookback_days,
+            lookforward_days=lookforward_days,
+            prediction_grain=prediction_grain,
+            config=config,
+        )
+
+    def generate_mule_risk_indicators(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        dataset_id: Optional[int] = None,
+        feature_families: Optional[List[str]] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mule_service = MulePipelineService(self.db_path)
+        return mule_service.generate_risk_indicators(
+            tenant_id,
+            env_id,
+            pipeline_id,
+            dataset_id=dataset_id,
+            feature_families=feature_families,
+            config=config,
+        )
+
+    def train_mule_detection_model(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        dataset_id: Optional[int] = None,
+        model_kind: Optional[str] = None,
+        benchmark_enabled: bool = True,
+        anomaly_enabled: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mule_service = MulePipelineService(self.db_path)
+        return mule_service.train_detection_model(
+            tenant_id,
+            env_id,
+            pipeline_id,
+            dataset_id=dataset_id,
+            model_kind=model_kind,
+            benchmark_enabled=benchmark_enabled,
+            anomaly_enabled=anomaly_enabled,
+            config=config,
+        )
+
+    def review_mule_typology_signals(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        model_run_id: Optional[int] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mule_service = MulePipelineService(self.db_path)
+        return mule_service.review_typology_signals(
+            tenant_id,
+            env_id,
+            pipeline_id,
+            model_run_id=model_run_id,
+            config=config,
+        )
+
+    def publish_mule_high_risk_accounts(
+        self,
+        tenant_id: str,
+        env_id: str,
+        pipeline_id: int,
+        *,
+        model_run_id: Optional[int] = None,
+        threshold: float = 0.72,
+        capacity: int = 250,
+        source_record_type: str = "high_risk_account",
+        destination_queue: str = "Sentinel Mule Intake",
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        mule_service = MulePipelineService(self.db_path)
+        return mule_service.publish_high_risk_accounts(
+            tenant_id,
+            env_id,
+            pipeline_id,
+            model_run_id=model_run_id,
+            threshold=threshold,
+            capacity=capacity,
+            source_record_type=source_record_type,
+            destination_queue=destination_queue,
+            config=config,
+        )
 
     def preview_dataset_rows(
         self,

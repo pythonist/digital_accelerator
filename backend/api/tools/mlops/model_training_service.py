@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pickle
 import threading
 import traceback
@@ -52,6 +53,14 @@ from api.tools.mlops.path_utils import resolve_data_file_path
 from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 import numpy as np
 import pandas as pd
+
+try:
+    import mlflow
+    import mlflow.sklearn
+    from mlflow.models.signature import infer_signature
+except Exception:  # pragma: no cover - optional dependency
+    mlflow = None
+    infer_signature = None
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +231,13 @@ def _assign_nearest_centroid_labels(
 # ─────────────────────────────────────────────────────────────────────────────
 
 GRAIN_CONFIG = {
+    "account": {
+        "id_column":           "ACCOUNT_ID",
+        "default_target":      "mule_flag",
+        "positive_label":      "mule detected",
+        "negative_label":      "non-mule / negative",
+        "description":         "1 row = 1 account. Predicts account-level mule detection outcomes.",
+    },
     "alert": {
         "id_column":           "ALERT_ID",
         "default_target":      "IS_TRUE_POS",
@@ -347,6 +363,47 @@ def _hml_summary(
     summary["total_alerts"]            = n
     summary["total_positives"]         = total_pos
     return summary
+
+
+def _json_artifact_path(prefix: str, payload: Dict[str, Any]) -> Path:
+    import tempfile
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix=str(prefix or "mlflow_artifact_")))
+    path = tmp_dir / "artifact.json"
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path
+
+
+class _MLflowStepRun:
+    def __init__(self, enabled: bool, run_name: str):
+        self.enabled = bool(enabled and mlflow is not None)
+        self.run_name = run_name
+        self._ctx = None
+        self.run = None
+
+    def __enter__(self):
+        if not self.enabled:
+            return None
+        self._ctx = mlflow.start_run(run_name=self.run_name, nested=True)
+        self.run = self._ctx.__enter__()
+        return self.run
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._ctx is None:
+            return False
+        return self._ctx.__exit__(exc_type, exc, tb)
+
+
+def _mlflow_enabled() -> bool:
+    return mlflow is not None and str(os.getenv("MLFLOW_DISABLED") or "").strip().lower() not in {"1", "true", "yes"}
+
+
+def _normalize_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2649,6 +2706,20 @@ class ModelTrainingService:
         env_root = Path(self.model_dir).resolve().parents[1]
         return resolve_data_file_path(file_path, env_root=env_root)
 
+    def _configure_mlflow_tracking(self) -> Optional[str]:
+        if mlflow is None:
+            return None
+        configured = str(os.getenv("MLFLOW_TRACKING_URI") or "").strip()
+        if configured:
+            mlflow.set_tracking_uri(configured)
+            return configured
+        env_root = Path(self.model_dir).resolve().parents[1]
+        tracking_dir = env_root / "mlops" / "mlflow" / "mlruns"
+        tracking_dir.mkdir(parents=True, exist_ok=True)
+        tracking_uri = tracking_dir.resolve().as_uri()
+        mlflow.set_tracking_uri(tracking_uri)
+        return tracking_uri
+
     # ── Job store helpers ──────────────────────────────────────────────────────
 
     def _new_job(self, job_id: str) -> Dict:
@@ -3306,6 +3377,8 @@ class ModelTrainingService:
         random_state: int,
         tenant_id: str,
         env_id: str,
+        pipeline_id: Optional[int] = None,
+        pipeline_name: str = "",
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
@@ -3688,6 +3761,8 @@ class ModelTrainingService:
             feature_diagnostics=feature_diag,
             selected_threshold=0.5,
             artifact_path=str(artifact_path),
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
             grain=grain,
             hml_high_threshold=hml_high_threshold,
             hml_low_threshold=hml_low_threshold,
@@ -3715,6 +3790,8 @@ class ModelTrainingService:
         random_state: int,
         tenant_id: str,
         env_id: str,
+        pipeline_id: Optional[int] = None,
+        pipeline_name: str = "",
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
@@ -4030,6 +4107,8 @@ class ModelTrainingService:
             feature_diagnostics=feature_diag,
             selected_threshold=0.5,
             artifact_path=str(artifact_path),
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
             grain=grain,
             hml_high_threshold=hml_high_threshold,
             hml_low_threshold=hml_low_threshold,
@@ -4054,7 +4133,9 @@ class ModelTrainingService:
                            selected_threshold, algorithm, target_column,
                            artifact_path, dataset_id, trained_at,
                            grain, hml_high_threshold, hml_low_threshold,
-                           validation_json
+                           validation_json, feature_columns_json,
+                           hyperparams_json, training_config_json,
+                           pipeline_id, pipeline_name
                     FROM model_training_runs WHERE job_id = ?
                     """,
                     [job_id],
@@ -4069,6 +4150,18 @@ class ModelTrainingService:
             validation = json.loads(row[12] or "{}")
         except Exception:
             validation = {}
+        try:
+            feature_columns = json.loads(row[13] or "[]")
+        except Exception:
+            feature_columns = []
+        try:
+            hyperparams = json.loads(row[14] or "{}")
+        except Exception:
+            hyperparams = {}
+        try:
+            training_config = json.loads(row[15] or "{}")
+        except Exception:
+            training_config = {}
         if result_json:
             try:
                 result = json.loads(result_json)
@@ -4077,6 +4170,16 @@ class ModelTrainingService:
                         result.pop(k, None)
                     if isinstance(validation, dict) and validation:
                         result["validation"] = validation
+                    if isinstance(feature_columns, list) and feature_columns:
+                        result.setdefault("feature_columns", feature_columns)
+                    if isinstance(hyperparams, dict) and hyperparams:
+                        result.setdefault("hyperparams", hyperparams)
+                    if isinstance(training_config, dict) and training_config:
+                        result.setdefault("training_config", training_config)
+                    if row[16] is not None:
+                        result.setdefault("pipeline_id", int(row[16]))
+                    if row[17]:
+                        result.setdefault("pipeline_name", str(row[17]))
                     return result
             except Exception:
                 pass
@@ -4101,6 +4204,11 @@ class ModelTrainingService:
             "hml_low_threshold":  float(row[11]) if row[11] is not None else 0.35,
             "metrics":            metrics,
             "feature_diagnostics":feature_diagnostics,
+            "feature_columns":    feature_columns if isinstance(feature_columns, list) else [],
+            "hyperparams":        hyperparams if isinstance(hyperparams, dict) else {},
+            "training_config":    training_config if isinstance(training_config, dict) else {},
+            "pipeline_id":        int(row[16]) if row[16] is not None else None,
+            "pipeline_name":      str(row[17] or ""),
             "validation":         validation if isinstance(validation, dict) else {},
         }
 
@@ -4154,6 +4262,11 @@ class ModelTrainingService:
                     "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS test_truth_json TEXT",
                     "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS test_prob_json TEXT",
                     "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS feature_diagnostics_json TEXT",
+                    "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS feature_columns_json TEXT",
+                    "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS hyperparams_json TEXT",
+                    "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS training_config_json TEXT",
+                    "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS pipeline_id BIGINT",
+                    "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS pipeline_name TEXT",
                     "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS selected_threshold DOUBLE",
                     "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS validation_json TEXT",
                     "ALTER TABLE model_training_runs ADD COLUMN IF NOT EXISTS model_name TEXT",
@@ -4257,6 +4370,8 @@ class ModelTrainingService:
         random_state: int = 42,
         tenant_id: str = "",
         env_id: str = "",
+        pipeline_id: Optional[int] = None,
+        pipeline_name: str = "",
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
@@ -4293,6 +4408,8 @@ class ModelTrainingService:
             random_state=random_state,
             tenant_id=tenant_id,
             env_id=env_id,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
             grain=grain,
             hml_high_threshold=hml_high_threshold,
             hml_low_threshold=hml_low_threshold,
@@ -4321,6 +4438,8 @@ class ModelTrainingService:
         random_state: int,
         tenant_id: str,
         env_id: str,
+        pipeline_id: Optional[int] = None,
+        pipeline_name: str = "",
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
@@ -4336,6 +4455,9 @@ class ModelTrainingService:
         )
 
         log = self._append_log
+        mlflow_active = _mlflow_enabled()
+        mlflow_parent_ctx = None
+        mlflow_failure: Optional[BaseException] = None
 
         try:
             mode_key = str(mode or "supervised").strip().lower()
@@ -4352,6 +4474,8 @@ class ModelTrainingService:
                     random_state=random_state,
                     tenant_id=tenant_id,
                     env_id=env_id,
+                    pipeline_id=pipeline_id,
+                    pipeline_name=pipeline_name,
                     grain=grain,
                     hml_high_threshold=hml_high_threshold,
                     hml_low_threshold=hml_low_threshold,
@@ -4373,6 +4497,8 @@ class ModelTrainingService:
                     random_state=random_state,
                     tenant_id=tenant_id,
                     env_id=env_id,
+                    pipeline_id=pipeline_id,
+                    pipeline_name=pipeline_name,
                     grain=grain,
                     hml_high_threshold=hml_high_threshold,
                     hml_low_threshold=hml_low_threshold,
@@ -4381,6 +4507,52 @@ class ModelTrainingService:
                     date_column=date_column,
                 )
                 return
+
+            if mlflow_active:
+                experiment_name = str(pipeline_name or dataset.get("pipeline_name") or algorithm or "mlops_pipeline").strip() or "mlops_pipeline"
+                try:
+                    tracking_uri = self._configure_mlflow_tracking()
+                    mlflow.set_experiment(experiment_name)
+                    mlflow_parent_ctx = mlflow.start_run(run_name=f"{experiment_name}:{job_id}", nested=False)
+                    mlflow_parent_ctx.__enter__()
+                    mlflow.set_tags({
+                        "pipeline_name": str(pipeline_name or experiment_name),
+                        "pipeline_id": str(pipeline_id or ""),
+                        "job_id": str(job_id),
+                        "tenant_id": str(tenant_id or ""),
+                        "env_id": str(env_id or ""),
+                        "grain": str(grain or "alert"),
+                        "algorithm": str(algorithm or ""),
+                        "mode": str(mode_key),
+                        "user": str(os.getenv("USER") or os.getenv("USERNAME") or "unknown"),
+                        "version": str(dataset.get("version") or dataset.get("pipeline_version") or "v1"),
+                        "tracking_uri": str(tracking_uri or ""),
+                    })
+                    mlflow.log_params({
+                        "algorithm": str(algorithm or ""),
+                        "mode": str(mode_key),
+                        "pipeline_name": str(pipeline_name or ""),
+                        "pipeline_id": str(pipeline_id or ""),
+                        "grain": str(grain or "alert"),
+                        "random_state": int(random_state),
+                        "test_size": float(test_size),
+                        "cv_folds": int(cv_folds),
+                        "stratify": bool(stratify),
+                        "split_strategy": str(split_strategy or DEFAULT_SPLIT_STRATEGY),
+                        "split_date": str(split_date or ""),
+                        "date_column": str(date_column or ""),
+                    })
+                    if hyperparams:
+                        mlflow.log_dict(_to_jsonable(hyperparams), "params/hyperparams.json")
+                except Exception as mlflow_setup_exc:
+                    logger.warning("MLflow setup failed for %s: %s", job_id, mlflow_setup_exc)
+                    mlflow_active = False
+                    if mlflow_parent_ctx is not None:
+                        try:
+                            mlflow_parent_ctx.__exit__(None, None, None)
+                        except Exception:
+                            pass
+                        mlflow_parent_ctx = None
 
             self._update_job(job_id, status="running")
 
@@ -4398,6 +4570,34 @@ class ModelTrainingService:
 
             log(job_id, f"Dataset loaded: {len(df):,} rows × {df.shape[1]} columns "
                         f"[grain={grain}, id_col={id_col}]", 0.06)
+
+            if mlflow_active:
+                with _MLflowStepRun(mlflow_active, "data_loading"):
+                    try:
+                        mlflow.log_params({
+                            "dataset_id": int(dataset.get("dataset_id") or 0),
+                            "dataset_name": str(dataset.get("name") or dataset.get("filename") or file_path.name),
+                            "source_path": str(file_path),
+                            "rows": int(len(df)),
+                            "columns": int(df.shape[1]),
+                            "grain": str(grain or "alert"),
+                            "target_column": str(target_column or ""),
+                        })
+                        mlflow.log_artifact(
+                            str(_json_artifact_path(
+                                f"{job_id}_dataset_",
+                                {
+                                    "dataset": _to_jsonable(dataset),
+                                    "resolved_file_path": str(file_path),
+                                    "row_count": int(len(df)),
+                                    "column_count": int(df.shape[1]),
+                                    "grain": str(grain or "alert"),
+                                },
+                            )),
+                            artifact_path="data_loading",
+                        )
+                    except Exception as mlflow_data_exc:
+                        logger.warning("MLflow data-loading logging failed for %s: %s", job_id, mlflow_data_exc)
 
             if target_column not in df.columns:
                 raise ValueError(
@@ -4437,6 +4637,32 @@ class ModelTrainingService:
                         f"{feature_diag.get('categorical_columns',0)} categorical)", 0.20)
 
             # ── 3. Train / test split ─────────────────────────────────────────
+            if mlflow_active:
+                with _MLflowStepRun(mlflow_active, "preprocessing"):
+                    try:
+                        mlflow.log_params({
+                            "feature_count": int(len(feature_names)),
+                            "numeric_columns": int(feature_diag.get("numeric_columns", 0) or 0),
+                            "categorical_columns": int(feature_diag.get("categorical_columns", 0) or 0),
+                            "prep_ms": round(prep_ms, 2),
+                        })
+                        mlflow.log_dict(_to_jsonable(feature_diag), "preprocessing/feature_diagnostics.json")
+                        mlflow.log_dict(_to_jsonable(enrichment_meta), "preprocessing/enrichment_meta.json")
+                        mlflow.log_artifact(
+                            str(_json_artifact_path(
+                                f"{job_id}_feature_list_",
+                                {
+                                    "feature_names": feature_names,
+                                    "feature_count": int(len(feature_names)),
+                                    "target_column": str(target_column),
+                                    "grain": str(grain or "alert"),
+                                },
+                            )),
+                            artifact_path="preprocessing",
+                        )
+                    except Exception as mlflow_prep_exc:
+                        logger.warning("MLflow preprocessing logging failed for %s: %s", job_id, mlflow_prep_exc)
+
             split_started = perf_counter()
             X_train, X_test, y_train, y_test, split_meta = _split_dataset(
                 X_enc,
@@ -4487,6 +4713,19 @@ class ModelTrainingService:
                         f"(sample_weight_applied={use_sample_weight})", 0.265)
 
             # ── 4. Cross-validation ───────────────────────────────────────────
+            if mlflow_active:
+                with _MLflowStepRun(mlflow_active, "training"):
+                    try:
+                        mlflow.log_params({
+                            "class_weight_0": float(neg_w),
+                            "class_weight_1": float(pos_w),
+                            "sample_weight_applied": bool(use_sample_weight),
+                            "cv_folds": int(cv_folds),
+                            "test_size": float(test_size),
+                        })
+                    except Exception as mlflow_train_param_exc:
+                        logger.warning("MLflow training param logging failed for %s: %s", job_id, mlflow_train_param_exc)
+
             log(job_id, f"Running {cv_folds}-fold stratified cross-validation...", 0.28)
             cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
             cv_scores: List[float] = []
@@ -4642,6 +4881,18 @@ class ModelTrainingService:
             f1          = float(f1_score(y_true_arr, y_pred_05, zero_division=0))
             precision   = float(precision_score(y_true_arr, y_pred_05, zero_division=0))
             recall      = float(recall_score(y_true_arr, y_pred_05, zero_division=0))
+            if mlflow_active:
+                with _MLflowStepRun(mlflow_active, "evaluation"):
+                    try:
+                        mlflow.log_metrics({
+                            "roc_auc": float(auc),
+                            "pr_auc": float(pr_auc),
+                            "f1": float(f1),
+                            "precision": float(precision),
+                            "recall": float(recall),
+                        })
+                    except Exception as mlflow_eval_metric_exc:
+                        logger.warning("MLflow evaluation metric logging failed for %s: %s", job_id, mlflow_eval_metric_exc)
             log(job_id, f"AUC={auc:.4f}  F1={f1:.4f}  P={precision:.4f}  R={recall:.4f}", 0.82)
 
             # ── 8. Curves & threshold table ───────────────────────────────────
@@ -4721,6 +4972,29 @@ class ModelTrainingService:
                     2,
                 ),
             }
+
+            if mlflow_active:
+                with _MLflowStepRun(mlflow_active, "evaluation"):
+                    try:
+                        mlflow.log_metrics({
+                            "suppression_rate_pct": float(optimized_threshold["metrics"]["suppression_rate_pct"]),
+                            "event_loss_pct": float(optimized_threshold["metrics"]["event_loss_pct"]),
+                            "cv_auc_mean": float(cv_mean),
+                            "cv_auc_std": float(cv_std),
+                            "accuracy": float(accuracy),
+                            "specificity": float(specificity),
+                            "balanced_accuracy": float(balanced_accuracy),
+                        })
+                        mlflow.log_dict(_to_jsonable({
+                            "roc_curve": roc_curve_data,
+                            "pr_curve": pr_curve_data,
+                            "threshold_table": threshold_table,
+                            "baseline_threshold": baseline_threshold,
+                            "optimized_threshold": optimized_threshold,
+                            "improvement_vs_baseline": improvement,
+                        }), "evaluation/evaluation_artifacts.json")
+                    except Exception as mlflow_eval_artifact_exc:
+                        logger.warning("MLflow evaluation artifact logging failed for %s: %s", job_id, mlflow_eval_artifact_exc)
 
             log(job_id,
                 f"HML bands — HIGH: {hml_result['high']['count']:,} "
@@ -4805,6 +5079,41 @@ class ModelTrainingService:
             log(job_id, f"[OK] Artefact saved: {artifact_path.name}", 0.96)
 
             # ── 12. Assemble result ───────────────────────────────────────────
+            if mlflow_active:
+                try:
+                    signature = None
+                    if infer_signature is not None:
+                        sig_input = X_train.head(min(len(X_train), 25)).copy()
+                        sig_output = _predict_binary_probability(calibrated_model, sig_input)
+                        signature = infer_signature(sig_input, sig_output)
+                    input_example = X_train.head(min(len(X_train), 5)).copy()
+                    mlflow.sklearn.log_model(
+                        calibrated_model,
+                        artifact_path="model",
+                        signature=signature,
+                        input_example=input_example if len(input_example) else None,
+                    )
+                    mlflow.log_artifact(str(artifact_path), artifact_path="model_pickle")
+                    mlflow.log_dict(_to_jsonable({
+                        "job_id": job_id,
+                        "algorithm": algorithm,
+                        "pipeline_name": pipeline_name,
+                        "pipeline_id": pipeline_id,
+                        "grain": grain,
+                        "target_column": target_column,
+                        "feature_columns": feature_names,
+                        "random_state": int(random_state),
+                        "hyperparams": hyperparams,
+                        "class_weight": class_weight_cfg,
+                        "calibration": calibration_meta,
+                        "threshold": BUSINESS_DEFAULT_THRESHOLD,
+                        "hml_high_threshold": hml_high_threshold,
+                        "hml_low_threshold": hml_low_threshold,
+                        "artifact_path": str(artifact_path),
+                    }), "model_metadata/model_bundle.json")
+                except Exception as mlflow_model_exc:
+                    logger.warning("MLflow model logging failed for %s: %s", job_id, mlflow_model_exc)
+
             result = {
                 "job_id":              job_id,
                 "dataset_id":          int(dataset.get("dataset_id") or 0),
@@ -4825,6 +5134,10 @@ class ModelTrainingService:
                 "train_rows":          int(len(X_train)),
                 "test_rows":           int(len(X_test)),
                 "features_used":       int(len(feature_names)),
+                "feature_columns":     feature_names,
+                "test_size":           float(test_size),
+                "stratify":            bool(stratify),
+                "random_state":        int(random_state),
                 "selected_threshold":  BUSINESS_DEFAULT_THRESHOLD,
                 "configured_threshold": BUSINESS_DEFAULT_THRESHOLD,
                 "deployable_threshold": deploy_threshold_policy.get("deployable_threshold"),
@@ -4833,6 +5146,8 @@ class ModelTrainingService:
                 "cv_folds":            cv_folds,
                 "trained_at":          datetime.utcnow().isoformat(),
                 "artifact_path":       str(artifact_path),
+                "pipeline_id":         int(pipeline_id) if pipeline_id not in (None, "", []) else None,
+                "pipeline_name":       str(pipeline_name or ""),
                 "summary": {
                     "dataset_id": int(dataset.get("dataset_id") or 0),
                     "dataset_name": str(dataset.get("name") or dataset.get("filename") or file_path.name),
@@ -4935,6 +5250,8 @@ class ModelTrainingService:
                     feature_diagnostics=feature_diag,
                     selected_threshold=BUSINESS_DEFAULT_THRESHOLD,
                     artifact_path=str(artifact_path),
+                    pipeline_id=pipeline_id,
+                    pipeline_name=pipeline_name,
                     internals=internals,
                 )
             except Exception as db_exc:
@@ -4963,6 +5280,7 @@ class ModelTrainingService:
                 self._job_store[job_id]["logs"].append("[OK] Job complete — proceed to Evaluate tab.")
 
         except Exception as exc:
+            mlflow_failure = exc
             tb = traceback.format_exc()
             logger.error("Training job %s failed: %s\n%s", job_id, exc, tb)
             with self._store_lock:
@@ -4972,6 +5290,12 @@ class ModelTrainingService:
                 job["current_stage"] = "Failed"
                 job.setdefault("logs", []).append(f"[ERROR] {exc}")
                 job["logs"].append(tb)
+        finally:
+            if mlflow_parent_ctx is not None:
+                try:
+                    mlflow_parent_ctx.__exit__(type(mlflow_failure), mlflow_failure, getattr(mlflow_failure, "__traceback__", None))
+                except Exception as mlflow_close_exc:
+                    logger.warning("Failed to close MLflow run for %s: %s", job_id, mlflow_close_exc)
 
     # ── Threshold re-scoring (existing — unchanged signature) ──────────────────
 
@@ -6304,7 +6628,10 @@ class ModelTrainingService:
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
         test_size: float = 0.2,
+        stratify: bool = True,
         random_state: int = 42,
+        pipeline_id: Optional[int] = None,
+        pipeline_name: str = "",
         changed_by: str = "",
     ) -> Dict:
         """
@@ -6316,6 +6643,11 @@ class ModelTrainingService:
             roc_curve, precision_recall_curve, confusion_matrix, average_precision_score,
         )
         from sklearn.model_selection import train_test_split
+
+        mlflow_active = _mlflow_enabled()
+        mlflow_parent_ctx = None
+        mlflow_failure: Optional[BaseException] = None
+        tracking_uri: Optional[str] = None
 
         raw_fp = self._resolve_file_path(Path(file_path))
         if not raw_fp.exists():
@@ -6346,8 +6678,67 @@ class ModelTrainingService:
             except Exception:
                 feature_columns = []
 
+        if mlflow_active:
+            experiment_name = str(pipeline_name or dataset.get("pipeline_name") or model_name or algorithm or "imported_model").strip() or "imported_model"
+            try:
+                tracking_uri = self._configure_mlflow_tracking()
+                mlflow.set_experiment(experiment_name)
+                mlflow_parent_ctx = mlflow.start_run(run_name=f"{experiment_name}:import:{Path(file_path).stem}", nested=False)
+                mlflow_parent_ctx.__enter__()
+                mlflow.set_tags({
+                    "pipeline_name": str(pipeline_name or experiment_name),
+                    "pipeline_id": str(pipeline_id or ""),
+                    "tenant_id": str(tenant_id or ""),
+                    "env_id": str(env_id or ""),
+                    "grain": str(grain or "alert"),
+                    "algorithm": f"uploaded::{algorithm}",
+                    "mode": "imported_model",
+                    "user": str(changed_by or os.getenv("USER") or os.getenv("USERNAME") or "unknown"),
+                    "version": str(dataset.get("version") or dataset.get("pipeline_version") or "v1"),
+                    "tracking_uri": str(tracking_uri or ""),
+                })
+                mlflow.log_params({
+                    "dataset_id": int(dataset_id),
+                    "dataset_name": str(dataset.get("name") or dataset.get("filename") or dataset_file_path.name),
+                    "target_column": str(target_column),
+                    "selected_threshold": float(selected_threshold),
+                    "grain": str(grain or "alert"),
+                    "test_size": max(0.05, min(float(test_size), 0.8)),
+                    "stratify": bool(stratify),
+                    "random_state": int(random_state),
+                    "pipeline_id": str(pipeline_id or ""),
+                    "pipeline_name": str(pipeline_name or ""),
+                })
+            except Exception as mlflow_setup_exc:
+                logger.warning("MLflow setup failed for imported model %s: %s", file_path, mlflow_setup_exc)
+                mlflow_active = False
+                if mlflow_parent_ctx is not None:
+                    try:
+                        mlflow_parent_ctx.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                    mlflow_parent_ctx = None
+
         ext = dataset_file_path.suffix.lower()
         df = pd.read_parquet(dataset_file_path) if ext == ".parquet" else pd.read_csv(dataset_file_path, low_memory=False)
+        if mlflow_active:
+            with _MLflowStepRun(mlflow_active, "data_loading"):
+                try:
+                    mlflow.log_artifact(
+                        str(_json_artifact_path(
+                            f"import_model_{dataset_id}_",
+                            {
+                                "dataset": _to_jsonable(dataset),
+                                "dataset_file_path": str(dataset_file_path),
+                                "model_file_path": str(raw_fp),
+                                "row_count": int(len(df)),
+                                "column_count": int(df.shape[1]),
+                            },
+                        )),
+                        artifact_path="data_loading",
+                    )
+                except Exception as mlflow_data_exc:
+                    logger.warning("MLflow imported-model data logging failed for %s: %s", file_path, mlflow_data_exc)
 
         if target_column not in df.columns:
             raise ValueError(f"Target column '{target_column}' not found in dataset")
@@ -6355,7 +6746,24 @@ class ModelTrainingService:
             raise ValueError(f"Target column '{target_column}' has fewer than 2 classes")
 
         X_enc, y, prepared_features, feature_diag = _prepare_features(df, target_column, grain=grain)
-        strat_y = y if int(y.nunique()) > 1 else None
+        if mlflow_active:
+            with _MLflowStepRun(mlflow_active, "preprocessing"):
+                try:
+                    mlflow.log_dict(_to_jsonable(feature_diag), "preprocessing/feature_diagnostics.json")
+                    mlflow.log_artifact(
+                        str(_json_artifact_path(
+                            f"import_model_features_{dataset_id}_",
+                            {
+                                "feature_names": prepared_features,
+                                "feature_count": int(len(prepared_features)),
+                                "target_column": str(target_column),
+                            },
+                        )),
+                        artifact_path="preprocessing",
+                    )
+                except Exception as mlflow_prep_exc:
+                    logger.warning("MLflow imported-model preprocessing logging failed for %s: %s", file_path, mlflow_prep_exc)
+        strat_y = y if (bool(stratify) and int(y.nunique()) > 1) else None
         X_train, X_test, y_train, y_test = train_test_split(
             X_enc,
             y,
@@ -6418,6 +6826,30 @@ class ModelTrainingService:
         selected_threshold = float(max(0.0, min(float(selected_threshold), 1.0)))
         selected_row = min(threshold_table, key=lambda r: abs(float(r.get("threshold") or 0.5) - selected_threshold)) if threshold_table else {}
         feature_importance = _extract_feature_importance(model, model_features)
+        if mlflow_active:
+            with _MLflowStepRun(mlflow_active, "evaluation"):
+                try:
+                    mlflow.log_metrics({
+                        "roc_auc": float(auc),
+                        "pr_auc": float(pr_auc),
+                        "f1": float(f1),
+                        "precision": float(precision),
+                        "recall": float(recall),
+                        "accuracy": float(accuracy),
+                        "specificity": float(specificity),
+                        "balanced_accuracy": float(balanced_accuracy),
+                        "suppression_rate_pct": float(selected_row.get("suppression_rate_pct") or 0.0),
+                        "event_loss_pct": float(selected_row.get("event_loss_pct") or 0.0),
+                    })
+                    mlflow.log_dict(_to_jsonable({
+                        "roc_curve": roc_curve_data,
+                        "pr_curve": pr_curve_data,
+                        "threshold_table": threshold_table,
+                        "selected_row": selected_row,
+                        "hml_summary": hml_result,
+                    }), "evaluation/evaluation_artifacts.json")
+                except Exception as mlflow_eval_exc:
+                    logger.warning("MLflow imported-model evaluation logging failed for %s: %s", file_path, mlflow_eval_exc)
 
         job_id = f"uploaded_{uuid.uuid4().hex}"
         artifact_path = self.model_dir / f"{job_id}.pkl"
@@ -6439,6 +6871,38 @@ class ModelTrainingService:
                 fh,
                 protocol=pickle.HIGHEST_PROTOCOL,
             )
+        if mlflow_active:
+            with _MLflowStepRun(mlflow_active, "training"):
+                try:
+                    signature = None
+                    if infer_signature is not None:
+                        sig_input = X_eval.head(min(len(X_eval), 25)).copy()
+                        sig_output = _predict_binary_probability(model, sig_input)
+                        signature = infer_signature(sig_input, sig_output)
+                    input_example = X_eval.head(min(len(X_eval), 5)).copy()
+                    mlflow.sklearn.log_model(
+                        model,
+                        artifact_path="model",
+                        signature=signature,
+                        input_example=input_example if len(input_example) else None,
+                    )
+                    mlflow.log_artifact(str(artifact_path), artifact_path="model_pickle")
+                    mlflow.log_dict(_to_jsonable({
+                        "job_id": job_id,
+                        "algorithm": f"uploaded::{algorithm}",
+                        "pipeline_id": pipeline_id,
+                        "pipeline_name": pipeline_name,
+                        "feature_columns": model_features,
+                        "target_column": target_column,
+                        "selected_threshold": selected_threshold,
+                        "random_state": int(random_state),
+                        "test_size": max(0.05, min(float(test_size), 0.8)),
+                        "stratify": bool(stratify),
+                        "artifact_path": str(artifact_path),
+                        "source_model_path": str(raw_fp),
+                    }), "model_metadata/imported_model_bundle.json")
+                except Exception as mlflow_model_exc:
+                    logger.warning("MLflow imported-model artifact logging failed for %s: %s", file_path, mlflow_model_exc)
 
         result = {
             "job_id": job_id,
@@ -6452,10 +6916,16 @@ class ModelTrainingService:
             "train_rows": int(len(X_train)),
             "test_rows": int(len(X_test)),
             "features_used": int(len(model_features)),
+            "feature_columns": model_features,
+            "test_size": max(0.05, min(float(test_size), 0.8)),
+            "stratify": bool(stratify),
+            "random_state": int(random_state),
             "selected_threshold": selected_threshold,
             "trained_at": datetime.utcnow().isoformat(),
             "artifact_path": str(artifact_path),
             "source": "uploaded",
+            "pipeline_id": int(pipeline_id) if pipeline_id not in (None, "", []) else None,
+            "pipeline_name": str(pipeline_name or ""),
             "metrics": {
                 "roc_auc": round(auc, 4),
                 "pr_auc": round(pr_auc, 4),
@@ -6506,6 +6976,8 @@ class ModelTrainingService:
             feature_diagnostics=feature_diag,
             selected_threshold=selected_threshold,
             artifact_path=str(artifact_path),
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
             internals={
                 "viz_type": "feature_importance",
                 "data": feature_importance,
@@ -6545,7 +7017,16 @@ class ModelTrainingService:
             changed_by=changed_by,
         )
 
+        if mlflow_parent_ctx is not None:
+            try:
+                mlflow_parent_ctx.__exit__(None, None, None)
+            except Exception as mlflow_close_exc:
+                logger.warning("Failed to close imported-model MLflow run for %s: %s", job_id, mlflow_close_exc)
+            finally:
+                mlflow_parent_ctx = None
+
         return {
+            "tracking_uri": tracking_uri,
             "job_id": job_id,
             "metrics": result.get("metrics"),
             "registry_entry": registry_entry,
@@ -6655,6 +7136,8 @@ class ModelTrainingService:
                         "leakage_features": leakage_features,
                         "quality_flags": quality_flags,
                         "artifact_source": "model_dir_scan",
+                        "validation_ready": False,
+                        "resume_ready": False,
                     }
                 )
             return discovered
@@ -6674,7 +7157,10 @@ class ModelTrainingService:
                     f"""
                     SELECT job_id, algorithm, target_column, metrics_json,
                            selected_threshold, trained_at, registry_stage, grain,
-                           hml_high_threshold, hml_low_threshold
+                           hml_high_threshold, hml_low_threshold,
+                           test_truth_json, test_prob_json, validation_json,
+                           hyperparams_json, training_config_json,
+                           pipeline_id, pipeline_name
                     FROM model_training_runs
                     WHERE tenant_id=? AND env_id=? {extra}
                     ORDER BY trained_at DESC LIMIT {int(limit)}
@@ -6690,7 +7176,41 @@ class ModelTrainingService:
                 metrics = json.loads(r[3] or "{}")
             except Exception:
                 metrics = {}
+            if not isinstance(metrics, dict):
+                metrics = {}
+            if not any(metrics.get(key) is not None for key in ("roc_auc", "f1", "precision", "recall", "threshold_table")):
+                try:
+                    persisted_result = self.get_job_result(str(r[0]))
+                except Exception:
+                    persisted_result = None
+                if isinstance(persisted_result, dict):
+                    persisted_metrics = persisted_result.get("metrics") if isinstance(persisted_result.get("metrics"), dict) else {}
+                    if persisted_metrics:
+                        metrics = {
+                            **persisted_metrics,
+                            **metrics,
+                        }
             selected_threshold = float(r[4]) if r[4] is not None else None
+            has_score_vectors = bool(r[10] and r[11])
+            try:
+                persisted_validation = json.loads(r[12] or "{}")
+            except Exception:
+                persisted_validation = {}
+            if not isinstance(persisted_validation, dict):
+                persisted_validation = {}
+            try:
+                hyperparams = json.loads(r[13] or "{}")
+            except Exception:
+                hyperparams = {}
+            try:
+                training_config = json.loads(r[14] or "{}")
+            except Exception:
+                training_config = {}
+            has_validation_payload = bool(
+                persisted_validation.get("report")
+                or persisted_validation.get("selected_threshold") is not None
+                or persisted_validation.get("locked_threshold") is not None
+            )
             threshold_target = selected_threshold if selected_threshold is not None else metrics.get("optimal_threshold")
             threshold_row = _closest_threshold_row(metrics.get("threshold_table"), threshold_target)
             if threshold_row:
@@ -6726,6 +7246,13 @@ class ModelTrainingService:
                 "specificity":        metrics.get("specificity"),
                 "accuracy":           metrics.get("accuracy"),
                 "balanced_accuracy":  metrics.get("balanced_accuracy"),
+                "hyperparams":        hyperparams if isinstance(hyperparams, dict) else {},
+                "training_config":    training_config if isinstance(training_config, dict) else {},
+                "pipeline_id":        int(r[15]) if r[15] is not None else None,
+                "pipeline_name":      str(r[16] or ""),
+                "artifact_source":    "model_training_runs",
+                "validation_ready":   bool(has_score_vectors or has_validation_payload or metrics.get("threshold_table")),
+                "resume_ready":       True,
             })
 
         artifact_rows = _artifact_run_rows(limit)
@@ -6770,6 +7297,8 @@ class ModelTrainingService:
         feature_diagnostics: Dict,
         selected_threshold: float,
         artifact_path: str,
+        pipeline_id: Optional[int] = None,
+        pipeline_name: str = "",
         grain: str = "alert",
         hml_high_threshold: float = 0.65,
         hml_low_threshold: float = 0.35,
@@ -6780,6 +7309,34 @@ class ModelTrainingService:
         try:
             result_copy = {k: v for k, v in result.items()
                            if k not in ("_y_test","_y_prob","_X_train","_y_train","_X_val","_y_val")}
+            if pipeline_id not in (None, "", []):
+                result_copy.setdefault("pipeline_id", int(pipeline_id))
+            if str(pipeline_name or "").strip():
+                result_copy.setdefault("pipeline_name", str(pipeline_name).strip())
+            feature_columns = result_copy.get("feature_columns")
+            if not isinstance(feature_columns, list):
+                feature_columns = []
+            hyperparams = result_copy.get("hyperparams")
+            if not isinstance(hyperparams, dict):
+                hyperparams = {}
+            training_config = {
+                "mode": result_copy.get("mode"),
+                "split_strategy": result_copy.get("split_strategy"),
+                "split_date": result_copy.get("split_date"),
+                "date_column": result_copy.get("date_column"),
+                "test_size": result_copy.get("test_size"),
+                "cv_folds": result_copy.get("cv_folds"),
+                "stratify": result_copy.get("stratify"),
+                "random_state": result_copy.get("random_state"),
+                "train_rows": result_copy.get("train_rows"),
+                "test_rows": result_copy.get("test_rows"),
+                "features_used": result_copy.get("features_used"),
+                "grain": result_copy.get("grain") or grain,
+                "hml_high_threshold": result_copy.get("hml_high_threshold") or hml_high_threshold,
+                "hml_low_threshold": result_copy.get("hml_low_threshold") or hml_low_threshold,
+                "pipeline_id": pipeline_id,
+                "pipeline_name": pipeline_name or result_copy.get("pipeline_name"),
+            }
             with get_connection(str(self.db_path)) as conn:
                 conn.execute(
                     """
@@ -6787,10 +7344,12 @@ class ModelTrainingService:
                         job_id, tenant_id, env_id, dataset_id,
                         target_column, algorithm, metrics_json, artifact_path,
                         result_json, test_truth_json, test_prob_json,
-                        feature_diagnostics_json, selected_threshold,
+                        feature_diagnostics_json, feature_columns_json,
+                        hyperparams_json, training_config_json,
+                        pipeline_id, pipeline_name, selected_threshold,
                         grain, hml_high_threshold, hml_low_threshold,
                         internals_json, updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     [
                         job_id, tenant_id, env_id, dataset_id,
@@ -6801,11 +7360,17 @@ class ModelTrainingService:
                         json.dumps(test_truth, default=str),
                         json.dumps(test_prob, default=str),
                         json.dumps(feature_diagnostics, default=str),
+                        json.dumps(feature_columns, default=str),
+                        json.dumps(hyperparams, default=str),
+                        json.dumps(training_config, default=str),
+                        int(pipeline_id) if pipeline_id not in (None, "", []) else None,
+                        str(pipeline_name or result_copy.get("pipeline_name") or ""),
                         float(selected_threshold),
                         str(grain),
                         float(hml_high_threshold),
                         float(hml_low_threshold),
                         json.dumps(internals or {}, default=str),
+                        datetime.utcnow(),
                     ],
                 )
         except Exception as exc:

@@ -32,6 +32,20 @@ class APIClient {
         if (!config.params.env_id) config.params.env_id = activeEnv;
       }
 
+      const isFormData = typeof FormData !== 'undefined' && config?.data instanceof FormData;
+      if (isFormData && config.headers) {
+        delete config.headers['Content-Type'];
+        delete config.headers['content-type'];
+        if (typeof config.headers.set === 'function') {
+          try {
+            config.headers.set('Content-Type', undefined);
+            config.headers.set('content-type', undefined);
+          } catch {
+            // Ignore AxiosHeaders variants that do not support set/undefined cleanly.
+          }
+        }
+      }
+
       if (shouldTraceApi(config.url)) {
         console.debug('[API START]', (config.method || 'get').toUpperCase(), config.url, {
           params: config.params || {},
@@ -119,12 +133,13 @@ class APIClient {
 
   async postForm(url, formData, config = {}) {
     try {
+      const headers = { ...(config.headers || {}) };
+      delete headers['Content-Type'];
+      delete headers['content-type'];
+      headers['Content-Type'] = 'multipart/form-data';
       const response = await this.client.post(url, formData, {
-        ...config, 
-        headers: {
-          ...config.headers,
-          'Content-Type': 'multipart/form-data'
-        }
+        ...config,
+        headers,
       });
       return response.data;
     } catch (error) {

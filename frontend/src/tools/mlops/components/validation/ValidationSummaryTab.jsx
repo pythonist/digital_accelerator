@@ -103,6 +103,7 @@ const ValidationSummaryTab = ({
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const signatureRef = useRef('');
+  const publishedSummaryRef = useRef('');
   const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
 
   const summaryPayload = useMemo(
@@ -168,11 +169,21 @@ const ValidationSummaryTab = ({
         },
       };
       setSummary(nextSummary);
-      onValidationComplete?.({
+      const nextPayload = {
         ...(validationReport || {}),
         job_id: activeModel.job_id,
         business_summary: nextSummary,
+      };
+      const nextPublishSignature = JSON.stringify({
+        job_id: nextPayload.job_id || '',
+        summary_signature: summarySignature,
+        conclusion: nextSummary?.conclusion || '',
+        source: nextSummary?.analysis_source || nextSummary?.generated_for || '',
       });
+      if (publishedSummaryRef.current !== nextPublishSignature) {
+        publishedSummaryRef.current = nextPublishSignature;
+        onValidationComplete?.(nextPayload);
+      }
     } catch (error) {
       const fallbackSummary = {
         analysis_source: 'deterministic',
@@ -192,11 +203,21 @@ const ValidationSummaryTab = ({
         },
       };
       setSummary(fallbackSummary);
-      onValidationComplete?.({
+      const nextPayload = {
         ...(validationReport || {}),
         job_id: activeModel.job_id,
         business_summary: fallbackSummary,
+      };
+      const nextPublishSignature = JSON.stringify({
+        job_id: nextPayload.job_id || '',
+        summary_signature: summarySignature,
+        conclusion: fallbackSummary?.conclusion || '',
+        source: fallbackSummary?.analysis_source || fallbackSummary?.generated_for || '',
       });
+      if (publishedSummaryRef.current !== nextPublishSignature) {
+        publishedSummaryRef.current = nextPublishSignature;
+        onValidationComplete?.(nextPayload);
+      }
       setNotice(error?.response?.data?.error || 'Using grounded validation summary because the AI summary service is unavailable right now.');
     } finally {
       setLoading(false);

@@ -35,6 +35,12 @@ def create_app():
     # NEW: Import Discovery
     from api.routes.discovery import discovery_bp 
     from api.routes.mule_detection import mule_bp
+    from api.routes.mule_upload import mule_upload_bp
+    from api.routes.mule_master_dataset import mule_master_dataset_bp
+    from api.routes.mule_feature_store import mule_feature_store_bp
+    from api.routes.mule_preprocessing import mule_preprocessing_bp
+    from api.routes.mule_model_build import mule_model_build_bp
+    from api.routes.mule_validation import mule_validation_bp
     from api.routes.mlops import mlops_bp
     from api.tools.mlops.autopilot_routes import autopilot_bp
     from api.routes.mlops.eda_routes import eda_bp
@@ -58,6 +64,12 @@ def create_app():
     # NEW: Register Discovery with correct prefix
     app.register_blueprint(discovery_bp, url_prefix='/api/v2/discovery')
     app.register_blueprint(mule_bp, url_prefix='/api/v2/mule')
+    app.register_blueprint(mule_upload_bp, url_prefix='/api/mule')
+    app.register_blueprint(mule_master_dataset_bp, url_prefix='/api/mule')
+    app.register_blueprint(mule_feature_store_bp, url_prefix='/api/mule')
+    app.register_blueprint(mule_preprocessing_bp, url_prefix='/api/mule')
+    app.register_blueprint(mule_model_build_bp, url_prefix='/api/mule')
+    app.register_blueprint(mule_validation_bp, url_prefix='/api/mule')
     app.register_blueprint(mlops_bp, url_prefix='/api/mlops')
     app.register_blueprint(autopilot_bp, url_prefix='/api/mlops/autopilot')
     # High-performance EDA endpoints used by the frontend workbench

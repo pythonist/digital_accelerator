@@ -78,6 +78,12 @@ export const mergePipelinePayload = ({
     next.dataset_ids = mergedDatasetIds;
   }
 
+  next.pipeline_id = toNumberOrNull(next.pipeline_id || existing.pipeline_id);
+  if (existing.pipeline_uuid && !next.pipeline_uuid) {
+    next.pipeline_uuid = existing.pipeline_uuid;
+  }
+  next.pipeline_type = next.pipeline_type || existing.pipeline_type || existing.model_family || 'fcc';
+  next.model_family = next.model_family || existing.model_family || existing.pipeline_type || next.pipeline_type;
   next.dataset_id = toNumberOrNull(next.dataset_id || existing.dataset_id) || 0;
   next.grain = next.grain || existing.grain || 'transaction';
   next.anchor_dataset_id = toNumberOrNull(next.anchor_dataset_id || existing.anchor_dataset_id);

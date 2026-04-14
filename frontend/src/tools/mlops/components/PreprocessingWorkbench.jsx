@@ -226,6 +226,39 @@ const PREPROCESS_TAB_GUIDES = {
   },
 };
 
+const MULE_PREPROCESS_TAB_GUIDES = {
+  0: {
+    title: 'Clean and Prepare',
+    subtitle: 'Review account-level data quality issues and choose deterministic preprocessing actions before mule model training.',
+    note: 'This stage is rules-based and statistics-driven. It prepares account-level Mule data using deterministic preprocessing steps and governed feature logic.',
+  },
+  1: {
+    title: 'Preprocessing Builder',
+    subtitle: 'Assemble reusable transformation steps, inspect affected columns, and shape a governed Mule preprocessing pipeline.',
+    note: 'Builder actions create deterministic pipeline steps such as imputation, encoding, scaling, and feature-safe transformations.',
+  },
+  2: {
+    title: 'Mule Signal Engineering',
+    subtitle: 'Add behavioural account-risk signals that help separate normal activity from mule-like behaviour.',
+    note: 'These are engineered features derived from data logic and Mule heuristics, not from a generative model.',
+  },
+  3: {
+    title: 'Feature Governance & Selection',
+    subtitle: 'Review and approve safe account-level signals before model training, with explicit buckets for approved, review, leakage, post-outcome, and redundant fields.',
+    note: 'No predictive model is trained here. This workbench blocks leakage, target proxies, post-outcome fields, and weak or redundant variables before they reach Mule model training.',
+  },
+  4: {
+    title: 'Preview the Pipeline Output',
+    subtitle: 'Inspect schema changes, before-versus-after samples, and the expected impact of the current Mule preprocessing plan.',
+    note: 'Use this screen to confirm that the planned deterministic transformations are shaping the account-level feature set the way you expect.',
+  },
+  5: {
+    title: 'Run the Preprocessing Pipeline',
+    subtitle: 'Execute the approved Mule transformation plan on the full dataset and save the model-ready output.',
+    note: 'Running this stage applies the deterministic preprocessing graph to the full Mule dataset and persists the output for model training.',
+  },
+};
+
 const AML_TEMPLATE_EXPLAINERS = {
   'Cash Intensity Ratio': {
     summary: 'Measures how cash-heavy the activity is relative to the overall transaction footprint.',
@@ -823,6 +856,7 @@ const PipelineSidebar = ({
   masterDataset,
   preprocessedDataset,
   activeTab = 0,
+  visitedTabs = [],
   activePipelineId = null,
   activePipelineName = '',
   onPipelineActivated,
@@ -846,9 +880,10 @@ const PipelineSidebar = ({
   const preprocessScreenState = useMemo(() => ({
     steps,
     activeTab,
+    visitedTabs: Array.isArray(visitedTabs) ? Array.from(new Set(visitedTabs.filter((value) => Number.isInteger(value)))) : [],
     masterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
     preprocessedDatasetId: Number(preprocessedDataset?.dataset_id || 0) || null,
-  }), [activeTab, masterDataset?.dataset_id, preprocessedDataset?.dataset_id, steps]);
+  }), [activeTab, masterDataset?.dataset_id, preprocessedDataset?.dataset_id, steps, visitedTabs]);
 
   const buildPreprocessPayload = useCallback((nameValue) => ({
     name: nameValue,
@@ -882,7 +917,7 @@ const PipelineSidebar = ({
             existingPipeline: existing,
             payload,
             screenKey: 'preprocess',
-            currentState: { steps },
+            currentState: preprocessScreenState,
           });
           payload.transforms = steps;
         } catch {
@@ -939,9 +974,13 @@ const PipelineSidebar = ({
     const fromScreen = getScreenState(pipeline?.steps, 'preprocess') || {};
     const loadedSteps = extractLoadedSteps(pipeline);
     const nextActiveTab = Number.isInteger(fromScreen?.activeTab) ? fromScreen.activeTab : null;
+    const nextVisitedTabs = Array.isArray(fromScreen?.visitedTabs)
+      ? Array.from(new Set(fromScreen.visitedTabs.filter((value) => Number.isInteger(value))))
+      : [];
     return {
       steps: loadedSteps,
       activeTab: nextActiveTab,
+      visitedTabs: nextVisitedTabs,
     };
   }, [extractLoadedSteps]);
 
@@ -1097,16 +1136,18 @@ const PipelineSidebar = ({
             onChange={e => setSaveName(e.target.value)}
             sx={{ flex: 1, '& input': { fontSize: 12 } }} />
           <Tooltip title={saveOk ? 'Saved!' : 'Save pipeline'}>
-            <IconButton size="small" onClick={save}
-              disabled={canDisable(!saveName.trim() || !steps.length)}
-              sx={{
-                bgcolor: saveOk ? T.doneBg : T.orangeLight,
-                color:   saveOk ? T.done   : T.orange,
-                border:  `1px solid ${saveOk ? T.doneBorder : '#fdd8c4'}`,
-                borderRadius: '8px', transition: 'all 0.2s',
-              }}>
-              {saveOk ? <CheckCircle sx={{ fontSize: 16 }} /> : <Save sx={{ fontSize: 16 }} />}
-            </IconButton>
+            <span>
+              <IconButton size="small" onClick={save}
+                disabled={canDisable(!saveName.trim() || !steps.length)}
+                sx={{
+                  bgcolor: saveOk ? T.doneBg : T.orangeLight,
+                  color:   saveOk ? T.done   : T.orange,
+                  border:  `1px solid ${saveOk ? T.doneBorder : '#fdd8c4'}`,
+                  borderRadius: '8px', transition: 'all 0.2s',
+                }}>
+                {saveOk ? <CheckCircle sx={{ fontSize: 16 }} /> : <Save sx={{ fontSize: 16 }} />}
+              </IconButton>
+            </span>
           </Tooltip>
         </Stack>
 
@@ -2207,7 +2248,8 @@ const AML_TEMPLATES = [
   },
 ];
 
-const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpenBuilder }) => {
+const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpenBuilder, pipelineVariant = 'fcc' }) => {
+  const isMuleVariant = String(pipelineVariant || 'fcc').trim().toLowerCase() === 'mule';
   const availableCols = masterDataset?.columns || [];
   const availableCount = AML_TEMPLATES.filter(t => t.req.every(c => availableCols.includes(c))).length;
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -2217,9 +2259,11 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpen
       <Card sx={{ bgcolor: '#fff' }}>
         <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" gap={1.5}>
           <Box>
-            <Typography sx={{ fontWeight: 800, fontSize: 18, color: T.textPri }}>AML feature engineering</Typography>
+            <Typography sx={{ fontWeight: 800, fontSize: 18, color: T.textPri }}>{isMuleVariant ? 'Mule signal engineering' : 'AML feature engineering'}</Typography>
             <Typography sx={{ fontSize: 12, color: T.textSec, mt: 0.45, maxWidth: 820, lineHeight: 1.7 }}>
-              Create reusable behavioural signals before model training. These features are built from deterministic formulas, aggregations, and encodings so the team can explain exactly how each field is calculated.
+              {isMuleVariant
+                ? 'Create reusable account-risk signals before model training. These features are built from deterministic formulas, aggregations, and encodings so the team can explain exactly how each field is calculated.'
+                : 'Create reusable behavioural signals before model training. These features are built from deterministic formulas, aggregations, and encodings so the team can explain exactly how each field is calculated.'}
             </Typography>
           </Box>
           <Chip
@@ -2238,15 +2282,15 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpen
           <Box>
             <Stack direction="row" spacing={1} alignItems="center">
               <WorkspacePremium sx={{ fontSize: 18, color: T.orange }} />
-              <Typography sx={{ fontWeight: 700, fontSize: 14 }}>AML Domain Templates</Typography>
+              <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{isMuleVariant ? 'Mule Signal Templates' : 'AML Domain Templates'}</Typography>
               <Tooltip title="Explain how these templates are defined">
-                <IconButton size="small" onClick={() => setSelectedTemplate({ label: 'AML Domain Templates' })} sx={{ color: T.textSec }}>
+                <IconButton size="small" onClick={() => setSelectedTemplate({ label: isMuleVariant ? 'Mule Signal Templates' : 'AML Domain Templates' })} sx={{ color: T.textSec }}>
                   <InfoOutlined sx={{ fontSize: 16 }} />
                 </IconButton>
               </Tooltip>
             </Stack>
             <Typography variant="caption" color="text.secondary">
-              Pre-built features for false-positive suppression
+              {isMuleVariant ? 'Pre-built account-risk signals for mule detection' : 'Pre-built features for false-positive suppression'}
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.75} alignItems="center">
@@ -2263,7 +2307,9 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpen
 
         <Box sx={{ mb: 1.4, p: 1.15, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
           <Typography sx={{ fontSize: 11.5, color: T.textSec, lineHeight: 1.7 }}>
-            Templates are defined from AML heuristics and simple formulas such as ratios, interactions, aggregations, and date parts. Click the info icon on any template to see what it means, how it is calculated, and why it can help reduce false positives.
+            {isMuleVariant
+              ? 'Templates are defined from Mule heuristics and simple formulas such as ratios, interactions, aggregations, and date parts. Click the info icon on any template to see what it means, how it is calculated, and why it can help detect mule-like behaviour.'
+              : 'Templates are defined from AML heuristics and simple formulas such as ratios, interactions, aggregations, and date parts. Click the info icon on any template to see what it means, how it is calculated, and why it can help reduce false positives.'}
           </Typography>
         </Box>
 
@@ -3776,15 +3822,21 @@ const PreviewTab = ({
     if (!masterDataset?.dataset_id || !steps.length) return;
     setLoading(true); setErr(null);
     try {
-      if (onPreview) onPreview(steps);
-      const res = await mlopsApi.preprocessPreview({
-        dataset_id: masterDataset.dataset_id,
-        dataset: masterDataset,
-        steps,
-        sample_rows: 100,
-        target_column: targetColumn,
-      });
-      setLocalPreview(res?.data || res);
+      let payload = null;
+      if (onPreview) {
+        payload = await onPreview(steps);
+      }
+      if (!payload) {
+        const res = await mlopsApi.preprocessPreview({
+          dataset_id: masterDataset.dataset_id,
+          dataset: masterDataset,
+          steps,
+          sample_rows: 100,
+          target_column: targetColumn,
+        });
+        payload = res?.data || res;
+      }
+      setLocalPreview(payload);
     } catch (e) { setErr(e?.message || 'Preview failed'); }
     finally { setLoading(false); }
   }, [masterDataset?.dataset_id, steps, targetColumn, onPreview]);
@@ -4030,7 +4082,7 @@ const PreviewTab = ({
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 5 - RUN
 // ═══════════════════════════════════════════════════════════════════════════════
-const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete }) => {
+const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun, onComplete }) => {
   const [outputName, setOutputName] = useState('preprocessed_dataset');
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(null);
@@ -4129,15 +4181,22 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
     const loadTrace = async () => {
       setTraceHydrating(true);
       try {
-        const res = await mlopsApi.preprocessPreview({
-          dataset_id: masterDataset.dataset_id,
-          dataset: masterDataset,
-          steps,
-          sample_rows: 100,
-          target_column: targetColumn,
-        });
+        let payload = null;
+        if (onPreview) {
+          payload = await onPreview(steps);
+        }
+        if (!payload) {
+          const res = await mlopsApi.preprocessPreview({
+            dataset_id: masterDataset.dataset_id,
+            dataset: masterDataset,
+            steps,
+            sample_rows: 100,
+            target_column: targetColumn,
+          });
+          payload = res;
+        }
         if (cancelled) return;
-        const inferred = readTrace(res);
+        const inferred = readTrace(payload);
         if (inferred) setTracePayload(inferred);
       } catch (_) {
         // Keep UI usable with planned steps if trace hydration fails.
@@ -4321,13 +4380,18 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
         output_name: outputName,
       };
       if (targetColumn) payload.target_column = targetColumn;
-      const res = await mlopsApi.preprocessRun(payload);
-      const result = res?.data || res;
+      let result = null;
+      if (onRun) {
+        result = await onRun(outputName, steps);
+      }
+      if (!result) {
+        const res = await mlopsApi.preprocessRun(payload);
+        result = res?.data || res;
+      }
       const ds = result?.dataset || result;
       const trace = result?.output?.trace || result?.trace || null;
       setTracePayload(trace);
       setDone(ds);
-      if (onRun) onRun(outputName, steps);
       if (onComplete) onComplete(ds);
     } catch (e) {
       setErr(e?.message || 'Pipeline failed');
@@ -4726,23 +4790,43 @@ const PreprocessingWorkbench = ({
   activePipelineId = null,
   activePipelineName = '',
   onPipelineActivated,
+  pipelineVariant = 'fcc',
 }) => {
+  const isMuleVariant = String(pipelineVariant || 'fcc').trim().toLowerCase() === 'mule';
   const [tab, setTab] = useState(0);
-  const activeGuide = PREPROCESS_TAB_GUIDES[tab] || PREPROCESS_TAB_GUIDES[0];
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([0]));
+
+  useEffect(() => {
+    setVisitedTabs((prev) => {
+      const next = new Set(prev);
+      next.add(tab);
+      return next;
+    });
+  }, [tab]);
+
+  const activeGuideMap = isMuleVariant ? MULE_PREPROCESS_TAB_GUIDES : PREPROCESS_TAB_GUIDES;
+  const activeGuide = activeGuideMap[tab] || activeGuideMap[0];
   const completedTabIndexes = useMemo(() => {
     const done = new Set();
-    if (Array.isArray(steps) && steps.length) {
+    if (visitedTabs.has(0) || (Array.isArray(steps) && steps.length)) {
       done.add(0);
+    }
+    const hasBuilderWork = (steps || []).some((step) => {
+      const type = String(step?.type || '').toLowerCase();
+      return Boolean(type) && !type.startsWith('feature_') && !['datetime_extract', 'text_features'].includes(type);
+    });
+    const hasEngineerWork = (steps || []).some((step) => String(step?.type || '').toLowerCase().startsWith('feature_') || ['datetime_extract', 'text_features'].includes(String(step?.type || '').toLowerCase()));
+    if (visitedTabs.has(1) || hasBuilderWork) {
       done.add(1);
     }
-    if ((steps || []).some((step) => String(step?.type || '').toLowerCase().startsWith('feature_') || ['datetime_extract', 'text_features'].includes(String(step?.type || '').toLowerCase()))) {
+    if (visitedTabs.has(2) || hasEngineerWork) {
       done.add(2);
     }
-    if ((Array.isArray(steps) && steps.length > 0) && (tab > 3 || preview || preprocessedDataset)) done.add(3);
-    if (preview || preprocessedDataset) done.add(4);
+    if ((visitedTabs.has(3) && Array.isArray(steps) && steps.length > 0) || ((Array.isArray(steps) && steps.length > 0) && (preview || preprocessedDataset))) done.add(3);
+    if (visitedTabs.has(4) || preview || preprocessedDataset) done.add(4);
     if (preprocessedDataset?.dataset_id) done.add(5);
     return done;
-  }, [preprocessedDataset, preview, steps, suggestions, tab]);
+  }, [preprocessedDataset, preview, steps, visitedTabs]);
 
   const removeStep = idx     => onStepsChange(steps.filter((_, i) => i !== idx));
   const moveStep   = (a, b) => {
@@ -4756,7 +4840,7 @@ const PreprocessingWorkbench = ({
   const TAB_DEFS = [
     { Icon: Build,      label: 'Plan',      biz: 'Fix Issues', tip: 'Auto-detected cleaning issues and grouped recommendations' },
     { Icon: Code,       label: 'Builder',   biz: 'Builder',    tip: 'Custom preprocessing workbench with column explorer' },
-    { Icon: TrendingUp, label: 'Engineer',  biz: 'Add Features', tip: 'AML domain templates + reusable feature engineering' },
+    { Icon: TrendingUp, label: 'Engineer',  biz: isMuleVariant ? 'Mule Signals' : 'Add Features', tip: isMuleVariant ? 'Mule signal templates + reusable feature engineering' : 'AML domain templates + reusable feature engineering' },
     { Icon: QueryStats, label: 'Governance', biz: 'Feature Review', tip: 'Governed feature approval, leakage blocking, timing checks, and redundancy review' },
     { Icon: TableChart, label: 'Preview',   biz: 'Preview',     tip: 'Before/after schema diff + 100-row sample table' },
     { Icon: PlayArrow,  label: 'Run',       biz: 'Run',         tip: 'Execute pipeline on full dataset' },
@@ -4844,6 +4928,7 @@ const PreprocessingWorkbench = ({
               onStepsChange={onStepsChange}
               targetColumn={targetColumn}
               onOpenBuilder={() => setTab(1)}
+              pipelineVariant={pipelineVariant}
             />
           )}
           {tab === 3 && (
@@ -4873,6 +4958,7 @@ const PreprocessingWorkbench = ({
               steps={steps}
               targetColumn={targetColumn}
               preview={preview}
+              onPreview={onPreview}
               onRun={onRun}
               onComplete={onComplete}
             />
@@ -4890,10 +4976,14 @@ const PreprocessingWorkbench = ({
         onLoadState={(loaded) => {
           onStepsChange(loaded?.steps || []);
           if (Number.isInteger(loaded?.activeTab)) setTab(loaded.activeTab);
+          if (Array.isArray(loaded?.visitedTabs) && loaded.visitedTabs.length > 0) {
+            setVisitedTabs(new Set(loaded.visitedTabs.filter((value) => Number.isInteger(value))));
+          }
         }}
         masterDataset={masterDataset}
         preprocessedDataset={preprocessedDataset}
         activeTab={tab}
+        visitedTabs={Array.from(visitedTabs)}
         activePipelineId={activePipelineId}
         activePipelineName={activePipelineName}
         onPipelineActivated={onPipelineActivated}

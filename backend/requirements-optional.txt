@@ -12,3 +12,4 @@ psycopg2_binary==2.9.11
 pymssql==2.3.11
 pyodbc==5.3.0
 community==1.0.0b1
+mlflow>=2.12,<3

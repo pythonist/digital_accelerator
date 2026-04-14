@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -45,6 +45,68 @@ import {
   TableHeader,
 } from './ValidationShared';
 
+const normalizeThresholdRows = (rows) => {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null;
+      const thresholdValue = Number(row.threshold ?? row.opt_threshold ?? row.score_threshold);
+      if (!Number.isFinite(thresholdValue)) return null;
+      const suppressionPct = Number(row.suppression_rate_pct ?? row.suppression_rate ?? 0);
+      const eventLossPct = Number(row.event_loss_pct ?? 0);
+      return {
+        ...row,
+        threshold: thresholdValue,
+        suppression_rate_pct: Number.isFinite(suppressionPct) ? suppressionPct : 0,
+        suppression_rate: Number.isFinite(suppressionPct) ? suppressionPct : 0,
+        event_loss_pct: Number.isFinite(eventLossPct) ? eventLossPct : 0,
+        precision: Number.isFinite(Number(row.precision)) ? Number(row.precision) : null,
+        recall: Number.isFinite(Number(row.recall)) ? Number(row.recall) : null,
+        f1: Number.isFinite(Number(row.f1)) ? Number(row.f1) : null,
+        specificity: Number.isFinite(Number(row.specificity)) ? Number(row.specificity) : null,
+        accuracy: Number.isFinite(Number(row.accuracy)) ? Number(row.accuracy) : null,
+        balanced_accuracy: Number.isFinite(Number(row.balanced_accuracy)) ? Number(row.balanced_accuracy) : null,
+        tn: Number.isFinite(Number(row.tn)) ? Number(row.tn) : 0,
+        fp: Number.isFinite(Number(row.fp)) ? Number(row.fp) : 0,
+        fn: Number.isFinite(Number(row.fn)) ? Number(row.fn) : 0,
+        tp: Number.isFinite(Number(row.tp)) ? Number(row.tp) : 0,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.threshold - right.threshold);
+};
+
+const buildScoreFromRow = (row, fallbackThreshold = 0.5) => {
+  if (!row || typeof row !== 'object') return null;
+  const threshold = Number(row.threshold ?? fallbackThreshold);
+  return {
+    threshold: Number.isFinite(threshold) ? threshold : 0.5,
+    confusion_matrix: [
+      [Number(row.tn ?? 0), Number(row.fp ?? 0)],
+      [Number(row.fn ?? 0), Number(row.tp ?? 0)],
+    ],
+    suppression_rate_pct: Number(row.suppression_rate_pct ?? row.suppression_rate ?? 0),
+    event_loss_pct: Number(row.event_loss_pct ?? 0),
+    precision: Number.isFinite(Number(row.precision)) ? Number(row.precision) : 0,
+    recall: Number.isFinite(Number(row.recall)) ? Number(row.recall) : 0,
+    f1: Number.isFinite(Number(row.f1)) ? Number(row.f1) : 0,
+    specificity: Number.isFinite(Number(row.specificity)) ? Number(row.specificity) : 0,
+    accuracy: Number.isFinite(Number(row.accuracy)) ? Number(row.accuracy) : 0,
+    balanced_accuracy: Number.isFinite(Number(row.balanced_accuracy)) ? Number(row.balanced_accuracy) : 0,
+  };
+};
+
+const closestThresholdRow = (rows, thresholdValue) => {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const target = Number(thresholdValue);
+  if (!Number.isFinite(target)) return rows[0];
+  return rows.reduce((best, row) => (
+    Math.abs(Number(row.threshold ?? 0.5) - target) < Math.abs(Number(best.threshold ?? 0.5) - target)
+      ? row
+      : best
+  ), rows[0]);
+};
+
 const emptyPanel = (title, body) => (
   <Stack
     spacing={0.75}
@@ -68,6 +130,7 @@ const ThresholdTuningTab = ({
   jobId,
   runs,
   activeModel = null,
+  savedValidationReport = null,
   onValidationComplete,
   onJobChange,
   actionsDisabled = false,
@@ -82,7 +145,9 @@ const ThresholdTuningTab = ({
   const [loadingReport, setLoadingReport] = useState(false);
   const [loadingThreshold, setLoadingThreshold] = useState(false);
   const [error, setError] = useState(null);
+  const [fallbackNotice, setFallbackNotice] = useState(null);
   const [activeJobId, setActiveJobId] = useState(jobId || '');
+  const publishedSignatureRef = useRef('');
   const gatingMessage = actionsMessage || 'Validation outputs are outdated. Rerun the upstream stages before continuing.';
 
   useEffect(() => {
@@ -103,6 +168,127 @@ const ThresholdTuningTab = ({
     () => (String(activeModel?.job_id || '') === String(activeJobId || '') ? activeModel : null),
     [activeJobId, activeModel],
   );
+
+  const buildSavedReport = useCallback((targetJobId = activeJobId) => {
+    const normalizedJobId = String(targetJobId || '').trim();
+    if (!normalizedJobId) return null;
+    const reportCandidates = [
+      savedValidationReport,
+      activeRun?.validation?.report,
+      activeRun?.validation,
+      activeRun,
+    ].filter((candidate) => candidate && typeof candidate === 'object');
+
+    for (const candidate of reportCandidates) {
+      const candidateJobId = String(candidate?.job_id || candidate?.run_id || activeRun?.job_id || '').trim();
+      if (candidateJobId && candidateJobId !== normalizedJobId) continue;
+      const thresholdTable = normalizeThresholdRows(
+        candidate?.threshold_table
+          || candidate?.report?.threshold_table
+          || candidate?.metrics?.threshold_table
+          || candidate?.validation?.report?.threshold_table,
+      );
+      if (!thresholdTable.length) continue;
+      const selectedThreshold = Number(
+        candidate?.selected_threshold
+          ?? candidate?.locked_threshold
+          ?? candidate?.configured_threshold
+          ?? activeRun?.selected_threshold
+          ?? activeRun?.threshold
+          ?? candidate?.optimal_threshold
+          ?? thresholdTable[0]?.threshold
+          ?? 0.5,
+      );
+      const selectedRow = closestThresholdRow(thresholdTable, selectedThreshold) || thresholdTable[0];
+      const reportBody = {
+        ...candidate,
+        job_id: normalizedJobId,
+        threshold_table: thresholdTable,
+        optimal_threshold: Number(
+          candidate?.optimal_threshold
+            ?? candidate?.recommended_threshold
+            ?? selectedRow?.threshold
+            ?? thresholdTable[0]?.threshold
+            ?? 0.5,
+        ),
+        configured_threshold: selectedThreshold,
+        selected_threshold: selectedThreshold,
+        locked_threshold: Number(candidate?.locked_threshold ?? selectedThreshold),
+        max_event_loss_pct: Number(candidate?.max_event_loss_pct ?? 5),
+        suppression_rate_pct: candidate?.suppression_rate_pct ?? selectedRow?.suppression_rate_pct ?? 0,
+        event_loss_pct: candidate?.event_loss_pct ?? selectedRow?.event_loss_pct ?? 0,
+        precision: candidate?.precision ?? selectedRow?.precision ?? null,
+        recall: candidate?.recall ?? selectedRow?.recall ?? null,
+        f1: candidate?.f1 ?? selectedRow?.f1 ?? null,
+        specificity: candidate?.specificity ?? selectedRow?.specificity ?? null,
+        accuracy: candidate?.accuracy ?? selectedRow?.accuracy ?? null,
+        balanced_accuracy: candidate?.balanced_accuracy ?? selectedRow?.balanced_accuracy ?? null,
+        confusion_matrix: candidate?.confusion_matrix || buildScoreFromRow(selectedRow, selectedThreshold)?.confusion_matrix || [[0, 0], [0, 0]],
+        constraint_satisfied: candidate?.constraint_satisfied ?? true,
+        selection_note: candidate?.selection_note || 'Restored from the saved validation report for this run.',
+      };
+      reportBody.metrics = {
+        ...(candidate?.metrics || {}),
+        roc_auc: candidate?.roc_auc ?? candidate?.metrics?.roc_auc ?? null,
+        pr_auc: candidate?.pr_auc ?? candidate?.metrics?.pr_auc ?? null,
+        precision: reportBody.precision,
+        recall: reportBody.recall,
+        f1: reportBody.f1,
+        accuracy: reportBody.accuracy,
+        balanced_accuracy: reportBody.balanced_accuracy,
+        specificity: reportBody.specificity,
+      };
+      return reportBody;
+    }
+    return null;
+  }, [activeJobId, activeRun, savedValidationReport]);
+
+  const buildLimitedReport = useCallback((targetJobId = activeJobId, detail = null) => {
+    const normalizedJobId = String(targetJobId || '').trim();
+    if (!normalizedJobId) return null;
+    const thresholdHint = Number(
+      detail?.selected_threshold
+        ?? detail?.configured_threshold
+        ?? detail?.recommended_threshold
+        ?? activeRun?.selected_threshold
+        ?? activeRun?.threshold
+        ?? activeRun?.metrics?.optimal_threshold
+        ?? 0.5,
+    );
+    const safeThreshold = Number.isFinite(thresholdHint) ? thresholdHint : 0.5;
+    return {
+      job_id: normalizedJobId,
+      optimal_threshold: safeThreshold,
+      selected_threshold: safeThreshold,
+      locked_threshold: safeThreshold,
+      configured_threshold: safeThreshold,
+      max_event_loss_pct: Number(maxEventLoss) || 5,
+      threshold_table: [],
+      suppression_rate_pct: detail?.suppression_rate_pct ?? activeRun?.metrics?.suppression_rate_pct ?? 0,
+      event_loss_pct: detail?.event_loss_pct ?? activeRun?.metrics?.event_loss_pct ?? 0,
+      precision: detail?.precision ?? activeRun?.metrics?.precision ?? null,
+      recall: detail?.recall ?? activeRun?.metrics?.recall ?? null,
+      f1: detail?.f1 ?? activeRun?.metrics?.f1 ?? null,
+      specificity: detail?.specificity ?? activeRun?.metrics?.specificity ?? null,
+      accuracy: detail?.accuracy ?? activeRun?.metrics?.accuracy ?? null,
+      balanced_accuracy: detail?.balanced_accuracy ?? activeRun?.metrics?.balanced_accuracy ?? null,
+      confusion_matrix: detail?.confusion_matrix || activeRun?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
+      constraint_satisfied: true,
+      restored_without_scores: true,
+      selection_note: detail?.score_distribution_reason
+        || 'Restored the saved model context for this run. Detailed threshold curves are unavailable because holdout score vectors were not persisted.',
+      metrics: {
+        roc_auc: detail?.roc_auc ?? activeRun?.metrics?.roc_auc ?? null,
+        pr_auc: detail?.pr_auc ?? activeRun?.metrics?.pr_auc ?? null,
+        precision: detail?.precision ?? activeRun?.metrics?.precision ?? null,
+        recall: detail?.recall ?? activeRun?.metrics?.recall ?? null,
+        f1: detail?.f1 ?? activeRun?.metrics?.f1 ?? null,
+        accuracy: detail?.accuracy ?? activeRun?.metrics?.accuracy ?? null,
+        balanced_accuracy: detail?.balanced_accuracy ?? activeRun?.metrics?.balanced_accuracy ?? null,
+        specificity: detail?.specificity ?? activeRun?.metrics?.specificity ?? null,
+      },
+    };
+  }, [activeJobId, activeRun, maxEventLoss]);
 
   const validationContext = useMemo(
     () => getValidationContext(activeRun),
@@ -146,7 +332,7 @@ const ThresholdTuningTab = ({
       balanced_accuracy: score?.balanced_accuracy ?? baseReport?.balanced_accuracy ?? baseReport?.metrics?.balanced_accuracy ?? null,
       specificity: score?.specificity ?? baseReport?.specificity ?? baseReport?.metrics?.specificity ?? null,
     };
-    onValidationComplete?.({
+    const nextPayload = {
       ...baseReport,
       job_id: activeJobId,
       selected_threshold: selected,
@@ -163,8 +349,74 @@ const ThresholdTuningTab = ({
       specificity: metrics.specificity,
       confusion_matrix: score?.confusion_matrix || baseReport?.confusion_matrix || [[0, 0], [0, 0]],
       metrics,
+    };
+    const nextSignature = JSON.stringify({
+      job_id: nextPayload.job_id || '',
+      selected_threshold: nextPayload.selected_threshold ?? null,
+      optimal_threshold: nextPayload.optimal_threshold ?? nextPayload.metrics?.optimal_threshold ?? null,
+      report_id: nextPayload.report_id || nextPayload.validation_id || '',
+      suppression_rate_pct: nextPayload.suppression_rate_pct ?? null,
+      event_loss_pct: nextPayload.event_loss_pct ?? null,
+      precision: nextPayload.metrics?.precision ?? null,
+      recall: nextPayload.metrics?.recall ?? null,
+      f1: nextPayload.metrics?.f1 ?? null,
+      accuracy: nextPayload.metrics?.accuracy ?? null,
+      balanced_accuracy: nextPayload.metrics?.balanced_accuracy ?? null,
+      specificity: nextPayload.metrics?.specificity ?? null,
+      confusion_matrix: nextPayload.confusion_matrix || [[0, 0], [0, 0]],
     });
+    if (publishedSignatureRef.current === nextSignature) return;
+    publishedSignatureRef.current = nextSignature;
+    onValidationComplete?.(nextPayload);
   }, [activeJobId, onValidationComplete, selectedThreshold]);
+
+  useEffect(() => {
+    if (!activeJobId) {
+      setReport(null);
+      setSelectedScore(null);
+      setFallbackNotice(null);
+      return;
+    }
+    if (String(report?.job_id || '') === String(activeJobId || '')) return;
+    const restoredReport = buildSavedReport(activeJobId);
+    if (!restoredReport) {
+      const limitedReport = buildLimitedReport(activeJobId);
+      if (!limitedReport) {
+        setReport(null);
+        setSelectedScore(null);
+        setSelectedThreshold(Number(
+          activeRun?.selected_threshold
+            ?? activeRun?.threshold
+            ?? activeRun?.metrics?.optimal_threshold
+            ?? 0.5,
+        ));
+        setFallbackNotice(null);
+        return;
+      }
+      setReport(limitedReport);
+      setSelectedThreshold(Number(limitedReport.selected_threshold ?? 0.5));
+      setSelectedScore(buildScoreFromRow(null, limitedReport.selected_threshold));
+      setFallbackNotice('Restored the saved threshold for this run. Detailed validation curves are unavailable until a full validation report is regenerated.');
+      setError(null);
+      publishValidationState(limitedReport, buildScoreFromRow(null, limitedReport.selected_threshold), limitedReport.selected_threshold);
+      return;
+    }
+    const restoredThreshold = Number(
+      restoredReport.selected_threshold
+        ?? restoredReport.locked_threshold
+        ?? restoredReport.configured_threshold
+        ?? restoredReport.optimal_threshold
+        ?? 0.5,
+    );
+    const restoredRow = closestThresholdRow(restoredReport.threshold_table, restoredThreshold) || restoredReport.threshold_table?.[0] || null;
+    const restoredScore = buildScoreFromRow(restoredRow, restoredThreshold);
+    setReport(restoredReport);
+    setSelectedThreshold(restoredThreshold);
+    setSelectedScore(restoredScore);
+    setFallbackNotice('Restored the saved validation report for this run.');
+    setError(null);
+    publishValidationState(restoredReport, restoredScore, restoredThreshold);
+  }, [activeJobId, activeRun?.metrics?.optimal_threshold, activeRun?.selected_threshold, activeRun?.threshold, buildLimitedReport, buildSavedReport, publishValidationState, report?.job_id]);
 
   const runValidation = async () => {
     if (!activeJobId) return;
@@ -174,6 +426,7 @@ const ThresholdTuningTab = ({
     }
     setLoadingReport(true);
     setError(null);
+    setFallbackNotice(null);
     try {
       const res = await mlopsApi.validationReport({
         job_id: activeJobId,
@@ -224,6 +477,40 @@ const ThresholdTuningTab = ({
       }, optimalThr);
       setReport(nextReport);
     } catch (runError) {
+      const restoredReport = buildSavedReport(activeJobId);
+      if (restoredReport) {
+        const restoredThreshold = Number(
+          restoredReport.selected_threshold
+            ?? restoredReport.locked_threshold
+            ?? restoredReport.configured_threshold
+            ?? restoredReport.optimal_threshold
+            ?? 0.5,
+        );
+        const restoredRow = closestThresholdRow(restoredReport.threshold_table, restoredThreshold) || restoredReport.threshold_table?.[0] || null;
+        const restoredScore = buildScoreFromRow(restoredRow, restoredThreshold);
+        setReport(restoredReport);
+        setSelectedThreshold(restoredThreshold);
+        setSelectedScore(restoredScore);
+        setFallbackNotice('Restored the saved validation report because live regeneration is unavailable for this run.');
+        publishValidationState(restoredReport, restoredScore, restoredThreshold);
+        return;
+      }
+      try {
+        const detailRes = await mlopsApi.validationDetail(activeJobId);
+        const detail = unwrap(detailRes);
+        const limitedReport = buildLimitedReport(activeJobId, detail);
+        if (limitedReport) {
+          const limitedScore = buildScoreFromRow(null, limitedReport.selected_threshold);
+          setReport(limitedReport);
+          setSelectedThreshold(Number(limitedReport.selected_threshold ?? 0.5));
+          setSelectedScore(limitedScore);
+          setFallbackNotice('Restored the saved threshold and model context for this run. Full threshold analytics are unavailable because the historical holdout scores were not persisted.');
+          publishValidationState(limitedReport, limitedScore, limitedReport.selected_threshold);
+          return;
+        }
+      } catch {
+        // Fall through to the original error below.
+      }
       setError(runError?.response?.data?.error || 'Failed to generate validation report');
     } finally {
       setLoadingReport(false);
@@ -238,6 +525,7 @@ const ThresholdTuningTab = ({
     }
     setLoadingThreshold(true);
     setError(null);
+    setFallbackNotice(null);
     try {
       const res = await mlopsApi.thresholdScore({
         job_id: activeJobId,
@@ -270,6 +558,16 @@ const ThresholdTuningTab = ({
         balanced_accuracy: Number(data?.balanced_accuracy ?? 0),
       }, Number(data?.threshold ?? thresholdValue));
     } catch (thresholdError) {
+      if (Array.isArray(report?.threshold_table) && report.threshold_table.length) {
+        const fallbackRow = closestThresholdRow(report.threshold_table, thresholdValue);
+        const fallbackScore = buildScoreFromRow(fallbackRow, thresholdValue);
+        const fallbackThreshold = Number(fallbackScore?.threshold ?? thresholdValue ?? selectedThreshold ?? 0.5);
+        setSelectedThreshold(fallbackThreshold);
+        setSelectedScore(fallbackScore);
+        setFallbackNotice('Applied the selected threshold from the saved validation table because live rescoring is unavailable for this run.');
+        publishValidationState(report, fallbackScore, fallbackThreshold);
+        return;
+      }
       setError(thresholdError?.response?.data?.error || 'Failed to score threshold');
     } finally {
       setLoadingThreshold(false);
@@ -396,6 +694,7 @@ const ThresholdTuningTab = ({
       </SectionCard>
 
       {error && <Alert severity="error" sx={{ borderRadius: 2 }}>{error}</Alert>}
+      {fallbackNotice && <Alert severity="info" sx={{ borderRadius: 2 }}>{fallbackNotice}</Alert>}
       {actionsDisabled && <Alert severity="warning" sx={{ borderRadius: 2 }}>{gatingMessage}</Alert>}
 
       {report && (
