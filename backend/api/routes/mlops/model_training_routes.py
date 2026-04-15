@@ -732,14 +732,40 @@ def _meaningful_value(*values):
 
 
 def _curve_has_points(curve: Any, x_key: str, y_key: str) -> bool:
+    if isinstance(curve, dict):
+        nested_points = curve.get("points") or curve.get("data")
+        if nested_points is not None:
+            return _curve_has_points(nested_points, x_key, y_key)
+        xs = curve.get(x_key) or curve.get("x")
+        ys = curve.get(y_key) or curve.get("y")
+        if isinstance(xs, list) and isinstance(ys, list):
+            for x_val, y_val in zip(xs, ys):
+                try:
+                    float(x_val)
+                    float(y_val)
+                    return True
+                except Exception:
+                    continue
+        return False
+
     if not isinstance(curve, list) or not curve:
         return False
+
     for point in curve:
+        if isinstance(point, (list, tuple)) and len(point) >= 2:
+            try:
+                float(point[0])
+                float(point[1])
+                return True
+            except Exception:
+                continue
         if not isinstance(point, dict):
             continue
+        x_val = point.get(x_key, point.get("x"))
+        y_val = point.get(y_key, point.get("y"))
         try:
-            float(point.get(x_key))
-            float(point.get(y_key))
+            float(x_val)
+            float(y_val)
             return True
         except Exception:
             continue
@@ -1492,6 +1518,50 @@ def validation_detail(job_id: str) -> tuple:
 
         score_distribution = _build_score_distribution(y_true, y_prob, bins=bins)
         validation_curves = _build_validation_curves(y_true, y_prob)
+        saved_roc_curve = (
+            validation.get("roc_curve")
+            or result.get("roc_curve")
+            or metrics.get("roc_curve")
+            or persisted_validation.get("roc_curve")
+            or []
+        )
+        saved_pr_curve = (
+            validation.get("pr_curve")
+            or result.get("pr_curve")
+            or metrics.get("pr_curve")
+            or persisted_validation.get("pr_curve")
+            or []
+        )
+        roc_curve_payload = (
+            validation_curves.get("roc_curve")
+            if _curve_has_points(validation_curves.get("roc_curve"), "fpr", "tpr")
+            else saved_roc_curve
+            if _curve_has_points(saved_roc_curve, "fpr", "tpr")
+            else []
+        )
+        pr_curve_payload = (
+            validation_curves.get("pr_curve")
+            if _curve_has_points(validation_curves.get("pr_curve"), "recall", "precision")
+            else saved_pr_curve
+            if _curve_has_points(saved_pr_curve, "recall", "precision")
+            else []
+        )
+        roc_auc_payload = (
+            validation_curves.get("roc_auc")
+            if validation_curves.get("roc_auc") is not None
+            else validation.get("roc_auc")
+            or result.get("roc_auc")
+            or metrics.get("roc_auc")
+            or persisted_validation.get("roc_auc")
+        )
+        pr_auc_payload = (
+            validation_curves.get("pr_auc")
+            if validation_curves.get("pr_auc") is not None
+            else validation.get("pr_auc")
+            or result.get("pr_auc")
+            or metrics.get("pr_auc")
+            or persisted_validation.get("pr_auc")
+        )
 
         return jsonify({
             "success": True,
@@ -1510,10 +1580,10 @@ def validation_detail(job_id: str) -> tuple:
                     if score_distribution.get("bins")
                     else "Saved holdout score vectors were not found for this historical run. Re-running validation will repopulate the score-distribution chart."
                 ),
-                "roc_curve": validation_curves.get("roc_curve") or [],
-                "pr_curve": validation_curves.get("pr_curve") or [],
-                "roc_auc": validation_curves.get("roc_auc"),
-                "pr_auc": validation_curves.get("pr_auc"),
+                "roc_curve": roc_curve_payload,
+                "pr_curve": pr_curve_payload,
+                "roc_auc": roc_auc_payload,
+                "pr_auc": pr_auc_payload,
                 "feature_importance": feature_rows,
                 "confusion_matrix": confusion_matrix,
                 "confusion_matrix_business_explainer": (
@@ -2032,8 +2102,30 @@ def compare_runs() -> tuple:
                     m.get("gini"),
                     round((2.0 * float(roc_auc)) - 1.0, 4) if roc_auc is not None else None,
                 )
-                roc_curve = result.get("roc_curve") or m.get("roc_curve") or preview.get("roc_curve") or []
-                pr_curve = result.get("pr_curve") or m.get("pr_curve") or preview.get("pr_curve") or []
+                roc_curve = next(
+                    (
+                        curve for curve in [
+                            result.get("roc_curve"),
+                            m.get("roc_curve"),
+                            validation.get("roc_curve"),
+                            preview.get("roc_curve"),
+                        ]
+                        if _curve_has_points(curve, "fpr", "tpr")
+                    ),
+                    [],
+                )
+                pr_curve = next(
+                    (
+                        curve for curve in [
+                            result.get("pr_curve"),
+                            m.get("pr_curve"),
+                            validation.get("pr_curve"),
+                            preview.get("pr_curve"),
+                        ]
+                        if _curve_has_points(curve, "recall", "precision")
+                    ),
+                    [],
+                )
                 confusion_matrix = (
                     validation.get("confusion_matrix")
                     or result.get("confusion_matrix")

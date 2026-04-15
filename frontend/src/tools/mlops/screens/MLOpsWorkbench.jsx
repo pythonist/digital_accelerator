@@ -2852,16 +2852,16 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const resolveStepNavigation = useCallback((requestedStepId) => {
     const requested = String(requestedStepId || '').trim();
     if (localPipelineComplete) return requested;
-    const requestedPipelineId = String(validActivePipelineId || activePipelineId || '').trim();
+    const requestedPipelineId = String(validActivePipelineId || activePipelineId || normalizedRouteRunId || '').trim();
     if (requestedPipelineId && isPipelineComplete({ ...currentLocalPipelineScope, pipeline_id: requestedPipelineId })) return requested;
     if (!requested || requested === 'pipelines' || !firstStaleStep) return requested;
     const requestedIndex = progressStepIndexMap[requested];
     if (requestedIndex == null || requestedIndex < firstStaleStepIndex) return requested;
     return firstStaleStep.id;
-  }, [activePipelineId, currentLocalPipelineScope, firstStaleStep, firstStaleStepIndex, localPipelineComplete, progressStepIndexMap, validActivePipelineId]);
+  }, [activePipelineId, currentLocalPipelineScope, firstStaleStep, firstStaleStepIndex, localPipelineComplete, normalizedRouteRunId, progressStepIndexMap, validActivePipelineId]);
   const openWorkbenchStep = useCallback((requestedStepId, options = {}) => {
     const requested = normalizeWorkbenchStep(requestedStepId || '');
-    const targetRunId = normalizeWorkbenchRunId(options?.pipelineId || validActivePipelineId || activePipelineId);
+    const targetRunId = normalizeWorkbenchRunId(options?.pipelineId || validActivePipelineId || activePipelineId || normalizedRouteRunId);
     const targetRunComplete = Boolean(targetRunId) && isPipelineComplete({ ...currentLocalPipelineScope, pipeline_id: String(targetRunId) });
     const resolvedStep = options?.skipGuardRedirect || activePipelineType === 'mule'
       ? requested || 'pipelines'
@@ -2884,7 +2884,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       replace: Boolean(options?.replace),
       state: options?.state,
     });
-  }, [activePipelineId, activePipelineType, navigate, resolveStepNavigation, shouldShowSummaryForStep, validActivePipelineId]);
+  }, [activePipelineId, activePipelineType, navigate, normalizedRouteRunId, resolveStepNavigation, shouldShowSummaryForStep, validActivePipelineId]);
+  useEffect(() => {
+    if (!normalizedRouteStep || !isWorkbenchStep(normalizedRouteStep)) return;
+    setActiveStep((prev) => (prev === normalizedRouteStep ? prev : normalizedRouteStep));
+  }, [normalizedRouteStep]);
   const activeSummaryStepKey = FCC_SUMMARY_STEP_MAP[String(summaryOverlayStep || activeStep || '').trim()] || '';
   const activeSummaryMetadata = activeSummaryStepKey ? (localSummaryMetadataByStep[activeSummaryStepKey] || {}) : {};
   const activeSummaryLabel = FCC_SUMMARY_STEP_LABELS[activeSummaryStepKey] || (flowSteps.find((step) => step.id === summaryOverlayStep)?.label || '');
@@ -5361,7 +5365,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                     variant="outlined"
                     disabled={!previousStep}
                     startIcon={<ChevronLeft sx={{ fontSize: 14 }} />}
-                    onClick={() => previousStep && openWorkbenchStep(previousStep.id)}
+                    onClick={() => previousStep && openWorkbenchStep(previousStep.id, { skipGuardRedirect: true })}
                     sx={{
                       height: 30,
                       px: 1.25,
@@ -5382,7 +5386,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                       variant="contained"
                       startIcon={primaryCta.stale ? <Refresh sx={{ fontSize: 14 }} /> : undefined}
                       endIcon={primaryCta.stale ? undefined : <ChevronRight />}
-                      onClick={() => openWorkbenchStep(primaryCta.target)}
+                      onClick={() => openWorkbenchStep(primaryCta.target, { skipGuardRedirect: true })}
                       sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, height: 30, px: 1.35, fontSize: 11.5, fontWeight: 700, textTransform: 'none', borderRadius: 0, boxShadow: 'none' }}
                     >
                       {primaryCta.stale ? `${primaryCta.label}: ${primaryCta.detail}` : `Continue to ${primaryCta.detail}`}

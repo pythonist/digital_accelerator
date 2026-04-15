@@ -514,6 +514,7 @@ def handoff_sentinel():
 
         simulation = None
         batch_id = requested_batch_id
+        requested_batch_missing = False
         if batch_id:
             existing_batch = next(
                 (
@@ -523,22 +524,24 @@ def handoff_sentinel():
                 None,
             )
             if not existing_batch:
-                return _err(f"Requested scored batch {batch_id} was not found for this FCC run.", 404)
-            simulation = {
-                "generated_at": existing_batch.get("scored_at") or existing_batch.get("created_at"),
-                "preview_tables": {},
-                "scoring": {
-                    "batch_id": batch_id,
-                    "total": int(existing_batch.get("total") or 0),
-                    "suppressed": int(existing_batch.get("suppressed") or 0),
-                    "escalated": int(existing_batch.get("escalated") or 0),
-                    "threshold": float(existing_batch.get("threshold") or threshold),
-                    "threshold_requested": float(existing_batch.get("threshold") or threshold),
-                    "threshold_applied": float(existing_batch.get("threshold") or threshold),
-                    "threshold_auto_optimized": False,
-                },
-            }
-        else:
+                requested_batch_missing = True
+                batch_id = ""
+            else:
+                simulation = {
+                    "generated_at": existing_batch.get("scored_at") or existing_batch.get("created_at"),
+                    "preview_tables": {},
+                    "scoring": {
+                        "batch_id": batch_id,
+                        "total": int(existing_batch.get("total") or 0),
+                        "suppressed": int(existing_batch.get("suppressed") or 0),
+                        "escalated": int(existing_batch.get("escalated") or 0),
+                        "threshold": float(existing_batch.get("threshold") or threshold),
+                        "threshold_requested": float(existing_batch.get("threshold") or threshold),
+                        "threshold_applied": float(existing_batch.get("threshold") or threshold),
+                        "threshold_auto_optimized": False,
+                    },
+                }
+        if not batch_id:
             simulation = svc.simulate_live_pipeline(
                 deployment_id=deployment_id,
                 run_id=run_id,
@@ -682,6 +685,7 @@ def handoff_sentinel():
                 "scope": scope_result,
                 "handoff": saved_handoff,
                 "workflow_session": session,
+                "requested_batch_missing": requested_batch_missing,
             }
         )
 

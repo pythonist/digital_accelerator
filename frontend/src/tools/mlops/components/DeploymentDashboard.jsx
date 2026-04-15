@@ -1760,10 +1760,9 @@ const DeploymentDashboard = ({
     setPublishNotice(null);
 
     try {
-      const handoffRes = await mlopsApi.handoffToSentinel({
+      const baseHandoffPayload = {
         deployment_id: deploymentId,
         run_id: runId,
-        batch_id: simResult?.scoring?.batch_id || undefined,
         threshold: simThresholdApplied ?? threshold,
         simulation_mode: 'synthetic_pipeline',
         persist_to_ledger: true,
@@ -1771,7 +1770,6 @@ const DeploymentDashboard = ({
         scenario: simConfig.scenario,
         batch_size: Number(simResult?.scoring?.total || simConfig.batch_size || 20),
         compare_run_ids: [],
-        seed: simResult?.scoring?.batch_id ? undefined : (Date.now() % 1000000),
         pipeline_id: activePipelineId || undefined,
         pipeline_name: activePipelineName || undefined,
         preferred_screen: 'fcc_bridge',
@@ -1779,7 +1777,32 @@ const DeploymentDashboard = ({
         merge_existing: false,
         rerank_after_import: true,
         force_refresh: false,
-      });
+      };
+      const rememberedBatchId = String(simResult?.scoring?.batch_id || '').trim();
+      let handoffRes;
+      try {
+        handoffRes = await mlopsApi.handoffToSentinel({
+          ...baseHandoffPayload,
+          ...(rememberedBatchId ? { batch_id: rememberedBatchId } : {}),
+          seed: rememberedBatchId ? undefined : (Date.now() % 1000000),
+        });
+      } catch (handoffError) {
+        const message = String(
+          handoffError?.response?.data?.error
+          || handoffError?.message
+          || '',
+        ).toLowerCase();
+        const shouldRetryFreshBatch = rememberedBatchId && (
+          handoffError?.response?.status === 404
+          || message.includes('requested scored batch')
+          || message.includes('batch was not found')
+        );
+        if (!shouldRetryFreshBatch) throw handoffError;
+        handoffRes = await mlopsApi.handoffToSentinel({
+          ...baseHandoffPayload,
+          seed: Date.now() % 1000000,
+        });
+      }
       const handoffBody = unwrap(handoffRes);
       const handoffPayload = handoffBody?.handoff || handoffBody?.workflow_session?.handoff_summary || {};
       const workflowSession = handoffBody?.workflow_session || null;
