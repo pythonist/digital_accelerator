@@ -2807,11 +2807,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     if (activePipelineType === 'mule') return false;
     const pipelineId = String(validActivePipelineId || activePipelineId || '').trim();
     const summaryStepKey = FCC_SUMMARY_STEP_MAP[String(stepId || '').trim()];
-    if (!pipelineId || !summaryStepKey) return false;
-    if (!savedLocalPipelineRun && !localPipelineComplete) return false;
-    const stepStatusValue = getStepStatus(pipelineId, summaryStepKey);
-    return stepStatusValue === 'done' || localPipelineComplete;
-  }, [activePipelineId, activePipelineType, localPipelineComplete, savedLocalPipelineRun, validActivePipelineId]);
+    const runIsCompleted = Boolean(pipelineIsCompleted || localPipelineComplete);
+    if (!pipelineId || !summaryStepKey || !runIsCompleted) return false;
+    if (!savedLocalPipelineRun && !runIsCompleted) return false;
+    return getStepStatus(pipelineId, summaryStepKey) === 'done' || runIsCompleted;
+  }, [activePipelineId, activePipelineType, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun, validActivePipelineId]);
 
   const flowSteps      = useMemo(() => STEPS.filter((s) => s.id !== 'pipelines'), [STEPS]);
   const currentIdx     = STEPS.findIndex((s) => s.id === activeStep);
@@ -2857,9 +2857,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       ts: Date.now(),
     };
     setActiveStep(resolvedStep);
-    if (shouldShowSummaryForStep(resolvedStep)) {
-      setSummaryOverlayStep(resolvedStep);
-    }
+    if (shouldShowSummaryForStep(resolvedStep)) setSummaryOverlayStep(resolvedStep);
+    else setSummaryOverlayStep('');
     if (!targetRunId) {
       navigate('/mlops/runs', { replace: Boolean(options?.replace), state: options?.state });
       return;
