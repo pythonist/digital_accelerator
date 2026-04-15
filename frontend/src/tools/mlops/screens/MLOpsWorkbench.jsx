@@ -92,7 +92,7 @@ const D = {
 };
 
 const ALLOW_LOCKED_NAV = true;
-const DEFAULT_EXPERIMENT_NAME = 'Experiment 1';
+const DEFAULT_EXPERIMENT_NAME = '';
 const MANUAL_STEP_OVERRIDE_MS = 30000;
 const DEFAULT_PIPELINE_SESSION_STATE = {
   by_env: {},
@@ -785,6 +785,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const invalidationResetSignatureRef = useRef('');
   const screenSaveSignatureRef = useRef({});
   const screenSaveInFlightRef = useRef({});
+  const screenSaveDisabledPipelineRef = useRef(new Set());
 
   const [activeStep,      setActiveStep]      = useState(
     normalizedRouteStep || normalizeWorkbenchStep(saved.activeStep || 'data') || 'data',
@@ -1212,7 +1213,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     if (!suppressStepRestore && !hasManualOverride && restoredStep && STEPS.some((step) => step.id === restoredStep)) {
       setActiveStep((prev) => {
         const current = normalizeWorkbenchStep(prev);
-        if (!current || current === 'data' || current === 'pipelines') {
+        if (!current || current === 'data') {
           return restoredStep;
         }
         return prev;
@@ -1275,6 +1276,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     if (!Number.isFinite(numericPipelineId) || numericPipelineId <= 0 || !screenKey) {
       return Promise.resolve(null);
     }
+    if (screenSaveDisabledPipelineRef.current.has(numericPipelineId)) {
+      return Promise.resolve(null);
+    }
     const signature = JSON.stringify(state ?? {});
     const refKey = `${numericPipelineId}:${screenKey}`;
     if (
@@ -1299,6 +1303,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       .catch((error) => {
         if (screenSaveInFlightRef.current[refKey] === signature) {
           delete screenSaveInFlightRef.current[refKey];
+        }
+        const status = Number(error?.response?.status || error?.status || 0);
+        if (status === 404 || status === 405) {
+          screenSaveDisabledPipelineRef.current.add(numericPipelineId);
+          return null;
         }
         throw error;
       });
@@ -2173,7 +2182,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         if (sessionStep && STEPS.some((step) => step.id === sessionStep)) {
           setActiveStep((prev) => {
             const current = normalizeWorkbenchStep(prev);
-            if (!current || current === 'data' || current === 'pipelines') {
+            if (!current || current === 'data') {
               return sessionStep;
             }
             return prev;
@@ -2870,11 +2879,6 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       state: options?.state,
     });
   }, [activePipelineId, activePipelineType, navigate, resolveStepNavigation, shouldShowSummaryForStep, validActivePipelineId]);
-  useEffect(() => {
-    if (activePipelineType === 'mule') return;
-    if (!localPipelineComplete || activeStep !== 'pipelines') return;
-    openWorkbenchStep('data', { skipGuardRedirect: true, replace: true });
-  }, [activePipelineType, activeStep, localPipelineComplete, openWorkbenchStep]);
   const activeSummaryStepKey = FCC_SUMMARY_STEP_MAP[String(summaryOverlayStep || activeStep || '').trim()] || '';
   const activeSummaryMetadata = activeSummaryStepKey ? (localSummaryMetadataByStep[activeSummaryStepKey] || {}) : {};
   const activeSummaryLabel = FCC_SUMMARY_STEP_LABELS[activeSummaryStepKey] || (flowSteps.find((step) => step.id === summaryOverlayStep)?.label || '');

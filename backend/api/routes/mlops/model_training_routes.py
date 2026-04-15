@@ -2122,7 +2122,13 @@ def list_runs() -> tuple:
         dataset_svc = _get_dataset_service(env_root)
         labels     = _get_labels(tenant_id, env_id)
         dataset_id = request.args.get("dataset_id")
-        pipeline_id = request.args.get("pipeline_id")
+        pipeline_id_raw = request.args.get("pipeline_id")
+        pipeline_id = None
+        if str(pipeline_id_raw or "").strip():
+            try:
+                pipeline_id = int(pipeline_id_raw)
+            except Exception:
+                pipeline_id = None
         limit      = int(request.args.get("limit") or 200)
         result     = trainer.list_runs(
             tenant_id=tenant_id, env_id=env_id,
@@ -2130,13 +2136,16 @@ def list_runs() -> tuple:
             limit=limit,
         )
         if pipeline_id:
-            pipeline_job_ids = set(
-                dataset_svc.list_pipeline_training_job_ids(
-                    tenant_id=tenant_id,
-                    env_id=env_id,
-                    pipeline_id=int(pipeline_id),
+            try:
+                pipeline_job_ids = set(
+                    dataset_svc.list_pipeline_training_job_ids(
+                        tenant_id=tenant_id,
+                        env_id=env_id,
+                        pipeline_id=pipeline_id,
+                    )
                 )
-            )
+            except ValueError:
+                pipeline_job_ids = set()
             result = [
                 row for row in result
                 if str(row.get("job_id") or row.get("run_id") or "").strip() in pipeline_job_ids
