@@ -781,9 +781,9 @@ def _progress_summary_from_steps(steps: List[Dict], status: Optional[str] = None
         current_substep = current_substep or derived_substep
         current_substep_label = derived_substep_label
 
-    completion_pct = _coerce_int(journey.get("completion_pct"), summary["completion_pct"])
-    completed_steps = _coerce_int(journey.get("completed_steps"), summary["completed_steps"])
-    total_steps = _coerce_int(journey.get("total_steps"), summary["total_steps"])
+    completion_pct = summary["completion_pct"]
+    completed_steps = summary["completed_steps"]
+    total_steps = summary["total_steps"]
     run_status = str(journey.get("run_status") or summary["run_status"] or status or "").strip().lower()
     if not run_status:
         run_status = "complete" if int(completion_pct or 0) >= 100 else "in_progress"
@@ -1208,6 +1208,10 @@ def _build_workflow_manifest(
         event_row = event_map.get(step_key) or event_map.get(screen_key) or {}
         event_status = _normalize_text(event_row.get("status")).lower()
         prerequisites = list(_STEP_DEPENDENCIES.get(step_key, ()))
+        missing_dependencies = [
+            dep for dep in prerequisites
+            if manifest_steps.get(dep, {}).get("status") != "completed"
+        ] if completed else []
 
         status = "completed" if completed else "not_started"
         if event_status in {"failed", "error"} or (
@@ -1217,11 +1221,7 @@ def _build_workflow_manifest(
         elif invalidation:
             status = "invalidated"
         elif prerequisites and not completed:
-            incomplete_prereqs = [
-                dep for dep in prerequisites
-                if manifest_steps.get(dep, {}).get("status") != "completed"
-            ]
-            if incomplete_prereqs:
+            if missing_dependencies:
                 status = "blocked"
         if status == "not_started" and step_key == current_step:
             status = "in_progress"
@@ -1242,21 +1242,18 @@ def _build_workflow_manifest(
         invalidated_reason = _normalize_optional_text(invalidation.get("message"))
         invalidated_by_step = _normalize_optional_text(invalidation.get("source_step"))
 
-        if status == "completed":
-            missing_dependencies = [
-                dep for dep in prerequisites
-                if manifest_steps.get(dep, {}).get("status") != "completed"
-            ]
-            if missing_dependencies:
-                inconsistencies.append({
-                    "step": step_key,
-                    "reason": (
-                        f"{_PIPELINE_STEP_LABELS.get(step_key, step_key.title())} is marked completed while "
-                        f"{_join_labels([_PIPELINE_STEP_LABELS.get(dep, dep.title()) for dep in missing_dependencies])} "
-                        "is not completed."
-                    ),
-                    "missing_prerequisites": missing_dependencies,
-                })
+        if status == "completed" and missing_dependencies:
+            inconsistencies.append({
+                "step": step_key,
+                "reason": (
+                    f"{_PIPELINE_STEP_LABELS.get(step_key, step_key.title())} is marked completed while "
+                    f"{_join_labels([_PIPELINE_STEP_LABELS.get(dep, dep.title()) for dep in missing_dependencies])} "
+                    "is not completed."
+                ),
+                "missing_prerequisites": missing_dependencies,
+            })
+            if overall_status not in {"complete", "completed", "done"}:
+                status = "blocked"
 
         manifest_steps[step_key] = {
             "step_key": step_key,
@@ -1276,6 +1273,19 @@ def _build_workflow_manifest(
                 "has_screen_state": bool(screen_state),
             },
         }
+
+    completed_progress_steps = sum(
+        1 for step_key in _PROGRESS_STAGE_ORDER
+        if manifest_steps.get(step_key, {}).get("status") == "completed"
+    )
+    if completed_progress_steps == 0:
+        for step in manifest_steps.values():
+            if step.get("status") == "invalidated":
+                step["status"] = "not_started"
+                step["invalidated_by"] = None
+                step["invalidated_reason"] = None
+        inconsistencies = []
+        latest_change = {}
 
     if inconsistencies:
         manifest_status = "inconsistent"
