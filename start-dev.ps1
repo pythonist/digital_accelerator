@@ -27,6 +27,96 @@ function New-PythonLaunchSpec {
     }
 }
 
+function Resolve-AnyPythonExecutable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$BackendDir
+    )
+
+    $candidatePaths = @()
+
+    if ($env:VIRTUAL_ENV) {
+        $candidatePaths += Join-Path $env:VIRTUAL_ENV "Scripts\python.exe"
+    }
+
+    $candidatePaths += @(
+        (Join-Path $BackendDir ".venv\Scripts\python.exe"),
+        (Join-Path $BackendDir ".venv312\Scripts\python.exe"),
+        (Join-Path $BackendDir ".venv311\Scripts\python.exe"),
+        (Join-Path $BackendDir ".venv310\Scripts\python.exe"),
+        (Join-Path $RepoRoot ".venv\Scripts\python.exe")
+    )
+
+    foreach ($candidate in ($candidatePaths | Select-Object -Unique)) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return New-PythonLaunchSpec -Executable $candidate
+        }
+    }
+
+    $pyCmd = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyCmd) {
+        foreach ($version in @("-3.12", "-3.11", "-3.10", "-3")) {
+            try {
+                & $pyCmd.Source $version -c "import sys; print(sys.executable)" *> $null
+                if ($LASTEXITCODE -eq 0) {
+                    return New-PythonLaunchSpec -Executable $pyCmd.Source -Arguments @($version)
+                }
+            } catch {
+            }
+        }
+    }
+
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCmd) {
+        return New-PythonLaunchSpec -Executable $pythonCmd.Source
+    }
+
+    throw "No usable Python launcher found. Install Python 3.10+ and ensure 'python' or 'py' works on PATH."
+}
+
+function Ensure-BackendPython {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$BackendDir
+    )
+
+    try {
+        return Resolve-PythonLaunchSpec -RepoRoot $RepoRoot -BackendDir $BackendDir
+    } catch {
+        Write-Host "No Python with Flask found. Bootstrapping backend\.venv..." -ForegroundColor Yellow
+    }
+
+    $bootstrapSpec = Resolve-AnyPythonExecutable -RepoRoot $RepoRoot -BackendDir $BackendDir
+    $bootstrapExe = $bootstrapSpec.Executable
+    $bootstrapArgs = @($bootstrapSpec.Arguments)
+    $backendVenv = Join-Path $BackendDir ".venv"
+    $backendVenvPy = Join-Path $backendVenv "Scripts\python.exe"
+    $requirementsFile = Join-Path $BackendDir "requirements.txt"
+
+    if (-not (Test-Path -LiteralPath $backendVenvPy)) {
+        & $bootstrapExe @bootstrapArgs -m venv $backendVenv
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create backend virtual environment at $backendVenv"
+        }
+    }
+
+    & $backendVenvPy -m pip install --upgrade pip
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to upgrade pip in backend\.venv"
+    }
+
+    & $backendVenvPy -m pip install -r $requirementsFile
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install backend requirements into backend\.venv"
+    }
+
+    return Resolve-PythonLaunchSpec -RepoRoot $RepoRoot -BackendDir $BackendDir
+}
+
 function Resolve-PythonLaunchSpec {
     param(
         [Parameter(Mandatory = $true)]
@@ -85,7 +175,7 @@ function Resolve-PythonLaunchSpec {
         }
     }
 
-    throw "No usable Python with Flask found. Activate the correct venv or install backend dependencies into backend\\.venv."
+    throw "No usable Python with Flask found."
 }
 
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -132,7 +222,7 @@ if (-not (Test-Path -LiteralPath $frontendNodeModules)) {
 
 $backendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendDir
 $frontendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $frontendDir
-$pythonLaunchSpec = Resolve-PythonLaunchSpec -RepoRoot $repoRoot -BackendDir $backendDir
+$pythonLaunchSpec = Ensure-BackendPython -RepoRoot $repoRoot -BackendDir $backendDir
 $pythonExecutable = $pythonLaunchSpec.Executable
 $pythonExecutableLiteral = Convert-ToSingleQuotedLiteral -PathValue $pythonExecutable
 $pythonArgLiteral = @($pythonLaunchSpec.Arguments | ForEach-Object {
