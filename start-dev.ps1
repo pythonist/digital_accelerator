@@ -27,6 +27,23 @@ function New-PythonLaunchSpec {
     }
 }
 
+function Test-PythonModule {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+        [string[]]$Arguments = @(),
+        [Parameter(Mandatory = $true)]
+        [string]$ModuleName
+    )
+
+    try {
+        & $Executable @Arguments -c "import $ModuleName" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
 function Resolve-AnyPythonExecutable {
     param(
         [Parameter(Mandatory = $true)]
@@ -84,18 +101,30 @@ function Ensure-BackendPython {
         [string]$BackendDir
     )
 
-    try {
-        return Resolve-PythonLaunchSpec -RepoRoot $RepoRoot -BackendDir $BackendDir
-    } catch {
-        Write-Host "No Python with Flask found. Bootstrapping backend\.venv..." -ForegroundColor Yellow
-    }
-
-    $bootstrapSpec = Resolve-AnyPythonExecutable -RepoRoot $RepoRoot -BackendDir $BackendDir
-    $bootstrapExe = $bootstrapSpec.Executable
-    $bootstrapArgs = @($bootstrapSpec.Arguments)
     $backendVenv = Join-Path $BackendDir ".venv"
     $backendVenvPy = Join-Path $backendVenv "Scripts\python.exe"
     $requirementsFile = Join-Path $BackendDir "requirements.txt"
+
+    if (Test-Path -LiteralPath $backendVenvPy) {
+        Write-Host "Using existing backend virtual environment: $backendVenvPy" -ForegroundColor Green
+        if (-not (Test-PythonModule -Executable $backendVenvPy -ModuleName "flask")) {
+            Write-Host "Existing backend venv is missing Flask or backend packages. Installing requirements..." -ForegroundColor Yellow
+            & $backendVenvPy -m pip install --upgrade pip
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to upgrade pip in existing backend\.venv"
+            }
+            & $backendVenvPy -m pip install -r $requirementsFile
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to install backend requirements into existing backend\.venv"
+            }
+        }
+        return New-PythonLaunchSpec -Executable $backendVenvPy
+    }
+
+    Write-Host "No backend virtual environment found. Bootstrapping backend\.venv..." -ForegroundColor Yellow
+    $bootstrapSpec = Resolve-AnyPythonExecutable -RepoRoot $RepoRoot -BackendDir $BackendDir
+    $bootstrapExe = $bootstrapSpec.Executable
+    $bootstrapArgs = @($bootstrapSpec.Arguments)
 
     if (-not (Test-Path -LiteralPath $backendVenvPy)) {
         & $bootstrapExe @bootstrapArgs -m venv $backendVenv
@@ -114,7 +143,11 @@ function Ensure-BackendPython {
         throw "Failed to install backend requirements into backend\.venv"
     }
 
-    return Resolve-PythonLaunchSpec -RepoRoot $RepoRoot -BackendDir $BackendDir
+    if (-not (Test-PythonModule -Executable $backendVenvPy -ModuleName "flask")) {
+        throw "backend\.venv was created, but Flask still cannot be imported. Check requirements.txt and pip output."
+    }
+
+    return New-PythonLaunchSpec -Executable $backendVenvPy
 }
 
 function Resolve-PythonLaunchSpec {
