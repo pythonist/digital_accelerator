@@ -2280,6 +2280,13 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     () => String(validActivePipelineId || activePipelineId || '').trim(),
     [activePipelineId, validActivePipelineId],
   );
+  const currentLocalPipelineScope = useMemo(() => ({
+    pipeline_id: currentLocalPipelineId || null,
+    pipeline_uuid: activeSavedPipeline?.pipeline_uuid || activePipelineMeta?.pipeline_uuid || null,
+    env_id: currentEnvId,
+    pipeline_type: activePipelineType,
+    pipeline_name: activePipelineName,
+  }), [activePipelineMeta?.pipeline_uuid, activePipelineName, activePipelineType, activeSavedPipeline?.pipeline_uuid, currentEnvId, currentLocalPipelineId]);
   useEffect(() => {
     if (!currentLocalPipelineId) {
       setSavedLocalPipelineRun(null);
@@ -2288,8 +2295,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       return;
     }
     setStepDirtyMap({});
-    setSavedLocalPipelineRun(loadPipelineRun(currentLocalPipelineId));
-  }, [currentLocalPipelineId]);
+    setSavedLocalPipelineRun(loadPipelineRun(currentLocalPipelineScope));
+  }, [currentLocalPipelineId, currentLocalPipelineScope]);
   const effectiveActiveModelRun = useMemo(() => {
     const routeRun = routeRegistryHandoff?.activeModelRun;
     if (routeRun?.job_id || routeRun?.run_id) return routeRun;
@@ -2593,8 +2600,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     }
   }, [activeModelRun?.job_id, activePipelineType, datasets, masterDataset, preprocessDataset, preprocessSteps, savedLocalPipelineRun, targetColumn]);
   const localPipelineComplete = useMemo(
-    () => Boolean(currentLocalPipelineId) && isPipelineComplete(currentLocalPipelineId),
-    [currentLocalPipelineId, savedLocalPipelineRun],
+    () => Boolean(currentLocalPipelineId) && isPipelineComplete(currentLocalPipelineScope),
+    [currentLocalPipelineId, currentLocalPipelineScope, savedLocalPipelineRun],
   );
   const rawStaleSteps = useMemo(
     () => Array.isArray(activePipelineMeta?.stale_steps) ? activePipelineMeta.stale_steps : [],
@@ -2727,18 +2734,18 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       }
       return {
         ...base,
-        data: base.data || getStepStatus(currentLocalPipelineId, 'data_upload') === 'done',
-        master: base.master || getStepStatus(currentLocalPipelineId, 'master_dataset') === 'done',
-        target: base.target || getStepStatus(currentLocalPipelineId, 'target_variable') === 'done',
-        preprocess: base.preprocess || getStepStatus(currentLocalPipelineId, 'preprocessing') === 'done',
-        model: base.model || getStepStatus(currentLocalPipelineId, 'model_run') === 'done',
-        dashboard: base.dashboard || getStepStatus(currentLocalPipelineId, 'live_dashboard') === 'done',
+        data: base.data || getStepStatus(currentLocalPipelineScope, 'data_upload') === 'done',
+        master: base.master || getStepStatus(currentLocalPipelineScope, 'master_dataset') === 'done',
+        target: base.target || getStepStatus(currentLocalPipelineScope, 'target_variable') === 'done',
+        preprocess: base.preprocess || getStepStatus(currentLocalPipelineScope, 'preprocessing') === 'done',
+        model: base.model || getStepStatus(currentLocalPipelineScope, 'model_run') === 'done',
+        dashboard: base.dashboard || getStepStatus(currentLocalPipelineScope, 'live_dashboard') === 'done',
         validation: base.validation || localPipelineComplete,
         registry: base.registry || localPipelineComplete,
         reports: base.reports || localPipelineComplete,
       };
     },
-    [activePipelineMeta, activePipelineType, activeSavedPipeline, currentLocalPipelineId, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun],
+    [activePipelineMeta, activePipelineType, activeSavedPipeline, currentLocalPipelineId, currentLocalPipelineScope, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun],
   );
   const savedStepStatuses = useMemo(
     () => {
@@ -2751,15 +2758,14 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         });
         return next;
       }
-      if (getStepStatus(currentLocalPipelineId, 'data_upload') === 'done') next.data = 'completed';
-      if (getStepStatus(currentLocalPipelineId, 'master_dataset') === 'done') next.master = 'completed';
-      if (getStepStatus(currentLocalPipelineId, 'target_variable') === 'done') next.target = 'completed';
-      if (getStepStatus(currentLocalPipelineId, 'preprocessing') === 'done') next.preprocess = 'completed';
-      if (getStepStatus(currentLocalPipelineId, 'model_run') === 'done') {
+      if (getStepStatus(currentLocalPipelineScope, 'data_upload') === 'done') next.data = 'completed';
+      if (getStepStatus(currentLocalPipelineScope, 'master_dataset') === 'done') next.master = 'completed';
+      if (getStepStatus(currentLocalPipelineScope, 'target_variable') === 'done') next.target = 'completed';
+      if (getStepStatus(currentLocalPipelineScope, 'preprocessing') === 'done') next.preprocess = 'completed';
+      if (getStepStatus(currentLocalPipelineScope, 'model_run') === 'done') {
         next.model = 'completed';
-        next.validation = next.validation === 'completed' ? next.validation : 'completed';
       }
-      if (getStepStatus(currentLocalPipelineId, 'live_dashboard') === 'done') {
+      if (getStepStatus(currentLocalPipelineScope, 'live_dashboard') === 'done') {
         next.dashboard = 'completed';
       }
       if (localPipelineComplete) {
@@ -2769,7 +2775,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       }
       return next;
     },
-    [activePipelineMeta, activePipelineType, activeSavedPipeline, currentLocalPipelineId, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun],
+    [activePipelineMeta, activePipelineType, activeSavedPipeline, currentLocalPipelineId, currentLocalPipelineScope, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun],
   );
 
   const stepCtx = useMemo(() => ({
@@ -2821,8 +2827,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     const runIsCompleted = Boolean(pipelineIsCompleted || localPipelineComplete);
     if (!pipelineId || !summaryStepKey || !runIsCompleted) return false;
     if (!savedLocalPipelineRun && !runIsCompleted) return false;
-    return getStepStatus(pipelineId, summaryStepKey) === 'done' || runIsCompleted;
-  }, [activePipelineId, activePipelineType, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun, validActivePipelineId]);
+    return getStepStatus({ ...currentLocalPipelineScope, pipeline_id: pipelineId }, summaryStepKey) === 'done' || runIsCompleted;
+  }, [activePipelineId, activePipelineType, currentLocalPipelineScope, localPipelineComplete, pipelineIsCompleted, savedLocalPipelineRun, validActivePipelineId]);
 
   const flowSteps      = useMemo(() => STEPS.filter((s) => s.id !== 'pipelines'), [STEPS]);
   const currentIdx     = STEPS.findIndex((s) => s.id === activeStep);
@@ -2847,16 +2853,16 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     const requested = String(requestedStepId || '').trim();
     if (localPipelineComplete) return requested;
     const requestedPipelineId = String(validActivePipelineId || activePipelineId || '').trim();
-    if (requestedPipelineId && isPipelineComplete(requestedPipelineId)) return requested;
+    if (requestedPipelineId && isPipelineComplete({ ...currentLocalPipelineScope, pipeline_id: requestedPipelineId })) return requested;
     if (!requested || requested === 'pipelines' || !firstStaleStep) return requested;
     const requestedIndex = progressStepIndexMap[requested];
     if (requestedIndex == null || requestedIndex < firstStaleStepIndex) return requested;
     return firstStaleStep.id;
-  }, [activePipelineId, firstStaleStep, firstStaleStepIndex, localPipelineComplete, progressStepIndexMap, validActivePipelineId]);
+  }, [activePipelineId, currentLocalPipelineScope, firstStaleStep, firstStaleStepIndex, localPipelineComplete, progressStepIndexMap, validActivePipelineId]);
   const openWorkbenchStep = useCallback((requestedStepId, options = {}) => {
     const requested = normalizeWorkbenchStep(requestedStepId || '');
     const targetRunId = normalizeWorkbenchRunId(options?.pipelineId || validActivePipelineId || activePipelineId);
-    const targetRunComplete = Boolean(targetRunId) && isPipelineComplete(String(targetRunId));
+    const targetRunComplete = Boolean(targetRunId) && isPipelineComplete({ ...currentLocalPipelineScope, pipeline_id: String(targetRunId) });
     const resolvedStep = options?.skipGuardRedirect || activePipelineType === 'mule'
       ? requested || 'pipelines'
       : targetRunComplete
@@ -2945,7 +2951,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       return;
     }
     const targetStep = normalizeWorkbenchStep(options?.step || deriveResumeStep(pipelineRef)) || 'pipelines';
-    const targetComplete = isPipelineComplete(String(pipelineId));
+    const targetComplete = isPipelineComplete({
+      pipeline_id: String(pipelineId),
+      pipeline_uuid: pipelineRef?.pipeline_uuid || null,
+      env_id: currentEnvId,
+    });
     const pipelineTypeHint = normalizePipelineFamily(
       options?.pipeline_type
       || pipelineRef?.pipeline_type
@@ -2962,7 +2972,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         skipGuardRedirect: targetComplete || Boolean(options?.skipGuardRedirect),
       },
     });
-  }, [deriveResumeStep, navigate]);
+  }, [currentEnvId, deriveResumeStep, navigate]);
   useEffect(() => {
     if (normalizedRouteRunId || hasPipelineContext) {
       setPipelineLauncherOpen(false);
@@ -3266,10 +3276,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     const pipelineId = Number(validActivePipelineId || 0);
     if (!Number.isFinite(pipelineId) || pipelineId <= 0) return;
     if (screenStatePersistencePausedRef.current) return;
-    const edaVisited = activeStep === 'eda' || Boolean(edaActiveTab);
+    const edaVisited = activeStep === 'eda';
     persistPipelineScreenState(pipelineId, 'eda', {
-      completed: Boolean(edaDone || edaVisited),
-      status: (edaDone || edaVisited) ? 'completed' : 'in_progress',
+      completed: Boolean(edaDone),
+      eda_completed: Boolean(edaDone),
+      status: edaDone ? 'completed' : 'in_progress',
       target_column: targetColumn || '',
       viewed_step: edaVisited,
       activeTab: edaActiveTab,
@@ -3296,69 +3307,72 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
-    savePipelineRun(currentLocalPipelineId, {
+    savePipelineRun(currentLocalPipelineScope, {
       pipeline_id: currentLocalPipelineId,
+      pipeline_uuid: currentLocalPipelineScope.pipeline_uuid,
+      env_id: currentEnvId,
+      pipeline_type: activePipelineType,
       pipeline_name: activePipelineName || `FCC Run - ${currentLocalPipelineId}`,
       status: 'draft',
     });
-  }, [activePipelineName, activePipelineType, currentLocalPipelineId]);
+  }, [activePipelineName, activePipelineType, currentEnvId, currentLocalPipelineId, currentLocalPipelineScope]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule' || !(datasets || []).length) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'data_upload', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'data_upload', {
       status: 'done',
       metadata: localDataUploadMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, datasets, localDataUploadMetadata]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, datasets, localDataUploadMetadata]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule' || !masterDataset) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'master_dataset', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'master_dataset', {
       status: 'done',
       metadata: localMasterMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, localMasterMetadata, masterDataset]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localMasterMetadata, masterDataset]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule' || !String(targetColumn || '').trim()) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'target_variable', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'target_variable', {
       status: 'done',
       metadata: localTargetMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, localTargetMetadata, targetColumn]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localTargetMetadata, targetColumn]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
     if (!(Array.isArray(preprocessSteps) && preprocessSteps.length > 0) && !preprocessDataset) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'preprocessing', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'preprocessing', {
       status: preprocessDataset ? 'done' : 'in_progress',
       metadata: localPreprocessMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, localPreprocessMetadata, preprocessDataset, preprocessSteps]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localPreprocessMetadata, preprocessDataset, preprocessSteps]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
     if (!edaDone && !localPipelineComplete && !savedStepCompletion?.eda) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'eda', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'eda', {
       status: 'done',
       metadata: localEdaMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, edaDone, localEdaMetadata, localPipelineComplete, savedStepCompletion?.eda]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, edaDone, localEdaMetadata, localPipelineComplete, savedStepCompletion?.eda]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
     if (!effectiveActiveModelRun?.job_id && !modelRun?.job_id) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'model_run', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'model_run', {
       status: 'done',
       metadata: localModelMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, effectiveActiveModelRun?.job_id, localModelMetadata, modelRun?.job_id]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveActiveModelRun?.job_id, localModelMetadata, modelRun?.job_id]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
@@ -3371,12 +3385,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       || savedStepCompletion?.validation,
     );
     if (!hasValidationPayload) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'validation', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'validation', {
       status: 'done',
       metadata: localValidationMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, effectiveValidationReport, localPipelineComplete, localValidationMetadata, savedStepCompletion?.validation]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveValidationReport, localPipelineComplete, localValidationMetadata, savedStepCompletion?.validation]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
@@ -3388,12 +3402,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       || savedStepCompletion?.registry,
     );
     if (!hasRegistryPayload) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'registry', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'registry', {
       status: 'done',
       metadata: localRegistryMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, effectiveRegistryEntry, localPipelineComplete, localRegistryMetadata, savedStepCompletion?.registry]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveRegistryEntry, localPipelineComplete, localRegistryMetadata, savedStepCompletion?.registry]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
@@ -3405,12 +3419,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       || savedDashboardState?.simulation_result?.publish?.publish_id
       || savedDashboardState?.simulation_result?.deployment_id,
     );
-    const next = updatePipelineStep(currentLocalPipelineId, 'live_dashboard', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'live_dashboard', {
       status: hasLiveDashboardState ? 'done' : 'in_progress',
       metadata: localDashboardMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, effectiveRegistryEntry, effectiveValidationReport, localDashboardMetadata, savedDashboardState]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveRegistryEntry, effectiveValidationReport, localDashboardMetadata, savedDashboardState]);
 
   useEffect(() => {
     if (!currentLocalPipelineId || activePipelineType === 'mule') return;
@@ -3421,12 +3435,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       || savedStepCompletion?.reports,
     );
     if (!hasReportPayload) return;
-    const next = updatePipelineStep(currentLocalPipelineId, 'reports', {
+    const next = updatePipelineStep(currentLocalPipelineScope, 'reports', {
       status: 'done',
       metadata: localReportMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, localPipelineComplete, localReportMetadata, savedStepCompletion?.reports]);
+  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localPipelineComplete, localReportMetadata, savedStepCompletion?.reports]);
 
   useEffect(() => {
     const pipelineId = Number(validActivePipelineId || 0);
@@ -3911,14 +3925,17 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       }
       return [nextRow, ...rows];
     });
+    pauseScreenStatePersistence();
+    clearLocalWorkbenchState();
+    setSavedLocalPipelineRun(null);
     setActiveStep(freshStep);
     activatePipeline({ ...verifiedPipeline, pipeline_id: verifiedPipeline.pipeline_id, name: trimmed }, { step: freshStep });
-    clearLocalWorkbenchState();
     setExperimentName(trimmed);
     setPipelineLauncherOpen(false);
+    resumeScreenStatePersistence();
     await loadSavedPipelines();
     return verifiedPipeline;
-  }, [activatePipeline, clearLocalWorkbenchState, loadSavedPipelines, persona]);
+  }, [activatePipeline, clearLocalWorkbenchState, loadSavedPipelines, pauseScreenStatePersistence, persona, resumeScreenStatePersistence]);
 
   const handleStartNewPipeline = useCallback(() => {
     setNewPipelineName('');

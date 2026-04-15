@@ -411,10 +411,7 @@ def _eda_state_is_completed(state: Any) -> bool:
         return True
     if not isinstance(state, dict) or not state:
         return False
-    viewed = bool(state.get("viewed_step"))
-    active_tab = _normalize_text(state.get("activeTab") or state.get("tab"))
-    target_column = _normalize_text(state.get("target_column"))
-    return viewed or bool(active_tab) or bool(target_column)
+    return bool(state.get("eda_completed"))
 
 
 def _sort_jsonable(value):

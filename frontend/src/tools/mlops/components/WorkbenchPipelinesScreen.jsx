@@ -257,20 +257,24 @@ const matchesSearch = (row, search) => {
   ].join(' ').toLowerCase().includes(needle);
 };
 
-const deriveFccSavedRunState = (row) => {
+const deriveFccSavedRunState = (row, envId = '') => {
   if (pipelineFamilyKey(row) !== 'fcc') return null;
-  const pipelineId = String(Number(row?.pipeline_id || 0) || '').trim();
-  if (!pipelineId) return null;
-  const savedRun = loadPipelineRun(pipelineId);
+  const pipelineScope = {
+    pipeline_id: Number(row?.pipeline_id || 0) || null,
+    pipeline_uuid: row?.pipeline_uuid || null,
+    env_id: envId || row?.env_id || '',
+  };
+  if (!pipelineScope.pipeline_id) return null;
+  const savedRun = loadPipelineRun(pipelineScope);
   if (!savedRun) return null;
-  const complete = isPipelineComplete(pipelineId);
+  const complete = isPipelineComplete(pipelineScope);
   const completion = historyStepOrder.reduce((acc, stepId) => {
     const storageKey = fccStorageStepMap[stepId];
     if (complete) {
       acc[stepId] = true;
       return acc;
     }
-    acc[stepId] = storageKey ? getStepStatus(pipelineId, storageKey) === 'done' : false;
+    acc[stepId] = storageKey ? getStepStatus(pipelineScope, storageKey) === 'done' : false;
     return acc;
   }, {});
   const statuses = historyStepOrder.reduce((acc, stepId) => {
@@ -353,11 +357,19 @@ const WorkbenchPipelinesScreen = ({
 
   const effectivePipeline = fullPipeline || selected;
   const savedPipelineState = useMemo(
-    () => deriveFccSavedRunState(effectivePipeline || {}),
-    [effectivePipeline],
+    () => deriveFccSavedRunState(effectivePipeline || {}, activeEnvironmentName),
+    [activeEnvironmentName, effectivePipeline],
   );
   const workflowManifest = useMemo(() => getWorkflowManifest(effectivePipeline), [effectivePipeline]);
   const workflowState = effectivePipeline?.workflow_session?.current_state?.mlops_state || {};
+  const scopedArtefacts = useMemo(() => {
+    const selectedPipelineId = Number(effectivePipeline?.pipeline_id || 0) || null;
+    const currentPipelineId = Number(activePipelineId || 0) || null;
+    if (!selectedPipelineId || !currentPipelineId || selectedPipelineId !== currentPipelineId) {
+      return {};
+    }
+    return artefacts || {};
+  }, [activePipelineId, artefacts, effectivePipeline?.pipeline_id]);
   const staleStepSet = useMemo(
     () => new Set(savedPipelineState?.complete ? [] : (effectivePipeline?.stale_steps || []).map((step) => String(step))),
     [effectivePipeline, savedPipelineState],
@@ -548,25 +560,25 @@ const WorkbenchPipelinesScreen = ({
         done: completion.preprocess || Boolean(workflowState?.preprocess_dataset_id || workflowState?.preprocess_dataset?.dataset_id || (Array.isArray(workflowState?.preprocess_steps) && workflowState.preprocess_steps.length)),
       },
       model: {
-        summary: artefacts?.modelRun || workflowState?.active_model_run
-          ? `AUC ${Number(artefacts?.modelRun?.metrics?.roc_auc ?? artefacts?.modelRun?.auc ?? workflowState?.active_model_run?.metrics?.roc_auc ?? workflowState?.active_model_run?.auc ?? 0).toFixed(3)}`
+        summary: scopedArtefacts?.modelRun || workflowState?.active_model_run
+          ? `AUC ${Number(scopedArtefacts?.modelRun?.metrics?.roc_auc ?? scopedArtefacts?.modelRun?.auc ?? workflowState?.active_model_run?.metrics?.roc_auc ?? workflowState?.active_model_run?.auc ?? 0).toFixed(3)}`
           : runSource,
-        done: Boolean(artefacts?.modelRun || workflowState?.active_model_run?.job_id) || pipelineComplete || pipelineHasRun,
+        done: Boolean(scopedArtefacts?.modelRun || workflowState?.active_model_run?.job_id) || pipelineComplete || pipelineHasRun,
       },
       validation: {
-        summary: artefacts?.validationReport || workflowState?.validation_report
-          ? `Threshold ${Number(artefacts?.validationReport?.optimal_threshold ?? workflowState?.validation_report?.optimal_threshold ?? 0.5).toFixed(2)}`
+        summary: scopedArtefacts?.validationReport || workflowState?.validation_report
+          ? `Threshold ${Number(scopedArtefacts?.validationReport?.optimal_threshold ?? workflowState?.validation_report?.optimal_threshold ?? 0.5).toFixed(2)}`
           : validationSource,
-        done: Boolean(artefacts?.validationReport || workflowState?.validation_report) || pipelineComplete,
+        done: Boolean(scopedArtefacts?.validationReport || workflowState?.validation_report) || pipelineComplete,
       },
       registry: {
-        summary: artefacts?.registryEntry || workflowState?.registry_entry
-          ? `Stage ${String(artefacts?.registryEntry?.stage || workflowState?.registry_entry?.stage || 'candidate').toUpperCase()}`
+        summary: scopedArtefacts?.registryEntry || workflowState?.registry_entry
+          ? `Stage ${String(scopedArtefacts?.registryEntry?.stage || workflowState?.registry_entry?.stage || 'candidate').toUpperCase()}`
           : registrySource,
-        done: Boolean(artefacts?.registryEntry || workflowState?.registry_entry) || pipelineComplete,
+        done: Boolean(scopedArtefacts?.registryEntry || workflowState?.registry_entry) || pipelineComplete,
       },
     };
-  }, [effectivePipeline, completion, artefacts, workflowState]);
+  }, [completion, effectivePipeline, scopedArtefacts, workflowState]);
 
   const stageVisualStates = useMemo(() => {
     const next = {};
