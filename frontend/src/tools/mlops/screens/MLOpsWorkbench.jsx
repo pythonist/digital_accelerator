@@ -2597,6 +2597,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   }, [activePipelineMeta?.status, activeSavedPipeline?.status, localPipelineComplete]);
   const effectiveStaleSteps = useMemo(() => {
     const hasDirtyEdits = Object.values(stepDirtyMap || {}).some(Boolean);
+    if (activePipelineType !== 'mule' && !hasDirtyEdits) return [];
     if (pipelineIsCompleted && !hasDirtyEdits) return [];
     const next = new Set((rawStaleSteps || []).map((step) => String(step).trim()).filter(Boolean));
     const currentModelJobId = String(activeModelRun?.job_id || modelRun?.job_id || '').trim();
@@ -2616,6 +2617,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     if (currentModelJobId && (validationMatchesModel || registryMatchesModel || String(reportRunId || '').trim() === currentModelJobId)) next.delete('reports');
     return Array.from(next);
   }, [
+    activePipelineType,
     rawStaleSteps,
     activeModelRun?.job_id,
     modelRun?.job_id,

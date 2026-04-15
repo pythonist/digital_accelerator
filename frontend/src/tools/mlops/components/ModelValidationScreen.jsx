@@ -29,6 +29,17 @@ const tabs = [
   { id: 'summary', label: 'Summary' },
 ];
 
+const DETAIL_REQUEST_TIMEOUT_MS = 8000;
+
+const withTimeout = (promise, timeoutMs = DETAIL_REQUEST_TIMEOUT_MS) => (
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Validation request timed out')), timeoutMs);
+    }),
+  ])
+);
+
 const normalizeSelectedIds = (value) => {
   const raw = Array.isArray(value)
     ? value
@@ -339,7 +350,7 @@ const ModelValidationScreen = ({
         const payload = await Promise.all(
           missingIds.map(async (job_id) => {
             try {
-              const res = await mlopsApi.modelResults(job_id);
+              const res = await withTimeout(mlopsApi.modelResults(job_id));
               return [job_id, unwrap(res)];
             } catch (detailError) {
               return [job_id, null];

@@ -47,12 +47,24 @@ import {
   getCurvePoints,
   getFeatureImportanceRows,
   getValidationContext,
+  mergeValidationModel,
   normalizeLabel,
   num,
   pct,
   unwrap,
 } from './validationUtils';
 import { ConfusionMatrixGrid, MetricChip, SectionCard, SectionTitle, TableHeader } from './ValidationShared';
+
+const DETAIL_REQUEST_TIMEOUT_MS = 8000;
+
+const withTimeout = (promise, timeoutMs = DETAIL_REQUEST_TIMEOUT_MS) => (
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Validation detail request timed out')), timeoutMs);
+    }),
+  ])
+);
 
 const metricGroups = [
   {
@@ -351,13 +363,18 @@ const ComparisonTab = ({
     );
   }, [compareData, selectedJobIds]);
 
+  const hydratedComparisonModels = useMemo(
+    () => comparisonModels.map((model) => mergeValidationModel(model, detailByJobId[model?.job_id] || null)),
+    [comparisonModels, detailByJobId],
+  );
+
   const rocGrid = useMemo(
-    () => buildCurveGrid(comparisonModels, 'roc_curve', 'fpr', 'tpr', 0.01),
-    [comparisonModels],
+    () => buildCurveGrid(hydratedComparisonModels, 'roc_curve', 'fpr', 'tpr', 0.01),
+    [hydratedComparisonModels],
   );
   const prGrid = useMemo(
-    () => buildCurveGrid(comparisonModels, 'pr_curve', 'recall', 'precision', 0.01),
-    [comparisonModels],
+    () => buildCurveGrid(hydratedComparisonModels, 'pr_curve', 'recall', 'precision', 0.01),
+    [hydratedComparisonModels],
   );
 
   useEffect(() => {
@@ -378,10 +395,10 @@ const ComparisonTab = ({
         const payload = await Promise.all(
           missingModels.map(async (model) => {
             try {
-              const res = await mlopsApi.validationDetail(model.job_id, {
+              const res = await withTimeout(mlopsApi.validationDetail(model.job_id, {
                 bins: 20,
                 threshold: model.optimal_threshold ?? model.metrics?.optimal_threshold,
-              });
+              }));
               return [model.job_id, unwrap(res)];
             } catch (error) {
               return [model.job_id, null];
@@ -548,15 +565,15 @@ const ComparisonTab = ({
             Remaining runs will appear as soon as their validation detail payload is available.
           </Alert>
         )}
-        {comparisonModels.length ? (
+        {hydratedComparisonModels.length ? (
           <Box
             sx={{
               display: 'grid',
               gap: 1.5,
-              gridTemplateColumns: { xs: '1fr', xl: comparisonModels.length > 1 ? 'repeat(2, minmax(0, 1fr))' : '1fr' },
+              gridTemplateColumns: { xs: '1fr', xl: hydratedComparisonModels.length > 1 ? 'repeat(2, minmax(0, 1fr))' : '1fr' },
             }}
           >
-            {comparisonModels.map((model, idx) => {
+            {hydratedComparisonModels.map((model, idx) => {
               const context = getValidationContext(model);
               const splitLabel = formatSplitLabel(context);
               const splitDetail = context.splitStrategy === 'temporal'
@@ -706,18 +723,13 @@ const ComparisonTab = ({
           title="Model evaluation boards"
           subtitle="Detailed validation cards inspired by the output mockup, including score separation, business-readable confusion outcomes, and top-15 feature signals."
         />
-        {comparisonModels.length ? (
-          <Box sx={{ maxHeight: comparisonModels.length > 2 ? '68vh' : 'none', overflowY: comparisonModels.length > 2 ? 'auto' : 'visible', pr: comparisonModels.length > 2 ? 0.5 : 0 }}>
+        {hydratedComparisonModels.length ? (
+          <Box sx={{ maxHeight: hydratedComparisonModels.length > 2 ? '68vh' : 'none', overflowY: hydratedComparisonModels.length > 2 ? 'auto' : 'visible', pr: hydratedComparisonModels.length > 2 ? 0.5 : 0 }}>
             <Stack spacing={2}>
-              {comparisonModels.map((model, idx) => {
+              {hydratedComparisonModels.map((model, idx) => {
                 const detail = detailByJobId[model.job_id] || {};
                 const context = getValidationContext(model);
-                const featureRows = getFeatureImportanceRows(
-                  detail?.feature_importance?.length
-                    ? { feature_importance: detail.feature_importance }
-                    : model,
-                  15,
-                );
+                const featureRows = getFeatureImportanceRows(model, 15);
                 const featureMax = featureRows.length
                   ? Math.max(...featureRows.map((row) => Number(row.importance) || 0), 0)
                   : 0;

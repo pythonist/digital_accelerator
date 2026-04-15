@@ -259,6 +259,87 @@ def _build_score_distribution(
     }
 
 
+def _sample_curve_points(
+    rows: List[Dict[str, float]],
+    *,
+    max_points: int = 120,
+) -> List[Dict[str, float]]:
+    if not rows:
+        return []
+    if len(rows) <= max_points:
+        return rows
+    stride = max(1, len(rows) // max_points)
+    sampled = [rows[idx] for idx in range(0, len(rows), stride)]
+    if sampled[-1] != rows[-1]:
+        sampled.append(rows[-1])
+    return sampled[:max_points]
+
+
+def _build_validation_curves(
+    y_true: List[Any],
+    y_prob: List[Any],
+    *,
+    max_points: int = 120,
+) -> Dict[str, Any]:
+    try:
+        truth = [int(v) for v in list(y_true or [])]
+        prob = [max(0.0, min(1.0, float(v))) for v in list(y_prob or [])]
+    except Exception:
+        truth, prob = [], []
+
+    if not truth or not prob or len(truth) != len(prob) or len(set(truth)) < 2:
+        return {
+            "roc_curve": [],
+            "pr_curve": [],
+            "roc_auc": None,
+            "pr_auc": None,
+        }
+
+    try:
+        from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score, roc_curve
+    except Exception:
+        return {
+            "roc_curve": [],
+            "pr_curve": [],
+            "roc_auc": None,
+            "pr_auc": None,
+        }
+
+    roc_rows: List[Dict[str, float]] = []
+    pr_rows: List[Dict[str, float]] = []
+    roc_auc: Optional[float] = None
+    pr_auc: Optional[float] = None
+
+    try:
+        fpr_arr, tpr_arr, _ = roc_curve(truth, prob)
+        roc_auc = float(roc_auc_score(truth, prob))
+        roc_rows = _sample_curve_points([
+            {"fpr": round(float(fpr), 4), "tpr": round(float(tpr), 4)}
+            for fpr, tpr in zip(fpr_arr, tpr_arr)
+        ], max_points=max_points)
+    except Exception:
+        roc_rows = []
+        roc_auc = None
+
+    try:
+        precision_arr, recall_arr, _ = precision_recall_curve(truth, prob)
+        pr_auc = float(average_precision_score(truth, prob))
+        pr_rows = _sample_curve_points([
+            {"recall": round(float(recall), 4), "precision": round(float(precision), 4)}
+            for precision, recall in zip(precision_arr, recall_arr)
+        ], max_points=max_points)
+    except Exception:
+        pr_rows = []
+        pr_auc = None
+
+    return {
+        "roc_curve": roc_rows,
+        "pr_curve": pr_rows,
+        "roc_auc": round(float(roc_auc), 6) if roc_auc is not None else None,
+        "pr_auc": round(float(pr_auc), 6) if pr_auc is not None else None,
+    }
+
+
 def _load_validation_scores(
     trainer: ModelTrainingService,
     dataset_service: MLOpsWorkbenchService,
@@ -1410,6 +1491,7 @@ def validation_detail(job_id: str) -> tuple:
         feature_rows = list(feature_rows or [])[:15]
 
         score_distribution = _build_score_distribution(y_true, y_prob, bins=bins)
+        validation_curves = _build_validation_curves(y_true, y_prob)
 
         return jsonify({
             "success": True,
@@ -1428,6 +1510,10 @@ def validation_detail(job_id: str) -> tuple:
                     if score_distribution.get("bins")
                     else "Saved holdout score vectors were not found for this historical run. Re-running validation will repopulate the score-distribution chart."
                 ),
+                "roc_curve": validation_curves.get("roc_curve") or [],
+                "pr_curve": validation_curves.get("pr_curve") or [],
+                "roc_auc": validation_curves.get("roc_auc"),
+                "pr_auc": validation_curves.get("pr_auc"),
                 "feature_importance": feature_rows,
                 "confusion_matrix": confusion_matrix,
                 "confusion_matrix_business_explainer": (
