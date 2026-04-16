@@ -652,7 +652,11 @@ def explain_similarity():
         # Get parameters
         case_id_1 = request.json.get('case_id_1')
         case_id_2 = request.json.get('case_id_2')
-        score = request.json.get('similarity_score', 0.0)
+        raw_score = request.json.get('similarity_score', 0.0)
+        try:
+            score = float(raw_score)
+        except Exception:
+            score = 0.0
         model = request.json.get('model', 'llama3.2:1b') # Use correct default
         
         # Validation

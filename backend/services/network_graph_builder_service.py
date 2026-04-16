@@ -27,6 +27,24 @@ def _to_iso(value):
         return None
 
 
+def _coerce_datetime(value):
+    if value is None or value == "":
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    if isinstance(value, pd.Timestamp):
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            return None
+        return value.to_pydatetime()
+    return value
+
+
 class NetworkGraphBuilderService:
     def __init__(self, db_manager):
         self.db_manager = db_manager
@@ -107,9 +125,7 @@ class NetworkGraphBuilderService:
             txn_type = str(txn.get("txn_type") or "").lower()
             if txn_type_filter and txn_type not in txn_type_filter:
                 continue
-            ts = txn.get("txn_timestamp")
-            if isinstance(ts, pd.Timestamp):
-                ts = ts.to_pydatetime()
+            ts = _coerce_datetime(txn.get("txn_timestamp"))
             if isinstance(ts, datetime) and ts < cutoff:
                 continue
             scoped.append(txn)
@@ -210,9 +226,7 @@ class NetworkGraphBuilderService:
                 external=target_label == "External Counterparty" or bool(txn.get("beneficiary_country")),
             )
 
-            ts = txn.get("txn_timestamp")
-            if isinstance(ts, pd.Timestamp):
-                ts = ts.to_pydatetime()
+            ts = _coerce_datetime(txn.get("txn_timestamp"))
 
             edge = {
                 "id": txn.get("transaction_id") or f"{source_id}->{target_id}->{len(links) + 1}",

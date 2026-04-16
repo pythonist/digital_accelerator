@@ -458,12 +458,16 @@ class VectorRAGSystem:
         Generate natural language explanation of why two cases are similar using LLM.
         """
         try:
+            try:
+                similarity_value = float(similarity_score)
+            except Exception:
+                similarity_value = 0.0
             # Get summaries for both cases
             summary_1 = self.case_metadata_map.get(str(case_id_1), "Case details unavailable")
             summary_2 = self.case_metadata_map.get(str(case_id_2), "Case details unavailable")
             
             # Create prompt for LLM
-            prompt = f"""Analyze why these two AML cases are similar (similarity score: {similarity_score:.2%}):
+            prompt = f"""Analyze why these two AML cases are similar (similarity score: {similarity_value:.2%}):
 
 Case 1: {summary_1}
 

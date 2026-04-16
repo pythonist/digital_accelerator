@@ -340,6 +340,83 @@ def _build_validation_curves(
     }
 
 
+def _build_validation_curves_from_threshold_table(
+    rows: Any,
+    *,
+    max_points: int = 120,
+) -> Dict[str, Any]:
+    threshold_rows = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            tn = float(row.get("tn") or 0.0)
+            fp = float(row.get("fp") or 0.0)
+            fn = float(row.get("fn") or 0.0)
+            tp = float(row.get("tp") or 0.0)
+        except Exception:
+            continue
+        negatives = tn + fp
+        positives = tp + fn
+        try:
+            precision = float(row.get("precision")) if row.get("precision") is not None else (tp / max(tp + fp, 1.0))
+        except Exception:
+            precision = tp / max(tp + fp, 1.0)
+        threshold_rows.append({
+            "fpr": fp / max(negatives, 1.0),
+            "tpr": tp / max(positives, 1.0),
+            "recall": tp / max(positives, 1.0),
+            "precision": precision,
+        })
+
+    if not threshold_rows:
+        return {
+            "roc_curve": [],
+            "pr_curve": [],
+            "roc_auc": None,
+            "pr_auc": None,
+        }
+
+    roc_rows = _sample_curve_points(
+        sorted(
+            [
+                {"fpr": round(float(item["fpr"]), 4), "tpr": round(float(item["tpr"]), 4)}
+                for item in threshold_rows
+            ],
+            key=lambda item: (item["fpr"], item["tpr"]),
+        ),
+        max_points=max_points,
+    )
+    pr_rows = _sample_curve_points(
+        sorted(
+            [
+                {"recall": round(float(item["recall"]), 4), "precision": round(float(item["precision"]), 4)}
+                for item in threshold_rows
+            ],
+            key=lambda item: (item["recall"], item["precision"]),
+        ),
+        max_points=max_points,
+    )
+
+    def _trapezoid(points: List[Dict[str, float]], x_key: str, y_key: str) -> Optional[float]:
+        if len(points) < 2:
+            return None
+        area = 0.0
+        previous = points[0]
+        for point in points[1:]:
+            dx = float(point[x_key]) - float(previous[x_key])
+            area += max(dx, 0.0) * ((float(previous[y_key]) + float(point[y_key])) / 2.0)
+            previous = point
+        return round(float(area), 6)
+
+    return {
+        "roc_curve": roc_rows,
+        "pr_curve": pr_rows,
+        "roc_auc": _trapezoid(roc_rows, "fpr", "tpr"),
+        "pr_auc": _trapezoid(pr_rows, "recall", "precision"),
+    }
+
+
 def _load_validation_scores(
     trainer: ModelTrainingService,
     dataset_service: MLOpsWorkbenchService,
@@ -1518,6 +1595,19 @@ def validation_detail(job_id: str) -> tuple:
 
         score_distribution = _build_score_distribution(y_true, y_prob, bins=bins)
         validation_curves = _build_validation_curves(y_true, y_prob)
+        threshold_table = (
+            validation.get("threshold_table")
+            or result.get("threshold_table")
+            or metrics.get("threshold_table")
+            or persisted_validation.get("threshold_table")
+            or []
+        )
+        if (
+            not _curve_has_points(validation_curves.get("roc_curve"), "fpr", "tpr")
+            and not _curve_has_points(validation_curves.get("pr_curve"), "recall", "precision")
+            and threshold_table
+        ):
+            validation_curves = _build_validation_curves_from_threshold_table(threshold_table)
         saved_roc_curve = (
             validation.get("roc_curve")
             or result.get("roc_curve")
@@ -2006,7 +2096,9 @@ def compare_runs() -> tuple:
                 )
                 display_threshold = _to_float_or_default(
                     _meaningful_value(
-                        validation.get("optimal_threshold"),
+                        validation.get("selected_threshold"),
+                        validation.get("configured_threshold"),
+                        result.get("selected_threshold"),
                         result.get("optimal_threshold"),
                         m.get("optimal_threshold"),
                         selected_threshold,
@@ -2038,13 +2130,16 @@ def compare_runs() -> tuple:
                 if not selected_row:
                     selected_row = _closest_threshold_row(threshold_table, display_threshold)
                 threshold_table = threshold_table[:25]  # First 25 rows are sufficient for comparison
+                threshold_curves = _build_validation_curves_from_threshold_table(threshold_table)
 
                 roc_auc = _meaningful_value(m.get("roc_auc"), preview.get("roc_auc"))
                 average_precision = _meaningful_value(
                     m.get("average_precision"),
                     m.get("pr_auc"),
                     preview.get("pr_auc"),
+                    threshold_curves.get("pr_auc"),
                 )
+                roc_auc = _meaningful_value(roc_auc, threshold_curves.get("roc_auc"))
                 precision = _meaningful_value(
                     validation.get("precision"),
                     selected_row.get("precision"),
@@ -2109,6 +2204,7 @@ def compare_runs() -> tuple:
                             m.get("roc_curve"),
                             validation.get("roc_curve"),
                             preview.get("roc_curve"),
+                            threshold_curves.get("roc_curve"),
                         ]
                         if _curve_has_points(curve, "fpr", "tpr")
                     ),
@@ -2121,6 +2217,7 @@ def compare_runs() -> tuple:
                             m.get("pr_curve"),
                             validation.get("pr_curve"),
                             preview.get("pr_curve"),
+                            threshold_curves.get("pr_curve"),
                         ]
                         if _curve_has_points(curve, "recall", "precision")
                     ),

@@ -943,7 +943,6 @@ def _workflow_step_completed(
                 _screen_job_id(screen_states, "model"),
                 _extract_nested_identifier(current_mlops_state.get("active_model_run"), ("job_id", "run_id")),
                 _extract_nested_identifier(stable_mlops_state.get("active_model_run"), ("job_id", "run_id")),
-                record.get("run_id"),
             )
         )
 
@@ -974,7 +973,6 @@ def _workflow_step_completed(
                 _workflow_first_text(
                     current_mlops_state.get("deployment_id"),
                     stable_mlops_state.get("deployment_id"),
-                    record.get("deployment_id"),
                 ),
             )
         )
@@ -990,17 +988,17 @@ def _workflow_step_completed(
                 dashboard_state.get("deployment_id"),
                 dashboard_state.get("run_id"),
                 dashboard_state.get("publish_id"),
-                record.get("publish_id"),
             )
         )
 
     if step_key == "reports":
         return bool(
             _workflow_first_text(
+                _screen_job_id(screen_states, "reports"),
+                screen_state.get("report_run_id"),
                 current_mlops_state.get("report_run_id"),
                 stable_mlops_state.get("report_run_id"),
             )
-            or str(record.get("run_status") or record.get("status") or "").strip().lower() in {"complete", "completed", "done"}
         )
 
     return False
@@ -1096,7 +1094,6 @@ def _workflow_step_artifacts(
             "job_id": _workflow_first_text(
                 _screen_job_id(screen_states, "model"),
                 active_run.get("job_id"),
-                record.get("run_id"),
             ),
             "algorithm": _workflow_first_text(screen_state.get("algorithm"), active_run.get("algorithm")),
             "linked_assets": compact_assets,
@@ -1128,7 +1125,6 @@ def _workflow_step_artifacts(
             "deployment_id": _workflow_first_text(
                 _screen_deployment_id(screen_states, "registry"),
                 registry_state.get("deployment_id"),
-                record.get("deployment_id"),
             ),
             "stage": _workflow_first_text(screen_state.get("stage"), registry_state.get("stage")),
             "linked_assets": compact_assets,
@@ -1140,7 +1136,6 @@ def _workflow_step_artifacts(
                 _screen_deployment_id(screen_states, "registry"),
                 current_mlops_state.get("deployment_id"),
                 stable_mlops_state.get("deployment_id"),
-                record.get("deployment_id"),
             ),
             "linked_assets": compact_assets,
         }
@@ -1151,17 +1146,18 @@ def _workflow_step_artifacts(
             stable_mlops_state.get("dashboard_state"),
         )
         return {
-            "deployment_id": _workflow_first_text(dashboard_state.get("deployment_id"), record.get("deployment_id")),
-            "run_id": _workflow_first_text(dashboard_state.get("run_id"), record.get("run_id")),
-            "publish_id": _workflow_first_text(dashboard_state.get("publish_id"), record.get("publish_id")),
+            "deployment_id": _workflow_first_text(dashboard_state.get("deployment_id")),
+            "run_id": _workflow_first_text(dashboard_state.get("run_id")),
+            "publish_id": _workflow_first_text(dashboard_state.get("publish_id")),
             "linked_assets": compact_assets,
         }
     if step_key == "reports":
         return {
             "report_run_id": _workflow_first_text(
+                _screen_job_id(screen_states, "reports"),
+                screen_state.get("report_run_id"),
                 current_mlops_state.get("report_run_id"),
                 stable_mlops_state.get("report_run_id"),
-                record.get("run_id"),
             ),
         }
     return {}
@@ -3886,9 +3882,11 @@ class MLOpsWorkbenchService:
                 if not self._workflow_session_has_meaningful_state(session):
                     trivial_session_ids.append(session_id)
                     continue
-                session_record = self._workflow_session_manager_record(session)
-                session_record["workflow_manifest"] = _build_workflow_manifest(session_record, session)
-                results.append(session_record)
+                # Session-only FCC records create ghost runs such as WFS-* entries
+                # in Pipeline Hub after refresh/login. Durable run navigation should
+                # only list persisted pipelines; workflow sessions remain available
+                # for resume recovery through their owning pipeline ids.
+                continue
             cleanup_session_ids = orphan_session_ids + trivial_session_ids
             if cleanup_session_ids:
                 placeholders = ",".join(["?"] * len(cleanup_session_ids))

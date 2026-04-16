@@ -5851,6 +5851,7 @@ class ModelTrainingService:
             target_within_tolerance = abs(target_gap_pct) <= target_tolerance_pct
 
         configured_threshold = float(result.get("selected_threshold") or BUSINESS_DEFAULT_THRESHOLD)
+        selected_row = _closest_threshold_row(table, configured_threshold) if table else None
         deploy_policy = _build_deploy_threshold_policy(
             table,
             configured_threshold=configured_threshold,
@@ -5878,19 +5879,22 @@ class ModelTrainingService:
             "target_gap_pct": target_gap_pct,
             "target_within_tolerance": target_within_tolerance,
             "deployable_threshold_row": deployable_row,
+            "active_threshold_metrics": dict(selected_row or {}),
+            "optimal_threshold_metrics": dict(optimal_row or {}),
         }
-        if optimal_row is not None:
+        display_row = selected_row or optimal_row
+        if display_row is not None:
             out.update({
-                "suppression_rate_pct": optimal_row["suppression_rate_pct"],
-                "event_loss_pct":       optimal_row["event_loss_pct"],
-                "precision":            optimal_row.get("precision"),
-                "recall":               optimal_row.get("recall"),
-                "f1":                   optimal_row.get("f1"),
-                "specificity":          optimal_row.get("specificity"),
-                "accuracy":             optimal_row.get("accuracy"),
+                "suppression_rate_pct": display_row["suppression_rate_pct"],
+                "event_loss_pct":       display_row["event_loss_pct"],
+                "precision":            display_row.get("precision"),
+                "recall":               display_row.get("recall"),
+                "f1":                   display_row.get("f1"),
+                "specificity":          display_row.get("specificity"),
+                "accuracy":             display_row.get("accuracy"),
                 "confusion_matrix": [
-                    [optimal_row.get("tn", 0), optimal_row.get("fp", 0)],
-                    [optimal_row.get("fn", 0), optimal_row.get("tp", 0)],
+                    [display_row.get("tn", 0), display_row.get("fp", 0)],
+                    [display_row.get("fn", 0), display_row.get("tp", 0)],
                 ],
             })
         try:

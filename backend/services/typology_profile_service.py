@@ -19,6 +19,10 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _fmt_decimal(value: Any, digits: int = 2, default: float = 0.0) -> str:
+    return f"{_safe_float(value, default):.{digits}f}"
+
+
 class TypologyProfileService:
     def __init__(self, db_manager):
         self.db_manager = db_manager
@@ -91,12 +95,12 @@ class TypologyProfileService:
                 },
                 {
                     "label": "Pass-through ratio",
-                    "value": f"{raw_features.get('pass_through_ratio', 0):.2f}",
+                    "value": _fmt_decimal(raw_features.get("pass_through_ratio")),
                     "detail": "Higher values indicate inbound and outbound activity is closely matched, which can support mule or pass-through review.",
                 },
                 {
                     "label": "Below-threshold transfer ratio",
-                    "value": f"{txn_metrics.get('sub_threshold_ratio', 0):.2f}",
+                    "value": _fmt_decimal(txn_metrics.get("sub_threshold_ratio")),
                     "detail": "Repeated values just under reporting thresholds can support structuring review.",
                 },
             ],
@@ -115,12 +119,12 @@ class TypologyProfileService:
             "customer_account_risk": [
                 {
                     "label": "Customer risk rating",
-                    "value": f"{raw_features.get('customer_risk_rating', 0):.0f}",
+                    "value": _fmt_decimal(raw_features.get("customer_risk_rating"), 0),
                     "detail": "Elevated customer risk can strengthen the seriousness of pattern-aligned activity.",
                 },
                 {
                     "label": "KYC completeness",
-                    "value": f"{raw_features.get('kyc_completeness', 0):.1f}%",
+                    "value": f"{_fmt_decimal(raw_features.get('kyc_completeness'), 1)}%",
                     "detail": "Poor or aging KYC can reduce confidence in the customer profile and strengthen escalation rationale.",
                 },
             ],
@@ -163,17 +167,17 @@ class TypologyProfileService:
             "time_pattern_anomalies": [
                 {
                     "label": "Off-hours ratio",
-                    "value": f"{raw_features.get('off_hours_ratio', 0):.2f}",
+                    "value": _fmt_decimal(raw_features.get("off_hours_ratio")),
                     "detail": "Off-hours activity can indicate unusual timing behavior for the customer or account profile.",
                 },
                 {
                     "label": "Weekend ratio",
-                    "value": f"{raw_features.get('weekend_ratio', 0):.2f}",
+                    "value": _fmt_decimal(raw_features.get("weekend_ratio")),
                     "detail": "Weekend transaction concentration can support suspicious velocity or burst pattern review.",
                 },
                 {
                     "label": "Burstiness",
-                    "value": f"{raw_features.get('burstiness', 0):.2f}",
+                    "value": _fmt_decimal(raw_features.get("burstiness")),
                     "detail": "Bursty activity can point to condensed suspicious movement rather than routine customer behavior.",
                 },
             ],

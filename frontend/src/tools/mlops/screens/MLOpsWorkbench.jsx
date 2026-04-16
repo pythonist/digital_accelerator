@@ -773,6 +773,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const restoredWorkflowSessionKeyRef = useRef('');
   const workflowPersistencePausedRef = useRef(false);
   const screenStatePersistencePausedRef = useRef(false);
+  const localPipelineSyncPausedRef = useRef(false);
   const autoResumeKeyRef = useRef('');
   const previousEnvIdRef = useRef(currentEnvId);
   const routeResumeRef = useRef('');
@@ -1208,7 +1209,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       sessionPipelineId
       && Number(manualOverride.pipelineId || 0) === Number(sessionPipelineId)
       && String(manualOverride.step || '').trim()
-      && (Date.now() - Number(manualOverride.ts || 0)) < 4000,
+      && (Date.now() - Number(manualOverride.ts || 0)) < MANUAL_STEP_OVERRIDE_MS,
     );
     if (!suppressStepRestore && !hasManualOverride && restoredStep && STEPS.some((step) => step.id === restoredStep)) {
       setActiveStep((prev) => {
@@ -1260,6 +1261,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
 
   const pauseScreenStatePersistence = useCallback(() => {
     screenStatePersistencePausedRef.current = true;
+    localPipelineSyncPausedRef.current = true;
     if (journeySaveTimerRef.current) {
       clearTimeout(journeySaveTimerRef.current);
       journeySaveTimerRef.current = null;
@@ -1268,6 +1270,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
 
   const resumeScreenStatePersistence = useCallback(() => {
     screenStatePersistencePausedRef.current = false;
+    setTimeout(() => {
+      localPipelineSyncPausedRef.current = false;
+    }, 0);
   }, []);
 
   const persistPipelineScreenState = useCallback((pipelineId, screen, state) => {
@@ -1416,23 +1421,31 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     'model_output', 'model_dataset', 'scored_dataset', 'feature_store',
   ]), []);
 
-  const hydrateDatasets = useCallback((payload) => {
+  const hydrateDatasets = useCallback((payload, options = {}) => {
     const all       = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.datasets) ? payload.datasets : [];
     const rawOnly   = Array.isArray(payload?.raw)       ? payload.raw       : all.filter((d) => !ARTEFACT_TYPES.has(d?.dataset_type));
     const artefacts = Array.isArray(payload?.artefacts) ? payload.artefacts : all.filter((d) =>  ARTEFACT_TYPES.has(d?.dataset_type));
+    const resolvedPipelineId = Number(options?.pipelineId || 0);
+    const hydrateArtefacts = Number.isFinite(resolvedPipelineId) && resolvedPipelineId > 0;
     setDatasets(rawOnly);
-    const master = artefacts.find((d) => d.dataset_type === 'master_dataset')
-      || artefacts.find((d) => d.dataset_type?.startsWith('master'))
-      || rawOnly.find((d) => d.dataset_type === 'master_dataset') || null;
-    setMasterDataset(master);
-    const featureStore = artefacts.find((d) => d.dataset_type === 'feature_store')
-      || artefacts.find((d) => d.dataset_type?.startsWith('feature_store'))
-      || null;
-    setFeatureStoreDataset(featureStore);
-    const prep = artefacts.find((d) => d.dataset_type === 'preprocess_dataset')
-      || artefacts.find((d) => d.dataset_type === 'preprocessed_dataset')
-      || artefacts.find((d) => d.dataset_type?.startsWith('preprocess')) || null;
-    setPreprocessDataset(prep);
+    if (hydrateArtefacts) {
+      const master = artefacts.find((d) => d.dataset_type === 'master_dataset')
+        || artefacts.find((d) => d.dataset_type?.startsWith('master'))
+        || rawOnly.find((d) => d.dataset_type === 'master_dataset') || null;
+      setMasterDataset(master);
+      const featureStore = artefacts.find((d) => d.dataset_type === 'feature_store')
+        || artefacts.find((d) => d.dataset_type?.startsWith('feature_store'))
+        || null;
+      setFeatureStoreDataset(featureStore);
+      const prep = artefacts.find((d) => d.dataset_type === 'preprocess_dataset')
+        || artefacts.find((d) => d.dataset_type === 'preprocessed_dataset')
+        || artefacts.find((d) => d.dataset_type?.startsWith('preprocess')) || null;
+      setPreprocessDataset(prep);
+    } else {
+      setMasterDataset(null);
+      setFeatureStoreDataset(null);
+      setPreprocessDataset(null);
+    }
     return { all, rawOnly, artefacts };
   }, [ARTEFACT_TYPES]);
 
@@ -1453,7 +1466,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       }
       if (sync) params.sync = '1';
       const payload = await mlopsApi.listDatasets(params);
-      const parsed  = hydrateDatasets(payload || {});
+      const parsed  = hydrateDatasets(payload || {}, { pipelineId: resolvedPipelineId });
       return parsed;
     } catch (e) {
       console.error('Failed to load datasets', e);
@@ -1598,30 +1611,6 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             }
           }
 
-          if (session && sessionPipelineName) {
-            workflowSessionRef.current = session;
-            setActivePipelineName(sessionPipelineName);
-            setActivePipelineMeta({
-              name: sessionPipelineName,
-              workflow_session_id: String(session?.session_id || '').trim() || null,
-              pipeline_id: sessionPipelineId,
-              pipeline_type: String(session?.pipeline_type || 'fcc').trim().toLowerCase() === 'mule' ? 'mule' : 'fcc',
-            });
-            activePipelineRef.current = {
-              pipeline_id: sessionPipelineId,
-              name: sessionPipelineName,
-              workflow_session_id: String(session?.session_id || '').trim() || null,
-              pipeline_type: normalizePipelineFamily(session?.pipeline_type || '', 'fcc'),
-            };
-            writePipelineSession(currentEnvId, {
-              pipeline_id: sessionPipelineId,
-              name: sessionPipelineName,
-              workflow_session_id: String(session?.session_id || '').trim() || null,
-              pipeline_type: normalizePipelineFamily(session?.pipeline_type || 'fcc', 'fcc'),
-            });
-            setPipelineSelectionNotice('Recovered the run context from its saved workflow session.');
-            return rows;
-          }
         } catch {
           // Fall through to stale cleanup only after session recovery fails.
         }
@@ -2287,6 +2276,15 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     pipeline_type: activePipelineType,
     pipeline_name: activePipelineName,
   }), [activePipelineMeta?.pipeline_uuid, activePipelineName, activePipelineType, activeSavedPipeline?.pipeline_uuid, currentEnvId, currentLocalPipelineId]);
+  const localPipelineSyncBlocked = (
+    !currentLocalPipelineId
+    || activePipelineType === 'mule'
+    || localPipelineSyncPausedRef.current
+    || screenStatePersistencePausedRef.current
+    || workflowPersistencePausedRef.current
+    || resumeInProgressRef.current
+    || routePipelineHydrating
+  );
   useEffect(() => {
     if (!currentLocalPipelineId) {
       setSavedLocalPipelineRun(null);
@@ -2873,9 +2871,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       step: resolvedStep,
       ts: Date.now(),
     };
-    setActiveStep(resolvedStep);
-    if (shouldShowSummaryForStep(resolvedStep)) setSummaryOverlayStep(resolvedStep);
-    else setSummaryOverlayStep('');
+    flushSync(() => {
+      setActiveStep(resolvedStep);
+      if (shouldShowSummaryForStep(resolvedStep)) setSummaryOverlayStep(resolvedStep);
+      else setSummaryOverlayStep('');
+    });
     if (!targetRunId) {
       navigate('/mlops/runs', { replace: Boolean(options?.replace), state: options?.state });
       return;
@@ -3008,7 +3008,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     : (currentStepMeta?.desc || 'Continue the current workbench stage.');
 
   const unfinishedPipelines = useMemo(
-    () => (savedPipelines || []).filter((p) => String(p?.run_status || p?.status || 'saved').toLowerCase() !== 'complete'),
+    () => (savedPipelines || []).filter((p) => !['complete', 'completed', 'done'].includes(String(p?.run_status || p?.status || 'saved').toLowerCase())),
     [savedPipelines],
   );
 
@@ -3026,7 +3026,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       const hit = (savedPipelines || []).find((p) => String(p?.name || '').trim().toLowerCase() === String(activePipelineName || '').trim().toLowerCase());
       if (hit) return hit;
     }
-    return unfinishedPipelines[0] || null;
+    return null;
   }, [activePipelineName, currentEnvId, savedPipelines, unfinishedPipelines, validActivePipelineId]);
 
   const activeSubstepState = useMemo(() => {
@@ -3310,7 +3310,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   }, [persistPipelineScreenState, validActivePipelineId, registryEntry, activeModelRun?.job_id, activeModelRun?.label, activeModelRun?.model_name, modelRun?.job_id, validationReport?.optimal_threshold, validationReport?.selected_threshold, validationReport?.locked_threshold, activePipelineName, compactRegistryEntry]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     savePipelineRun(currentLocalPipelineScope, {
       pipeline_id: currentLocalPipelineId,
       pipeline_uuid: currentLocalPipelineScope.pipeline_uuid,
@@ -3319,67 +3319,67 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       pipeline_name: activePipelineName || `FCC Run - ${currentLocalPipelineId}`,
       status: 'draft',
     });
-  }, [activePipelineName, activePipelineType, currentEnvId, currentLocalPipelineId, currentLocalPipelineScope]);
+  }, [activePipelineName, currentEnvId, currentLocalPipelineId, currentLocalPipelineScope, localPipelineSyncBlocked]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule' || !(datasets || []).length) return;
+    if (localPipelineSyncBlocked || !(datasets || []).length) return;
     const next = updatePipelineStep(currentLocalPipelineScope, 'data_upload', {
       status: 'done',
       metadata: localDataUploadMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, datasets, localDataUploadMetadata]);
+  }, [currentLocalPipelineScope, datasets, localDataUploadMetadata, localPipelineSyncBlocked]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule' || !masterDataset) return;
+    if (localPipelineSyncBlocked || !masterDataset) return;
     const next = updatePipelineStep(currentLocalPipelineScope, 'master_dataset', {
       status: 'done',
       metadata: localMasterMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localMasterMetadata, masterDataset]);
+  }, [currentLocalPipelineScope, localMasterMetadata, localPipelineSyncBlocked, masterDataset]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule' || !String(targetColumn || '').trim()) return;
+    if (localPipelineSyncBlocked || !String(targetColumn || '').trim()) return;
     const next = updatePipelineStep(currentLocalPipelineScope, 'target_variable', {
       status: 'done',
       metadata: localTargetMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localTargetMetadata, targetColumn]);
+  }, [currentLocalPipelineScope, localPipelineSyncBlocked, localTargetMetadata, targetColumn]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     if (!(Array.isArray(preprocessSteps) && preprocessSteps.length > 0) && !preprocessDataset) return;
     const next = updatePipelineStep(currentLocalPipelineScope, 'preprocessing', {
       status: preprocessDataset ? 'done' : 'in_progress',
       metadata: localPreprocessMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localPreprocessMetadata, preprocessDataset, preprocessSteps]);
+  }, [currentLocalPipelineScope, localPipelineSyncBlocked, localPreprocessMetadata, preprocessDataset, preprocessSteps]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     if (!edaDone && !localPipelineComplete && !savedStepCompletion?.eda) return;
     const next = updatePipelineStep(currentLocalPipelineScope, 'eda', {
       status: 'done',
       metadata: localEdaMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, edaDone, localEdaMetadata, localPipelineComplete, savedStepCompletion?.eda]);
+  }, [currentLocalPipelineScope, edaDone, localEdaMetadata, localPipelineComplete, localPipelineSyncBlocked, savedStepCompletion?.eda]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     if (!effectiveActiveModelRun?.job_id && !modelRun?.job_id) return;
     const next = updatePipelineStep(currentLocalPipelineScope, 'model_run', {
       status: 'done',
       metadata: localModelMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveActiveModelRun?.job_id, localModelMetadata, modelRun?.job_id]);
+  }, [currentLocalPipelineScope, effectiveActiveModelRun?.job_id, localModelMetadata, localPipelineSyncBlocked, modelRun?.job_id]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     const hasValidationPayload = Boolean(
       effectiveValidationReport?.report_id
       || effectiveValidationReport?.validation_id
@@ -3394,10 +3394,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       metadata: localValidationMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveValidationReport, localPipelineComplete, localValidationMetadata, savedStepCompletion?.validation]);
+  }, [currentLocalPipelineScope, effectiveValidationReport, localPipelineComplete, localPipelineSyncBlocked, localValidationMetadata, savedStepCompletion?.validation]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     const hasRegistryPayload = Boolean(
       effectiveRegistryEntry?.deployment_id
       || effectiveRegistryEntry?.job_id
@@ -3411,10 +3411,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       metadata: localRegistryMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveRegistryEntry, localPipelineComplete, localRegistryMetadata, savedStepCompletion?.registry]);
+  }, [currentLocalPipelineScope, effectiveRegistryEntry, localPipelineComplete, localPipelineSyncBlocked, localRegistryMetadata, savedStepCompletion?.registry]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     if (!effectiveValidationReport && !effectiveRegistryEntry && !savedDashboardState) return;
     const hasLiveDashboardState = Boolean(
       effectiveRegistryEntry?.deployment_id
@@ -3428,10 +3428,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       metadata: localDashboardMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, effectiveRegistryEntry, effectiveValidationReport, localDashboardMetadata, savedDashboardState]);
+  }, [currentLocalPipelineScope, effectiveRegistryEntry, effectiveValidationReport, localDashboardMetadata, localPipelineSyncBlocked, savedDashboardState]);
 
   useEffect(() => {
-    if (!currentLocalPipelineId || activePipelineType === 'mule') return;
+    if (localPipelineSyncBlocked) return;
     const hasReportPayload = Boolean(
       localReportMetadata.run_id
       || localReportMetadata.report_id
@@ -3444,7 +3444,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       metadata: localReportMetadata,
     });
     setSavedLocalPipelineRun(next);
-  }, [activePipelineType, currentLocalPipelineId, currentLocalPipelineScope, localPipelineComplete, localReportMetadata, savedStepCompletion?.reports]);
+  }, [currentLocalPipelineScope, localPipelineComplete, localPipelineSyncBlocked, localReportMetadata, savedStepCompletion?.reports]);
 
   useEffect(() => {
     const pipelineId = Number(validActivePipelineId || 0);
@@ -3932,6 +3932,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     pauseScreenStatePersistence();
     clearLocalWorkbenchState();
     setSavedLocalPipelineRun(null);
+    setSummaryOverlayStep('');
+    setStepDirtyMap({});
     setActiveStep(freshStep);
     activatePipeline({ ...verifiedPipeline, pipeline_id: verifiedPipeline.pipeline_id, name: trimmed }, { step: freshStep });
     setExperimentName(trimmed);
@@ -4298,7 +4300,15 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       const resumeStaleStep = resumedFlowSteps.find((step) => (full?.stale_steps || []).includes(step.id))?.id || '';
       const completion     = derivePipelineStepCompletion(full || {});
       const pipelineStatus = String(full?.status || '').toLowerCase();
-      if (explicitStep && isWorkbenchStep(explicitStep)) setActiveStep(explicitStep);
+      const manualOverride = manualStepSelectionRef.current || {};
+      const lockedStep = (
+        Number(manualOverride.pipelineId || 0) === Number(full?.pipeline_id || pipelineRef?.pipeline_id || 0)
+        && String(manualOverride.step || '').trim()
+        && (Date.now() - Number(manualOverride.ts || 0)) < MANUAL_STEP_OVERRIDE_MS
+        && isWorkbenchStep(String(manualOverride.step || '').trim())
+      ) ? normalizeWorkbenchStep(manualOverride.step) : '';
+      if (lockedStep) setActiveStep(lockedStep);
+      else if (explicitStep && isWorkbenchStep(explicitStep)) setActiveStep(explicitStep);
       else if (firstAttentionStep) setActiveStep(firstAttentionStep);
       else if (resumeStaleStep) setActiveStep(resumeStaleStep);
       else if (normalizedStep && resumedFlowSteps.some((step) => step.id === normalizedStep)) setActiveStep(normalizedStep);
@@ -4642,8 +4652,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   ]);
 
   const handleModelComplete = useCallback((run, options = {}) => {
-    adoptModelRun(run, { resetDownstream: !options?.resumeExisting, nextStep: 'validation' });
-  }, [adoptModelRun]);
+    flushSync(() => {
+      adoptModelRun(run, { resetDownstream: !options?.resumeExisting });
+    });
+    openWorkbenchStep('validation', { skipGuardRedirect: true });
+  }, [adoptModelRun, openWorkbenchStep]);
 
   const handleRegistered = useCallback((entry) => { setRegistryEntry(entry); }, []);
 

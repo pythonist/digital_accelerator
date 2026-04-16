@@ -199,7 +199,7 @@ class CaseProfileBuilder:
 
         dominant_alert_family = Counter(alert_families).most_common(1)[0][0] if alert_families else "UNKNOWN"
         dominant_typology = max(typology_scores, key=typology_scores.get) if typology_scores else "structuring"
-        time_period = timestamps[0].strftime("%Y-Q%q") if timestamps else ""
+        time_period = ""
         if timestamps:
             first_ts = min(timestamps)
             quarter = ((first_ts.month - 1) // 3) + 1

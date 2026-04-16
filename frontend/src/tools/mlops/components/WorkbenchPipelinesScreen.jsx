@@ -337,7 +337,7 @@ const WorkbenchPipelinesScreen = ({
   const [renameDialog, setRenameDialog] = useState({ open: false, value: '', saving: false, error: '' });
   const [searchText, setSearchText] = useState('');
   const [scopeFilter, setScopeFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [familyFilter, setFamilyFilter] = useState('all');
 
   const selected = useMemo(() => {
@@ -435,12 +435,10 @@ const WorkbenchPipelinesScreen = ({
       const res = await mlopsApi.pipelineList();
       const rows = Array.isArray(pick(res)) ? pick(res) : [];
       setPipelines(rows);
-      const firstOpenable = rows[0] || null;
       const preferred = activePipelineId
         ? rows.find((p) => Number(p.pipeline_id) === Number(activePipelineId))
         : rows.find((p) => runKey(p) === String(selectedPipelineId))
-          || rows.find((p) => String(p?.name || '').trim().toLowerCase() === String(activePipelineName || '').trim().toLowerCase())
-          || firstOpenable;
+          || rows.find((p) => String(p?.name || '').trim().toLowerCase() === String(activePipelineName || '').trim().toLowerCase());
       if (preferred) {
         setSelectedPipelineId(runKey(preferred));
       } else {
@@ -506,10 +504,9 @@ const WorkbenchPipelinesScreen = ({
       setSelectedPipelineId(byId ? runKey(byId) : String(activePipelineId));
       return;
     }
-    const firstOpenable = pipelines[0] || null;
     setSelectedPipelineId((prev) => {
       if (prev && pipelines.some((pipeline) => runKey(pipeline) === String(prev))) return prev;
-      return firstOpenable ? runKey(firstOpenable) : '';
+      return '';
     });
   }, [activePipelineId, pipelines]);
 

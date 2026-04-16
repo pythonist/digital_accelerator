@@ -335,7 +335,10 @@ const MailConfigurationPage = () => {
                   >
                     {recipientRows.map((row) => (
                       <MenuItem key={row.id} value={row.id}>
-                        {row.name} | {row.email}
+                        {[row.name, row.role, row.recipient_type, row.email]
+                          .map((value) => String(value || '').trim())
+                          .filter(Boolean)
+                          .join(' | ')}
                       </MenuItem>
                     ))}
                   </TextField>
