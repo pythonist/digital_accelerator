@@ -1,7 +1,7 @@
 import math
 import re
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from case_pack.case_pack_generator import CasePackGenerator
@@ -40,12 +40,20 @@ def _pick_first(record: Dict[str, Any], keys: List[str], default: Any = None) ->
 def _parse_datetime(value: Any) -> Optional[datetime]:
     if not value:
         return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
     text = str(value).strip().replace("Z", "+00:00")
     for fmt in (None, "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%d/%m/%Y %H:%M"):
         try:
             if fmt is None:
-                return datetime.fromisoformat(text)
-            return datetime.strptime(text, fmt)
+                parsed = datetime.fromisoformat(text)
+            else:
+                parsed = datetime.strptime(text, fmt)
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
         except Exception:
             continue
     return None

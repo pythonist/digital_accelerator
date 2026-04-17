@@ -80,9 +80,64 @@ const extractCurve = (model, curveKey) => {
   return candidates.find(hasValue) || [];
 };
 
-export const getCurvePoints = (model, curveKey, xKey, yKey) => (
-  extractCurveFromValue(extractCurve(model, curveKey), xKey, yKey)
-);
+const normalizeThresholdRow = (row) => {
+  if (!isRecord(row)) return null;
+  const precision = Number(row?.precision);
+  const recall = Number(row?.recall ?? row?.tpr);
+  const explicitFpr = Number(row?.fpr ?? row?.false_positive_rate);
+  const specificity = Number(row?.specificity);
+  const tn = Number(row?.tn);
+  const fp = Number(row?.fp);
+  let derivedFpr = explicitFpr;
+  if (!Number.isFinite(derivedFpr) && Number.isFinite(tn) && Number.isFinite(fp) && (tn + fp) > 0) {
+    derivedFpr = fp / (tn + fp);
+  }
+  if (!Number.isFinite(derivedFpr) && Number.isFinite(specificity)) {
+    derivedFpr = 1 - specificity;
+  }
+  return {
+    threshold: Number(row?.threshold),
+    precision,
+    recall,
+    fpr: derivedFpr,
+  };
+};
+
+const buildCurveFromThresholdTable = (model, curveKey) => {
+  const thresholdTable = pickFirst(
+    model?.threshold_table,
+    model?.metrics?.threshold_table,
+    model?.results?.threshold_table,
+    model?.results?.metrics?.threshold_table,
+    [],
+  );
+  if (!Array.isArray(thresholdTable) || !thresholdTable.length) return [];
+  const normalizedRows = thresholdTable
+    .map(normalizeThresholdRow)
+    .filter(Boolean);
+
+  if (curveKey === 'roc_curve') {
+    return normalizedRows
+      .map((row) => ({ x: row.fpr, y: row.recall }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .sort((left, right) => left.x - right.x);
+  }
+
+  if (curveKey === 'pr_curve') {
+    return normalizedRows
+      .map((row) => ({ x: row.recall, y: row.precision }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .sort((left, right) => left.x - right.x);
+  }
+
+  return [];
+};
+
+export const getCurvePoints = (model, curveKey, xKey, yKey) => {
+  const directPoints = extractCurveFromValue(extractCurve(model, curveKey), xKey, yKey);
+  if (directPoints.length) return directPoints;
+  return buildCurveFromThresholdTable(model, curveKey);
+};
 
 export const totalFromConfusionMatrix = (cm) => (
   asArray(cm).flat().reduce((total, value) => total + safeNumber(value, 0), 0)

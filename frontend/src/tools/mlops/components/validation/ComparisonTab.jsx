@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -336,6 +336,7 @@ const ComparisonTab = ({
   const [labelDrafts, setLabelDrafts] = useState({});
   const [detailByJobId, setDetailByJobId] = useState({});
   const [detailLoading, setDetailLoading] = useState({});
+  const detailRequestTokensRef = useRef({});
   const [featureSelection, setFeatureSelection] = useState(null);
   const [featureAnalysis, setFeatureAnalysis] = useState(null);
   const [featureAnalysisLoading, setFeatureAnalysisLoading] = useState(false);
@@ -387,6 +388,10 @@ const ComparisonTab = ({
     let cancelled = false;
 
     (async () => {
+      const requestToken = `${Date.now()}:${missingModels.map((model) => model.job_id).join('|')}`;
+      missingModels.forEach((model) => {
+        detailRequestTokensRef.current[model.job_id] = requestToken;
+      });
       setDetailLoading((prev) => ({
         ...prev,
         ...Object.fromEntries(missingModels.map((model) => [model.job_id, true])),
@@ -414,15 +419,15 @@ const ComparisonTab = ({
           return next;
         });
       } finally {
-        if (!cancelled) {
-          setDetailLoading((prev) => {
-            const next = { ...prev };
-            missingModels.forEach((model) => {
+        setDetailLoading((prev) => {
+          const next = { ...prev };
+          missingModels.forEach((model) => {
+            if (detailRequestTokensRef.current[model.job_id] === requestToken) {
               next[model.job_id] = false;
-            });
-            return next;
+            }
           });
-        }
+          return next;
+        });
       }
     })();
 

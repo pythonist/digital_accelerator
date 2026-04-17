@@ -127,7 +127,19 @@ const MasterDatasetWizardContainer = ({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1600);
-  const [buildReadyForContinue, setBuildReadyForContinue] = useState(Boolean(masterDataset?.dataset_id));
+  const activePipelineKey = Number(activePipelineId || 0) || null;
+  const masterDatasetTypeKey = String(masterDataset?.dataset_type || '').trim().toLowerCase();
+  const masterDatasetOwnedByActivePipeline = useMemo(() => {
+    const masterDatasetId = Number(masterDataset?.dataset_id || 0) || null;
+    if (!masterDatasetId) return false;
+    if (!(masterDatasetTypeKey === 'master_dataset' || masterDatasetTypeKey.startsWith('master'))) {
+      return false;
+    }
+    if (!activePipelineKey) return true;
+    const ownerPipelineId = Number(masterDataset?.pipeline_id || 0) || null;
+    return ownerPipelineId === activePipelineKey;
+  }, [activePipelineKey, masterDataset?.dataset_id, masterDataset?.pipeline_id, masterDatasetTypeKey]);
+  const [buildReadyForContinue, setBuildReadyForContinue] = useState(masterDatasetOwnedByActivePipeline);
   const [builtConfigFingerprint, setBuiltConfigFingerprint] = useState('');
   const rootRef = useRef(null);
 
@@ -357,8 +369,8 @@ const MasterDatasetWizardContainer = ({
     grain,
     anchorType,
     outputName,
-    builtMasterDatasetId: Number(masterDataset?.dataset_id || 0) || null,
-    outputDatasetId: Number(masterDataset?.dataset_id || 0) || null,
+    builtMasterDatasetId: masterDatasetOwnedByActivePipeline ? (Number(masterDataset?.dataset_id || 0) || null) : null,
+    outputDatasetId: masterDatasetOwnedByActivePipeline ? (Number(masterDataset?.dataset_id || 0) || null) : null,
     joins,
     enabledTables: Array.from(enabledTables),
     rollupConfirmed,
@@ -372,6 +384,7 @@ const MasterDatasetWizardContainer = ({
     grain,
     anchorType,
     outputName,
+    masterDatasetOwnedByActivePipeline,
     masterDataset?.dataset_id,
     joins,
     enabledTables,
@@ -810,17 +823,17 @@ const MasterDatasetWizardContainer = ({
   }, [effectiveSteps, currentStepId]);
 
   useEffect(() => {
-    if (!masterDataset?.dataset_id) return;
+    if (!masterDatasetOwnedByActivePipeline || !masterDataset?.dataset_id) return;
     setBuiltConfigFingerprint((prev) => prev || buildFingerprint);
-  }, [masterDataset?.dataset_id, buildFingerprint]);
+  }, [masterDatasetOwnedByActivePipeline, masterDataset?.dataset_id, buildFingerprint]);
 
   useEffect(() => {
     if (!builtConfigFingerprint) {
-      setBuildReadyForContinue(Boolean(masterDataset?.dataset_id));
+      setBuildReadyForContinue(masterDatasetOwnedByActivePipeline);
       return;
     }
     setBuildReadyForContinue(buildFingerprint === builtConfigFingerprint);
-  }, [buildFingerprint, builtConfigFingerprint, masterDataset?.dataset_id]);
+  }, [buildFingerprint, builtConfigFingerprint, masterDatasetOwnedByActivePipeline, masterDataset?.dataset_id]);
 
   const summaryLines = useMemo(() => {
     const selectedTableSet = new Set(Array.from(enabledTables));

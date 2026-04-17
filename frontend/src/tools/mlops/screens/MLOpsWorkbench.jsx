@@ -934,11 +934,25 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     });
   }, []);
 
+  const isMasterDatasetSnapshot = useCallback((dataset) => {
+    const datasetType = String(dataset?.dataset_type || '').trim().toLowerCase();
+    return datasetType === 'master_dataset' || datasetType.startsWith('master');
+  }, []);
+
+  const isPreprocessDatasetSnapshot = useCallback((dataset) => {
+    const datasetType = String(dataset?.dataset_type || '').trim().toLowerCase();
+    return datasetType === 'preprocess_dataset'
+      || datasetType === 'preprocessed_dataset'
+      || datasetType === 'preprocessed'
+      || datasetType.startsWith('preprocess');
+  }, []);
+
   const compactDatasetSnapshot = useCallback((dataset) => {
     if (!dataset || typeof dataset !== 'object') return null;
     const datasetId = Number(dataset?.dataset_id || 0) || null;
     return {
       dataset_id: datasetId,
+      pipeline_id: Number(dataset?.pipeline_id || 0) || null,
       dataset_type: String(dataset?.dataset_type || '').trim() || null,
       name: String(dataset?.name || dataset?.dataset_name || '').trim() || null,
       row_count: Number(dataset?.row_count || dataset?.rows || 0) || 0,
@@ -1068,7 +1082,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     const stableState = session?.last_stable_state?.mlops_state || {};
     const mlopsState = Object.keys(currentState).length ? currentState : stableState;
     if (!mlopsState || typeof mlopsState !== 'object') return;
-    const suppressStepRestore = Boolean(options?.suppressStepRestore);
+    const routePreferredStep = normalizedRouteStep && isWorkbenchStep(normalizedRouteStep) ? normalizedRouteStep : '';
+    const suppressStepRestore = Boolean(options?.suppressStepRestore || routePreferredStep);
 
     const catalog = Array.isArray(availableDatasets) ? availableDatasets : [];
     const lookupDataset = (candidateId, fallbackSnapshot = null) => {
@@ -1220,7 +1235,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         return prev;
       });
     }
-  }, [compactDatasetSnapshot]);
+    if (routePreferredStep) {
+      setActiveStep((prev) => (prev === routePreferredStep ? prev : routePreferredStep));
+    }
+  }, [compactDatasetSnapshot, normalizedRouteStep]);
 
   const resetWorkbenchRuntimeState = useCallback(() => {
     setDatasets([]);
@@ -1427,19 +1445,40 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     const artefacts = Array.isArray(payload?.artefacts) ? payload.artefacts : all.filter((d) =>  ARTEFACT_TYPES.has(d?.dataset_type));
     const resolvedPipelineId = Number(options?.pipelineId || 0);
     const hydrateArtefacts = Number.isFinite(resolvedPipelineId) && resolvedPipelineId > 0;
+    const resolveDatasetPipelineId = (dataset) => {
+      const numeric = Number(dataset?.pipeline_id || 0);
+      return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+    };
+    const ownedArtefacts = hydrateArtefacts
+      ? artefacts.filter((dataset) => resolveDatasetPipelineId(dataset) === resolvedPipelineId)
+      : [];
+    const ownedRawArtefacts = hydrateArtefacts
+      ? rawOnly.filter((dataset) => resolveDatasetPipelineId(dataset) === resolvedPipelineId && ARTEFACT_TYPES.has(dataset?.dataset_type))
+      : [];
+    const pickOwnedArtefact = (...predicates) => {
+      for (const group of [ownedArtefacts, ownedRawArtefacts]) {
+        const hit = group.find((dataset) => predicates.some((predicate) => predicate(dataset)));
+        if (hit) return hit;
+      }
+      return null;
+    };
     setDatasets(rawOnly);
     if (hydrateArtefacts) {
-      const master = artefacts.find((d) => d.dataset_type === 'master_dataset')
-        || artefacts.find((d) => d.dataset_type?.startsWith('master'))
-        || rawOnly.find((d) => d.dataset_type === 'master_dataset') || null;
+      const master = pickOwnedArtefact(
+        (dataset) => dataset?.dataset_type === 'master_dataset',
+        (dataset) => String(dataset?.dataset_type || '').startsWith('master'),
+      ) || null;
       setMasterDataset(master);
-      const featureStore = artefacts.find((d) => d.dataset_type === 'feature_store')
-        || artefacts.find((d) => d.dataset_type?.startsWith('feature_store'))
-        || null;
+      const featureStore = pickOwnedArtefact(
+        (dataset) => dataset?.dataset_type === 'feature_store',
+        (dataset) => String(dataset?.dataset_type || '').startsWith('feature_store'),
+      ) || null;
       setFeatureStoreDataset(featureStore);
-      const prep = artefacts.find((d) => d.dataset_type === 'preprocess_dataset')
-        || artefacts.find((d) => d.dataset_type === 'preprocessed_dataset')
-        || artefacts.find((d) => d.dataset_type?.startsWith('preprocess')) || null;
+      const prep = pickOwnedArtefact(
+        (dataset) => dataset?.dataset_type === 'preprocess_dataset',
+        (dataset) => dataset?.dataset_type === 'preprocessed_dataset',
+        (dataset) => String(dataset?.dataset_type || '').startsWith('preprocess'),
+      ) || null;
       setPreprocessDataset(prep);
     } else {
       setMasterDataset(null);
@@ -1966,6 +2005,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       if (targetPath === currentPath) {
         return;
       }
+      routeResumeRef.current = '';
+      routeHydrationRef.current = pid ? `${currentEnvId}:${pid}` : '';
       navigate(targetPath, {
         replace: Boolean(options?.replace),
       });
@@ -2168,7 +2209,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
           restoredWorkflowSessionKeyRef.current = restoreKey;
         }
 
-        if (sessionStep && STEPS.some((step) => step.id === sessionStep)) {
+        if (!normalizedRouteStep && sessionStep && STEPS.some((step) => step.id === sessionStep)) {
           setActiveStep((prev) => {
             const current = normalizeWorkbenchStep(prev);
             if (!current || current === 'data') {
@@ -2189,6 +2230,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     currentEnvId,
     activePipelineId,
     activePipelineName,
+    normalizedRouteStep,
     restoreWorkflowRuntimeState,
     savedPipelinePresenceSignature,
     savedPipelinesLoaded,
@@ -2580,10 +2622,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     if (!(datasets || []).length && Array.isArray(dataMeta.datasets) && dataMeta.datasets.length > 0) {
       setDatasets(dataMeta.datasets);
     }
-    if (!masterDataset && masterMeta?.dataset_snapshot) {
+    if (!masterDataset && isMasterDatasetSnapshot(masterMeta?.dataset_snapshot)) {
       setMasterDataset(masterMeta.dataset_snapshot);
     }
-    if (!preprocessDataset && preprocessMeta?.dataset_snapshot) {
+    if (!preprocessDataset && isPreprocessDatasetSnapshot(preprocessMeta?.dataset_snapshot)) {
       setPreprocessDataset(preprocessMeta.dataset_snapshot);
     }
     if (!(preprocessSteps || []).length && Array.isArray(preprocessMeta?.step_objects) && preprocessMeta.step_objects.length > 0) {
@@ -2596,7 +2638,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       setActiveModelRun(modelMeta.model_snapshot);
       setModelRun(modelMeta.model_snapshot);
     }
-  }, [activeModelRun?.job_id, activePipelineType, datasets, masterDataset, preprocessDataset, preprocessSteps, savedLocalPipelineRun, targetColumn]);
+  }, [activeModelRun?.job_id, activePipelineType, datasets, isMasterDatasetSnapshot, isPreprocessDatasetSnapshot, masterDataset, preprocessDataset, preprocessSteps, savedLocalPipelineRun, targetColumn]);
   const localPipelineComplete = useMemo(
     () => Boolean(currentLocalPipelineId) && isPipelineComplete(currentLocalPipelineScope),
     [currentLocalPipelineId, currentLocalPipelineScope, savedLocalPipelineRun],
@@ -2735,6 +2777,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         data: base.data || getStepStatus(currentLocalPipelineScope, 'data_upload') === 'done',
         master: base.master || getStepStatus(currentLocalPipelineScope, 'master_dataset') === 'done',
         target: base.target || getStepStatus(currentLocalPipelineScope, 'target_variable') === 'done',
+        eda: base.eda || getStepStatus(currentLocalPipelineScope, 'eda') === 'done',
         preprocess: base.preprocess || getStepStatus(currentLocalPipelineScope, 'preprocessing') === 'done',
         model: base.model || getStepStatus(currentLocalPipelineScope, 'model_run') === 'done',
         dashboard: base.dashboard || getStepStatus(currentLocalPipelineScope, 'live_dashboard') === 'done',
@@ -2759,6 +2802,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       if (getStepStatus(currentLocalPipelineScope, 'data_upload') === 'done') next.data = 'completed';
       if (getStepStatus(currentLocalPipelineScope, 'master_dataset') === 'done') next.master = 'completed';
       if (getStepStatus(currentLocalPipelineScope, 'target_variable') === 'done') next.target = 'completed';
+      if (getStepStatus(currentLocalPipelineScope, 'eda') === 'done') next.eda = 'completed';
       if (getStepStatus(currentLocalPipelineScope, 'preprocessing') === 'done') next.preprocess = 'completed';
       if (getStepStatus(currentLocalPipelineScope, 'model_run') === 'done') {
         next.model = 'completed';
@@ -2877,14 +2921,18 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       else setSummaryOverlayStep('');
     });
     if (!targetRunId) {
+      routeResumeRef.current = '';
+      routeHydrationRef.current = '';
       navigate('/mlops/runs', { replace: Boolean(options?.replace), state: options?.state });
       return;
     }
+    routeResumeRef.current = '';
+    routeHydrationRef.current = `${currentEnvId}:${targetRunId}`;
     navigate(buildWorkbenchRoute(targetRunId, resolvedStep), {
       replace: Boolean(options?.replace),
       state: options?.state,
     });
-  }, [activePipelineId, activePipelineType, navigate, normalizedRouteRunId, resolveStepNavigation, shouldShowSummaryForStep, validActivePipelineId]);
+  }, [activePipelineId, activePipelineType, currentEnvId, navigate, normalizedRouteRunId, resolveStepNavigation, shouldShowSummaryForStep, validActivePipelineId]);
   useEffect(() => {
     if (!normalizedRouteStep || !isWorkbenchStep(normalizedRouteStep)) return;
     setActiveStep((prev) => (prev === normalizedRouteStep ? prev : normalizedRouteStep));
@@ -2966,6 +3014,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       || pipelineRef?.model_family
       || '',
     );
+    routeResumeRef.current = '';
+    routeHydrationRef.current = `${currentEnvId}:${pipelineId}`;
     navigate(buildWorkbenchRoute(pipelineId, targetStep), {
       replace: Boolean(options?.replace),
       state: {
@@ -4098,21 +4148,29 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       ]);
       if (resumedFeatureStore) setFeatureStoreDataset(resumedFeatureStore);
 
-      const resumedPreprocessed = firstById([preprocessState?.preprocessedDatasetId, preprocessState?.outputDatasetId]);
-      if (resumedPreprocessed) setPreprocessDataset(resumedPreprocessed);
+      const resumedPreprocessed = firstById([
+        preprocessState?.preprocessedDatasetId,
+        preprocessState?.outputDatasetId,
+      ]);
+      if (isPreprocessDatasetSnapshot(resumedPreprocessed)) setPreprocessDataset(resumedPreprocessed);
 
-      const resumedMaster = firstById([masterState?.builtMasterDatasetId, masterState?.outputDatasetId, preprocessState?.masterDatasetId, full?.output_dataset_id, full?.dataset_id]);
+      const resumedMaster = firstById([
+        masterState?.builtMasterDatasetId,
+        masterState?.outputDatasetId,
+        preprocessState?.masterDatasetId,
+        full?.output_dataset_id,
+      ]);
       if (resumedMaster) {
-        if (String(resumedMaster?.dataset_type || '').toLowerCase().includes('preprocess')) {
+        if (isPreprocessDatasetSnapshot(resumedMaster)) {
           setPreprocessDataset((prev) => prev || resumedMaster);
-        } else {
+        } else if (isMasterDatasetSnapshot(resumedMaster)) {
           setMasterDataset(resumedMaster);
         }
       }
 
       const restoredTarget = String(targetState?.currentTargetColumn || targetState?.selectedTargetColumn || '').trim();
       if (restoredTarget) setTargetColumn(restoredTarget);
-      setEdaDone(Boolean(edaState?.completed || edaState?.done || edaState?.status === 'completed' || edaState?.viewed_step || edaState?.activeTab));
+      setEdaDone(Boolean(edaState?.completed || edaState?.done || edaState?.eda_completed || edaState?.status === 'completed'));
       if (Array.isArray(preprocessState?.steps)) {
         setPreprocessSteps(normalizePreprocessSteps(preprocessState.steps));
       }
@@ -4307,8 +4365,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         && (Date.now() - Number(manualOverride.ts || 0)) < MANUAL_STEP_OVERRIDE_MS
         && isWorkbenchStep(String(manualOverride.step || '').trim())
       ) ? normalizeWorkbenchStep(manualOverride.step) : '';
-      if (lockedStep) setActiveStep(lockedStep);
-      else if (explicitStep && isWorkbenchStep(explicitStep)) setActiveStep(explicitStep);
+      if (explicitStep && isWorkbenchStep(explicitStep)) setActiveStep(explicitStep);
+      else if (lockedStep) setActiveStep(lockedStep);
       else if (firstAttentionStep) setActiveStep(firstAttentionStep);
       else if (resumeStaleStep) setActiveStep(resumeStaleStep);
       else if (normalizedStep && resumedFlowSteps.some((step) => step.id === normalizedStep)) setActiveStep(normalizedStep);
@@ -4333,7 +4391,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         resumeWorkflowPersistence();
       }, 0);
     }
-  }, [activatePipeline, activePipelineName, clearLocalWorkbenchState, currentEnvId, flowSteps, loadDatasets, pauseScreenStatePersistence, pauseWorkflowPersistence, restoreWorkflowRuntimeState, resumeScreenStatePersistence, resumeWorkflowPersistence]);
+  }, [activatePipeline, activePipelineName, clearLocalWorkbenchState, currentEnvId, flowSteps, isMasterDatasetSnapshot, isPreprocessDatasetSnapshot, loadDatasets, pauseScreenStatePersistence, pauseWorkflowPersistence, restoreWorkflowRuntimeState, resumeScreenStatePersistence, resumeWorkflowPersistence]);
 
   useEffect(() => {
     if (!savedPipelinesLoaded) return;

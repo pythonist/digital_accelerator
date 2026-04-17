@@ -318,11 +318,23 @@ def chat():
     
     # --- STEP 1: IDENTIFY ACTIVE CONTEXT ---
     active_env_name = services.metadata_manager.active_env
+    active_tenant_id = getattr(services.metadata_manager, 'active_tenant', None) or getattr(request, 'tenant_id', None) or 'default'
     active_db_path = None
     
     if active_env_name:
-        paths = services.metadata_manager.activate_environment(active_env_name)
-        active_db_path = paths['paths']['investigation_db']
+        try:
+            bound_db = services.bind_environment_context(active_env_name, active_tenant_id)
+            active_db_path = getattr(bound_db, 'db_path', None)
+        except Exception:
+            try:
+                paths = services.metadata_manager.activate_environment(active_env_name, active_tenant_id)
+                active_db_path = paths['paths']['investigation_db']
+            except Exception:
+                existing_db = getattr(services, 'investigation_db', None)
+                if existing_db and getattr(services.metadata_manager, 'active_env', None) == active_env_name:
+                    active_db_path = getattr(existing_db, 'db_path', None)
+                else:
+                    active_db_path = None
     
     # --- STEP 2: FETCH RICH SCHEMA ---
     schema_context = "No active investigation database found. Please select an environment."

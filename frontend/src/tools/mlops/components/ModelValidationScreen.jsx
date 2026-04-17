@@ -350,8 +350,17 @@ const ModelValidationScreen = ({
         const payload = await Promise.all(
           missingIds.map(async (job_id) => {
             try {
-              const res = await withTimeout(mlopsApi.modelResults(job_id));
-              return [job_id, unwrap(res)];
+              const [modelRes, validationRes] = await Promise.all([
+                withTimeout(mlopsApi.modelResults(job_id)).catch(() => null),
+                withTimeout(mlopsApi.validationDetail(job_id)).catch(() => null),
+              ]);
+              const modelDetail = unwrap(modelRes);
+              const validationDetail = unwrap(validationRes);
+              const mergedDetail = mergeValidationModel(
+                mergeValidationModel({ job_id }, modelDetail || {}),
+                validationDetail || {},
+              );
+              return [job_id, Object.keys(mergedDetail || {}).length ? mergedDetail : null];
             } catch (detailError) {
               return [job_id, null];
             }

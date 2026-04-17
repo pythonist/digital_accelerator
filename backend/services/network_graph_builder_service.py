@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -16,15 +16,10 @@ def _pick_col(df, candidates):
 def _to_iso(value):
     if value is None or value == "":
         return None
-    if isinstance(value, datetime):
-        return value.replace(microsecond=0).isoformat() + "Z"
-    try:
-        parsed = pd.to_datetime(value, errors="coerce")
-        if pd.isna(parsed):
-            return None
-        return parsed.to_pydatetime().replace(microsecond=0).isoformat() + "Z"
-    except Exception:
+    parsed = _coerce_datetime(value)
+    if not isinstance(parsed, datetime):
         return None
+    return parsed.replace(microsecond=0).isoformat() + "Z"
 
 
 def _coerce_datetime(value):
@@ -41,8 +36,18 @@ def _coerce_datetime(value):
                 return None
         except Exception:
             return None
-        return value.to_pydatetime()
-    return value
+        value = value.to_pydatetime()
+    elif not isinstance(value, datetime):
+        try:
+            parsed = pd.to_datetime(value, errors="coerce", utc=True)
+            if pd.isna(parsed):
+                return None
+            value = parsed.to_pydatetime()
+        except Exception:
+            return None
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value if isinstance(value, datetime) else None
 
 
 class NetworkGraphBuilderService:

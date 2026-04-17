@@ -383,7 +383,7 @@ def _screen_state_is_completed(state: Any) -> bool:
     if bool(state.get("completed")) or bool(state.get("done")):
         return True
     status_text = str(state.get("status") or "").strip().lower()
-    return status_text in {"completed", "complete", "done", "success", "saved"}
+    return status_text in {"completed", "complete", "done", "success"}
 
 
 def _data_upload_state_is_completed(state: Any) -> bool:
@@ -2591,7 +2591,7 @@ class MLOpsWorkbenchService:
             "datasets_count": len(data_state.get("dataset_ids") or []),
             "master_dataset_id": _coerce_int(master_state.get("builtMasterDatasetId")),
             "target_column": _workflow_first_text(target_state.get("currentTargetColumn"), target_state.get("selectedTargetColumn"), data_state.get("target_column")),
-            "eda_completed": bool(eda_state.get("completed") or eda_state.get("viewed_step") or eda_state.get("status") == "completed"),
+            "eda_completed": bool(eda_state.get("completed") or eda_state.get("done") or str(eda_state.get("status") or "").strip().lower() == "completed"),
             "preprocess_dataset_id": _coerce_int(preprocess_state.get("preprocessedDatasetId")),
             "preprocess_steps": list(preprocess_state.get("steps") or []),
             "preprocess_plan": list(preprocess_state.get("plan") or preprocess_state.get("suggestions") or []),
@@ -4229,7 +4229,7 @@ class MLOpsWorkbenchService:
                 tenant_id,
                 env_id,
                 int(row[0]),
-                row[1] or "",
+                row[2] or "",
                 result["steps"],
             )
         runtime_state = result.get("runtime_state") if isinstance(result.get("runtime_state"), dict) else {}
