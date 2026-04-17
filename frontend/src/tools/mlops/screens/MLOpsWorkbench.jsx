@@ -2574,10 +2574,15 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       low_risk: Number(publish?.risk_counts?.low || scoring?.risk_counts?.low || Math.max(0, totalAlerts - highRisk - mediumRisk)) || 0,
       model_version: effectiveRegistryEntry?.version || effectiveRegistryEntry?.deployment_id || 'v1.0',
       last_scored_at: simulation?.generated_at || savedDashboardState?.updated_at || new Date().toISOString(),
+      total_scored: Number(scoring?.total || 0) || totalAlerts,
+      suppressed_count: Number(scoring?.suppressed || scoring?.suppressed_count || 0) || 0,
+      retained_count: Number(scoring?.escalated || scoring?.retained_count || 0) || totalAlerts,
+      suppression_rate_pct: scoring?.suppression_rate ?? null,
+      event_loss_pct: scoring?.event_loss_pct ?? effectiveValidationReport?.event_loss_pct ?? null,
       alert_rows: Array.isArray(simulation?.ledger_preview) ? simulation.ledger_preview.slice(0, 25) : [],
       alert_trend: alertTrend,
     };
-  }, [effectiveRegistryEntry?.deployment_id, effectiveRegistryEntry?.version, savedDashboardState, savedLocalPipelineRun]);
+  }, [effectiveRegistryEntry?.deployment_id, effectiveRegistryEntry?.version, effectiveValidationReport?.event_loss_pct, savedDashboardState, savedLocalPipelineRun]);
   const localValidationMetadata = useMemo(() => ({
     selected_threshold: effectiveValidationReport?.selected_threshold ?? effectiveValidationReport?.locked_threshold ?? effectiveValidationReport?.optimal_threshold ?? null,
     locked_threshold: effectiveValidationReport?.locked_threshold ?? effectiveValidationReport?.selected_threshold ?? effectiveValidationReport?.optimal_threshold ?? null,
@@ -5649,6 +5654,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                       activePipelineId={validActivePipelineId}
                       activePipelineName={activePipelineName}
                       savedDashboardState={savedDashboardState}
+                      savedDashboardMetadata={savedLocalPipelineRun?.steps?.live_dashboard?.metadata || localDashboardMetadata}
                       validationReport={effectiveValidationReport || validationReport} registryEntry={effectiveRegistryEntry || registryEntry} onBack={() => openWorkbenchStep('registry', { skipGuardRedirect: true })}
                       actionsDisabled={staleStepSet.has('dashboard')}
                       actionsMessage={staleMessageForStep('dashboard')}

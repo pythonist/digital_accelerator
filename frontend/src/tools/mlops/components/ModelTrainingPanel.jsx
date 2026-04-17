@@ -36,7 +36,7 @@ import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from 'react';
 import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider,
+  Alert, Box, Button, Checkbox, Chip, CircularProgress, Collapse, Divider,
   Dialog, DialogContent, DialogTitle,
   IconButton, LinearProgress, Paper, Slider, Stack,
   Tab, Tabs, TextField, Tooltip, Typography,
@@ -2571,6 +2571,7 @@ const ModelTrainingPanel = ({
   const [runsLoading, setRunsLoading]       = useState(false);
   const [runsError, setRunsError]           = useState(null);
   const [runsRefreshKey, setRunsRefreshKey] = useState(0);
+  const [compareSelection, setCompareSelection] = useState([]);
 
   const [pipelineSelection, setPipelineSelection] = useState([]);
   const [pipelineRuns, setPipelineRuns]           = useState([]);
@@ -3424,6 +3425,23 @@ const ModelTrainingPanel = ({
     });
   };
 
+  const toggleHistoryCompareSelection = (runJobId) => {
+    const key = String(runJobId || '').trim();
+    if (!key) return;
+    setCompareSelection((prev) => (
+      prev.includes(key)
+        ? prev.filter((value) => value !== key)
+        : [...prev, key]
+    ));
+  };
+
+  const addSelectedHistoryRunsToCompare = () => {
+    recentRuns
+      .filter((run) => compareSelection.includes(String(run?.job_id || '').trim()))
+      .forEach((run) => handleAddRunToCompare(run));
+    setActiveTab(5);
+  };
+
   const handleSaveRun = () => {
     if (!results || savedRuns.some((r) => r.job_id === jobId)) return;
     setSavedRuns((prev) => [...prev, {
@@ -3565,6 +3583,9 @@ const ModelTrainingPanel = ({
   // JSX-consuming code is unchanged; just moving logic here is sufficient.
 
   const shownRuns = recentRuns.slice(0, 6);
+  const shownRunIds = shownRuns.map((run) => String(run?.job_id || '').trim()).filter(Boolean);
+  const allShownHistorySelected = shownRunIds.length > 0 && shownRunIds.every((runIdValue) => compareSelection.includes(runIdValue));
+  const selectedHistoryCount = compareSelection.filter((runIdValue) => shownRunIds.includes(runIdValue)).length;
   const recentRunHistoryPanel = (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, bgcolor: '#fafbfc' }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" spacing={1} mb={1}>
@@ -3578,6 +3599,25 @@ const ModelTrainingPanel = ({
         </Box>
         <Stack direction="row" spacing={0.75}>
           <Chip label={`${recentRuns.length} saved run${recentRuns.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setCompareSelection(allShownHistorySelected ? [] : shownRunIds)}
+            disabled={!shownRunIds.length}
+            sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+          >
+            {allShownHistorySelected ? 'Clear selection' : 'Select visible'}
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<CompareArrows />}
+            onClick={addSelectedHistoryRunsToCompare}
+            disabled={selectedHistoryCount === 0}
+            sx={{ textTransform: 'none', borderRadius: 0, bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover } }}
+          >
+            Compare selected ({selectedHistoryCount})
+          </Button>
           <Button
             size="small"
             variant="outlined"
@@ -3601,7 +3641,7 @@ const ModelTrainingPanel = ({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['Status', 'Trained At', 'Algorithm', 'Grain', 'AUC', 'F1', 'Stage', 'Actions'].map((h) => (
+                {['Pick', 'Status', 'Trained At', 'Algorithm', 'Grain', 'AUC', 'F1', 'Stage', 'Actions'].map((h) => (
                   <th key={h} style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.4, borderBottom: `1px solid ${T.border}` }}>{h}</th>
                 ))}
               </tr>
@@ -3609,8 +3649,17 @@ const ModelTrainingPanel = ({
             <tbody>
               {shownRuns.map((run) => {
                 const isCurrent = run.job_id === jobId;
+                const compareSelected = compareSelection.includes(String(run?.job_id || '').trim());
                 return (
                   <tr key={run.job_id} style={{ borderBottom: `1px solid ${T.border}`, background: isCurrent ? T.orangeLight : 'transparent' }}>
+                    <td style={{ padding: '6px 8px', width: 48 }}>
+                      <Checkbox
+                        size="small"
+                        checked={compareSelected}
+                        onChange={() => toggleHistoryCompareSelection(run.job_id)}
+                        sx={{ p: 0.25 }}
+                      />
+                    </td>
                     <td style={{ padding: '6px 8px' }}>
                       <Chip
                         label={isCurrent ? 'Loaded now' : 'History'}
@@ -5089,6 +5138,16 @@ const ModelTrainingPanel = ({
             <Stack direction="row" alignItems="center" spacing={1}>
               <TrendingUp sx={{ fontSize: 18, color: T.textDim }} />
               <Typography sx={{ fontSize: 13, fontWeight: 700, color: T.textPrimary }}>{savedRuns.length} saved run{savedRuns.length !== 1 ? 's' : ''} - best F1 highlighted</Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<AddCircleOutline />}
+                onClick={handleSaveRun}
+                disabled={!results || savedRuns.some((r) => r.job_id === jobId)}
+                sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+              >
+                {savedRuns.some((r) => r.job_id === jobId) ? 'Current run included' : 'Include current run'}
+              </Button>
             </Stack>
             <Box sx={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>

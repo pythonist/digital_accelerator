@@ -92,6 +92,19 @@ const MailboxPanel = ({
     sent: mailboxRows.filter((row) => row.direction === 'sent').length,
     received: mailboxRows.filter((row) => row.direction === 'received').length,
   }), [mailboxRows]);
+  const selectedToRecipients = useMemo(
+    () => recipientRows.filter((row) => composeForm.to_recipient_ids.includes(row.id)),
+    [composeForm.to_recipient_ids, recipientRows],
+  );
+  const selectedCcRecipients = useMemo(
+    () => recipientRows.filter((row) => composeForm.cc_recipient_ids.includes(row.id)),
+    [composeForm.cc_recipient_ids, recipientRows],
+  );
+  const evidenceReady = Boolean(
+    String(composeForm.case_id || '').trim()
+    || String(composeForm.case_ids_text || '').trim()
+    || String(composeForm.batch_ref || '').trim(),
+  );
 
   const handleTemplateChange = (templateId) => {
     const template = templateRows.find((row) => String(row.id) === String(templateId));
@@ -305,6 +318,30 @@ const MailboxPanel = ({
               <TextField size="small" label="Case IDs (comma-separated)" value={composeForm.case_ids_text} onChange={(event) => setComposeForm((previous) => ({ ...previous, case_ids_text: event.target.value }))} sx={{ flex: 1 }} />
               <TextField size="small" label="Batch Ref" value={composeForm.batch_ref} onChange={(event) => setComposeForm((previous) => ({ ...previous, batch_ref: event.target.value }))} sx={{ flex: 1 }} />
             </Stack>
+            {(selectedToRecipients.length > 0 || selectedCcRecipients.length > 0) && (
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, bgcolor: '#f8fafc' }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#0f172a', mb: 1 }}>
+                  Recipient routing summary
+                </Typography>
+                <Stack spacing={0.9}>
+                  {selectedToRecipients.map((row) => (
+                    <Typography key={`to-${row.id}`} sx={{ fontSize: 12, color: '#334155' }}>
+                      To: {[row.name, row.role, row.region, row.branch_code, row.email].filter(Boolean).join(' | ')}
+                    </Typography>
+                  ))}
+                  {selectedCcRecipients.map((row) => (
+                    <Typography key={`cc-${row.id}`} sx={{ fontSize: 12, color: '#64748b' }}>
+                      CC: {[row.name, row.role, row.region, row.branch_code, row.email].filter(Boolean).join(' | ')}
+                    </Typography>
+                  ))}
+                </Stack>
+              </Paper>
+            )}
+            <Alert severity={evidenceReady ? 'success' : 'info'} sx={{ borderRadius: 0 }}>
+              {evidenceReady
+                ? 'Case pack summary, transaction context, rule/typology snapshot, and JSON/text evidence attachments will be included automatically.'
+                : 'Add a Case ID, case list, or batch reference if you want FCIP to attach case-pack evidence instead of sending only a free-form message.'}
+            </Alert>
             <TextField size="small" label="Subject" value={composeForm.subject} onChange={(event) => setComposeForm((previous) => ({ ...previous, subject: event.target.value }))} />
             <TextField size="small" label="Body" value={composeForm.body} onChange={(event) => setComposeForm((previous) => ({ ...previous, body: event.target.value }))} multiline minRows={7} />
           </Stack>

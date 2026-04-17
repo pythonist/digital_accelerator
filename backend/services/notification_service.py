@@ -1,4 +1,6 @@
 import html
+import json
+import mimetypes
 import os
 import smtplib
 from email.message import EmailMessage
@@ -182,6 +184,31 @@ class NotificationService:
                 parts.append(f"{title}\n{content}".strip())
         return "\n\n".join(part for part in parts if part).strip()
 
+    def _normalize_attachments(self, attachments: Any) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        for item in list(attachments or []):
+            if not isinstance(item, dict):
+                continue
+            filename = str(item.get("filename") or "").strip()
+            if not filename:
+                continue
+            content = item.get("content")
+            if content in (None, ""):
+                continue
+            if isinstance(content, bytes):
+                content_bytes = content
+            elif isinstance(content, str):
+                content_bytes = content.encode("utf-8")
+            else:
+                content_bytes = json.dumps(content, indent=2, ensure_ascii=False).encode("utf-8")
+            content_type = str(item.get("content_type") or mimetypes.guess_type(filename)[0] or "application/octet-stream").strip()
+            normalized.append({
+                "filename": filename,
+                "content": content_bytes,
+                "content_type": content_type,
+            })
+        return normalized
+
     def send_email(
         self,
         recipient_email: Any,
@@ -189,6 +216,7 @@ class NotificationService:
         body: str,
         metadata: Optional[Dict[str, Any]] = None,
         cc_emails: Any = None,
+        attachments: Any = None,
     ) -> Dict[str, Any]:
         to_emails = self._normalize_email_list(recipient_email)
         cc_list = self._normalize_email_list(cc_emails)
@@ -197,6 +225,7 @@ class NotificationService:
 
         plain_text = self._compose_plain_text(body or "", metadata)
         html_body = self._render_html_email(subject, body or "", metadata)
+        normalized_attachments = self._normalize_attachments(attachments)
 
         if self.smtp_host:
             try:
@@ -208,6 +237,18 @@ class NotificationService:
                     message["Cc"] = ", ".join(cc_list)
                 message.set_content(plain_text or subject)
                 message.add_alternative(html_body, subtype="html")
+                for attachment in normalized_attachments:
+                    content_type = attachment["content_type"]
+                    if "/" in content_type:
+                        maintype, subtype = content_type.split("/", 1)
+                    else:
+                        maintype, subtype = "application", "octet-stream"
+                    message.add_attachment(
+                        attachment["content"],
+                        maintype=maintype,
+                        subtype=subtype,
+                        filename=attachment["filename"],
+                    )
 
                 with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as server:
                     server.ehlo()
@@ -224,6 +265,7 @@ class NotificationService:
                     "delivery_mode": "smtp",
                     "to_emails": to_emails,
                     "cc_emails": cc_list,
+                    "attachment_count": len(normalized_attachments),
                 }
             except Exception as exc:
                 return {"success": False, "status": "failed", "error": str(exc)}
@@ -235,4 +277,5 @@ class NotificationService:
             "error": "",
             "to_emails": to_emails,
             "cc_emails": cc_list,
+            "attachment_count": len(normalized_attachments),
         }

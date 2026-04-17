@@ -38,8 +38,8 @@ export const FCC_THEME = {
   shadowSm: '0 1px 2px rgba(22, 18, 14, 0.06)',
   shadowMd: '0 12px 26px rgba(22, 18, 14, 0.08)',
   radiusSm: 0,
-  radiusMd: 2,
-  radiusLg: 4,
+  radiusMd: 0,
+  radiusLg: 0,
 };
 
 export const FCC_STATUS_TONES = {

@@ -293,8 +293,9 @@ const ScrollArea = ({ children, height = 320, sx = {} }) => (
       overflowY: 'auto',
       overflowX: 'hidden',
       pr: 0.5,
+      overscrollBehavior: 'contain',
       '&::-webkit-scrollbar': { width: 8, height: 8 },
-      '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 999 },
+      '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
       '&::-webkit-scrollbar-track': { background: '#f8fafc' },
       ...sx,
     }}>
@@ -306,7 +307,7 @@ const SectionCard = ({ eyebrow, title, subtitle, action, children }) => (
   <Paper
     elevation={0}
     sx={{
-      borderRadius: 2.25,
+      borderRadius: 0,
       border: `1px solid ${T.border}`,
       bgcolor: T.surface,
       overflow: 'hidden',
@@ -588,7 +589,7 @@ const BarMeter = ({ level = 3, color = T.orange }) => (
         sx={{
           width: 18,
           height: 8,
-          borderRadius: 999,
+          borderRadius: 0,
           bgcolor: slot <= level ? color : '#e2e8f0',
         }}
       />

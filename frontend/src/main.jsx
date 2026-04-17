@@ -45,7 +45,7 @@ const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 14,
+    borderRadius: 0,
   },
   transitions: {
     duration: {
@@ -68,6 +68,14 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           backgroundImage: 'none',
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          borderRadius: 0,
         },
       },
     },
@@ -77,13 +85,14 @@ const theme = createTheme({
       },
       styleOverrides: {
         root: {
-          borderRadius: 12,
+          borderRadius: 0,
         },
       },
     },
     MuiOutlinedInput: {
       styleOverrides: {
         root: {
+          borderRadius: 0,
           transition: 'box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease',
           '&.Mui-focused': {
             boxShadow: '0 0 0 4px rgba(180, 83, 9, 0.10)',
@@ -91,11 +100,67 @@ const theme = createTheme({
         },
       },
     },
+    MuiFilledInput: {
+      styleOverrides: {
+        root: {
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: {
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiAlert: {
+      styleOverrides: {
+        root: {
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiDialog: {
+      styleOverrides: {
+        paper: {
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiMenu: {
+      styleOverrides: {
+        paper: {
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiPopover: {
+      styleOverrides: {
+        paper: {
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiToggleButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: '0 !important',
+        },
+      },
+    },
     MuiTab: {
       styleOverrides: {
         root: {
           minHeight: 40,
-          borderRadius: 10,
+          borderRadius: 0,
+        },
+      },
+    },
+    MuiTableContainer: {
+      styleOverrides: {
+        root: {
+          borderRadius: 0,
         },
       },
     },

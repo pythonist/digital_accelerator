@@ -314,6 +314,7 @@ class MailConfigService:
             "case_details": {},
             "sections": [],
             "case_rows": [],
+            "attachments": [],
         }
         normalized_case_ids = [str(item).strip() for item in (case_ids or []) if str(item or "").strip()]
         case_text = str(case_id or "").strip()
@@ -326,11 +327,29 @@ class MailConfigService:
                 "Batch Ref": batch_ref or "-",
             }
             metadata["case_rows"] = self._build_multi_case_rows(normalized_case_ids)
+            metadata["sections"].append({
+                "title": "Case Pack Summary",
+                "body": "\n".join([
+                    f"Batch reference: {batch_ref or '-'}",
+                    f"Cases included: {len(normalized_case_ids)}",
+                    "Evidence bundle attached as JSON for downstream review and audit traceability.",
+                ]),
+            })
             if body:
                 metadata["sections"].append({
                     "title": "Analyst Message",
                     "body": body,
                 })
+            metadata["attachments"] = [{
+                "filename": f"fcc_case_batch_{(batch_ref or 'multi_case').replace(' ', '_')}.json",
+                "content_type": "application/json",
+                "content": json.dumps({
+                    "batch_ref": batch_ref or None,
+                    "case_count": len(normalized_case_ids),
+                    "cases": metadata["case_rows"],
+                    "analyst_message": body,
+                }, indent=2, ensure_ascii=False),
+            }]
             return metadata
         if not case_text:
             if batch_ref:
@@ -346,6 +365,20 @@ class MailConfigService:
         packet = self.packet_builder.build_case_summary(case_text, queue_row)
         mail_context = packet.get("mail_context") or {}
         resolution = packet.get("resolution_workspace") or {}
+        case_overview = packet.get("case_overview") or {}
+        alert_summary = packet.get("alert_summary") or {}
+        transaction_highlights = packet.get("transaction_highlights") or {}
+        evidence_summary = packet.get("evidence_summary") or {}
+        top_counterparties = list(transaction_highlights.get("top_counterparties") or [])[:5]
+        trigger_lines = [
+            str(item).strip()
+            for item in list(evidence_summary.get("rule_triggers_summary") or [])
+            if str(item or "").strip() and str(item or "").strip() != "-"
+        ]
+        counterparty_lines = [
+            f"{str(item.get('name') or '-').strip()} ({item.get('count') or 0})"
+            for item in top_counterparties
+        ]
         metadata["summary"] = str(
             mail_context.get("why_review_needed")
             or packet.get("alert_summary", {}).get("why_generated")
@@ -365,8 +398,38 @@ class MailConfigService:
                 "body": metadata["summary"],
             },
             {
+                "title": "Case Pack Summary",
+                "body": "\n".join([
+                    f"Linked alerts: {alert_summary.get('linked_alert_count') or 0}",
+                    f"Severity: {mail_context.get('severity') or '-'}",
+                    f"Scenario: {mail_context.get('scenario_name') or '-'}",
+                    f"Current stage: {case_overview.get('stage') or queue_row.get('current_stage') or '-'}",
+                    f"Status: {case_overview.get('status') or queue_row.get('current_status') or '-'}",
+                ]),
+            },
+            {
                 "title": "Transaction Context",
-                "body": str(mail_context.get("transaction_summary") or "Transaction summary is not yet available for this case."),
+                "body": "\n".join([
+                    str(mail_context.get("transaction_summary") or "Transaction summary is not yet available for this case."),
+                    f"Total suspicious amount: {transaction_highlights.get('total_suspicious_amount') or 0}",
+                    f"Date range: {((transaction_highlights.get('date_range') or {}).get('from') or '-')} to {((transaction_highlights.get('date_range') or {}).get('to') or '-')}",
+                ]),
+            },
+            {
+                "title": "Rules, Typologies, and Evidence",
+                "body": "\n".join([
+                    f"Triggered markers: {', '.join(trigger_lines) if trigger_lines else 'No specific triggered markers were captured in the compact summary.'}",
+                    f"Risk score: {(evidence_summary.get('model_score_summary') or {}).get('risk_score') or '-'}",
+                    f"Analyst findings stage: {evidence_summary.get('analyst_findings_summary') or '-'}",
+                ]),
+            },
+            {
+                "title": "Counterparty / Network Snapshot",
+                "body": "\n".join(counterparty_lines) if counterparty_lines else "No counterparty concentration summary is available for this case yet.",
+            },
+            {
+                "title": "Recommended Next Action",
+                "body": str(mail_context.get("recommended_next_action") or "Review the case pack, confirm evidence, and respond with disposition or escalation guidance."),
             },
         ]
         sar_excerpt = str(
@@ -385,6 +448,38 @@ class MailConfigService:
                 "title": "Analyst Message",
                 "body": body,
             })
+        evidence_payload = {
+            "case_id": case_text,
+            "case_overview": case_overview,
+            "alert_summary": alert_summary,
+            "transaction_highlights": transaction_highlights,
+            "evidence_summary": evidence_summary,
+            "resolution_workspace": resolution,
+            "mail_context": mail_context,
+        }
+        summary_lines = [
+            f"Case ID: {case_text}",
+            f"Customer ID: {mail_context.get('customer_id') or '-'}",
+            f"Account ID: {mail_context.get('account_id') or '-'}",
+            f"Severity: {mail_context.get('severity') or '-'}",
+            f"Scenario: {mail_context.get('scenario_name') or '-'}",
+            f"Why review needed: {metadata['summary']}",
+            f"Transaction summary: {mail_context.get('transaction_summary') or '-'}",
+            f"Triggered markers: {', '.join(trigger_lines) if trigger_lines else '-'}",
+            f"Recommended next action: {mail_context.get('recommended_next_action') or '-'}",
+        ]
+        metadata["attachments"] = [
+            {
+                "filename": f"fcc_case_summary_{case_text}.txt",
+                "content_type": "text/plain",
+                "content": "\n".join(summary_lines),
+            },
+            {
+                "filename": f"fcc_case_evidence_{case_text}.json",
+                "content_type": "application/json",
+                "content": json.dumps(evidence_payload, indent=2, ensure_ascii=False),
+            },
+        ]
         return metadata
 
     def list_mailbox(self, filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -495,12 +590,14 @@ class MailConfigService:
                 for recipient in cc_recipients
                 for email in self._expand_recipient_emails(recipient)
             ])
+            mail_metadata = self._build_mail_metadata(case_id, batch_ref, body, case_ids=case_ids)
             send_result = self.notification_service.send_email(
                 to_emails,
                 subject,
                 body,
-                metadata=self._build_mail_metadata(case_id, batch_ref, body, case_ids=case_ids),
+                metadata=mail_metadata,
                 cc_emails=cc_emails,
+                attachments=mail_metadata.get("attachments"),
             )
             for email in to_emails:
                 conn.execute(

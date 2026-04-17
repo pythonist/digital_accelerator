@@ -97,7 +97,7 @@ const SharedWorkbenchLayout = ({
   onBackToTools,
   onLogout,
   accentColor = '#cbd5e1',
-  navShape = 'rounded',
+  navShape = 'sharp',
   headerActions = null,
 }) => {
   const theme = useTheme();
@@ -147,7 +147,7 @@ const SharedWorkbenchLayout = ({
         overflowY: 'auto',
         '&::-webkit-scrollbar': { width: '4px' },
         '&::-webkit-scrollbar-track': { background: 'transparent' },
-        '&::-webkit-scrollbar-thumb': { background: '#334155', borderRadius: '4px' },
+        '&::-webkit-scrollbar-thumb': { background: '#334155', borderRadius: 0 },
       }}
     >
       <Box
@@ -264,7 +264,7 @@ const SharedWorkbenchLayout = ({
                                 px: 2.5,
                                 py: 0.75,
                                 mx: 1.5,
-                                borderRadius: isSharp ? 1 : 2,
+                                borderRadius: 0,
                                 transition: 'all 0.18s ease',
                                 position: 'relative',
                                 ...(active && {
@@ -281,7 +281,7 @@ const SharedWorkbenchLayout = ({
                                     top: 8,
                                     bottom: 8,
                                     width: 3,
-                                    borderRadius: isSharp ? 1 : 999,
+                                    borderRadius: 0,
                                     bgcolor: item.highlight ? '#f59e0b' : accentColor,
                                   },
                                 }),
@@ -378,6 +378,7 @@ const SharedWorkbenchLayout = ({
                 border: '1px solid #334155',
                 width: 24,
                 height: 24,
+                borderRadius: 0,
                 boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
                 '&:hover': {
                   bgcolor: '#22324a',
@@ -473,7 +474,7 @@ const SharedWorkbenchLayout = ({
                     px: 1,
                     py: 0.25,
                     bgcolor: 'rgba(255,255,255,0.1)',
-                    borderRadius: 1,
+                    borderRadius: 0,
                   }}
                 >
                   <Dns sx={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', mr: 0.5 }} />
@@ -492,7 +493,7 @@ const SharedWorkbenchLayout = ({
                     alignItems: 'center',
                     px: 1.2,
                     py: 0.45,
-                    borderRadius: 999,
+                    borderRadius: 0,
                     bgcolor: 'rgba(255,255,255,0.06)',
                     border: '1px solid rgba(255,255,255,0.10)',
                     maxWidth: 260,
@@ -547,7 +548,7 @@ const SharedWorkbenchLayout = ({
                 anchorEl={anchorElUser}
                 open={Boolean(anchorElUser)}
                 onClose={() => setAnchorElUser(null)}
-                PaperProps={{ sx: { minWidth: 160, borderRadius: 1, mt: 1 } }}
+                PaperProps={{ sx: { minWidth: 160, borderRadius: 0, mt: 1 } }}
                 anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
                 transformOrigin={{ horizontal: 'right', vertical: 'top' }}
               >

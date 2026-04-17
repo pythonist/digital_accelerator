@@ -4515,7 +4515,17 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
             Computing transformation metrics from preview trace...
           </Typography>
         )}
-        <Box sx={{ maxHeight: 380, overflow: 'auto', pr: 0.25 }}>
+        <Box
+          sx={{
+            maxHeight: 320,
+            overflow: 'auto',
+            pr: 0.75,
+            overscrollBehavior: 'contain',
+            '&::-webkit-scrollbar': { width: 8, height: 8 },
+            '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
+            '&::-webkit-scrollbar-track': { background: '#f8fafc' },
+          }}
+        >
           <Box sx={{
             display: 'grid',
             gridTemplateColumns: { xs: '1fr', xl: '220px 1fr 220px' },
@@ -4587,7 +4597,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
               ))}
             </Box>
 
-            <Box sx={{ p: 1.25, borderRadius: 1.5, border: `1px solid ${T.border}`, bgcolor: '#f8fafc' }}>
+            <Box sx={{ p: 1.25, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: '#f8fafc' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 12, mb: 0.4 }}>Output Dataset</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                 {done?.dataset_type || outputName}
@@ -4664,7 +4674,20 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
                       </td>
                       <td style={{ padding: '7px 10px', minWidth: 260 }}>
                         <Typography sx={{ fontSize: 11, color: T.textSec }}>
-                          <Box component="span" sx={{ whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.55 }}>
+                          <Box
+                            component="span"
+                            sx={{
+                              display: 'block',
+                              maxHeight: 58,
+                              overflowY: 'auto',
+                              whiteSpace: 'normal',
+                              wordBreak: 'break-word',
+                              lineHeight: 1.55,
+                              pr: 0.5,
+                              '&::-webkit-scrollbar': { width: 6 },
+                              '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
+                            }}
+                          >
                             {affected.slice(0, 8).join(', ') || '-'}{affected.length > 8 ? ` +${affected.length - 8} more` : ''}
                           </Box>
                         </Typography>
@@ -4682,7 +4705,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
         <SLabel>Transformation Impact By Category</SLabel>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 1 }}>
           {categorySummary.map((cat) => (
-            <Box key={cat.category} sx={{ p: 1.2, borderRadius: 1.25, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+            <Box key={cat.category} sx={{ p: 1.2, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 11.5 }}>{cat.label}</Typography>
               <Typography variant="caption" sx={{ display: 'block', color: T.textSec }}>
                 steps: {fmt(cat.steps)} | applied: {fmt(cat.applied_steps)}
@@ -4730,7 +4753,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
                 fontSize: 15.5,
                 fontWeight: 700,
                 textTransform: 'none',
-                borderRadius: '12px',
+                borderRadius: 0,
                 boxShadow: 'none',
               }}
             >
@@ -4768,7 +4791,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
         </Card>
       )}
 
-      {err && <Alert severity="error" icon={<Warning />} sx={{ borderRadius: 2 }}>{err}</Alert>}
+      {err && <Alert severity="error" icon={<Warning />} sx={{ borderRadius: 0 }}>{err}</Alert>}
     </Stack>
   );
 };
@@ -4903,7 +4926,17 @@ const PreprocessingWorkbench = ({
         </Box>
 
         {/* Tab content */}
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 2.5 }}>
+        <Box
+          sx={{
+            flex: 1,
+            overflowY: 'auto',
+            p: 2.5,
+            pr: 1.75,
+            '&::-webkit-scrollbar': { width: 8, height: 8 },
+            '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
+            '&::-webkit-scrollbar-track': { background: '#f8fafc' },
+          }}
+        >
           {tab === 0 && (
             <PlanTab
               masterDataset={masterDataset}

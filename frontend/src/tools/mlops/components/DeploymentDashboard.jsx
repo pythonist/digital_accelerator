@@ -869,6 +869,7 @@ const DeploymentDashboard = ({
   activePipelineId = null,
   activePipelineName = '',
   savedDashboardState = null,
+  savedDashboardMetadata = null,
   validationReport,
   registryEntry,
   onBack,
@@ -1085,6 +1086,20 @@ const DeploymentDashboard = ({
       setSelectedRunId(String(activeDeployment.job_id));
     }
   }, [selectedRunId, activeDeployment?.job_id]);
+
+  useEffect(() => {
+    if (!(activeDeployment?.deployment_id || propDeploymentId || savedDeploymentId)) return;
+    if (!selectedRunId) return;
+    setActiveDeployment((prev) => {
+      if (!prev) return prev;
+      if (String(prev.job_id || '').trim() === String(selectedRunId || '').trim()) return prev;
+      if (String(prev.job_id || '').trim()) return prev;
+      return {
+        ...prev,
+        job_id: String(selectedRunId || '').trim(),
+      };
+    });
+  }, [activeDeployment?.deployment_id, propDeploymentId, savedDeploymentId, selectedRunId]);
 
   useEffect(() => {
     if (!selectedRunId && savedRunId) {
@@ -1565,6 +1580,28 @@ const DeploymentDashboard = ({
   const totalScored = kpiSummary?.total_scored ?? grainRow?.total ?? null;
   const totalEscalated = kpiSummary?.total_escalated ?? grainRow?.escalated ?? null;
   const productionReady = Number(totalScored || 0) > 0;
+  const savedDashboardSummaryReady = Number(
+    savedDashboardMetadata?.total_scored
+    ?? savedDashboardMetadata?.retained_count
+    ?? savedDashboardMetadata?.total_alerts
+    ?? 0,
+  ) > 0;
+  const savedSummaryScored = savedDashboardMetadata?.total_scored ?? null;
+  const savedSummaryRetained = savedDashboardMetadata?.retained_count ?? savedDashboardMetadata?.total_alerts ?? null;
+  const savedSummarySuppressed = savedDashboardMetadata?.suppressed_count
+    ?? ((savedDashboardMetadata?.total_scored != null && savedDashboardMetadata?.retained_count != null)
+      ? Math.max(Number(savedDashboardMetadata.total_scored) - Number(savedDashboardMetadata.retained_count), 0)
+      : null);
+  const savedSummarySuppressionRate = savedDashboardMetadata?.suppression_rate_pct
+    ?? ((savedDashboardMetadata?.total_scored != null && savedSummarySuppressed != null && Number(savedDashboardMetadata.total_scored) > 0)
+      ? (100 * Number(savedSummarySuppressed)) / Number(savedDashboardMetadata.total_scored)
+      : null);
+  const savedSummaryEventLoss = savedDashboardMetadata?.event_loss_pct
+    ?? validationReport?.event_loss_pct
+    ?? validationReport?.metrics?.event_loss_pct
+    ?? validationReport?.metrics?.threshold_event_loss_pct
+    ?? null;
+  const savedSummaryLastScoredAt = savedDashboardMetadata?.last_scored_at || null;
   const overallSupprRate = kpiSummary?.suppression_rate_pct != null
     ? Number(kpiSummary.suppression_rate_pct)
     : ((totalScored != null && totalScored > 0 && totalSuppressed != null)
@@ -1572,7 +1609,14 @@ const DeploymentDashboard = ({
       : null);
   const latestEventLoss = kpiSummary?.latest_event_loss_pct
     ?? drift?.windows?.[drift?.windows?.length - 1]?.event_loss_pct
+    ?? validationReport?.event_loss_pct
+    ?? validationReport?.metrics?.event_loss_pct
     ?? deriveEventLossFromRunMeta(selectedRunMeta || activeModelRun || {});
+  const rocAucDisplay = metrics?.roc_auc
+    ?? validationReport?.metrics?.roc_auc
+    ?? validationReport?.roc_auc
+    ?? activeModelRun?.roc_auc
+    ?? null;
   const estimatedHoursSaved = (totalSuppressed != null && totalSuppressed > 0) ? (totalSuppressed * 12) / 60 : null; // 12 min analyst review baseline
 
   const driftWindows = drift?.windows || [];
@@ -1619,13 +1663,57 @@ const DeploymentDashboard = ({
   const effectiveLiveSuppressionRate = streamSummary
     ? (num(streamSummary.ingested) > 0 ? (100 * num(streamSummary.suppressed)) / num(streamSummary.ingested) : null)
     : simResult?.scoring?.suppression_rate;
-  const usingLiveHeadlineMetrics = tab === DEPLOYMENT_TAB.LIVE && Number(effectiveLiveGenerated || 0) > 0;
-  const headlineScored = usingLiveHeadlineMetrics ? effectiveLiveGenerated : totalScored;
-  const headlineSuppressed = usingLiveHeadlineMetrics ? effectiveLiveSuppressed : totalSuppressed;
-  const headlineEscalated = usingLiveHeadlineMetrics ? effectiveLiveEscalated : totalEscalated;
-  const headlineSuppressionRate = usingLiveHeadlineMetrics ? effectiveLiveSuppressionRate : overallSupprRate;
-  const headlineEventLoss = usingLiveHeadlineMetrics ? simEventLossValue : latestEventLoss;
+  const activeDeploymentRunIds = Array.from(new Set([
+    activeDeployment?.job_id,
+    propRunId,
+    registryEntry?.job_id,
+    savedRunId,
+    activeModelRun?.job_id,
+  ].map((value) => String(value || '').trim()).filter(Boolean)));
+  const selectedRunAlreadyActive = Boolean(
+    (activeDeployment?.deployment_id || propDeploymentId || registryEntry?.deployment_id || savedDeploymentId)
+    && (
+      (String(selectedRunId || runId || selectedRunMeta?.job_id || '').trim()
+        && activeDeploymentRunIds.includes(String(selectedRunId || runId || selectedRunMeta?.job_id || '').trim()))
+      || (activeDeploymentRunIds.length === 0 && String(selectedRunId || runId || '').trim())
+    ),
+  );
+  const usingSavedDashboardFallback = !productionReady
+    && Number(effectiveLiveGenerated || 0) <= 0
+    && savedDashboardSummaryReady;
+  const usingLiveHeadlineMetrics = Number(effectiveLiveGenerated || 0) > 0
+    && (tab === DEPLOYMENT_TAB.LIVE || !productionReady);
+  const headlineScored = usingLiveHeadlineMetrics
+    ? effectiveLiveGenerated
+    : usingSavedDashboardFallback
+      ? (savedSummaryScored ?? savedSummaryRetained)
+      : totalScored;
+  const headlineSuppressed = usingLiveHeadlineMetrics
+    ? effectiveLiveSuppressed
+    : usingSavedDashboardFallback
+      ? savedSummarySuppressed
+      : totalSuppressed;
+  const headlineEscalated = usingLiveHeadlineMetrics
+    ? effectiveLiveEscalated
+    : usingSavedDashboardFallback
+      ? savedSummaryRetained
+      : totalEscalated;
+  const headlineSuppressionRate = usingLiveHeadlineMetrics
+    ? effectiveLiveSuppressionRate
+    : usingSavedDashboardFallback
+      ? savedSummarySuppressionRate
+      : overallSupprRate;
+  const headlineEventLoss = usingLiveHeadlineMetrics
+    ? simEventLossValue
+    : usingSavedDashboardFallback
+      ? savedSummaryEventLoss
+      : latestEventLoss;
   const headlineReady = Number(headlineScored || 0) > 0;
+  const headlineModeLabel = usingLiveHeadlineMetrics
+    ? 'Current Batch'
+    : usingSavedDashboardFallback
+      ? 'Saved Batch'
+      : 'Production';
   const liveDecisionFlow = useMemo(() => ([
     {
       key: 'generated',
@@ -2077,10 +2165,10 @@ const DeploymentDashboard = ({
                   size="small"
                   variant="contained"
                   onClick={activateSelectedDeployment}
-                  disabled={actionsDisabled || canDisable(!selectedRunId || switchingDeployment)}
+                  disabled={actionsDisabled || canDisable(!selectedRunId || switchingDeployment || selectedRunAlreadyActive)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, minWidth: 190 }}
                 >
-                  {switchingDeployment ? 'Activating...' : 'Activate Deployment'}
+                  {switchingDeployment ? 'Activating...' : (selectedRunAlreadyActive ? 'Deployment Active' : 'Activate Deployment')}
                 </Button>
               </Stack>
             </Stack>
@@ -2090,6 +2178,16 @@ const DeploymentDashboard = ({
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               The deployment threshold is locked from Model Release and remains immutable downstream. To change it, run validation and create a new approved release rather than editing live FCC scoring.
             </Alert>
+            {usingSavedDashboardFallback && (
+              <Alert severity="success" sx={{ borderRadius: 2 }}>
+                Showing the last saved scored batch for this deployed FCC run: retained {fmt(savedSummaryRetained)} {modelGrain === 'case' ? 'cases' : 'alerts'}
+                {savedSummaryScored != null ? ` from ${fmt(savedSummaryScored)} scored rows` : ''}.
+                {savedSummaryLastScoredAt ? ` Last scored at ${new Date(savedSummaryLastScoredAt).toLocaleString()}.` : ''}
+                {savedDashboardMetadata?.high_risk != null || savedDashboardMetadata?.medium_risk != null || savedDashboardMetadata?.low_risk != null
+                  ? ` Risk mix - High ${fmt(savedDashboardMetadata?.high_risk)}, Medium ${fmt(savedDashboardMetadata?.medium_risk)}, Low ${fmt(savedDashboardMetadata?.low_risk)}.`
+                  : ''}
+              </Alert>
+            )}
             {selectedRunFlags.includes('label_leakage_features_present') && (
               <Alert
                 severity="warning"
@@ -2152,29 +2250,36 @@ const DeploymentDashboard = ({
         <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
           <StatCard
             icon={NotificationsOff}
-            label={usingLiveHeadlineMetrics ? 'Current Batch Suppressed' : 'Production Suppressed'}
+            label={`${headlineModeLabel} Suppressed`}
             value={headlineReady ? fmt(headlineSuppressed) : '-'}
-            sub={headlineReady ? `of ${fmt(headlineScored)} scored` : 'No production-scored rows yet'}
+            sub={headlineReady
+              ? `of ${fmt(headlineScored)} scored`
+              : (usingSavedDashboardFallback ? 'Saved batch did not include suppressed volume' : 'No production-scored rows yet')}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
             tooltip={`${grainLabel} entities the model decided not to escalate`}
           />
           <StatCard
             icon={Shield}
-            label={usingLiveHeadlineMetrics ? 'Current Batch Suppression Rate' : 'Production Suppression Rate'}
+            label={`${headlineModeLabel} Suppression Rate`}
             value={headlineReady ? pct(headlineSuppressionRate) : '-'}
-            sub={headlineReady ? `${grainLabel.toLowerCase()}-grain model` : 'Run the live simulation tab for unseen-batch scoring'}
+            sub={headlineReady
+              ? `${grainLabel.toLowerCase()}-grain model`
+              : (usingSavedDashboardFallback ? 'Restored from saved dashboard state' : 'Run the live simulation tab for unseen-batch scoring')}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
           />
           <StatCard
             icon={modelGrain === 'case' ? Gavel : Notifications}
-            label={usingLiveHeadlineMetrics ? `Current ${grainLabel} Retained` : `Production ${grainLabel} Suppression`}
-            value={headlineReady ? (usingLiveHeadlineMetrics ? fmt(headlineEscalated) : pct(kpiSummary?.suppression_rate_pct ?? grainRow?.suppression_rate)) : '-'}
+            label={usingLiveHeadlineMetrics ? `Current ${grainLabel} Retained` : `${headlineModeLabel} ${grainLabel} Retained`}
+            value={headlineReady ? fmt(headlineEscalated) : '-'}
             sub={headlineReady
               ? (usingLiveHeadlineMetrics
                 ? `${fmt(headlineEscalated)} ${modelGrain === 'case' ? 'cases' : 'alerts'} retained for Sentinel at threshold ${dec(simThresholdApplied, 2)}`
-                : `${fmt(kpiSummary?.total_suppressed ?? grainRow?.suppressed)} ${modelGrain === 'case' ? 'cases' : 'alerts'} suppressed`)
+                : (usingSavedDashboardFallback
+                  ? `${fmt(headlineEscalated)} ${modelGrain === 'case' ? 'cases' : 'alerts'} restored from the last saved scored batch`
+                : `${fmt(headlineEscalated)} ${modelGrain === 'case' ? 'cases' : 'alerts'} retained in the active deployment`)
+                )
               : 'Production view only'}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
@@ -2191,18 +2296,21 @@ const DeploymentDashboard = ({
           <StatCard
             icon={Assessment}
             label="ROC-AUC"
-            value={dec(metrics.roc_auc)}
+            value={dec(rocAucDisplay)}
             sub="on held-out test set"
-            tone={metrics.roc_auc >= 0.6 ? 'default' : 'warn'}
+            tone={Number(rocAucDisplay || 0) >= 0.6 ? 'default' : 'warn'}
           />
           <StatCard
             icon={QueryStats}
-            label={usingLiveHeadlineMetrics ? 'Current Batch Event Loss' : 'Latest Production Event Loss'}
+            label={usingLiveHeadlineMetrics ? 'Current Batch Event Loss' : (usingSavedDashboardFallback ? 'Saved Batch Event Loss' : 'Latest Production Event Loss')}
             value={headlineReady ? pct(headlineEventLoss) : '-'}
             sub={headlineReady
               ? (usingLiveHeadlineMetrics
                 ? (simEventLossDefined ? 'estimated missed true SARs on current batch' : 'event loss unavailable for current batch')
+                : (usingSavedDashboardFallback
+                  ? 'restored from the last saved scored batch'
                 : 'missed true SARs (latest week)')
+                )
               : 'Shown when production-scored outcomes exist'}
             tone={
               (!headlineReady || headlineEventLoss == null)
