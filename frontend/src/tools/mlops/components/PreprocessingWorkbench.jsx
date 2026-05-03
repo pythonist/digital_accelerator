@@ -4379,6 +4379,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
         steps,
         output_name: outputName,
       };
+      if (activePipelineId) payload.pipeline_id = activePipelineId;
       if (targetColumn) payload.target_column = targetColumn;
       let result = null;
       if (onRun) {

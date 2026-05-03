@@ -1,0 +1,11 @@
+Flask==3.1.1
+Flask-SQLAlchemy==3.1.1
+Flask-Session==0.8.0
+Flask-Caching==2.3.1
+SQLAlchemy==2.0.40
+psycopg2-binary==2.9.10
+redis==6.0.0
+celery==5.5.2
+gunicorn==23.0.0
+waitress==3.0.2
+python-dotenv==1.1.0

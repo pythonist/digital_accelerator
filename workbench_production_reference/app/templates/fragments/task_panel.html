@@ -1,0 +1,32 @@
+<div class="task-status" id="task-panel">
+  {% if latest_task %}
+    <div class="summary-row">
+      <span class="badge brand">{{ latest_task.task_name }}</span>
+      <span class="badge {% if latest_task.status == 'completed' %}ok{% elif latest_task.status == 'failed' %}warn{% else %}brand{% endif %}">
+        {{ latest_task.status }}
+      </span>
+      <span class="badge mono">{{ latest_task.task_id }}</span>
+    </div>
+    <div class="progress">
+      <div class="progress-bar" style="width: {{ latest_task.progress }}%;"></div>
+    </div>
+    <div class="note">{{ latest_task.message }}</div>
+    <div class="note" style="margin-top: 8px;">Task status endpoint: <span class="mono">/task-status/{{ latest_task.task_id }}</span></div>
+    {% if latest_task.status != "completed" and latest_task.status != "failed" %}
+      <div
+        hx-get="{{ url_for('pages.task_fragment', task_id=latest_task.task_id) }}"
+        hx-trigger="every 2s"
+        hx-target="#task-panel"
+        hx-swap="outerHTML"></div>
+    {% elif latest_task.result_payload %}
+      <div class="summary-row" style="margin-top: 12px;">
+        <span class="badge ok">Dataset: {{ latest_task.result_payload.output_dataset }}</span>
+        <span class="badge ok">Rows: {{ latest_task.result_payload.rows_written }}</span>
+        <span class="badge ok">Selected: {{ latest_task.result_payload.selected_features }}</span>
+      </div>
+    {% endif %}
+  {% else %}
+    <h2>Task Status</h2>
+    <div class="note">No background task is running yet. Start one from the Pipeline Run tab.</div>
+  {% endif %}
+</div>

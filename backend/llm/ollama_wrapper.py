@@ -48,9 +48,9 @@ class OllamaWrapper:
         self.default_model = default_model
         self.conversation_history: List[Dict] = []
 
-        print(f"🧠 OllamaWrapper initialized")
-        print(f"   → Base URL : {self.base_url}")
-        print(f"   → Model    : {self.default_model}")
+        print("OllamaWrapper initialized")
+        print(f"   Base URL : {self.base_url}")
+        print(f"   Model    : {self.default_model}")
 
     # -------------------------
     # Health & Diagnostics
@@ -78,7 +78,7 @@ class OllamaWrapper:
                 return [m["name"] for m in r.json().get("models", [])]
             return []
         except Exception as e:
-            print(f"❌ list_models error: {e}")
+            print(f"list_models error: {e}")
             return []
 
     # -------------------------
@@ -279,7 +279,7 @@ class OllamaWrapper:
             return None
 
         except Exception as e:
-            print(f"❌ Embedding error: {e}")
+            print(f"Embedding error: {e}")
             return None
 
     # -------------------------

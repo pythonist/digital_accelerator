@@ -284,6 +284,23 @@ const mlopsApi = {
   pipelineSaveScreenState: async (pipelineId, payload) => {
     return apiClient.post(`/api/mlops/pipeline/${pipelineId}/screen-state`, payload);
   },
+
+  /** Persistent Vertex-style RUN_STATE APIs. */
+  createRunState: async (payload = {}) => {
+    return apiClient.post('/api/mlops/run', payload);
+  },
+  getRunState: async (runId) => {
+    return apiClient.get(`/api/mlops/run/${encodeURIComponent(String(runId))}`);
+  },
+  getCurrentRunState: async (params = {}) => {
+    return apiClient.get('/api/mlops/run/current', params);
+  },
+  executeStatefulStep: async (stepName, payload = {}) => {
+    return apiClient.post(`/api/mlops/step/${encodeURIComponent(String(stepName))}/execute`, payload);
+  },
+  getStepData: async (stepName, params = {}) => {
+    return apiClient.get(`/api/mlops/step/${encodeURIComponent(String(stepName))}/data`, params);
+  },
   muleBuildAnalyticalDataset: async (pipelineId, payload = {}) => {
     return apiClient.post(`/api/mlops/pipeline/${pipelineId}/mule/analytical-dataset`, payload);
   },

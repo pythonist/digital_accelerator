@@ -86,6 +86,7 @@ import {
   YAxis,
 } from 'recharts';
 import mlopsApi from '../services/mlopsApi';
+import ModelRegistryPanel from './ModelRegistryPanel';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
 import { useAppContext } from '../../../context/AppContext';
 import { persistFccSentinelHandoff } from '../../../utils/fccSentinelHandoff';
@@ -118,6 +119,7 @@ const DEPLOYMENT_TAB = {
   DRIFT: 2,
   LEDGER: 3,
   LINEAGE: 4,
+  REGISTRY: 5,
 };
 
 // â”€â”€ Tiny helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -150,6 +152,76 @@ const runDisplayLabel = (run = {}) => {
   if (algo) return algo;
   if (shortId) return shortId;
   return 'Model run';
+};
+
+const GENERIC_DEPLOYMENT_THRESHOLD = 0.5;
+const firstFiniteThreshold = (candidates = []) => {
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (candidate != null && Number.isFinite(value) && value >= 0 && value <= 1) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const isGenericDeploymentThreshold = (value) => (
+  Number.isFinite(Number(value))
+  && Math.abs(Number(value) - GENERIC_DEPLOYMENT_THRESHOLD) < 0.0001
+);
+
+const resolveRunThreshold = (run = {}, fallback = null) => {
+  const validation = run?.validation && typeof run.validation === 'object' ? run.validation : {};
+  const validationReport = validation?.report && typeof validation.report === 'object' ? validation.report : {};
+  const metrics = run?.metrics && typeof run.metrics === 'object' ? run.metrics : {};
+  const selectedThresholdRow = metrics?.selected_threshold_row && typeof metrics.selected_threshold_row === 'object'
+    ? metrics.selected_threshold_row
+    : {};
+
+  const approvedThreshold = firstFiniteThreshold([
+    validation?.locked_threshold,
+    validation?.selected_threshold,
+    validationReport?.locked_threshold,
+    validationReport?.selected_threshold,
+    validationReport?.recommended_threshold,
+    validationReport?.optimal_threshold,
+    run?.optimal_threshold,
+    run?.recommended_threshold,
+    run?.results?.threshold_analysis?.recommended_threshold,
+    run?.results?.validation?.locked_threshold,
+    run?.results?.validation?.selected_threshold,
+    run?.results?.validation?.report?.optimal_threshold,
+  ]);
+
+  const storedThreshold = firstFiniteThreshold([
+    run?.selected_threshold,
+    run?.locked_threshold,
+    run?.threshold,
+    run?.results?.selected_threshold,
+    run?.results?.optimal_threshold,
+    run?.metrics?.optimal_threshold,
+    selectedThresholdRow?.threshold,
+  ]);
+
+  const hmlLowThreshold = firstFiniteThreshold([
+    run?.hml_low_threshold,
+    run?.results?.hml_low_threshold,
+    validationReport?.hml_low_threshold,
+  ]);
+
+  if (approvedThreshold != null && (!isGenericDeploymentThreshold(approvedThreshold) || hmlLowThreshold == null)) {
+    return approvedThreshold;
+  }
+  if (hmlLowThreshold != null && (storedThreshold == null || isGenericDeploymentThreshold(storedThreshold))) {
+    return hmlLowThreshold;
+  }
+  if (storedThreshold != null) {
+    return storedThreshold;
+  }
+  if (hmlLowThreshold != null) {
+    return hmlLowThreshold;
+  }
+  return fallback;
 };
 
 const num = (value, fallback = 0) => {
@@ -889,7 +961,9 @@ const DeploymentDashboard = ({
   const propThreshold = Number(
     registryEntry?.selected_threshold
     || registryEntry?.threshold
+    || activeModelRun?.selected_threshold
     || validationReport?.optimal_threshold
+    || activeModelRun?.optimal_threshold
     || activeModelRun?.threshold
     || 0.5,
   );
@@ -1133,6 +1207,21 @@ const DeploymentDashboard = ({
     if (activeDeployment?.threshold == null) return;
     setSelectedThreshold(Number(activeDeployment.threshold));
   }, [activeDeployment?.threshold]);
+
+  useEffect(() => {
+    if (!selectedRunId) return;
+    const selectedRun = runOptions.find((run) => String(run?.job_id || '') === String(selectedRunId || ''))
+      || (String(activeModelRun?.job_id || '') === String(selectedRunId || '') ? activeModelRun : null);
+    if (!selectedRun) return;
+    const nextThreshold = resolveRunThreshold(selectedRun, propThreshold);
+    if (!Number.isFinite(Number(nextThreshold))) return;
+    setSelectedThreshold((prev) => {
+      const prevValue = Number(prev);
+      return Number.isFinite(prevValue) && Math.abs(prevValue - Number(nextThreshold)) < 0.0001
+        ? prev
+        : Number(nextThreshold);
+    });
+  }, [selectedRunId, runOptions, activeModelRun, propThreshold]);
 
   useEffect(() => {
     const savedSimulation = savedDashboardState?.simulation_result;
@@ -1670,13 +1759,24 @@ const DeploymentDashboard = ({
     savedRunId,
     activeModelRun?.job_id,
   ].map((value) => String(value || '').trim()).filter(Boolean)));
+  const selectedRunKey = String(selectedRunId || runId || selectedRunMeta?.job_id || '').trim();
+  const activeDeploymentThreshold = Number(activeDeployment?.threshold ?? propThreshold ?? null);
+  const selectedThresholdValue = Number(selectedThreshold ?? threshold ?? null);
+  const selectedRunMatchesActiveRun = Boolean(
+    selectedRunKey && (
+      activeDeploymentRunIds.includes(selectedRunKey)
+      || (activeDeploymentRunIds.length === 0 && selectedRunKey)
+    ),
+  );
+  const selectedRunMatchesActiveThreshold = Number.isFinite(activeDeploymentThreshold)
+    && Number.isFinite(selectedThresholdValue)
+    ? Math.abs(activeDeploymentThreshold - selectedThresholdValue) < 0.0001
+    : false;
+  const selectedRunNeedsThresholdRefresh = selectedRunMatchesActiveRun && !selectedRunMatchesActiveThreshold;
   const selectedRunAlreadyActive = Boolean(
     (activeDeployment?.deployment_id || propDeploymentId || registryEntry?.deployment_id || savedDeploymentId)
-    && (
-      (String(selectedRunId || runId || selectedRunMeta?.job_id || '').trim()
-        && activeDeploymentRunIds.includes(String(selectedRunId || runId || selectedRunMeta?.job_id || '').trim()))
-      || (activeDeploymentRunIds.length === 0 && String(selectedRunId || runId || '').trim())
-    ),
+    && selectedRunMatchesActiveRun
+    && !selectedRunNeedsThresholdRefresh,
   );
   const usingSavedDashboardFallback = !productionReady
     && Number(effectiveLiveGenerated || 0) <= 0
@@ -1793,6 +1893,11 @@ const DeploymentDashboard = ({
       key: DEPLOYMENT_TAB.LINEAGE,
       title: 'Model Lineage',
       subtitle: 'Trace which training run, validation threshold, preprocessing logic, and deployment record produced the live outcome.',
+    },
+    {
+      key: DEPLOYMENT_TAB.REGISTRY,
+      title: 'Model Registry',
+      subtitle: 'Static frontend preview of historical model comparison, training results, and registry-style detail panels.',
     },
   ]), []);
   const activeTabMeta = deploymentTabMeta.find((item) => item.key === tab) || deploymentTabMeta[0];
@@ -2168,7 +2273,11 @@ const DeploymentDashboard = ({
                   disabled={actionsDisabled || canDisable(!selectedRunId || switchingDeployment || selectedRunAlreadyActive)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, minWidth: 190 }}
                 >
-                  {switchingDeployment ? 'Activating...' : (selectedRunAlreadyActive ? 'Deployment Active' : 'Activate Deployment')}
+                  {switchingDeployment
+                    ? 'Activating...'
+                    : selectedRunNeedsThresholdRefresh
+                      ? 'Refresh Deployment Threshold'
+                      : (selectedRunAlreadyActive ? 'Deployment Active' : 'Activate Deployment')}
                 </Button>
               </Stack>
             </Stack>
@@ -2198,12 +2307,7 @@ const DeploymentDashboard = ({
                     size="small"
                     onClick={() => {
                       setSelectedRunId(String(recommendedDemoRun.job_id || ''));
-                      setSelectedThreshold(Number(
-                        recommendedDemoRun.selected_threshold
-                        ?? recommendedDemoRun.optimal_threshold
-                        ?? threshold
-                        ?? 0.5,
-                      ));
+                      setSelectedThreshold(resolveRunThreshold(recommendedDemoRun, threshold ?? 0.5));
                     }}
                   >
                     Use Demo-Safe Suggestion
@@ -2337,6 +2441,7 @@ const DeploymentDashboard = ({
           <Tab label="Drift & Trends" icon={<Timeline sx={{ fontSize: 15 }} />} iconPosition="start" />
           <Tab label="Suppression Ledger" icon={<Assessment sx={{ fontSize: 15 }} />} iconPosition="start" />
           <Tab label="Model Lineage" icon={<AccountTree sx={{ fontSize: 15 }} />} iconPosition="start" />
+          <Tab label="Model Registry" icon={<TableChart sx={{ fontSize: 15 }} />} iconPosition="start" />
         </Tabs>
       </Box>
 
@@ -3496,6 +3601,14 @@ const DeploymentDashboard = ({
                 </Stack>
               </Paper>
             )}
+          </Stack>
+        )}
+
+        {tab === DEPLOYMENT_TAB.REGISTRY && (
+          <Stack spacing={2}>
+            <Box sx={{ mx: -3 }}>
+              <ModelRegistryPanel />
+            </Box>
           </Stack>
         )}
 

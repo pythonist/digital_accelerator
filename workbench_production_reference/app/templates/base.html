@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "Production Workbench Reference" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script defer src="{{ url_for('static', filename='js/app.js') }}"></script>
+  </head>
+  <body>
+    <div class="shell" x-data="shellState">
+      <div class="topbar">
+        <div>
+          <a href="{{ url_for('pages.workbench_page', workbench_key='fcc') }}">FCC Workbench</a>
+          <a href="{{ url_for('pages.workbench_page', workbench_key='mule') }}">Mule Workbench</a>
+        </div>
+        <div class="badge">Flask + HTMX + Alpine + Celery</div>
+      </div>
+      <div class="page">
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </body>
+</html>

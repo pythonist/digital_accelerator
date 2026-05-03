@@ -38,7 +38,7 @@ const normalizeRouteStepId = (value) => {
   return RUN_ROUTE_STEP_IDS.has(raw) ? raw : '';
 };
 
-const WorkbenchRouteShell = ({ datasets, masterDataset }) => {
+const WorkbenchRouteShell = ({ datasets, masterDataset, routeGlobalView = '' }) => {
   const { runId, stepId } = useParams();
   const routeRunId = useMemo(() => normalizeRouteRunId(runId), [runId]);
   const routeStepId = useMemo(() => normalizeRouteStepId(stepId), [stepId]);
@@ -47,6 +47,7 @@ const WorkbenchRouteShell = ({ datasets, masterDataset }) => {
     <MLOpsWorkbench
       routeRunId={routeRunId}
       routeStepId={routeStepId}
+      routeGlobalView={routeGlobalView}
       renderAutoBuild={(workbenchContext = {}) => (
         <AutoPipelineScreen
           datasets={datasets}
@@ -120,6 +121,7 @@ const MLOpsPlatform = () => {
         <Route path="runs" element={<WorkbenchRouteShell datasets={datasets} masterDataset={masterDataset} />} />
         <Route path="runs/:runId" element={<RunIndexRedirect />} />
         <Route path="runs/:runId/:stepId" element={<WorkbenchRouteShell datasets={datasets} masterDataset={masterDataset} />} />
+        <Route path="registry" element={<WorkbenchRouteShell datasets={datasets} masterDataset={masterDataset} routeGlobalView="registry" />} />
         <Route path="*" element={<Navigate to="runs" replace />} />
       </Routes>
     </Box>

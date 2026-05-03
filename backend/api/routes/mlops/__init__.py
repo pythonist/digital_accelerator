@@ -6,12 +6,14 @@ from .target_routes import target_bp
 from .workbench_routes import mlops_workbench_bp
 from .eda_routes import eda_bp
 from .report_routes import report_bp
+from .run_state_routes import run_state_bp
 
 mlops_bp = Blueprint("mlops", __name__)
 mlops_bp.register_blueprint(mlops_workbench_bp)
 mlops_bp.register_blueprint(target_bp)
 mlops_bp.register_blueprint(eda_bp)
 mlops_bp.register_blueprint(report_bp)
+mlops_bp.register_blueprint(run_state_bp)
 
 try:
     from .model_training_routes import model_training_bp

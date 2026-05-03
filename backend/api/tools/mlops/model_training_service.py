@@ -1696,6 +1696,60 @@ def _threshold_metrics(y_true: np.ndarray, y_prob: np.ndarray, low_threshold: fl
     }
 
 
+def _operating_metrics_payload(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    threshold: float,
+) -> Dict[str, Any]:
+    from sklearn.metrics import average_precision_score, confusion_matrix as sklearn_cm, f1_score, roc_auc_score
+
+    threshold_value = float(threshold)
+    pred = (y_prob >= threshold_value).astype(int)
+    tn, fp, fn, tp = sklearn_cm(y_true, pred, labels=[0, 1]).ravel()
+    total = max(int(len(y_true)), 1)
+    positive_total = int(np.sum(y_true == 1))
+    negative_total = int(np.sum(y_true == 0))
+    precision = float(tp / max(tp + fp, 1))
+    recall = float(tp / max(tp + fn, 1))
+    accuracy = float((tp + tn) / total)
+    specificity = float(tn / max(tn + fp, 1))
+    balanced_accuracy = float((recall + specificity) / 2)
+    suppression_rate_pct = float((tn + fn) / total * 100.0)
+    event_loss_pct = float(fn / max(positive_total, 1) * 100.0)
+
+    try:
+        roc_auc = float(roc_auc_score(y_true, y_prob))
+    except Exception:
+        roc_auc = None
+
+    try:
+        pr_auc = float(average_precision_score(y_true, y_prob))
+    except Exception:
+        pr_auc = None
+
+    return {
+        "threshold": threshold_value,
+        "total_rows": total,
+        "actual_true_events": positive_total,
+        "actual_non_events": negative_total,
+        "true_positives": int(tp),
+        "true_negatives": int(tn),
+        "false_positives": int(fp),
+        "false_negatives": int(fn),
+        "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
+        "roc_auc": roc_auc,
+        "pr_auc": pr_auc,
+        "f1": float(f1_score(y_true, pred, zero_division=0)),
+        "precision": precision,
+        "recall": recall,
+        "accuracy": accuracy,
+        "specificity": specificity,
+        "balanced_accuracy": balanced_accuracy,
+        "suppression_rate_pct": suppression_rate_pct,
+        "event_loss_pct": event_loss_pct,
+    }
+
+
 def _optimize_hml_thresholds(
     y_true: np.ndarray,
     y_prob: np.ndarray,
@@ -5030,6 +5084,17 @@ class ModelTrainingService:
                 max_event_loss_pct=AML_EVENT_LOSS_MAX_PCT_DEFAULT,
             )
             selected_threshold_row = _closest_threshold_row(threshold_table, BUSINESS_DEFAULT_THRESHOLD)
+            train_prob_arr = _predict_binary_probability(calibrated_model, X_train)
+            train_operating_metrics = _operating_metrics_payload(
+                y_train.values.astype(int),
+                train_prob_arr,
+                BUSINESS_DEFAULT_THRESHOLD,
+            )
+            test_operating_metrics = _operating_metrics_payload(
+                y_true_arr,
+                y_prob_arr,
+                BUSINESS_DEFAULT_THRESHOLD,
+            )
             suppressed_cases_preview, decision_reason_summary = _build_suppressed_cases_preview(
                 X_test.reset_index(drop=True),
                 y_test.reset_index(drop=True),
@@ -5139,6 +5204,8 @@ class ModelTrainingService:
                 "stratify":            bool(stratify),
                 "random_state":        int(random_state),
                 "selected_threshold":  BUSINESS_DEFAULT_THRESHOLD,
+                "train_operating_metrics": train_operating_metrics,
+                "test_operating_metrics": test_operating_metrics,
                 "configured_threshold": BUSINESS_DEFAULT_THRESHOLD,
                 "deployable_threshold": deploy_threshold_policy.get("deployable_threshold"),
                 "threshold_band_min":  DEPLOYABLE_THRESHOLD_MIN,
@@ -6829,6 +6896,18 @@ class ModelTrainingService:
         hml_result = _hml_summary(y_true_arr, y_prob_arr, float(hml_high_threshold), float(hml_low_threshold))
         selected_threshold = float(max(0.0, min(float(selected_threshold), 1.0)))
         selected_row = min(threshold_table, key=lambda r: abs(float(r.get("threshold") or 0.5) - selected_threshold)) if threshold_table else {}
+        X_train_eval = X_train.reindex(columns=model_features, fill_value=0.0).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(float)
+        y_train_prob_arr = _predict_binary_probability(model, X_train_eval)
+        train_operating_metrics = _operating_metrics_payload(
+            y_train.values.astype(int),
+            y_train_prob_arr,
+            selected_threshold,
+        )
+        test_operating_metrics = _operating_metrics_payload(
+            y_true_arr,
+            y_prob_arr,
+            selected_threshold,
+        )
         feature_importance = _extract_feature_importance(model, model_features)
         if mlflow_active:
             with _MLflowStepRun(mlflow_active, "evaluation"):
@@ -6925,6 +7004,8 @@ class ModelTrainingService:
             "stratify": bool(stratify),
             "random_state": int(random_state),
             "selected_threshold": selected_threshold,
+            "train_operating_metrics": train_operating_metrics,
+            "test_operating_metrics": test_operating_metrics,
             "trained_at": datetime.utcnow().isoformat(),
             "artifact_path": str(artifact_path),
             "source": "uploaded",

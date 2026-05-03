@@ -131,6 +131,7 @@ const ThresholdTuningTab = ({
   runs,
   activeModel = null,
   savedValidationReport = null,
+  activePipelineId = null,
   onValidationComplete,
   onJobChange,
   actionsDisabled = false,
@@ -433,6 +434,7 @@ const ThresholdTuningTab = ({
         max_event_loss_pct: Number(maxEventLoss) || 5,
         optimization_mode: optimizationMode,
         target_suppression_pct: optimizationMode === 'target_suppression' ? Number(targetSuppression) : undefined,
+        ...(Number(activePipelineId || 0) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
       });
       const data = unwrap(res);
       const table = data?.threshold_table || [];

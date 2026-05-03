@@ -25,7 +25,7 @@ import {
 import {
   AccountTree, Add, Analytics, Article, Build, CheckCircle, ChevronLeft, ChevronRight,
   CloudUpload, Close, Dashboard, DeleteForever, Engineering, Flag, Lock,
-  MenuOpen, ModelTraining, Person, PlayArrow, Refresh, Restore, SaveAlt, Settings, Storage,
+  MenuOpen, ModelTraining, Person, PlayArrow, Refresh, Restore, SaveAlt, Settings, Storage, TableChart,
   Tune, ViewSidebar,
 } from '@mui/icons-material';
 
@@ -39,6 +39,7 @@ import PreprocessingWorkbench from '../components/PreprocessingWorkbench';
 import ModelTrainingPanel     from '../components/ModelTrainingPanel';
 import ModelValidationScreen  from '../components/ModelValidationScreen';
 import DeploymentDashboard    from '../components/DeploymentDashboard';
+import GlobalModelRegistryScreen from '../components/GlobalModelRegistryScreen';
 import ModelReleaseScreen     from '../components/ModelReleaseScreen';
 import RunReport              from '../components/RunReport';
 import WorkbenchPipelinesScreen from '../components/WorkbenchPipelinesScreen';
@@ -324,6 +325,11 @@ const normalizeWorkbenchStep = (value) => {
   return raw;
 };
 
+const normalizeGlobalWorkbenchView = (value) => {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw === 'registry' ? 'registry' : '';
+};
+
 const isWorkbenchStep = (value) => [...STEPS, ...MULE_STEPS].some((step) => step.id === value);
 
 const normalizeWorkbenchRunId = (value) => {
@@ -450,6 +456,14 @@ const extractPipelineTrainingJobId = (pipeline = null) => {
     });
   return String(sortedLinks[0]?.asset_id || '').trim();
 };
+
+const extractPersistentRunId = (pipeline = null) => String(
+  pipeline?.run_state_id
+  || pipeline?.persistent_run_id
+  || pipeline?.run_state?.run_id
+  || pipeline?.runState?.run_id
+  || '',
+).trim();
 
 // ── Step Lock Logic ───────────────────────────────────────────────────────────
 function stepStatus(id, ctx) {
@@ -738,7 +752,7 @@ const ContextPanel = ({
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN WORKBENCH
 // ══════════════════════════════════════════════════════════════════════════════
-const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }) => {
+const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', routeGlobalView = '' }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const theme = useTheme();
@@ -748,6 +762,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const currentEnvId = useMemo(() => resolvePipelineEnvKey(activeEnv), [activeEnv]);
   const normalizedRouteRunId = useMemo(() => normalizeWorkbenchRunId(routeRunId), [routeRunId]);
   const normalizedRouteStep = useMemo(() => normalizeWorkbenchStep(routeStepId), [routeStepId]);
+  const normalizedRouteGlobalView = useMemo(() => normalizeGlobalWorkbenchView(routeGlobalView), [routeGlobalView]);
+  const isGlobalRegistryView = normalizedRouteGlobalView === 'registry';
   const routeRegistryHandoff = useMemo(() => {
     const handoff = location?.state?.registryHandoff;
     return handoff && typeof handoff === 'object' ? handoff : null;
@@ -780,7 +796,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const routeHydrationRef = useRef('');
   const manualStepSelectionRef = useRef({ pipelineId: null, step: '', ts: 0 });
   const workflowSessionFetchKeyRef = useRef('');
-  const activePipelineRef = useRef({ pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '' });
+  const activePipelineRef = useRef({ pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '', run_id: null });
   const resumeInProgressRef = useRef(false);
   const muleWorkspaceStepRestoreRef = useRef('');
   const invalidationResetSignatureRef = useRef('');
@@ -824,6 +840,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const [activePipelineId,   setActivePipelineId]   = useState(normalizedRouteRunId || savedPipelineSession.pipeline_id || null);
   const [activePipelineName, setActivePipelineName] = useState(savedPipelineSession.name || '');
   const [activePipelineMeta, setActivePipelineMeta] = useState(null);
+  const [persistentRunId, setPersistentRunId] = useState(savedPipelineSession.run_id || savedPipelineSession.run_state_id || null);
   const [savedLocalPipelineRun, setSavedLocalPipelineRun] = useState(null);
   const [summaryOverlayStep, setSummaryOverlayStep] = useState('');
   const [stepDirtyMap, setStepDirtyMap] = useState({});
@@ -835,6 +852,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   const [newPipelineError, setNewPipelineError] = useState('');
   const [floatingNotice, setFloatingNotice] = useState({ open: false, message: '', severity: 'warning' });
   const floatingNoticeSignatureRef = useRef('');
+
+  useEffect(() => {
+    if (!isGlobalRegistryView) return;
+    setActiveStep((prev) => (prev === 'pipelines' ? prev : 'pipelines'));
+    setSummaryOverlayStep('');
+  }, [isGlobalRegistryView]);
 
   const activeSavedPipeline = useMemo(() => {
     const pipelineId = Number(activePipelineId || 0);
@@ -1321,6 +1344,19 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         }
         screenSaveSignatureRef.current[refKey] = signature;
         const payload = res?.data || res;
+        const nextRunId = extractPersistentRunId(payload);
+        if (nextRunId) setPersistentRunId(nextRunId);
+        if (payload?.run_state && typeof payload.run_state === 'object') {
+          setActivePipelineMeta((prev) => {
+            if (!prev || Number(prev?.pipeline_id || 0) !== numericPipelineId) return prev;
+            return {
+              ...prev,
+              run_state: payload.run_state,
+              run_state_id: payload.run_state_id || payload.run_state.run_id || prev.run_state_id,
+              persistent_run_id: payload.run_state_id || payload.run_state.run_id || prev.persistent_run_id,
+            };
+          });
+        }
         return payload;
       })
       .catch((error) => {
@@ -1419,8 +1455,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       name: activePipelineName,
       workflow_session_id: workflowSessionId || null,
       pipeline_type: activePipelineType,
+      run_id: persistentRunId || null,
+      run_state_id: persistentRunId || null,
     });
-  }, [activePipelineId, activePipelineName, activePipelineType, currentEnvId]);
+  }, [activePipelineId, activePipelineName, activePipelineType, currentEnvId, persistentRunId]);
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onResize = () => setViewportWidth(window.innerWidth);
@@ -1547,7 +1585,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             name: String(active.name || '').trim(),
             workflow_session_id: String(active.workflow_session_id || activePipelineRef.current?.workflow_session_id || '').trim() || null,
             pipeline_type: normalizePipelineFamily(active?.pipeline_type || active?.model_family || activePipelineRef.current?.pipeline_type || ''),
+            run_id: extractPersistentRunId(active) || String(activePipelineRef.current?.run_id || '').trim() || null,
           };
+          if (activePipelineRef.current.run_id) setPersistentRunId(activePipelineRef.current.run_id);
           setPipelineSelectionNotice('');
           return rows;
         }
@@ -1571,7 +1611,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
               name: String(direct.name || '').trim(),
               workflow_session_id: String(direct.workflow_session_id || activePipelineRef.current?.workflow_session_id || '').trim() || null,
               pipeline_type: normalizePipelineFamily(direct?.pipeline_type || direct?.model_family || activePipelineRef.current?.pipeline_type || ''),
+              run_id: extractPersistentRunId(direct) || String(activePipelineRef.current?.run_id || '').trim() || null,
             };
+            if (activePipelineRef.current.run_id) setPersistentRunId(activePipelineRef.current.run_id);
             setPipelineSelectionNotice('Recovered the active run directly from backend persistence.');
             return [direct, ...rows.filter((row) => Number(row?.pipeline_id) !== Number(direct.pipeline_id))];
           }
@@ -1632,7 +1674,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                   || session?.pipeline_type
                   || '',
                 ),
+                run_id: extractPersistentRunId(recovered) || String(activePipelineRef.current?.run_id || '').trim() || null,
               };
+              if (activePipelineRef.current.run_id) setPersistentRunId(activePipelineRef.current.run_id);
               writePipelineSession(currentEnvId, {
                 pipeline_id: Number(recovered.pipeline_id || 0) || null,
                 name: String(sessionPipelineName || recovered.name || '').trim(),
@@ -1644,6 +1688,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                   || 'fcc',
                   'fcc',
                 ),
+                run_id: activePipelineRef.current.run_id || null,
+                run_state_id: activePipelineRef.current.run_id || null,
               });
               setPipelineSelectionNotice('Recovered the active run from its saved workflow session.');
               return [recovered, ...rows.filter((row) => Number(row?.pipeline_id) !== Number(recovered.pipeline_id))];
@@ -1669,7 +1715,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
           name: String(draftWorkflowRun.name || '').trim(),
           workflow_session_id: String(draftWorkflowRun.workflow_session_id || activePipelineRef.current?.workflow_session_id || '').trim() || null,
           pipeline_type: normalizePipelineFamily(draftWorkflowRun?.pipeline_type || draftWorkflowRun?.model_family || activePipelineRef.current?.pipeline_type || ''),
+          run_id: extractPersistentRunId(draftWorkflowRun) || String(activePipelineRef.current?.run_id || '').trim() || null,
         };
+        if (activePipelineRef.current.run_id) setPersistentRunId(activePipelineRef.current.run_id);
         setPipelineSelectionNotice('');
         return rows;
       }
@@ -1681,7 +1729,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         setActivePipelineId(null);
         setActivePipelineName('');
         setActivePipelineMeta(null);
-        activePipelineRef.current = { pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '' };
+        activePipelineRef.current = { pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '', run_id: null };
+        setPersistentRunId(null);
         workflowSessionRef.current = null;
         autoResumeKeyRef.current = '';
         clearPipelineSession(currentEnvId);
@@ -1701,7 +1750,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       setActivePipelineId(null);
       setActivePipelineName('');
       setActivePipelineMeta(null);
-      activePipelineRef.current = { pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '' };
+      activePipelineRef.current = { pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '', run_id: null };
+      setPersistentRunId(null);
       workflowSessionRef.current = null;
       autoResumeKeyRef.current = '';
       clearPipelineSession(currentEnvId);
@@ -1752,8 +1802,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         || activePipelineRef.current?.pipeline_type
         || '',
       ),
+      run_id: extractPersistentRunId(activePipelineMeta) || persistentRunId || activePipelineRef.current?.run_id || null,
     };
-  }, [activePipelineId, activePipelineMeta, activePipelineName]);
+  }, [activePipelineId, activePipelineMeta, activePipelineName, persistentRunId]);
 
   const STEPS = useMemo(() => getWorkbenchSteps(activePipelineType), [activePipelineType]);
 
@@ -1979,15 +2030,21 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       || 'fcc',
       'fcc',
     );
+    const nextRunId = extractPersistentRunId(pipeline)
+      || (Number(activePipelineRef.current?.pipeline_id || 0) === Number(pid || 0)
+        ? String(activePipelineRef.current?.run_id || '').trim()
+        : '');
     activePipelineRef.current = {
       pipeline_id: pid,
       name: pname,
       workflow_session_id: workflowSessionId || null,
       pipeline_type: pipelineType,
+      run_id: nextRunId || null,
     };
     setActivePipelineId(pid);
     setActivePipelineName(pname);
     setActivePipelineMeta(pipeline || null);
+    setPersistentRunId(nextRunId || null);
     setPipelineSelectionNotice('');
     if (hasExplicitWorkflowSessionId && !workflowSessionId) {
       workflowSessionRef.current = null;
@@ -1997,6 +2054,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       name: pname,
       workflow_session_id: workflowSessionId || null,
       pipeline_type: pipelineType,
+      run_id: nextRunId || null,
+      run_state_id: nextRunId || null,
     });
     if (pname) setExperimentName(pname);
     if (!options?.suppressRouteNavigation) {
@@ -2033,10 +2092,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
       name: '',
       workflow_session_id: null,
       pipeline_type: preservedPipelineType || '',
+      run_id: null,
     };
     setActivePipelineId(null);
     setActivePipelineName('');
     setActivePipelineMeta(null);
+    setPersistentRunId(null);
     setPipelineSelectionNotice('');
     workflowSessionRef.current = null;
     workflowSessionFetchKeyRef.current = '';
@@ -2049,6 +2110,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         name: '',
         workflow_session_id: null,
         pipeline_type: preservedPipelineType,
+        run_id: null,
+        run_state_id: null,
       });
     } else {
       clearPipelineSession(currentEnvId);
@@ -2110,6 +2173,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     setActivePipelineMeta(null);
     setActivePipelineId(scopedSession.pipeline_id || null);
     setActivePipelineName(scopedName);
+    setPersistentRunId(scopedSession.run_id || scopedSession.run_state_id || null);
     setPipelineSelectionNotice('');
     setExperimentName(scopedName || DEFAULT_EXPERIMENT_NAME);
     workflowSessionRef.current = null;
@@ -2183,6 +2247,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             pipeline_id: sessionPipelineId,
             name: sessionPipelineName,
             workflow_session_id: session?.session_id || null,
+            run_id: persistentRunId || null,
+            run_state_id: persistentRunId || null,
           });
         } else if (!activePipelineId && sessionPipelineId && !sessionPipelineExists) {
           const staleLabel = String(sessionPipelineName || toRunRef(sessionPipelineId) || 'previous run').trim();
@@ -2199,6 +2265,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             pipeline_id: null,
             name: sessionPipelineName,
             workflow_session_id: session?.session_id || null,
+            run_id: persistentRunId || null,
+            run_state_id: persistentRunId || null,
           });
         } else if (validActivePipelineId && sessionPipelineName && !String(activePipelineName || '').trim()) {
           setActivePipelineName(sessionPipelineName);
@@ -2236,6 +2304,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     savedPipelinesLoaded,
     scopedWorkflowSessionId,
     validActivePipelineId,
+    persistentRunId,
   ]);
 
   // ── STARTUP ────────────────────────────────────────────────────────────────
@@ -3547,6 +3616,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
               pipeline_id: resolvedPipelineId,
               name: workflowStateSnapshot.pipeline_name || activePipelineName || experimentName,
               workflow_session_id: session.session_id,
+              run_id: persistentRunId || null,
+              run_state_id: persistentRunId || null,
             });
           }
         })
@@ -3572,6 +3643,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     validActivePipelineId,
     writePipelineSession,
     workbenchJourneyState.run_status,
+    persistentRunId,
   ]);
 
   const guardMessage = useMemo(() => {
@@ -3835,7 +3907,13 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         }
         return payload;
       }
-      const res   = await mlopsApi.preprocessRun({ dataset_id: preprocessingInput.dataset_id, steps: stepsToUse, target_column: targetColumn, output_name: outputName });
+      const res   = await mlopsApi.preprocessRun({
+        dataset_id: preprocessingInput.dataset_id,
+        steps: stepsToUse,
+        target_column: targetColumn,
+        output_name: outputName,
+        ...(Number(validActivePipelineId || 0) > 0 ? { pipeline_id: Number(validActivePipelineId) } : {}),
+      });
       const built = res.data?.dataset || res.dataset || res.data || res;
       if (built?.dataset_id) { setPreprocessDataset(built); await loadDatasets(); }
       return res?.data || res;
@@ -4060,6 +4138,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             || pipelineRef?.model_family
             || 'fcc'
           ).trim().toLowerCase() === 'mule' ? 'mule' : 'fcc',
+          run_id: extractPersistentRunId(pipelineRef) || persistentRunId || null,
+          run_state_id: extractPersistentRunId(pipelineRef) || persistentRunId || null,
         });
         let parsed = await loadDatasets({ sync: false, pipelineId: sessionPipelineId });
         if (!(parsed?.all?.length > 0)) parsed = await loadDatasets({ sync: true, pipelineId: sessionPipelineId });
@@ -4092,6 +4172,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             || workflowSession?.pipeline_type
             || 'fcc'
           ).trim().toLowerCase() === 'mule' ? 'mule' : 'fcc',
+          run_id: extractPersistentRunId(full) || persistentRunId || null,
+          run_state_id: extractPersistentRunId(full) || persistentRunId || null,
         });
         restoreWorkflowRuntimeState(workflowSession, parsed?.all || [], {
           suppressStepRestore: Boolean(explicitStep),
@@ -4396,10 +4478,15 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
         resumeWorkflowPersistence();
       }, 0);
     }
-  }, [activatePipeline, activePipelineName, clearLocalWorkbenchState, currentEnvId, flowSteps, isMasterDatasetSnapshot, isPreprocessDatasetSnapshot, loadDatasets, pauseScreenStatePersistence, pauseWorkflowPersistence, restoreWorkflowRuntimeState, resumeScreenStatePersistence, resumeWorkflowPersistence]);
+  }, [activatePipeline, activePipelineName, clearLocalWorkbenchState, currentEnvId, flowSteps, isMasterDatasetSnapshot, isPreprocessDatasetSnapshot, loadDatasets, pauseScreenStatePersistence, pauseWorkflowPersistence, restoreWorkflowRuntimeState, resumeScreenStatePersistence, resumeWorkflowPersistence, persistentRunId]);
 
   useEffect(() => {
     if (!savedPipelinesLoaded) return;
+    if (isGlobalRegistryView) {
+      routeResumeRef.current = '';
+      routeHydrationRef.current = '';
+      return;
+    }
     if (!normalizedRouteRunId) {
       routeResumeRef.current = '';
       routeHydrationRef.current = '';
@@ -4451,6 +4538,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     navigate,
     normalizedRouteRunId,
     normalizedRouteStep,
+    isGlobalRegistryView,
     resumePipeline,
     savedPipelines,
     savedPipelinesLoaded,
@@ -4458,6 +4546,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
   ]);
 
   useEffect(() => {
+    if (isGlobalRegistryView) return;
     if (normalizedRouteRunId) return;
     const pipelineId = Number(validActivePipelineId || 0);
     const resumeTargetId = Number(defaultResumePipeline?.pipeline_id || 0);
@@ -4473,6 +4562,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     currentEnvId,
     defaultResumePipeline,
     hasWorkbenchRuntimeState,
+    isGlobalRegistryView,
     openPipelineRoute,
     pipelineLauncherOpen,
   ]);
@@ -4742,6 +4832,71 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
     openWorkbenchStep('reports', { skipGuardRedirect: true });
   }, [openWorkbenchStep]);
 
+  const openGlobalRegistry = useCallback((options = {}) => {
+    setSummaryOverlayStep('');
+    navigate('/mlops/registry', {
+      replace: Boolean(options?.replace),
+      state: options?.state,
+    });
+  }, [navigate]);
+
+  const renderGlobalRegistryNav = useCallback((collapsed, onSelect) => {
+    const isActive = isGlobalRegistryView;
+    return (
+      <Tooltip title={collapsed ? 'Global Registry' : ''} placement="right">
+        <Box
+          onClick={() => {
+            openGlobalRegistry();
+            onSelect?.();
+          }}
+          sx={{
+            mt: 1,
+            mx: collapsed ? 1.25 : 1.5,
+            px: collapsed ? 1.25 : 1.5,
+            py: 1.2,
+            borderRadius: 1.5,
+            cursor: 'pointer',
+            bgcolor: isActive ? 'rgba(208,74,2,0.12)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${isActive ? 'rgba(208,74,2,0.35)' : D.railBorder}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: collapsed ? 0 : 1.2,
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            '&:hover': {
+              bgcolor: isActive ? 'rgba(208,74,2,0.16)' : 'rgba(255,255,255,0.06)',
+            },
+          }}
+        >
+          <Box
+            sx={{
+              width: 28,
+              height: 28,
+              borderRadius: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              bgcolor: isActive ? 'rgba(208,74,2,0.18)' : 'rgba(255,255,255,0.05)',
+              border: `1.5px solid ${isActive ? D.orange : 'rgba(255,255,255,0.18)'}`,
+            }}
+          >
+            <TableChart sx={{ fontSize: 13, color: isActive ? D.orange : D.textMuted }} />
+          </Box>
+          {!collapsed && (
+            <Box sx={{ minWidth: 0 }}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: isActive ? 700 : 500, color: isActive ? D.textPrimary : D.textMuted }}>
+                Global Registry
+              </Typography>
+              <Typography sx={{ fontSize: 10, color: isActive ? D.orange : D.textMuted }}>
+                All saved model runs
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Tooltip>
+    );
+  }, [isGlobalRegistryView, openGlobalRegistry]);
+
   const renderStepRail = (collapsed, onStepSelect) => (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ px: collapsed ? 1 : 2.5, pt: 1.6, pb: 1.2, display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'space-between' }}>
@@ -4834,6 +4989,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
             </Box>
           );
         })}
+        {renderGlobalRegistryNav(collapsed, onStepSelect)}
       </Box>
 
       <Box sx={{ px: collapsed ? 1 : 2.5, py: 2, borderTop: `1px solid ${D.railBorder}` }}>
@@ -5308,6 +5464,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                   </Box>
                 );
               })}
+              {renderGlobalRegistryNav(effectiveRailCollapsed)}
             </Box>
 
             {/* Rail footer */}
@@ -5405,7 +5562,21 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                 </Stack>
 
                 <Stack direction="row" spacing={0.75} alignItems="center" sx={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  {validActivePipelineId ? (
+                  {isGlobalRegistryView ? (
+                    <Chip
+                      size="small"
+                      label="Workbench-wide view"
+                      sx={{
+                        height: 22,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        bgcolor: D.panelAlt,
+                        color: D.textBody,
+                        border: `1px solid ${D.border}`,
+                        borderRadius: 0,
+                      }}
+                    />
+                  ) : validActivePipelineId ? (
                     <>
                       <Chip
                         size="small"
@@ -5436,44 +5607,48 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                     </>
                   ) : null}
 
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={!previousStep}
-                    startIcon={<ChevronLeft sx={{ fontSize: 14 }} />}
-                    onClick={() => previousStep && openWorkbenchStep(previousStep.id, { skipGuardRedirect: true })}
-                    sx={{
-                      height: 30,
-                      px: 1.25,
-                      fontSize: 11.5,
-                      fontWeight: 700,
-                      textTransform: 'none',
-                      borderRadius: 0,
-                      borderColor: D.border,
-                      color: D.textBody,
-                    }}
-                  >
-                    {previousStep ? `Back to ${persona === 'business' ? previousStep.biz : previousStep.label}` : 'Back'}
-                  </Button>
+                  {!isGlobalRegistryView && (
+                    <>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={!previousStep}
+                        startIcon={<ChevronLeft sx={{ fontSize: 14 }} />}
+                        onClick={() => previousStep && openWorkbenchStep(previousStep.id, { skipGuardRedirect: true })}
+                        sx={{
+                          height: 30,
+                          px: 1.25,
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          textTransform: 'none',
+                          borderRadius: 0,
+                          borderColor: D.border,
+                          color: D.textBody,
+                        }}
+                      >
+                        {previousStep ? `Back to ${persona === 'business' ? previousStep.biz : previousStep.label}` : 'Back'}
+                      </Button>
 
-                  {primaryCta && (
-                    <Button
-                      size="small"
-                      variant="contained"
-                      startIcon={primaryCta.stale ? <Refresh sx={{ fontSize: 14 }} /> : undefined}
-                      endIcon={primaryCta.stale ? undefined : <ChevronRight />}
-                      onClick={() => openWorkbenchStep(primaryCta.target, { skipGuardRedirect: true })}
-                      sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, height: 30, px: 1.35, fontSize: 11.5, fontWeight: 700, textTransform: 'none', borderRadius: 0, boxShadow: 'none' }}
-                    >
-                      {primaryCta.stale ? `${primaryCta.label}: ${primaryCta.detail}` : `Continue to ${primaryCta.detail}`}
-                    </Button>
+                      {primaryCta && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          startIcon={primaryCta.stale ? <Refresh sx={{ fontSize: 14 }} /> : undefined}
+                          endIcon={primaryCta.stale ? undefined : <ChevronRight />}
+                          onClick={() => openWorkbenchStep(primaryCta.target, { skipGuardRedirect: true })}
+                          sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, height: 30, px: 1.35, fontSize: 11.5, fontWeight: 700, textTransform: 'none', borderRadius: 0, boxShadow: 'none' }}
+                        >
+                          {primaryCta.stale ? `${primaryCta.label}: ${primaryCta.detail}` : `Continue to ${primaryCta.detail}`}
+                        </Button>
+                      )}
+                    </>
                   )}
                 </Stack>
               </Box>
             )}
 
             <Box id="fcc-workbench-main-canvas" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: activeStep === 'master' ? 'auto' : 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? { xs: 0.5, md: 1 } : { xs: 1, md: 2 } }}>
-              {businessStaleCard ? (
+              {!isGlobalRegistryView && businessStaleCard ? (
                 <BusinessStaleStepCard
                   currentStepLabel={businessStaleCard.currentStepLabel}
                   whatChanged={businessStaleCard.whatChanged}
@@ -5483,23 +5658,28 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                   onAction={handleBusinessStaleAction}
                 />
               ) : null}
-              <StepSummaryModal
-                stepType={activeSummaryStepKey}
-                stepName={activeSummaryLabel}
-                metadata={activeSummaryMetadata}
-                isOpen={Boolean(summaryOverlayStep && activeSummaryStepKey)}
-                onClose={closeSummaryOverlay}
-              />
+              {!isGlobalRegistryView && (
+                <StepSummaryModal
+                  stepType={activeSummaryStepKey}
+                  stepName={activeSummaryLabel}
+                  metadata={activeSummaryMetadata}
+                  isOpen={Boolean(summaryOverlayStep && activeSummaryStepKey)}
+                  onClose={closeSummaryOverlay}
+                />
+              )}
               <AnimatePresence mode="wait" initial={false}>
                 <Box
                   key={activeStep}
                   component={motion.div}
                   initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  transition={{ duration: 0.18 }}
-                >
-                  {routePipelineHydrating && activeStep !== 'pipelines' && (
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.18 }}
+              >
+                  {isGlobalRegistryView && (
+                    <GlobalModelRegistryScreen />
+                  )}
+                  {!isGlobalRegistryView && routePipelineHydrating && activeStep !== 'pipelines' && (
                     <Paper variant="outlined" sx={{ p: 3, borderRadius: 0 }}>
                       <Stack spacing={1.5} alignItems="flex-start">
                         <Stack direction="row" spacing={1.25} alignItems="center">
@@ -5514,7 +5694,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
                       </Stack>
                     </Paper>
                   )}
-                  {!routePipelineHydrating && activeStep === 'pipelines' && (
+                  {!isGlobalRegistryView && !routePipelineHydrating && activeStep === 'pipelines' && (
                     <WorkbenchPipelinesScreen
                       persona={persona} activePipelineId={validActivePipelineId} activePipelineName={activePipelineName}
                       onPipelineActivated={activatePipeline} onCreateNewPipeline={handleStartNewPipeline}
@@ -5666,7 +5846,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '' }
           </Box>
 
           {/* ── RIGHT CONTEXT PANEL ── */}
-          {showContextPanel && (
+          {showContextPanel && !isGlobalRegistryView && (
             <ContextPanel
               datasets={datasets} masterDataset={masterDataset} targetColumn={targetColumn}
               preprocessDataset={preprocessDataset} modelRun={effectiveActiveModelRun || modelRun} validationReport={effectiveValidationReport || validationReport}

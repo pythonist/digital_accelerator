@@ -16,6 +16,7 @@ import pandas as pd
 from api.tools.mlops.duckdb_manager import get_connection
 from api.tools.mlops.mule_pipeline_service import MulePipelineService
 from api.tools.mlops.path_utils import resolve_data_file_path, resolve_env_root
+from api.tools.mlops.run_state_service import RunStateService
 from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 from services.fcc_sentinel_bridge import FCCSentinelBridgeService
 
@@ -4285,6 +4286,21 @@ class MLOpsWorkbenchService:
                     )
             except Exception:
                 pass
+        try:
+            run_state = RunStateService(self.db_path).get_active_run_state(
+                tenant_id,
+                env_id,
+                pipeline_id=int(row[0]),
+                pipeline_uuid=_normalize_optional_text(row[1]),
+                pipeline_name=row[2] or "",
+                pipeline_type=_normalize_pipeline_type(row[26]),
+                create_if_missing=True,
+            )
+            result["run_state"] = run_state
+            result["run_state_id"] = (run_state or {}).get("run_id")
+            result["persistent_run_id"] = (run_state or {}).get("run_id")
+        except Exception:
+            result["run_state"] = None
         result.update(_progress_summary_from_steps(result["steps"], status=result["status"]))
         workflow_session = self.get_workflow_session(tenant_id, env_id, pipeline_id=int(pipeline_id))
         hydrated = self._apply_workflow_summary(result, workflow_session)
@@ -5318,7 +5334,7 @@ class MLOpsWorkbenchService:
         with get_connection(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT steps_json, name, pipeline_uuid
+                SELECT steps_json, name, pipeline_uuid, pipeline_type, model_family
                 FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -5329,13 +5345,14 @@ class MLOpsWorkbenchService:
 
             steps = json.loads(row[0] or "[]")
             pipeline_name = _normalize_text(row[1] or "")
+            pipeline_type = _normalize_pipeline_type(row[3] or row[4] or ("mule" if screen_key.startswith("mule_") else "fcc"))
             pipeline_uuid = _normalize_optional_text(row[2]) or self._ensure_pipeline_uuid(
                 conn,
                 tenant_id,
                 env_id,
                 int(pipeline_id),
-                pipeline_type="mule" if screen_key.startswith("mule_") else "fcc",
-                model_family="mule" if screen_key.startswith("mule_") else "fcc",
+                pipeline_type=pipeline_type,
+                model_family=_normalize_optional_text(row[4]) or pipeline_type,
                 name=pipeline_name,
             )
             screen_states = _screen_state_map(steps or [])
@@ -5464,12 +5481,28 @@ class MLOpsWorkbenchService:
                         ),
                     ],
                 )
-                return {
+                result_payload = {
                     "pipeline_id": int(pipeline_id),
                     "pipeline_name": pipeline_name,
                     "screen": screen_key,
                     "status": "saved",
                 }
+                try:
+                    run_state = RunStateService(self.db_path).sync_screen_state(
+                        tenant_id,
+                        env_id,
+                        pipeline_id=int(pipeline_id),
+                        pipeline_uuid=pipeline_uuid,
+                        pipeline_name=pipeline_name,
+                        pipeline_type=pipeline_type,
+                        screen=screen_key,
+                        state=state if isinstance(state, dict) else {},
+                    )
+                    result_payload["run_state_id"] = run_state.get("run_id")
+                    result_payload["run_state"] = run_state
+                except Exception as run_state_exc:
+                    result_payload["run_state_warning"] = str(run_state_exc)
+                return result_payload
 
             active_training_job_id = _normalize_optional_text(
                 state.get("job_id")
@@ -5676,12 +5709,28 @@ class MLOpsWorkbenchService:
             except Exception:
                 pass
 
-        return {
+        result_payload = {
             "pipeline_id": int(pipeline_id),
             "pipeline_name": pipeline_name,
             "screen": screen_key,
             "status": "saved",
         }
+        try:
+            run_state = RunStateService(self.db_path).sync_screen_state(
+                tenant_id,
+                env_id,
+                pipeline_id=int(pipeline_id),
+                pipeline_uuid=pipeline_uuid,
+                pipeline_name=pipeline_name,
+                pipeline_type=pipeline_type,
+                screen=screen_key,
+                state=state if isinstance(state, dict) else {},
+            )
+            result_payload["run_state_id"] = run_state.get("run_id")
+            result_payload["run_state"] = run_state
+        except Exception as run_state_exc:
+            result_payload["run_state_warning"] = str(run_state_exc)
+        return result_payload
 
     def attach_pipeline_asset(
         self,

@@ -23,6 +23,7 @@ from datetime import datetime
 from api.service_locator import services
 from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 from api.tools.mlops.path_utils import resolve_env_root, resolve_mlops_data_dir
+from api.tools.mlops.run_state_service import RunStateService
 
 
 mlops_workbench_bp = Blueprint("mlops_workbench", __name__)
@@ -1375,12 +1376,79 @@ def mlops_preprocess_run():
         mlops_svc  = _get_mlops_service(env_root)
         dataset    = _require_dataset(mlops_svc, tenant_id, env_id, body)
         output_name = _safe_dataset_type(body.get("output_name") or "preprocessed_dataset")
+        pipeline_id_raw = body.get("pipeline_id")
+        pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        stateful_inputs = {
+            "dataset_id": int(dataset.get("dataset_id") or body.get("dataset_id") or 0),
+            "steps": body.get("steps") or [],
+            "target_column": str(body.get("target_column") or "").strip() or None,
+            "output_name": output_name,
+        }
+        run_state_svc = RunStateService(Path(env_root) / "mlops" / "duckdb" / "mlops.duckdb") if pipeline_id else None
+        run_state_gate = None
+        if run_state_svc and pipeline_id:
+            active_run = run_state_svc.get_active_run_state(
+                tenant_id,
+                env_id,
+                pipeline_id=pipeline_id,
+                pipeline_name=str(body.get("pipeline_name") or "").strip(),
+                pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+                create_if_missing=True,
+            )
+            run_state_gate = run_state_svc.execute_step(
+                tenant_id,
+                env_id,
+                active_run["run_id"],
+                "preprocessing",
+                inputs=stateful_inputs,
+                outputs={},
+                status="running",
+                pipeline_id=pipeline_id,
+                pipeline_name=str(body.get("pipeline_name") or "").strip(),
+                pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+            )
+            if run_state_gate.get("skipped"):
+                saved_outputs = (run_state_gate.get("step") or {}).get("outputs") or {}
+                return jsonify({
+                    "success": True,
+                    "data": {
+                        **saved_outputs,
+                        "skipped": True,
+                        "skip_reason": run_state_gate.get("reason"),
+                        "run_state": run_state_gate.get("run_state"),
+                    },
+                }), 200
         result = mlops_svc.preprocess_run(
             tenant_id, env_id, dataset,
             body.get("steps") or [],
             output_name,
             target_column=str(body.get("target_column") or "").strip() or None,
         )
+        if run_state_svc and pipeline_id and run_state_gate:
+            try:
+                run_state_svc.update_step_state(
+                    tenant_id,
+                    env_id,
+                    run_state_gate["run_state"]["run_id"],
+                    "preprocessing",
+                    inputs=stateful_inputs,
+                    outputs={
+                        "dataset": result.get("dataset") if isinstance(result, dict) else result,
+                        "preprocessedDatasetId": (
+                            (result.get("dataset") or {}).get("dataset_id")
+                            if isinstance(result, dict) and isinstance(result.get("dataset"), dict)
+                            else result.get("dataset_id") if isinstance(result, dict) else None
+                        ),
+                        "output_name": output_name,
+                        "trace": (result.get("output") or {}).get("trace") if isinstance(result, dict) and isinstance(result.get("output"), dict) else None,
+                    },
+                    status="completed",
+                    pipeline_id=pipeline_id,
+                    pipeline_name=str(body.get("pipeline_name") or "").strip(),
+                    pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+                )
+            except Exception:
+                pass
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400

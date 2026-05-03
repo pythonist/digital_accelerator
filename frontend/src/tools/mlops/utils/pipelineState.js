@@ -4,6 +4,19 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const MANIFEST_STAGE_KEYS = ['data', 'master', 'target', 'eda', 'preprocess', 'model', 'validation', 'registry', 'ready', 'dashboard', 'reports'];
+const RUN_STATE_TO_STAGE = {
+  data_upload: 'data',
+  master_dataset: 'master',
+  target_definition: 'target',
+  explore_data: 'eda',
+  feature_store: 'featurestore',
+  preprocessing: 'preprocess',
+  model_training: 'model',
+  validation: 'validation',
+  model_release: 'registry',
+  deployment_monitoring: 'dashboard',
+  reports: 'reports',
+};
 
 const toNumberOrNull = (value) => {
   const n = Number(value);
@@ -115,6 +128,31 @@ export const getManifestStepState = (pipeline, stepKey) => {
   return isObject(step) ? step : null;
 };
 
+export const getRunState = (pipeline) => (
+  isObject(pipeline?.run_state) ? pipeline.run_state : null
+);
+
+const deriveRunStateStepStatuses = (pipeline) => {
+  const runState = getRunState(pipeline);
+  const explicitStatuses = isObject(runState?.ui_step_statuses) ? runState.ui_step_statuses : {};
+  const statuses = {};
+  Object.entries(explicitStatuses).forEach(([stage, status]) => {
+    const key = safeLower(stage);
+    if (!key) return;
+    statuses[key] = safeLower(status) === 'stale' ? 'invalidated' : safeLower(status || 'not_started');
+  });
+
+  const steps = isObject(runState?.steps_json) ? runState.steps_json : isObject(runState?.steps) ? runState.steps : {};
+  Object.entries(steps).forEach(([stepName, record]) => {
+    const stage = RUN_STATE_TO_STAGE[safeLower(stepName)];
+    if (!stage || !isObject(record)) return;
+    const status = safeLower(record.status || 'not_started');
+    statuses[stage] = status === 'stale' ? 'invalidated' : status;
+  });
+
+  return Object.keys(statuses).length ? statuses : null;
+};
+
 const deriveLegacyPipelineStepCompletion = (pipeline) => {
   const staleSet = new Set(asArray(pipeline?.stale_steps).map((step) => safeLower(step)));
   const steps = asArray(pipeline?.steps);
@@ -144,6 +182,14 @@ const deriveLegacyPipelineStepCompletion = (pipeline) => {
 };
 
 export const derivePipelineStepStatuses = (pipeline) => {
+  const runStateStatuses = deriveRunStateStepStatuses(pipeline);
+  if (runStateStatuses) {
+    return MANIFEST_STAGE_KEYS.reduce((acc, key) => {
+      acc[key] = runStateStatuses[key] || 'not_started';
+      return acc;
+    }, {});
+  }
+
   const manifest = getWorkflowManifest(pipeline);
   if (manifest && isObject(manifest.steps)) {
     return MANIFEST_STAGE_KEYS.reduce((acc, key) => {
@@ -163,6 +209,11 @@ export const derivePipelineStepStatuses = (pipeline) => {
 
 export const derivePipelineStepCompletion = (pipeline) => {
   const manifestStatuses = derivePipelineStepStatuses(pipeline);
+  if (getRunState(pipeline)) {
+    return Object.fromEntries(
+        MANIFEST_STAGE_KEYS.map((key) => [key, manifestStatuses[key] === 'completed'])
+    );
+  }
   if (Object.keys(manifestStatuses).length > 0 && getWorkflowManifest(pipeline)) {
     return Object.fromEntries(
         MANIFEST_STAGE_KEYS.map((key) => [key, manifestStatuses[key] === 'completed'])

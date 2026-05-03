@@ -48,11 +48,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+try:
+    import joblib
+except Exception:  # pragma: no cover - optional runtime dependency
+    joblib = None
+
 from flask import Blueprint, jsonify, request
 
 from api.service_locator import services
+from api.tools.mlops.duckdb_manager import get_connection
 from api.tools.mlops.mlops_workbench_service import MLOpsWorkbenchService
 from api.tools.mlops.path_utils import resolve_env_root
+from api.tools.mlops.run_state_service import RunStateService
+from api.tools.mlops.sklearn_pickle_compat import load_pickle_compat
 from api.tools.mlops.model_training_service import (
     ModelTrainingService,
     BUSINESS_DEFAULT_THRESHOLD,
@@ -808,6 +816,807 @@ def _meaningful_value(*values):
     return None
 
 
+_GLOBAL_REGISTRY_SCOPES = {
+    "global",
+    "global_registry",
+    "global-model-registry",
+    "workbench_global",
+}
+_GLOBAL_SOURCE_LEGACY_MLOPS = "legacy-mlops"
+_GLOBAL_SOURCE_MULE_WORKBENCH = "mule-workbench"
+_GLOBAL_SOURCE_MULE_BUILD = "mule-build"
+_GLOBAL_SOURCE_MULE_PIPELINE = "mule-pipeline"
+
+
+def _global_registry_requested() -> bool:
+    scope = str(request.args.get("scope") or "").strip().lower()
+    include = str(request.args.get("include_workbench_runs") or "").strip().lower()
+    return scope in _GLOBAL_REGISTRY_SCOPES or include in {"1", "true", "yes"}
+
+
+def _mlops_db_path(env_root: Path) -> Path:
+    return env_root / "mlops" / "duckdb" / "mlops.duckdb"
+
+
+def _registry_ref(prefix: str, *parts: Any) -> str:
+    return ":".join([str(prefix).strip()] + [str(part).strip() for part in parts if str(part).strip()])
+
+
+def _parse_registry_ref(job_id: str) -> Dict[str, Any]:
+    parts = [str(part or "").strip() for part in str(job_id or "").split(":")]
+    prefix = str(parts[0] or "").strip().lower()
+    if prefix == _GLOBAL_SOURCE_LEGACY_MLOPS and len(parts) >= 2:
+        return {"source": prefix, "run_id": parts[1]}
+    if prefix == _GLOBAL_SOURCE_MULE_WORKBENCH and len(parts) >= 3:
+        try:
+            return {"source": prefix, "pipeline_id": int(parts[1]), "run_id": int(parts[2])}
+        except Exception:
+            return {}
+    if prefix == _GLOBAL_SOURCE_MULE_BUILD and len(parts) >= 3:
+        try:
+            return {"source": prefix, "pipeline_id": int(parts[1]), "run_id": int(parts[2])}
+        except Exception:
+            return {}
+    if prefix == _GLOBAL_SOURCE_MULE_PIPELINE and len(parts) >= 3:
+        try:
+            return {"source": prefix, "pipeline_id": int(parts[1]), "run_id": int(parts[2])}
+        except Exception:
+            return {}
+    return {}
+
+
+def _json_load_safe(value: Any, default: Any) -> Any:
+    if value in (None, "", b""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _float_or_none(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _mean_metric(rows: Any, key: str) -> Optional[float]:
+    if not isinstance(rows, list):
+        return None
+    values: List[float] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        numeric = _float_or_none(row.get(key))
+        if numeric is not None:
+            values.append(numeric)
+    if not values:
+        return None
+    return float(sum(values) / len(values))
+
+
+def _split_row_count(split_summary: Any, split_name: str) -> Optional[int]:
+    if not isinstance(split_summary, dict):
+        return None
+    target_name = str(split_name or "").strip().lower()
+    for item in split_summary.get("splits") or []:
+        if str((item or {}).get("name") or "").strip().lower() != target_name:
+            continue
+        return _int_or_none((item or {}).get("row_count"))
+    return None
+
+
+def _scalar_hyperparams(source: Any, limit: int = 24) -> Dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key, value in source.items():
+        if isinstance(value, (str, int, float, bool)) and key not in out:
+            out[str(key)] = value
+        if len(out) >= int(limit):
+            break
+    return out
+
+
+def _resolve_local_path(env_root: Path, raw_path: Any) -> Optional[Path]:
+    text = str(raw_path or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    candidates = [path]
+    if not path.is_absolute():
+        candidates.extend([
+            env_root / path,
+            env_root / "mlops" / "models" / path.name,
+        ])
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                return candidate
+        except Exception:
+            continue
+    return candidates[0] if candidates else None
+
+
+def _load_artifact_bundle(env_root: Path, artifact_path: Any) -> Any:
+    path = _resolve_local_path(env_root, artifact_path)
+    if path is None or not path.exists():
+        return None
+    if joblib is not None:
+        try:
+            return joblib.load(path)
+        except Exception:
+            pass
+    try:
+        return load_pickle_compat(path)
+    except Exception:
+        return None
+
+
+def _extract_estimator(bundle: Any) -> Any:
+    if hasattr(bundle, "named_steps"):
+        return bundle.named_steps.get("model", bundle)
+    if not isinstance(bundle, dict):
+        return bundle
+    for key in ("model", "champion_model", "supervised_model"):
+        model = bundle.get(key)
+        if model is None:
+            continue
+        if hasattr(model, "named_steps"):
+            return model.named_steps.get("model", model)
+        return model
+    return None
+
+
+def _extract_feature_columns(bundle: Any) -> List[str]:
+    if isinstance(bundle, dict):
+        columns = bundle.get("feature_columns")
+        if isinstance(columns, list):
+            return [str(item) for item in columns if str(item or "").strip()]
+    return []
+
+
+def _artifact_feature_importance(env_root: Path, artifact_path: Any) -> List[Dict[str, Any]]:
+    bundle = _load_artifact_bundle(env_root, artifact_path)
+    estimator = _extract_estimator(bundle)
+    feature_columns = _extract_feature_columns(bundle)
+    if estimator is None or not feature_columns:
+        return []
+    scores = None
+    if hasattr(estimator, "feature_importances_"):
+        try:
+            scores = list(estimator.feature_importances_)
+        except Exception:
+            scores = None
+    elif hasattr(estimator, "coef_"):
+        try:
+            coefs = estimator.coef_
+            if hasattr(coefs, "tolist"):
+                coefs = coefs.tolist()
+            if isinstance(coefs, list) and coefs and isinstance(coefs[0], list):
+                scores = [abs(sum(values) / max(len(values), 1)) for values in zip(*coefs)]
+            elif isinstance(coefs, list):
+                scores = [abs(float(value)) for value in coefs]
+        except Exception:
+            scores = None
+    if not scores:
+        return []
+    rows: List[Dict[str, Any]] = []
+    for feature, score in zip(feature_columns, scores):
+        numeric = _float_or_none(score)
+        if numeric is None or numeric <= 0:
+            continue
+        rows.append({"feature": str(feature), "importance": float(numeric)})
+    rows.sort(key=lambda item: float(item.get("importance") or 0.0), reverse=True)
+    return rows[:20]
+
+
+def _artifact_hyperparams(env_root: Path, artifact_path: Any) -> Dict[str, Any]:
+    bundle = _load_artifact_bundle(env_root, artifact_path)
+    estimator = _extract_estimator(bundle)
+    if estimator is not None and hasattr(estimator, "get_params"):
+        try:
+            params = estimator.get_params(deep=False)
+            compact = _scalar_hyperparams(params)
+            if compact:
+                return compact
+        except Exception:
+            pass
+    if isinstance(bundle, dict):
+        compact = _scalar_hyperparams(bundle.get("config") or {})
+        if compact:
+            return compact
+    return {}
+
+
+def _binary_metrics_from_threshold_row(row: Any, *, total_rows: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, dict):
+        return None
+    tn = _int_or_none(row.get("tn"))
+    fp = _int_or_none(row.get("fp"))
+    fn = _int_or_none(row.get("fn"))
+    tp = _int_or_none(row.get("tp"))
+    if None in (tn, fp, fn, tp):
+        return None
+    positives = int(tp + fn)
+    non_events = int(tn + fp)
+    total = int(total_rows) if total_rows not in (None, "", []) else int(tn + fp + fn + tp)
+    precision = _float_or_none(row.get("precision"))
+    recall = _float_or_none(row.get("recall"))
+    if precision is None:
+        precision = float(tp / max(tp + fp, 1))
+    if recall is None:
+        recall = float(tp / max(tp + fn, 1))
+    f1 = float((2 * precision * recall) / max(precision + recall, 1e-9))
+    specificity = float(tn / max(non_events, 1))
+    accuracy = float((tp + tn) / max(total, 1))
+    suppression_rate_pct = _float_or_none(row.get("suppression_rate_pct"))
+    if suppression_rate_pct is None:
+        suppression_rate_pct = float((tn + fn) / max(total, 1) * 100.0)
+    event_loss_pct = _float_or_none(row.get("event_loss_pct"))
+    if event_loss_pct is None:
+        event_loss_pct = float(fn / max(positives, 1) * 100.0)
+    return {
+        "threshold": _float_or_none(row.get("threshold")),
+        "true_negatives": int(tn),
+        "false_positives": int(fp),
+        "false_negatives": int(fn),
+        "true_positives": int(tp),
+        "actual_true_events": int(positives),
+        "actual_non_events": int(non_events),
+        "total_rows": int(total),
+        "precision": round(float(precision), 4),
+        "recall": round(float(recall), 4),
+        "f1": round(float(f1), 4),
+        "accuracy": round(float(accuracy), 4),
+        "specificity": round(float(specificity), 4),
+        "balanced_accuracy": round(float((recall + specificity) / 2.0), 4),
+        "suppression_rate_pct": round(float(suppression_rate_pct), 2),
+        "event_loss_pct": round(float(event_loss_pct), 2),
+        "confusion_matrix": [[int(tn), int(fp)], [int(fn), int(tp)]],
+    }
+
+
+def _legacy_mlops_summary_rows(env_root: Path, tenant_id: str, env_id: str, limit: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            rows = conn.execute(
+                """
+                SELECT run_id, dataset_id, target_column, algorithm, metrics_json,
+                       threshold_metrics_json, selected_threshold, created_at, updated_at
+                FROM mlops_model_runs
+                WHERE tenant_id = ? AND env_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT ?
+                """,
+                [tenant_id, env_id, int(limit)],
+            ).fetchall()
+    except Exception:
+        return out
+
+    for row in rows:
+        metrics = _json_load_safe(row[4], {})
+        threshold_table = _json_load_safe(row[5], [])
+        selected_threshold = _float_or_none(row[6])
+        threshold_row = _closest_threshold_row(threshold_table, selected_threshold) if isinstance(threshold_table, list) else None
+        operating = _binary_metrics_from_threshold_row(threshold_row)
+        candidates = metrics.get("candidates") if isinstance(metrics, dict) else []
+        best_name = str((metrics or {}).get("best_model") or row[3] or "").strip()
+        best_row = next(
+            (
+                item for item in (candidates or [])
+                if str((item or {}).get("model") or "").strip().lower() == best_name.lower()
+            ),
+            (candidates or [None])[0] if isinstance(candidates, list) and candidates else None,
+        )
+        roc_auc = _float_or_none((best_row or {}).get("auc_roc")) if isinstance(best_row, dict) else None
+        out.append({
+            "job_id": _registry_ref(_GLOBAL_SOURCE_LEGACY_MLOPS, row[0]),
+            "model_name": str(row[3] or "Legacy Model"),
+            "algorithm": str(row[3] or "legacy_model"),
+            "target_column": str(row[2] or ""),
+            "metrics": {
+                "roc_auc": roc_auc,
+                "f1": (operating or {}).get("f1"),
+                "precision": (operating or {}).get("precision"),
+                "recall": (operating or {}).get("recall"),
+                "threshold_table": threshold_table if isinstance(threshold_table, list) else [],
+            },
+            "selected_threshold": selected_threshold,
+            "trained_at": row[8].isoformat() if hasattr(row[8], "isoformat") else (row[8] or row[7]),
+            "pipeline_id": None,
+            "pipeline_name": f"Legacy Workspace Dataset {int(row[1])}" if row[1] is not None else "Legacy Workspace",
+            "grain": "alert",
+            "suppression_rate_pct": (operating or {}).get("suppression_rate_pct"),
+            "event_loss_pct": (operating or {}).get("event_loss_pct"),
+            "precision": (operating or {}).get("precision"),
+            "recall": (operating or {}).get("recall"),
+            "f1": (operating or {}).get("f1"),
+            "artifact_source": "mlops_model_runs",
+            "source_type": "legacy_mlops_workspace",
+        })
+    return out
+
+
+def _mule_workbench_summary_rows(env_root: Path, limit: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            rows = conn.execute(
+                """
+                SELECT r.run_id, r.pipeline_id, COALESCE(p.pipeline_name, ''), r.summary_json,
+                       r.evaluation_json, r.supervised_json, r.split_json, r.updated_at
+                FROM mule_model_workbench_runs r
+                LEFT JOIN mule_pipeline_runs p ON p.pipeline_id = r.pipeline_id
+                ORDER BY r.updated_at DESC, r.run_id DESC
+                LIMIT ?
+                """,
+                [int(limit)],
+            ).fetchall()
+    except Exception:
+        return out
+
+    for row in rows:
+        summary = _json_load_safe(row[3], {})
+        evaluation = _json_load_safe(row[4], {})
+        supervised = _json_load_safe(row[5], {})
+        split_summary = _json_load_safe(row[6], {})
+        per_class = evaluation.get("per_class_metrics") if isinstance(evaluation, dict) else []
+        algorithm = _meaningful_value(
+            (supervised or {}).get("champion_model"),
+            (summary or {}).get("primary_algorithm"),
+            "mule_workbench_model",
+        )
+        out.append({
+            "job_id": _registry_ref(_GLOBAL_SOURCE_MULE_WORKBENCH, row[1], row[0]),
+            "model_name": str(algorithm or "Mule Workbench Model"),
+            "algorithm": str(algorithm or "mule_workbench_model"),
+            "target_column": str((summary or {}).get("target_column") or ""),
+            "metrics": {
+                "roc_auc": _float_or_none((evaluation or {}).get("ovr_auc")),
+                "f1": _float_or_none((evaluation or {}).get("macro_f1")),
+                "precision": _mean_metric(per_class, "precision"),
+                "recall": _mean_metric(per_class, "recall"),
+            },
+            "selected_threshold": None,
+            "trained_at": row[7].isoformat() if hasattr(row[7], "isoformat") else row[7],
+            "pipeline_id": _int_or_none(row[1]),
+            "pipeline_name": str(row[2] or f"Mule Pipeline {row[1]}"),
+            "grain": "entity",
+            "train_rows": _split_row_count(split_summary, "train"),
+            "test_rows": _split_row_count(split_summary, "test"),
+            "artifact_source": "mule_model_workbench_runs",
+            "source_type": "mule_model_workbench",
+        })
+    return out
+
+
+def _mule_build_summary_rows(env_root: Path, limit: int, workbench_refs: Optional[set] = None) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    seen_refs = workbench_refs or set()
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            rows = conn.execute(
+                """
+                SELECT b.run_id, b.pipeline_id, COALESCE(p.pipeline_name, ''), b.metrics_json,
+                       b.feature_importance_json, b.created_at
+                FROM mule_model_build_runs b
+                LEFT JOIN mule_pipeline_runs p ON p.pipeline_id = b.pipeline_id
+                ORDER BY b.created_at DESC, b.run_id DESC
+                LIMIT ?
+                """,
+                [int(limit)],
+            ).fetchall()
+    except Exception:
+        return out
+
+    for row in rows:
+        dedupe_key = (_int_or_none(row[1]), _int_or_none(row[0]))
+        if dedupe_key in seen_refs:
+            continue
+        metrics = _json_load_safe(row[3], {})
+        feature_rows = _json_load_safe(row[4], [])
+        supervised_metrics = metrics.get("supervised") if isinstance(metrics, dict) and isinstance(metrics.get("supervised"), dict) else {}
+        algorithm = _meaningful_value(
+            supervised_metrics.get("algorithm_resolved"),
+            metrics.get("champion_model") if isinstance(metrics, dict) else None,
+            "mule_model_build",
+        )
+        out.append({
+            "job_id": _registry_ref(_GLOBAL_SOURCE_MULE_BUILD, row[1], row[0]),
+            "model_name": str(algorithm or "Mule Model Build"),
+            "algorithm": str(algorithm or "mule_model_build"),
+            "target_column": str(
+                supervised_metrics.get("target_column")
+                or (metrics.get("target_column") if isinstance(metrics, dict) else "")
+                or ""
+            ),
+            "metrics": {
+                "roc_auc": _float_or_none(supervised_metrics.get("roc_auc")),
+                "f1": _float_or_none(supervised_metrics.get("f1") or (metrics.get("macro_f1") if isinstance(metrics, dict) else None)),
+                "precision": _float_or_none(supervised_metrics.get("precision")),
+                "recall": _float_or_none(supervised_metrics.get("recall")),
+            },
+            "selected_threshold": _float_or_none(supervised_metrics.get("decision_threshold")),
+            "trained_at": row[5].isoformat() if hasattr(row[5], "isoformat") else row[5],
+            "pipeline_id": _int_or_none(row[1]),
+            "pipeline_name": str(row[2] or f"Mule Pipeline {row[1]}"),
+            "grain": "entity",
+            "feature_importance": feature_rows if isinstance(feature_rows, list) else [],
+            "artifact_source": "mule_model_build_runs",
+            "source_type": "mule_model_build_legacy",
+        })
+    return out
+
+
+def _mule_pipeline_summary_rows(env_root: Path, tenant_id: str, env_id: str, limit: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            rows = conn.execute(
+                """
+                SELECT m.model_run_id, m.pipeline_id, COALESCE(p.pipeline_name, ''), m.model_kind,
+                       m.performance_summary_json, m.model_config_json, m.created_at
+                FROM mule_model_runs m
+                LEFT JOIN mule_pipeline_runs p ON p.pipeline_id = m.pipeline_id
+                WHERE m.tenant_id = ? AND m.env_id = ?
+                ORDER BY m.updated_at DESC, m.created_at DESC, m.model_run_id DESC
+                LIMIT ?
+                """,
+                [tenant_id, env_id, int(limit)],
+            ).fetchall()
+    except Exception:
+        return out
+
+    for row in rows:
+        performance = _json_load_safe(row[4], {})
+        out.append({
+            "job_id": _registry_ref(_GLOBAL_SOURCE_MULE_PIPELINE, row[1], row[0]),
+            "model_name": str(row[3] or "Mule Pipeline Model"),
+            "algorithm": str(row[3] or "mule_pipeline_model"),
+            "target_column": "mule_flag",
+            "metrics": {
+                "f1": _float_or_none(performance.get("f1")),
+                "precision": _float_or_none(performance.get("precision")),
+                "recall": _float_or_none(performance.get("recall")),
+                "pr_auc": _float_or_none(performance.get("pr_auc")),
+            },
+            "trained_at": row[6].isoformat() if hasattr(row[6], "isoformat") else row[6],
+            "pipeline_id": _int_or_none(row[1]),
+            "pipeline_name": str(row[2] or f"Mule Pipeline {row[1]}"),
+            "grain": "entity",
+            "artifact_source": "mule_model_runs",
+            "source_type": "mule_pipeline_training",
+        })
+    return out
+
+
+def _list_global_registry_runs(env_root: Path, tenant_id: str, env_id: str, trainer: ModelTrainingService, limit: int) -> List[Dict[str, Any]]:
+    combined: List[Dict[str, Any]] = []
+    try:
+        combined.extend(trainer.list_runs(tenant_id=tenant_id, env_id=env_id, limit=max(int(limit), 200)))
+    except Exception:
+        pass
+
+    legacy_rows = _legacy_mlops_summary_rows(env_root, tenant_id, env_id, limit=max(int(limit), 200))
+    combined.extend(legacy_rows)
+
+    mule_workbench_rows = _mule_workbench_summary_rows(env_root, limit=max(int(limit), 200))
+    combined.extend(mule_workbench_rows)
+    workbench_refs = {
+        (_int_or_none(row.get("pipeline_id")), _int_or_none(str(row.get("job_id") or "").split(":")[-1]))
+        for row in mule_workbench_rows
+    }
+    combined.extend(_mule_build_summary_rows(env_root, limit=max(int(limit), 200), workbench_refs=workbench_refs))
+    combined.extend(_mule_pipeline_summary_rows(env_root, tenant_id, env_id, limit=max(int(limit), 200)))
+
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for row in combined:
+        key = str(row.get("job_id") or row.get("run_id") or "").strip()
+        if not key:
+            continue
+        if key not in deduped:
+            deduped[key] = row
+    rows = list(deduped.values())
+    rows.sort(key=lambda item: str(item.get("trained_at") or ""), reverse=True)
+    return rows[: int(limit)]
+
+
+def _legacy_mlops_detail(env_root: Path, tenant_id: str, env_id: str, run_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            row = conn.execute(
+                """
+                SELECT run_id, dataset_id, target_column, algorithm, metrics_json,
+                       threshold_metrics_json, selected_threshold, artifact_path,
+                       created_at, updated_at
+                FROM mlops_model_runs
+                WHERE tenant_id = ? AND env_id = ? AND run_id = ?
+                """,
+                [tenant_id, env_id, str(run_id)],
+            ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return None
+
+    metrics_payload = _json_load_safe(row[4], {})
+    threshold_table = _json_load_safe(row[5], [])
+    selected_threshold = _float_or_none(row[6])
+    threshold_row = _closest_threshold_row(threshold_table, selected_threshold) if isinstance(threshold_table, list) else None
+    operating = _binary_metrics_from_threshold_row(threshold_row)
+    candidates = metrics_payload.get("candidates") if isinstance(metrics_payload, dict) else []
+    best_name = str((metrics_payload or {}).get("best_model") or row[3] or "").strip()
+    best_row = next(
+        (
+            item for item in (candidates or [])
+            if str((item or {}).get("model") or "").strip().lower() == best_name.lower()
+        ),
+        (candidates or [None])[0] if isinstance(candidates, list) and candidates else None,
+    )
+    roc_auc = _float_or_none((best_row or {}).get("auc_roc")) if isinstance(best_row, dict) else None
+    feature_importance = _artifact_feature_importance(env_root, row[7])
+    hyperparams = _artifact_hyperparams(env_root, row[7])
+    return {
+        "job_id": _registry_ref(_GLOBAL_SOURCE_LEGACY_MLOPS, row[0]),
+        "run_id": str(row[0]),
+        "model_name": str(row[3] or "Legacy Model"),
+        "algorithm": str(row[3] or "legacy_model"),
+        "target_column": str(row[2] or ""),
+        "pipeline_id": None,
+        "pipeline_name": f"Legacy Workspace Dataset {int(row[1])}" if row[1] is not None else "Legacy Workspace",
+        "trained_at": row[9].isoformat() if hasattr(row[9], "isoformat") else (row[9] or row[8]),
+        "selected_threshold": selected_threshold,
+        "grain": "alert",
+        "metrics": {
+            "roc_auc": roc_auc,
+            "f1": (operating or {}).get("f1"),
+            "precision": (operating or {}).get("precision"),
+            "recall": (operating or {}).get("recall"),
+            "threshold_table": threshold_table if isinstance(threshold_table, list) else [],
+        },
+        "suppression_rate_pct": (operating or {}).get("suppression_rate_pct"),
+        "event_loss_pct": (operating or {}).get("event_loss_pct"),
+        "precision": (operating or {}).get("precision"),
+        "recall": (operating or {}).get("recall"),
+        "f1": (operating or {}).get("f1"),
+        "test_rows": int((operating or {}).get("total_rows") or 0) or None,
+        "feature_importance": feature_importance,
+        "hyperparams": hyperparams,
+        "test_operating_metrics": operating,
+        "artifact_source": "mlops_model_runs",
+        "source_type": "legacy_mlops_workspace",
+    }
+
+
+def _mule_workbench_detail(env_root: Path, pipeline_id: int, run_id: int) -> Optional[Dict[str, Any]]:
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            row = conn.execute(
+                """
+                SELECT r.run_id, r.pipeline_id, COALESCE(p.pipeline_name, ''), r.target_json,
+                       r.split_json, r.supervised_json, r.tuning_json, r.evaluation_json,
+                       r.explainability_json, r.summary_json, r.created_at, r.updated_at
+                FROM mule_model_workbench_runs r
+                LEFT JOIN mule_pipeline_runs p ON p.pipeline_id = r.pipeline_id
+                WHERE r.pipeline_id = ? AND r.run_id = ?
+                """,
+                [int(pipeline_id), int(run_id)],
+            ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return None
+
+    target_payload = _json_load_safe(row[3], {})
+    split_summary = _json_load_safe(row[4], {})
+    supervised = _json_load_safe(row[5], {})
+    tuning = _json_load_safe(row[6], {})
+    evaluation = _json_load_safe(row[7], {})
+    explainability = _json_load_safe(row[8], {})
+    summary = _json_load_safe(row[9], {})
+    per_class = evaluation.get("per_class_metrics") if isinstance(evaluation, dict) else []
+    algorithm = _meaningful_value(
+        (supervised or {}).get("champion_model"),
+        (summary or {}).get("primary_algorithm"),
+        "mule_workbench_model",
+    )
+    labels = [
+        str(item.get("class_name") or "").strip()
+        for item in (per_class or [])
+        if isinstance(item, dict) and str(item.get("class_name") or "").strip()
+    ] or [str(item) for item in ((summary or {}).get("class_names") or []) if str(item or "").strip()]
+    hyperparams = _scalar_hyperparams(
+        (
+            (summary or {}).get("primary_algorithm_params")
+            or ((tuning or {}).get("manual_params") or {}).get(str(algorithm or ""), {})
+            or {}
+        )
+    )
+    return {
+        "job_id": _registry_ref(_GLOBAL_SOURCE_MULE_WORKBENCH, row[1], row[0]),
+        "run_id": int(row[0]),
+        "model_name": str(algorithm or "Mule Workbench Model"),
+        "algorithm": str(algorithm or "mule_workbench_model"),
+        "target_column": str((summary or {}).get("target_column") or (target_payload or {}).get("derived_name") or ""),
+        "pipeline_id": int(row[1]),
+        "pipeline_name": str(row[2] or f"Mule Pipeline {row[1]}"),
+        "trained_at": row[11].isoformat() if hasattr(row[11], "isoformat") else (row[11] or row[10]),
+        "selected_threshold": None,
+        "grain": "entity",
+        "train_rows": _split_row_count(split_summary, "train"),
+        "test_rows": _split_row_count(split_summary, "test"),
+        "metrics": {
+            "roc_auc": _float_or_none((evaluation or {}).get("ovr_auc")),
+            "f1": _float_or_none((evaluation or {}).get("macro_f1")),
+            "precision": _mean_metric(per_class, "precision"),
+            "recall": _mean_metric(per_class, "recall"),
+        },
+        "precision": _mean_metric(per_class, "precision"),
+        "recall": _mean_metric(per_class, "recall"),
+        "f1": _float_or_none((evaluation or {}).get("macro_f1")),
+        "feature_importance": (explainability or {}).get("global_importance") if isinstance((explainability or {}).get("global_importance"), list) else [],
+        "hyperparams": hyperparams,
+        "training_config": {
+            "split_strategy": (split_summary or {}).get("strategy"),
+            "time_column": (split_summary or {}).get("time_column"),
+            "class_count": len(labels),
+            "primary_algorithm": (summary or {}).get("primary_algorithm"),
+            "selected_algorithms": (summary or {}).get("selected_algorithms") or [],
+        },
+        "test_confusion_matrix": (evaluation or {}).get("confusion_matrix"),
+        "confusion_matrix_labels": labels,
+        "artifact_source": "mule_model_workbench_runs",
+        "source_type": "mule_model_workbench",
+    }
+
+
+def _mule_build_detail(env_root: Path, pipeline_id: int, run_id: int) -> Optional[Dict[str, Any]]:
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            row = conn.execute(
+                """
+                SELECT b.run_id, b.pipeline_id, COALESCE(p.pipeline_name, ''), b.model_path,
+                       b.output_path, b.output_table_name, b.approved_features_json, b.metrics_json,
+                       b.feature_importance_json, b.risk_bands_json, b.typology_enabled, b.created_at
+                FROM mule_model_build_runs b
+                LEFT JOIN mule_pipeline_runs p ON p.pipeline_id = b.pipeline_id
+                WHERE b.pipeline_id = ? AND b.run_id = ?
+                """,
+                [int(pipeline_id), int(run_id)],
+            ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return None
+
+    approved_features = _json_load_safe(row[6], [])
+    metrics_payload = _json_load_safe(row[7], {})
+    feature_rows = _json_load_safe(row[8], [])
+    supervised_metrics = metrics_payload.get("supervised") if isinstance(metrics_payload, dict) and isinstance(metrics_payload.get("supervised"), dict) else {}
+    algorithm = _meaningful_value(
+        supervised_metrics.get("algorithm_resolved"),
+        metrics_payload.get("champion_model") if isinstance(metrics_payload, dict) else None,
+        "mule_model_build",
+    )
+    hyperparams = _artifact_hyperparams(env_root, row[3])
+    if not hyperparams:
+        hyperparams = _scalar_hyperparams((metrics_payload.get("config") if isinstance(metrics_payload, dict) else {}) or {})
+    return {
+        "job_id": _registry_ref(_GLOBAL_SOURCE_MULE_BUILD, row[1], row[0]),
+        "run_id": int(row[0]),
+        "model_name": str(algorithm or "Mule Model Build"),
+        "algorithm": str(algorithm or "mule_model_build"),
+        "target_column": str(
+            supervised_metrics.get("target_column")
+            or (metrics_payload.get("target_column") if isinstance(metrics_payload, dict) else "")
+            or ""
+        ),
+        "pipeline_id": int(row[1]),
+        "pipeline_name": str(row[2] or f"Mule Pipeline {row[1]}"),
+        "trained_at": row[11].isoformat() if hasattr(row[11], "isoformat") else row[11],
+        "selected_threshold": _float_or_none(supervised_metrics.get("decision_threshold")),
+        "grain": "entity",
+        "metrics": {
+            "roc_auc": _float_or_none(supervised_metrics.get("roc_auc")),
+            "f1": _float_or_none(supervised_metrics.get("f1") or (metrics_payload.get("macro_f1") if isinstance(metrics_payload, dict) else None)),
+            "precision": _float_or_none(supervised_metrics.get("precision")),
+            "recall": _float_or_none(supervised_metrics.get("recall")),
+            "pr_auc": _float_or_none(supervised_metrics.get("pr_auc")),
+        },
+        "precision": _float_or_none(supervised_metrics.get("precision")),
+        "recall": _float_or_none(supervised_metrics.get("recall")),
+        "f1": _float_or_none(supervised_metrics.get("f1") or (metrics_payload.get("macro_f1") if isinstance(metrics_payload, dict) else None)),
+        "feature_importance": feature_rows if isinstance(feature_rows, list) and feature_rows else _artifact_feature_importance(env_root, row[3]),
+        "hyperparams": hyperparams,
+        "training_config": {
+            "output_table_name": str(row[5] or ""),
+            "approved_feature_count": len(approved_features) if isinstance(approved_features, list) else 0,
+            "typology_enabled": bool(row[10]),
+        },
+        "artifact_source": "mule_model_build_runs",
+        "source_type": "mule_model_build_legacy",
+    }
+
+
+def _mule_pipeline_detail(env_root: Path, tenant_id: str, env_id: str, pipeline_id: int, run_id: int) -> Optional[Dict[str, Any]]:
+    try:
+        with get_connection(_mlops_db_path(env_root)) as conn:
+            row = conn.execute(
+                """
+                SELECT m.model_run_id, m.pipeline_id, COALESCE(p.pipeline_name, ''), m.model_kind,
+                       m.performance_summary_json, m.model_config_json, m.artifact_ref, m.created_at
+                FROM mule_model_runs m
+                LEFT JOIN mule_pipeline_runs p ON p.pipeline_id = m.pipeline_id
+                WHERE m.tenant_id = ? AND m.env_id = ? AND m.pipeline_id = ? AND m.model_run_id = ?
+                """,
+                [tenant_id, env_id, int(pipeline_id), int(run_id)],
+            ).fetchone()
+    except Exception:
+        row = None
+    if not row:
+        return None
+
+    performance = _json_load_safe(row[4], {})
+    model_config = _json_load_safe(row[5], {})
+    return {
+        "job_id": _registry_ref(_GLOBAL_SOURCE_MULE_PIPELINE, row[1], row[0]),
+        "run_id": int(row[0]),
+        "model_name": str(row[3] or "Mule Pipeline Model"),
+        "algorithm": str(row[3] or "mule_pipeline_model"),
+        "target_column": "mule_flag",
+        "pipeline_id": int(row[1]),
+        "pipeline_name": str(row[2] or f"Mule Pipeline {row[1]}"),
+        "trained_at": row[7].isoformat() if hasattr(row[7], "isoformat") else row[7],
+        "selected_threshold": None,
+        "grain": "entity",
+        "metrics": {
+            "f1": _float_or_none(performance.get("f1")),
+            "precision": _float_or_none(performance.get("precision")),
+            "recall": _float_or_none(performance.get("recall")),
+            "pr_auc": _float_or_none(performance.get("pr_auc")),
+        },
+        "precision": _float_or_none(performance.get("precision")),
+        "recall": _float_or_none(performance.get("recall")),
+        "f1": _float_or_none(performance.get("f1")),
+        "hyperparams": _scalar_hyperparams(model_config),
+        "training_config": _scalar_hyperparams(model_config),
+        "artifact_source": "mule_model_runs",
+        "source_type": "mule_pipeline_training",
+    }
+
+
+def _global_registry_detail(env_root: Path, tenant_id: str, env_id: str, job_id: str) -> Optional[Dict[str, Any]]:
+    ref = _parse_registry_ref(job_id)
+    source = str(ref.get("source") or "").strip().lower()
+    if source == _GLOBAL_SOURCE_LEGACY_MLOPS:
+        return _legacy_mlops_detail(env_root, tenant_id, env_id, str(ref.get("run_id") or ""))
+    if source == _GLOBAL_SOURCE_MULE_WORKBENCH:
+        return _mule_workbench_detail(env_root, int(ref.get("pipeline_id") or 0), int(ref.get("run_id") or 0))
+    if source == _GLOBAL_SOURCE_MULE_BUILD:
+        return _mule_build_detail(env_root, int(ref.get("pipeline_id") or 0), int(ref.get("run_id") or 0))
+    if source == _GLOBAL_SOURCE_MULE_PIPELINE:
+        return _mule_pipeline_detail(
+            env_root,
+            tenant_id,
+            env_id,
+            int(ref.get("pipeline_id") or 0),
+            int(ref.get("run_id") or 0),
+        )
+    return None
+
+
 def _curve_has_points(curve: Any, x_key: str, y_key: str) -> bool:
     if isinstance(curve, dict):
         nested_points = curve.get("points") or curve.get("data")
@@ -863,6 +1672,92 @@ def _validate_deployable_threshold(threshold: Any) -> float:
             f"Deployable threshold must stay within {DEPLOYABLE_THRESHOLD_MIN:.2f}-{DEPLOYABLE_THRESHOLD_MAX:.2f}."
         )
     return float(value)
+
+
+def _coerce_probability_threshold(threshold: Any) -> Optional[float]:
+    if threshold in (None, "", []):
+        return None
+    try:
+        value = float(threshold)
+    except Exception as exc:
+        raise ValueError("Threshold must be a numeric value between 0.00 and 1.00.") from exc
+    if not 0.0 <= value <= 1.0:
+        raise ValueError("Threshold must stay within 0.00-1.00.")
+    return float(value)
+
+
+def _first_probability_threshold(candidates: List[Any]) -> Optional[float]:
+    for candidate in candidates:
+        try:
+            value = _coerce_probability_threshold(candidate)
+        except ValueError:
+            continue
+        if value is not None:
+            return value
+    return None
+
+
+def _is_generic_default_threshold(value: Optional[float]) -> bool:
+    return value is not None and abs(float(value) - float(BUSINESS_DEFAULT_THRESHOLD)) < 1e-9
+
+
+def _resolve_deployment_threshold(result: Optional[Dict[str, Any]], requested_threshold: Any = None) -> float:
+    payload = result if isinstance(result, dict) else {}
+    validation = payload.get("validation") if isinstance(payload.get("validation"), dict) else {}
+    report = validation.get("report") if isinstance(validation.get("report"), dict) else {}
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    selected_row = (
+        metrics.get("selected_threshold_row")
+        if isinstance(metrics.get("selected_threshold_row"), dict)
+        else {}
+    )
+
+    requested = _coerce_probability_threshold(requested_threshold)
+    approved_threshold = _first_probability_threshold(
+        [
+            validation.get("locked_threshold"),
+            validation.get("selected_threshold"),
+            report.get("locked_threshold"),
+            report.get("selected_threshold"),
+            report.get("recommended_threshold"),
+            report.get("optimal_threshold"),
+            payload.get("optimal_threshold"),
+            payload.get("recommended_threshold"),
+        ]
+    )
+    stored_threshold = _first_probability_threshold(
+        [
+            payload.get("selected_threshold"),
+            payload.get("locked_threshold"),
+            payload.get("threshold"),
+            payload.get("results", {}).get("selected_threshold") if isinstance(payload.get("results"), dict) else None,
+            payload.get("results", {}).get("optimal_threshold") if isinstance(payload.get("results"), dict) else None,
+            metrics.get("optimal_threshold"),
+            selected_row.get("threshold"),
+        ]
+    )
+    hml_low_threshold = _first_probability_threshold(
+        [
+            payload.get("hml_low_threshold"),
+            validation.get("hml_low_threshold"),
+            report.get("hml_low_threshold"),
+            payload.get("results", {}).get("hml_low_threshold") if isinstance(payload.get("results"), dict) else None,
+        ]
+    )
+
+    if requested is not None and (not _is_generic_default_threshold(requested) or (approved_threshold is None and hml_low_threshold is None)):
+        return requested
+    if approved_threshold is not None and (not _is_generic_default_threshold(approved_threshold) or hml_low_threshold is None):
+        return approved_threshold
+    if hml_low_threshold is not None and (stored_threshold is None or _is_generic_default_threshold(stored_threshold)):
+        return hml_low_threshold
+    if requested is not None:
+        return requested
+    if stored_threshold is not None:
+        return stored_threshold
+    if hml_low_threshold is not None:
+        return hml_low_threshold
+    return float(BUSINESS_DEFAULT_THRESHOLD)
 
 
 def _deploy_dir(env_root: Path) -> Path:
@@ -1068,6 +1963,68 @@ def train_model() -> tuple:
                             "error": f"target_column '{resolved_target}' not found. Available: {preview}...",
                             "error_code": "VALIDATION_ERROR"}), 400
 
+        stateful_inputs = {
+            "dataset_id": dataset_id,
+            "target_column": resolved_target,
+            "algorithm": algorithm,
+            "mode": requested_mode,
+            "hyperparams": hyperparams,
+            "test_size": test_size,
+            "cv_folds": cv_folds,
+            "stratify": stratify,
+            "random_state": random_state,
+            "grain": grain,
+            "hml_high_threshold": hml_high,
+            "hml_low_threshold": hml_low,
+            "split_strategy": split_strategy,
+            "split_date": str(split_date).strip() if split_date is not None else None,
+            "date_column": date_column,
+        }
+        run_state_svc = RunStateService(env_root / "mlops" / "duckdb" / "mlops.duckdb") if pipeline_id else None
+        run_state_gate = None
+        if run_state_svc and pipeline_id:
+            active_state = run_state_svc.get_active_run_state(
+                tenant_id,
+                env_id,
+                pipeline_id=int(pipeline_id),
+                pipeline_name=pipeline_name,
+                pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+                create_if_missing=True,
+            )
+            run_state_gate = run_state_svc.execute_step(
+                tenant_id,
+                env_id,
+                active_state["run_id"],
+                "model_training",
+                inputs=stateful_inputs,
+                outputs={},
+                status="running",
+                pipeline_id=int(pipeline_id),
+                pipeline_name=pipeline_name,
+                pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+            )
+            if run_state_gate.get("skipped"):
+                saved_outputs = (run_state_gate.get("step") or {}).get("outputs") or {}
+                saved_job_id = (
+                    saved_outputs.get("job_id")
+                    or saved_outputs.get("run_id")
+                    or (saved_outputs.get("active_model_run") or {}).get("job_id")
+                )
+                return jsonify({"success": True, "data": {
+                    "job_id": saved_job_id,
+                    "status": "complete",
+                    "mode": requested_mode,
+                    "grain": grain,
+                    "split_strategy": split_strategy,
+                    "split_date": (str(split_date).strip() if split_date is not None else None),
+                    "date_column": date_column,
+                    "hml_high_threshold": hml_high,
+                    "hml_low_threshold": hml_low,
+                    "skipped": True,
+                    "skip_reason": run_state_gate.get("reason"),
+                    "run_state": run_state_gate.get("run_state"),
+                }}), 200
+
         trainer = _get_training_service(env_root)
         job_id  = trainer.submit_training_job(
             dataset=dataset, target_column=resolved_target,
@@ -1089,6 +2046,29 @@ def train_model() -> tuple:
         custom_label = str(body.get("label") or "").strip()
         if custom_label:
             _set_labels(tenant_id, env_id, {job_id: custom_label})
+
+        if run_state_svc and pipeline_id and run_state_gate:
+            try:
+                run_state_svc.update_step_state(
+                    tenant_id,
+                    env_id,
+                    run_state_gate["run_state"]["run_id"],
+                    "model_training",
+                    inputs=stateful_inputs,
+                    outputs={
+                        "job_id": job_id,
+                        "run_id": job_id,
+                        "algorithm": algorithm,
+                        "status": "pending",
+                        "model_id": job_id,
+                    },
+                    status="running",
+                    pipeline_id=int(pipeline_id),
+                    pipeline_name=pipeline_name,
+                    pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+                )
+            except Exception:
+                pass
 
         return jsonify({"success": True, "data": {
             "job_id":             job_id,
@@ -1200,6 +2180,11 @@ def job_results(job_id: str) -> tuple:
         env_root = _resolve_env_path(env_id, tenant_id)
         trainer  = _get_training_service(env_root)
         labels   = _get_labels(tenant_id, env_id)
+
+        global_detail = _global_registry_detail(env_root, tenant_id, env_id, str(job_id))
+        if global_detail is not None:
+            _enrich_run_with_label(global_detail, labels)
+            return jsonify({"success": True, "data": global_detail}), 200
 
         result = trainer.get_job_result(str(job_id))
         if result is not None:
@@ -1412,6 +2397,47 @@ def validation_report() -> tuple:
 
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
+        pipeline_id_raw = body.get("pipeline_id")
+        pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        stateful_inputs = {
+            "job_id": job_id,
+            "max_event_loss_pct": max_event_loss_pct,
+            "thresholds": thresholds if isinstance(thresholds, list) else None,
+            "optimization_mode": optimization_mode,
+            "target_suppression_pct": target_supp_pct,
+            "target_tolerance_pct": target_tol_pct,
+        }
+        run_state_svc = RunStateService(env_root / "mlops" / "duckdb" / "mlops.duckdb") if pipeline_id else None
+        run_state_gate = None
+        if run_state_svc and pipeline_id:
+            active_state = run_state_svc.get_active_run_state(
+                tenant_id,
+                env_id,
+                pipeline_id=int(pipeline_id),
+                pipeline_name=str(body.get("pipeline_name") or "").strip(),
+                pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+                create_if_missing=True,
+            )
+            run_state_gate = run_state_svc.execute_step(
+                tenant_id,
+                env_id,
+                active_state["run_id"],
+                "validation",
+                inputs=stateful_inputs,
+                outputs={},
+                status="running",
+                pipeline_id=int(pipeline_id),
+                pipeline_name=str(body.get("pipeline_name") or "").strip(),
+                pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+            )
+            if run_state_gate.get("skipped"):
+                saved_outputs = (run_state_gate.get("step") or {}).get("outputs") or {}
+                return jsonify({"success": True, "data": {
+                    **saved_outputs,
+                    "skipped": True,
+                    "skip_reason": run_state_gate.get("reason"),
+                    "run_state": run_state_gate.get("run_state"),
+                }}), 200
         validator = _get_validation_service(env_root)
         result    = validator.validation_report(
             job_id=job_id,
@@ -1434,6 +2460,30 @@ def validation_report() -> tuple:
             )
         except Exception:
             pass
+        if run_state_svc and pipeline_id and run_state_gate:
+            try:
+                run_state_svc.update_step_state(
+                    tenant_id,
+                    env_id,
+                    run_state_gate["run_state"]["run_id"],
+                    "validation",
+                    inputs=stateful_inputs,
+                    outputs={
+                        **dict(result),
+                        "job_id": job_id,
+                        "run_id": job_id,
+                        "report_id": result.get("report_id") or result.get("validation_id"),
+                        "selected_threshold": result.get("selected_threshold") or result.get("configured_threshold"),
+                        "metrics": result.get("metrics") or result.get("model_metrics") or {},
+                        "confusion_matrix": result.get("confusion_matrix"),
+                    },
+                    status="completed",
+                    pipeline_id=int(pipeline_id),
+                    pipeline_name=str(body.get("pipeline_name") or "").strip(),
+                    pipeline_type=str(body.get("pipeline_type") or "fcc").strip().lower() or "fcc",
+                )
+            except Exception:
+                pass
         return jsonify({"success": True, "data": result}), 200
 
     except ValueError as ve:
@@ -2319,6 +3369,20 @@ def list_runs() -> tuple:
             except Exception:
                 pipeline_id = None
         limit      = int(request.args.get("limit") or 200)
+        if _global_registry_requested():
+            result = _list_global_registry_runs(
+                env_root=env_root,
+                tenant_id=tenant_id,
+                env_id=env_id,
+                trainer=trainer,
+                limit=limit,
+            )
+            if pipeline_id:
+                result = [row for row in result if _int_or_none(row.get("pipeline_id")) == int(pipeline_id)]
+            for r in result:
+                _enrich_run_with_label(r, labels)
+            return jsonify({"success": True, "data": result}), 200
+
         result     = trainer.list_runs(
             tenant_id=tenant_id, env_id=env_id,
             dataset_id=int(dataset_id) if dataset_id else None,
@@ -2358,7 +3422,6 @@ def deploy_model() -> tuple:
     try:
         body = request.get_json(silent=True) or {}
         job_id = str(body.get("job_id") or "").strip()
-        threshold = _validate_deployable_threshold(body.get("threshold"))
 
         if not job_id:
             return jsonify({"success": False, "error": "job_id is required",
@@ -2398,6 +3461,7 @@ def deploy_model() -> tuple:
                 "findings": quality_review.get("findings") or [],
             }), 400
 
+        threshold = _resolve_deployment_threshold(result, body.get("threshold"))
         deploy_dir = _deploy_dir(env_root)
         current_active = _load_active_deployment(deploy_dir)
         previous_deployment_id = (current_active or {}).get("deployment_id")
@@ -2464,7 +3528,6 @@ def swap_deployment() -> tuple:
     try:
         body = request.get_json(silent=True) or {}
         new_job_id = str(body.get("new_job_id") or body.get("job_id") or "").strip()
-        threshold = _validate_deployable_threshold(body.get("threshold"))
         validation_raw = body.get("validation_only", False)
         if isinstance(validation_raw, str):
             validation_only = validation_raw.strip().lower() in {"1", "true", "yes", "on"}
@@ -2506,6 +3569,7 @@ def swap_deployment() -> tuple:
                 "findings": quality_review.get("findings") or [],
             }), 400
 
+        threshold = _resolve_deployment_threshold(result, body.get("threshold"))
         deploy_dir = _deploy_dir(env_root)
         current_active = _load_active_deployment(deploy_dir)
         previous_deployment_id = (current_active or {}).get("deployment_id")

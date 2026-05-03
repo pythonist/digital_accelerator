@@ -82,6 +82,13 @@ _REASON_THRESHOLDS = [
     (0.50, "Borderline, suppressed under current threshold setting"),
 ]
 
+_SYNTHETIC_DEMO_TARGETS = {
+    "steady": {"suppression_rate_pct": 42.0, "event_loss_pct": 5.0, "positive_rate_pct": 12.0},
+    "noisy": {"suppression_rate_pct": 38.0, "event_loss_pct": 6.0, "positive_rate_pct": 13.0},
+    "drifted": {"suppression_rate_pct": 46.0, "event_loss_pct": 7.0, "positive_rate_pct": 11.0},
+    "bad_data": {"suppression_rate_pct": 35.0, "event_loss_pct": 8.0, "positive_rate_pct": 10.0},
+}
+
 
 def _reason_code(score: float, threshold: float) -> str:
     """Derive a human-readable suppression reason from score bucket."""
@@ -211,6 +218,299 @@ class DeploymentDashboardService:
             if feat_l in exact_matches or token_pattern.search(feat_l):
                 suspicious.append(feat_s)
         return sorted(set(suspicious))
+
+    @staticmethod
+    def _first_existing_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        """Return the first matching column name from a candidate list."""
+        if df is None or df.empty:
+            return None
+        by_lower = {str(col).strip().lower(): str(col) for col in df.columns}
+        for candidate in candidates or []:
+            candidate_text = str(candidate or "").strip()
+            if not candidate_text:
+                continue
+            if candidate_text in df.columns:
+                return candidate_text
+            matched = by_lower.get(candidate_text.lower())
+            if matched:
+                return matched
+        return None
+
+    def _coerce_binary_label_series(self, series: pd.Series) -> List[Optional[int]]:
+        """Coerce mixed label representations into binary values with null preservation."""
+        positive_values = {"1", "true", "yes", "sar_filed", "sar filed", "closed_sar_filed", "true_positive"}
+        negative_values = {"0", "false", "no", "closed_false_positive", "false_positive", "closed_monitoring", "monitoring"}
+        labels: List[Optional[int]] = []
+        for value in series.tolist():
+            if value is None:
+                labels.append(None)
+                continue
+            try:
+                if pd.isna(value):
+                    labels.append(None)
+                    continue
+            except Exception:
+                pass
+            try:
+                numeric_value = int(float(value))
+            except Exception:
+                text = str(value).strip().lower()
+                if text in positive_values:
+                    labels.append(1)
+                elif text in negative_values:
+                    labels.append(0)
+                else:
+                    labels.append(None)
+                continue
+            labels.append(numeric_value if numeric_value in (0, 1) else None)
+        return labels
+
+    def _resolve_live_labels(
+        self,
+        *,
+        batch_df: pd.DataFrame,
+        bundle: Dict[str, Any],
+        model_grain: str,
+    ) -> Tuple[List[Optional[int]], str, Optional[str]]:
+        """
+        Resolve evaluation labels for live simulation.
+
+        Preference order:
+          1. The model's trained target column when present in the batch.
+          2. Known AML label aliases (FINAL_LABEL / str_label / CASE_LABEL / IS_TRUE_POS).
+          3. CASE_STATUS-derived labels for case-outcome monitoring.
+        """
+        target_column = str(bundle.get("target_column") or "").strip()
+        candidate_columns: List[str] = []
+        if target_column:
+            candidate_columns.append(target_column)
+        if model_grain == "case":
+            candidate_columns.extend(["CASE_LABEL", "CASE_STATUS", "FINAL_LABEL", "str_label", "IS_TRUE_POS"])
+        else:
+            candidate_columns.extend(["FINAL_LABEL", "str_label", "CASE_LABEL", "IS_TRUE_POS", "CASE_STATUS"])
+
+        label_column = self._first_existing_column(batch_df, candidate_columns)
+        if not label_column:
+            return [], "estimated_labels", None
+
+        if str(label_column).strip().lower() == "case_status":
+            labels = self._derive_is_true_pos_from_case_status(batch_df[label_column]).tolist()
+            return labels, "case_outcome_labels", label_column
+
+        labels = self._coerce_binary_label_series(batch_df[label_column])
+        label_basis = "target_column_labels" if target_column and str(label_column).strip().lower() == target_column.lower() else "derived_label_column"
+        return labels, label_basis, label_column
+
+    @staticmethod
+    def _sample_without_replacement(
+        rng: np.random.Generator,
+        indices: List[int],
+        count: int,
+    ) -> List[int]:
+        if count <= 0 or not indices:
+            return []
+        take = min(int(count), len(indices))
+        if take <= 0:
+            return []
+        return rng.choice(np.asarray(indices, dtype=int), size=take, replace=False).tolist()
+
+    def _build_label_summary(
+        self,
+        *,
+        labels: List[Optional[int]],
+        label_basis: str,
+        label_column: Optional[str],
+        strategy: str,
+    ) -> Dict[str, Any]:
+        labelled = [int(label) for label in labels if label in (0, 1)]
+        positives = int(sum(1 for label in labelled if label == 1))
+        negatives = int(sum(1 for label in labelled if label == 0))
+        labelled_rows = int(len(labelled))
+        total_rows = int(len(labels))
+        return {
+            "label_source": label_column or label_basis,
+            "strategy": strategy,
+            "n_total": total_rows,
+            "labelled_rows": labelled_rows,
+            "excluded_rows": int(max(total_rows - labelled_rows, 0)),
+            "n_positive": positives,
+            "n_negative": negatives,
+            "str_rate_overall": round(positives / max(total_rows, 1), 4),
+            "str_rate_labelled": round(positives / max(labelled_rows, 1), 4) if labelled_rows else 0.0,
+        }
+
+    def _build_seeded_demo_batch(
+        self,
+        *,
+        bundle: Dict[str, Any],
+        model_grain: str,
+        threshold: float,
+        scenario: str,
+        batch_size: int,
+        seed: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build a realistic demo batch from the environment master dataset when available.
+
+        Synthetic live simulation is client-demo oriented, so we seed the batch from
+        scored historical rows and sample a plausible TP/FP/TN/FN mix instead of
+        letting random batch composition swing the suppression metrics wildly.
+        """
+        data_dir = resolve_mlops_data_dir(self._env_root(), create_if_missing=False)
+        candidate_path = data_dir / "master_dataset.csv"
+        if not candidate_path.exists():
+            return None
+        try:
+            candidate_df = pd.read_csv(candidate_path)
+        except Exception:
+            return None
+        if candidate_df.empty:
+            return None
+
+        bundle_features: List[str] = bundle.get("feature_columns", []) or []
+        if not bundle_features:
+            return None
+
+        if model_grain == "case":
+            case_col = self._first_existing_column(candidate_df, ["CASE_ID", "case_id"])
+            if not case_col:
+                return None
+            case_values = candidate_df[case_col].astype(str).str.strip()
+            candidate_df = candidate_df[case_values.ne("") & case_values.str.lower().ne("nan")].copy()
+            if candidate_df.empty:
+                return None
+            candidate_df["entity_type"] = "case"
+            candidate_df["entity_id"] = candidate_df[case_col].astype(str).str.strip()
+            candidate_df = candidate_df.drop_duplicates(subset=["entity_id"]).reset_index(drop=True)
+        else:
+            alert_col = self._first_existing_column(candidate_df, ["ALERT_ID", "alert_id"])
+            if not alert_col:
+                return None
+            alert_values = candidate_df[alert_col].astype(str).str.strip()
+            candidate_df = candidate_df[alert_values.ne("") & alert_values.str.lower().ne("nan")].copy()
+            if candidate_df.empty:
+                return None
+            candidate_df["entity_type"] = "alert"
+            candidate_df["entity_id"] = candidate_df[alert_col].astype(str).str.strip()
+            candidate_df = candidate_df.drop_duplicates(subset=["entity_id"]).reset_index(drop=True)
+
+        labels, label_basis, label_column = self._resolve_live_labels(
+            batch_df=candidate_df,
+            bundle=bundle,
+            model_grain=model_grain,
+        )
+        labelled_rows = int(sum(1 for label in labels if label in (0, 1)))
+        positive_rows = int(sum(1 for label in labels if label == 1))
+        negative_rows = int(sum(1 for label in labels if label == 0))
+        if labelled_rows < max(40, int(batch_size * 0.3)) or positive_rows < 8 or negative_rows < 20:
+            return None
+
+        X_pool, _ = self._build_feature_matrix(candidate_df, bundle_features)
+        scores_pool = self._predict_scores(bundle, X_pool)
+        decisions_pool = [
+            "escalated" if float(score) >= float(threshold) else "suppressed"
+            for score in scores_pool
+        ]
+
+        pools: Dict[str, List[int]] = {
+            "tp": [],
+            "tn": [],
+            "fp": [],
+            "fn": [],
+            "escalated_unknown": [],
+            "suppressed_unknown": [],
+        }
+        for idx, (label, decision) in enumerate(zip(labels, decisions_pool)):
+            decision_text = str(decision).lower()
+            if label == 1:
+                pools["tp" if decision_text == "escalated" else "fn"].append(idx)
+            elif label == 0:
+                pools["fp" if decision_text == "escalated" else "tn"].append(idx)
+            else:
+                pools["escalated_unknown" if decision_text == "escalated" else "suppressed_unknown"].append(idx)
+
+        targets = _SYNTHETIC_DEMO_TARGETS.get(str(scenario or "steady").lower(), _SYNTHETIC_DEMO_TARGETS["steady"])
+        target_suppressed = int(round(batch_size * float(targets["suppression_rate_pct"]) / 100.0))
+        target_positive = int(round(batch_size * float(targets["positive_rate_pct"]) / 100.0))
+        target_positive = max(12, min(target_positive, positive_rows))
+        target_fn = min(int(round(target_positive * float(targets["event_loss_pct"]) / 100.0)), max(len(pools["fn"]), 0))
+        target_tp = min(max(target_positive - target_fn, 0), len(pools["tp"]))
+        realized_positive = target_tp + target_fn
+        if realized_positive <= 0:
+            return None
+        target_fn = min(target_fn, max(realized_positive - target_tp, 0))
+        target_tn = min(max(target_suppressed - target_fn, 0), len(pools["tn"]))
+        target_fp = min(max(batch_size - target_tn - realized_positive, 0), len(pools["fp"]))
+
+        rng = np.random.default_rng(seed)
+        selected_indices = (
+            self._sample_without_replacement(rng, pools["tp"], target_tp)
+            + self._sample_without_replacement(rng, pools["fn"], target_fn)
+            + self._sample_without_replacement(rng, pools["tn"], target_tn)
+            + self._sample_without_replacement(rng, pools["fp"], target_fp)
+        )
+
+        current_suppressed = target_tn + target_fn
+        while len(selected_indices) < batch_size:
+            remaining = batch_size - len(selected_indices)
+            prefer_suppressed = current_suppressed < target_suppressed
+            fill_pools = (
+                ["suppressed_unknown", "tn", "escalated_unknown", "fp", "tp", "fn"]
+                if prefer_suppressed
+                else ["escalated_unknown", "fp", "suppressed_unknown", "tn", "tp", "fn"]
+            )
+            added_any = False
+            selected_set = set(selected_indices)
+            for pool_name in fill_pools:
+                available = [idx for idx in pools[pool_name] if idx not in selected_set]
+                if not available:
+                    continue
+                take = self._sample_without_replacement(rng, available, remaining)
+                if not take:
+                    continue
+                selected_indices.extend(take)
+                selected_set.update(take)
+                if pool_name in {"tn", "fn", "suppressed_unknown"}:
+                    current_suppressed += len(take)
+                remaining -= len(take)
+                added_any = True
+                if remaining <= 0:
+                    break
+            if not added_any:
+                break
+
+        if len(selected_indices) < max(32, int(batch_size * 0.5)):
+            return None
+
+        rng.shuffle(selected_indices)
+        sampled_df = candidate_df.iloc[selected_indices].copy().reset_index(drop=True)
+
+        protected_cols: Dict[str, pd.Series] = {}
+        for protected in ("IS_TRUE_POS", "CASE_STATUS", "CASE_LABEL", "FINAL_LABEL", "str_label", "alert_id", "case_id", "entity_id", "entity_type", "ALERT_ID", "CASE_ID"):
+            if protected in sampled_df.columns:
+                protected_cols[protected] = sampled_df[protected].copy()
+        sampled_df, _ = self._apply_simulation_scenario(sampled_df, str(scenario or "steady"), seed=seed + 17)
+        for protected, values in protected_cols.items():
+            sampled_df[protected] = values
+        sampled_df = sampled_df.reset_index(drop=True)
+
+        sampled_labels, sampled_basis, sampled_label_column = self._resolve_live_labels(
+            batch_df=sampled_df,
+            bundle=bundle,
+            model_grain=model_grain,
+        )
+        sampled_summary = self._build_label_summary(
+            labels=sampled_labels,
+            label_basis=sampled_basis,
+            label_column=sampled_label_column,
+            strategy="seeded_master_demo_batch",
+        )
+        sampled_summary["sampling_targets"] = dict(targets)
+        return {
+            "batch_df": sampled_df,
+            "label_summary": sampled_summary,
+            "source_name": "seeded_master_demo_batch",
+        }
 
     def _preview_rows(
         self,
@@ -1245,7 +1545,10 @@ class DeploymentDashboardService:
         alerts_df = transactions_df.iloc[alert_idx].copy().reset_index(drop=True)
         alerts_df["ALERT_ID"] = [f"ALT{i:08d}" for i in range(1, len(alerts_df) + 1)]
         alerts_df["RULE_TRIGGERED"] = rule_series.iloc[alert_idx].to_numpy()
-        alerts_df["RISK_SCORE"] = risk_score_tx[alert_idx]
+        # Preserve the top-alert scores positionally. Using a Series with the
+        # original transaction index would align by label after reset_index()
+        # and wipe most simulated scores to NaN/0.
+        alerts_df["RISK_SCORE"] = pd.Series(risk_score_tx).iloc[alert_idx].to_numpy()
         alerts_df["ALERT_DATE"] = pd.to_datetime(alerts_df["TXN_TIMESTAMP"])
         alerts_df = alerts_df[
             [
@@ -1607,6 +1910,12 @@ class DeploymentDashboardService:
             master["IS_TRUE_POS"] = self._derive_is_true_pos_from_case_status(master["CASE_STATUS"])
         else:
             master["IS_TRUE_POS"] = np.nan
+        if "CASE_LABEL" not in master.columns:
+            master["CASE_LABEL"] = master["IS_TRUE_POS"]
+        if "FINAL_LABEL" not in master.columns:
+            master["FINAL_LABEL"] = master["IS_TRUE_POS"]
+        if "str_label" not in master.columns:
+            master["str_label"] = master["FINAL_LABEL"]
 
         try:
             from api.tools.mlops.model_training_service import _enrich_aml_features
@@ -2132,6 +2441,24 @@ class DeploymentDashboardService:
         if not feature_columns:
             raise ValueError("Model bundle missing feature_columns")
         leakage_features = self._detect_label_leakage_features(feature_columns)
+        threshold_requested = float(threshold)
+        threshold_applied = float(threshold)
+        threshold_optimization: Optional[Dict[str, Any]] = None
+        threshold_optimization_skipped_reason: Optional[str] = None
+
+        if sim_mode == "synthetic_pipeline":
+            seeded_demo = self._build_seeded_demo_batch(
+                bundle=bundle,
+                model_grain=model_grain,
+                threshold=float(threshold_requested),
+                scenario=scenario_name,
+                batch_size=max(int(batch_size), 16),
+                seed=sim_seed + 23,
+            )
+            if seeded_demo:
+                batch_df = seeded_demo["batch_df"].copy()
+                base_label_summary = seeded_demo.get("label_summary") or base_label_summary
+                source_name = str(seeded_demo.get("source_name") or source_name)
 
         # Enforce scoring scope by model grain.
         if model_grain == "case":
@@ -2176,28 +2503,14 @@ class DeploymentDashboardService:
         unique_score_count = int(np.unique(np.round(scores, 8)).size) if len(scores) else 0
         constant_scores = bool(unique_score_count <= 1 or score_std <= 1e-9)
 
-        label_col = next(
-            (c for c in batch_df.columns if str(c).strip().lower() in {"is_true_pos", "actual_label", "label"}),
-            None,
+        resolved_labels, label_basis, label_column = self._resolve_live_labels(
+            batch_df=batch_df,
+            bundle=bundle,
+            model_grain=model_grain,
         )
-        threshold_requested = float(threshold)
-        threshold_applied = float(threshold)
-        threshold_optimization: Optional[Dict[str, Any]] = None
-        threshold_optimization_skipped_reason: Optional[str] = None
 
-        if label_col is not None:
-            actual_labels: List[Optional[int]] = []
-            for v in batch_df[label_col]:
-                if pd.isna(v):
-                    actual_labels.append(None)
-                    continue
-                try:
-                    yi = int(float(v))
-                except Exception:
-                    actual_labels.append(None)
-                    continue
-                actual_labels.append(yi if yi in (0, 1) else None)
-            label_basis = "case_outcome_labels"
+        if resolved_labels:
+            actual_labels: List[Optional[int]] = list(resolved_labels)
 
             if optimize_threshold:
                 if leakage_features:
@@ -2245,6 +2558,7 @@ class DeploymentDashboardService:
         label_summary = dict(base_label_summary or {})
         label_summary.update(
             {
+                "label_column": label_column,
                 "evaluation_labelled_rows": int(label_eval.get("labelled_rows", 0)),
                 "evaluation_positive_rows": int(label_eval.get("positive_rows", 0)),
                 "evaluation_negative_rows": int(label_eval.get("negative_rows", 0)),

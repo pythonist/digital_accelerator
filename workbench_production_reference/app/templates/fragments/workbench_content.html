@@ -1,0 +1,256 @@
+<div class="panel">
+  <div class="panel-pad">
+    <div class="summary-row">
+      <span class="badge">{{ active_tab | upper }}</span>
+      <span class="badge ok">Redis session-backed</span>
+      <span class="badge ok">PostgreSQL persisted</span>
+      {% if state.ui_state and state.ui_state.last_message %}
+        <span class="badge warn">{{ state.ui_state.last_message }}</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if active_tab == "overview" %}
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-pad">
+        <h2>Why this feels persistent</h2>
+        <p class="note">
+          This screen stores user tab state in Redis-backed sessions and durable workbench state in PostgreSQL.
+          The page is not a client SPA, so tab changes only replace this content area instead of re-mounting the whole application.
+        </p>
+        <div class="grid-3">
+          <div class="method">
+            <strong>No debug reloader</strong>
+            <div class="note">Run with Waitress on Windows or Gunicorn in containers, never Flask debug reload.</div>
+          </div>
+          <div class="method">
+            <strong>No in-memory-only state</strong>
+            <div class="note">Selections, tabs, and latest task references are persisted server-side.</div>
+          </div>
+          <div class="method">
+            <strong>Background jobs</strong>
+            <div class="note">Long preprocessing work moves to Celery so the request thread stays fast.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-pad">
+        {% include "fragments/task_panel.html" %}
+      </div>
+    </div>
+  </div>
+{% elif active_tab == "transform" %}
+  <div class="panel">
+    <div class="panel-pad">
+      <h2>Deterministic Transform Settings</h2>
+      <p class="note">These controls persist to PostgreSQL immediately through an HTMX partial update. No full page reload is needed.</p>
+      <form
+        hx-post="{{ url_for('pages.workbench_transform', workbench_key=workbench_key) }}"
+        hx-target="#workbench-content"
+        hx-swap="innerHTML"
+        class="feature-actions">
+        <label>
+          Missing strategy
+          <select name="missing_strategy">
+            {% for option in ["median", "mean", "mode", "constant"] %}
+              <option value="{{ option }}" {% if state.transform_config.missing_strategy == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Categorical encoding
+          <select name="categorical_encoding">
+            {% for option in ["frequency", "one_hot", "ordinal"] %}
+              <option value="{{ option }}" {% if state.transform_config.categorical_encoding == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Numeric scaling
+          <select name="numeric_scaling">
+            {% for option in ["robust", "standard", "minmax", "none"] %}
+              <option value="{{ option }}" {% if state.transform_config.numeric_scaling == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Preserve identifiers
+          <select name="keep_identifiers">
+            <option value="true" {% if state.transform_config.keep_identifiers %}selected{% endif %}>true</option>
+            <option value="false" {% if not state.transform_config.keep_identifiers %}selected{% endif %}>false</option>
+          </select>
+        </label>
+        <button class="button brand" type="submit">Save transform settings</button>
+      </form>
+    </div>
+  </div>
+{% elif active_tab == "feature_builder" %}
+  <div class="panel">
+    <div class="panel-pad">
+      <h2>Feature Builder</h2>
+      <p class="note">
+        In production, keep this as a server-backed draft form. Save feature definitions to PostgreSQL and validate formulas asynchronously if they take more than a second or two.
+      </p>
+      <div class="grid-3">
+        <div class="method">
+          <strong>Persist drafts</strong>
+          <div class="note">Do not keep authored feature rules only in browser state.</div>
+        </div>
+        <div class="method">
+          <strong>Validate in background</strong>
+          <div class="note">Complex lineage or rule validation should enqueue a Celery task.</div>
+        </div>
+        <div class="method">
+          <strong>Return fragments</strong>
+          <div class="note">Replace only the editor panel or preview grid after save.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% elif active_tab == "feature_selection" %}
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-pad">
+        <h2>Selection Methods</h2>
+        <div class="grid-3">
+          {% for method in selection_methods %}
+            <div class="method">
+              <strong>{{ method.name }}</strong>
+              <div class="note">{{ method.description }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-pad">
+        <h2>Selected vs Dropped</h2>
+        <div class="stats-row">
+          <div class="stat">
+            <div class="stat-label">Selected</div>
+            <div class="stat-value">{{ selected_count }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Dropped</div>
+            <div class="stat-value">{{ dropped_count }}</div>
+          </div>
+        </div>
+        <h3 style="margin-top: 16px;">Feature Family Coverage</h3>
+        <div class="summary-row" style="margin-top: 8px;">
+          {% for family, count in family_counts.items() %}
+            <span class="badge">{{ family }}: {{ count }}</span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-pad">
+      <h2>Candidate Features</h2>
+      <p class="note">Feature Store features are explicitly tagged so the operator can see what entered this stage from the previous step.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Feature</th>
+              <th>Family</th>
+              <th>Source</th>
+              <th>Correlation</th>
+              <th>Model Score</th>
+              <th>Decision</th>
+              <th>Update</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in selection_rows %}
+              <tr>
+                <td class="mono">
+                  {{ row.feature_name }}
+                  {% if row.feature_store_tag %}
+                    <div style="margin-top: 6px;"><span class="badge ok">From Feature Store</span></div>
+                  {% endif %}
+                </td>
+                <td>{{ row.family }}</td>
+                <td>{{ row.source_tag }}</td>
+                <td>{{ "%.2f"|format(row.correlation_score) }}</td>
+                <td>{{ "%.2f"|format(row.model_score) }}</td>
+                <td>
+                  {% if row.decision == "selected" %}
+                    <span class="decision-selected">selected</span>
+                  {% else %}
+                    <span class="decision-dropped">dropped</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <form
+                    hx-post="{{ url_for('pages.workbench_feature_decision', workbench_key=workbench_key) }}"
+                    hx-target="#workbench-content"
+                    hx-swap="innerHTML">
+                    <input type="hidden" name="feature_name" value="{{ row.feature_name }}">
+                    <select name="decision" onchange="this.form.requestSubmit()">
+                      <option value="selected" {% if row.decision == "selected" %}selected{% endif %}>selected</option>
+                      <option value="dropped" {% if row.decision == "dropped" %}selected{% endif %}>dropped</option>
+                    </select>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% elif active_tab == "pipeline_run" %}
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-pad">
+        <h2>Queue a Background Pipeline Run</h2>
+        <p class="note">
+          Any task that might take more than two seconds should go through Celery. The UI stays responsive, the job survives web worker restarts, and progress is polled via a dedicated task status endpoint.
+        </p>
+        <form
+          hx-post="{{ url_for('pages.workbench_start_task', workbench_key=workbench_key) }}"
+          hx-target="#task-panel"
+          hx-swap="outerHTML">
+          <button class="button brand" type="submit">Start preprocessing task</button>
+        </form>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-pad">
+        {% include "fragments/task_panel.html" %}
+      </div>
+    </div>
+  </div>
+{% elif active_tab == "summary" %}
+  <div class="panel">
+    <div class="panel-pad">
+      <h2>Summary / Traceability</h2>
+      <p class="note">
+        This reference keeps operator state, transform preferences, feature decisions, and task audit records on the server side.
+        In a cloud deployment, the browser can reconnect to another web instance and still restore the same workbench state from PostgreSQL and Redis.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Implementation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>No full page reload tabs</td><td>HTMX partial swap into <span class="mono">#workbench-content</span></td></tr>
+            <tr><td>Screen persistence</td><td>Redis-backed session + PostgreSQL <span class="mono">workbench_state</span></td></tr>
+            <tr><td>Queueing</td><td>Celery workers with Redis broker and task records in PostgreSQL</td></tr>
+            <tr><td>Status polling</td><td><span class="mono">/task-status/&lt;id&gt;</span> JSON + HTMX task fragment polling</td></tr>
+            <tr><td>Restart-safe storage</td><td>Docker volumes for Redis and PostgreSQL</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endif %}

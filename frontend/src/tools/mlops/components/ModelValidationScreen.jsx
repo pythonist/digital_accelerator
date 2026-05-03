@@ -836,6 +836,7 @@ const ModelValidationScreen = ({
             runs={runs}
             activeModel={activeModelResolved}
             savedValidationReport={validationReport}
+            activePipelineId={activePipelineId}
             onJobChange={setCurrentJobId}
             onValidationComplete={onValidationComplete}
             actionsDisabled={actionsDisabled}

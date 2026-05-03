@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="panel">
+    <div class="panel-pad">
+      <div class="title-row">
+        <div>
+          <div class="eyebrow">{{ meta.title }}</div>
+          <h1>Preprocessing &amp; Feature Selection</h1>
+          <div class="subtitle">{{ meta.headline }}</div>
+        </div>
+        <div class="actions-row">
+          {% for badge in meta.badges %}
+            <span class="badge brand">{{ badge }}</span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-pad">
+      <div class="stats-row">
+        {% for card in summary_cards %}
+          <div class="stat">
+            <div class="stat-label">{{ card.label }}</div>
+            <div class="stat-value">{{ card.value }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tabs">
+      {% for tab_item in tabs %}
+        <button
+          class="tab-button {% if tab_item.id == active_tab %}active{% endif %}"
+          hx-post="{{ url_for('pages.workbench_tab', workbench_key=workbench_key) }}"
+          hx-vals='{"tab":"{{ tab_item.id }}"}'
+          hx-target="#workbench-content"
+          hx-swap="innerHTML"
+          hx-indicator="#global-indicator">
+          {{ tab_item.label }}
+        </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="global-indicator" class="indicator">Loading without a full page refresh...</div>
+
+  <div id="workbench-content">
+    {% include "fragments/workbench_content.html" %}
+  </div>
+{% endblock %}
