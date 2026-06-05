@@ -4082,7 +4082,7 @@ const PreviewTab = ({
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 5 - RUN
 // ═══════════════════════════════════════════════════════════════════════════════
-const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun, onComplete }) => {
+const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun, onComplete, activePipelineId = null }) => {
   const [outputName, setOutputName] = useState('preprocessed_dataset');
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(null);
@@ -4995,6 +4995,7 @@ const PreprocessingWorkbench = ({
               onPreview={onPreview}
               onRun={onRun}
               onComplete={onComplete}
+              activePipelineId={activePipelineId}
             />
           )}
         </Box>
