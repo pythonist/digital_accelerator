@@ -1832,7 +1832,7 @@ def _optimize_hml_thresholds(
                 "optimizer_status": "grid_best",
             }
         else:
-            low_opt, high_opt = AML_BASELINE_LOW_THRESHOLD, AML_BASELINE_HIGH_THRESHOLD
+            low_opt, high_opt = 0.0, AML_BASELINE_HIGH_THRESHOLD
             m = _threshold_metrics(y_true, y_prob, low_opt)
             h = _hml_summary(y_true, y_prob, high_opt, low_opt)
             best = {
@@ -1841,7 +1841,7 @@ def _optimize_hml_thresholds(
                 "metrics": m,
                 "hml_summary": h,
                 "success": False,
-                "optimizer_status": "no_feasible_solution_fallback_baseline",
+                "optimizer_status": "no_feasible_solution_fallback_no_suppression",
             }
 
     best["source"] = source
@@ -4982,9 +4982,20 @@ class ModelTrainingService:
                 y_prob_arr,
                 max_event_loss_pct=AML_EVENT_LOSS_MAX_PCT_DEFAULT,
             )
-            if float(hml_opt["metrics"]["event_loss_pct"]) > float(AML_EVENT_LOSS_MAX_PCT_DEFAULT):
-                raise ValueError(
-                    f"No feasible HML threshold pair found with Event Loss <= {AML_EVENT_LOSS_MAX_PCT_DEFAULT:.1f}%."
+            hml_event_loss_pct = float(hml_opt["metrics"]["event_loss_pct"])
+            hml_policy_met = hml_event_loss_pct <= float(AML_EVENT_LOSS_MAX_PCT_DEFAULT)
+            if not hml_policy_met:
+                status = hml_opt.get("optimizer_status") or "event_loss_policy_breached"
+                hml_opt["optimizer_status"] = f"{status}; event_loss_policy_breached"
+                hml_opt["success"] = False
+                log(
+                    job_id,
+                    (
+                        f"[Warning] No HML threshold pair met Event Loss <= {AML_EVENT_LOSS_MAX_PCT_DEFAULT:.1f}%. "
+                        f"Continuing with safest available thresholds "
+                        f"(event loss {hml_event_loss_pct:.2f}%) for review."
+                    ),
+                    0.87,
                 )
             hml_low_threshold = float(hml_opt["low_threshold"])
             hml_high_threshold = float(hml_opt["high_threshold"])
@@ -4999,6 +5010,7 @@ class ModelTrainingService:
                     "status": hml_opt.get("optimizer_status"),
                     "success": bool(hml_opt.get("success")),
                     "max_event_loss_pct": float(hml_opt.get("max_event_loss_pct", AML_EVENT_LOSS_MAX_PCT_DEFAULT)),
+                    "policy_met": bool(hml_policy_met),
                 },
             }
             threshold_table = _build_threshold_table(

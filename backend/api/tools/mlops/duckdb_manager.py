@@ -77,6 +77,18 @@ def _get_or_create_connection(db_path: str, read_only: bool = False) -> duckdb.D
         return conn
 
 
+def close_connection(db_path: str | Path) -> None:
+    """Close the cached connection for a DB path, mainly for tests and clean shutdowns."""
+    db_path = str(db_path)
+    with _locks_meta:
+        conn = _connections.pop(db_path, None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @contextmanager
 def get_connection(db_path: str | Path, read_only: bool = False):
     """

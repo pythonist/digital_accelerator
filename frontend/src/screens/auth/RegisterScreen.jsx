@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import QRCode from "react-qr-code";
 
 // 1. Assets & Theme
 import SentinelLogo from '../../assets/PwC_2025_Logo.svg';
@@ -23,10 +22,7 @@ import {
   OutlinedInput,
   InputAdornment,
   IconButton,
-  Paper,
-  CircularProgress,
-  useTheme,
-  useMediaQuery
+  CircularProgress
 } from '@mui/material';
 
 // 4. Icons
@@ -34,7 +30,6 @@ import {
   Lock,
   Email,
   Phone,
-  Smartphone,
   CheckCircle,
   Visibility,
   VisibilityOff
@@ -69,11 +64,6 @@ const RegisterScreen = () => {
   const [formData, setFormData] = useState({ email: '', password: '', phone: '' });
   const [showPassword, setShowPassword] = useState(false);
 
-  // Auth Data (Returned from Backend)
-  const [tempToken, setTempToken] = useState('');
-  const [qrUri, setQrUri] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   // --- API: Step 1 (Initialize Registration) ---
@@ -92,45 +82,13 @@ const RegisterScreen = () => {
       const data = await res.json();
       
       if (res.ok && data.success) {
-        // Backend should return a temp_token and the QR URI for 2FA setup
-        setTempToken(data.temp_token);
-        setQrUri(data.qr_uri);
-        setStep(2); // Move to QR Scan
+        setStep(3);
       } else {
         setError(data.error || 'Registration failed. User may already exist.');
       }
     } catch (err) { 
       setError("Network connection error. Please try again."); 
       console.error(err);
-    }
-    setLoading(false);
-  };
-
-  // --- API: Step 2 (Verify OTP & Finalize) ---
-  const handleVerify = async (e) => {
-    e.preventDefault();
-    setLoading(true); 
-    setError('');
-
-    try {
-      const res = await fetch('/api/register/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            temp_token: tempToken, 
-            code: otpCode 
-        })
-      });
-
-      const data = await res.json();
-      
-      if (res.ok && data.success) {
-        setStep(3); // Move to Success Screen
-      } else {
-        setError(data.error || 'Invalid authentication code.');
-      }
-    } catch (err) { 
-      setError("Network connection error."); 
     }
     setLoading(false);
   };
@@ -187,7 +145,7 @@ const RegisterScreen = () => {
               </Typography>
               
               <Typography variant="body1" sx={{ color: '#9e9e9e', maxWidth: '400px', fontSize: '1.125rem' }}>
-                  Secure enrollment with mandatory 2-Factor Authentication.
+                  Create your workspace account with secure password access.
               </Typography>
             </Box>
         </FadeIn>
@@ -219,7 +177,7 @@ const RegisterScreen = () => {
                                     Sign Up
                                 </Typography>
                                 <Typography variant="body1" sx={{ color: pwcColors.textMuted }}>
-                                    Enter your details to begin setup.
+                                    Enter your details to create your account.
                                 </Typography>
                             </Box>
                         </MotionItem>
@@ -292,7 +250,7 @@ const RegisterScreen = () => {
                             >
                                 {loading ? (
                                   <CircularProgress size={24} sx={{ color: 'white' }} />
-                                ) : 'Continue to Security Setup'}
+                                ) : 'Create Account'}
                             </Button>
                         </MotionItem>
 
@@ -318,90 +276,6 @@ const RegisterScreen = () => {
                     </MotionContainer>
                 )}
 
-                {/* STEP 2: SCAN QR & VERIFY OTP */}
-                {step === 2 && (
-                    <MotionContainer component="form" onSubmit={handleVerify} sx={{ textAlign: 'center' }}>
-                         <MotionItem>
-                            <Box sx={{ display: 'inline-flex', p: 1.5, bgcolor: pwcColors.warningBg, borderRadius: '50%', color: pwcColors.primary, mb: 2 }}>
-                                <Smartphone sx={{ fontSize: 32 }} />
-                            </Box>
-                            <Typography variant="h5" sx={{ fontWeight: 700, color: pwcColors.textMain, mb: 1 }}>
-                                Setup Authenticator
-                            </Typography>
-                            <Typography variant="body2" sx={{ color: pwcColors.textMuted, mb: 4 }}>
-                                Scan this code with your Authenticator App.
-                            </Typography>
-                         </MotionItem>
-
-                         <MotionItem>
-                            <Paper elevation={0} sx={{ p: 2, border: `2px solid ${pwcColors.border}`, borderRadius: '16px', display: 'inline-block', mb: 4, bgcolor: pwcColors.surface }}>
-                                {/* Ensure QR URI is valid to prevent errors */}
-                                {qrUri && <QRCode value={qrUri} size={160} />}
-                            </Paper>
-                         </MotionItem>
-
-                         <MotionItem>
-                            <Box sx={{ mb: 3, textAlign: 'left' }}>
-                                <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', color: pwcColors.textMuted, display: 'block', mb: 1, ml: 0.5 }}>
-                                    Enter 6-Digit Code
-                                </Typography>
-                                <OutlinedInput
-                                    fullWidth
-                                    autoFocus
-                                    required
-                                    value={otpCode}
-                                    onChange={(e) => setOtpCode(e.target.value)}
-                                    placeholder="000 000"
-                                    inputProps={{ 
-                                        maxLength: 6, 
-                                        style: { textAlign: 'center', fontSize: '1.5rem', fontFamily: 'monospace', letterSpacing: '0.2em' } 
-                                    }}
-                                    sx={{
-                                        ...inputStyles,
-                                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: pwcColors.primary }
-                                    }}
-                                />
-                            </Box>
-                         </MotionItem>
-
-                         <MotionItem>
-                            <Box sx={{ display: 'flex', gap: 2 }}>
-                                <Button
-                                    onClick={() => setStep(1)}
-                                    variant="outlined"
-                                    disabled={loading}
-                                    sx={{
-                                        px: 3, py: 1.5,
-                                        borderRadius: '8px',
-                                        borderColor: pwcColors.border,
-                                        color: pwcColors.textMuted,
-                                        fontWeight: 700,
-                                        '&:hover': { borderColor: pwcColors.textMuted, bgcolor: pwcColors.bg }
-                                    }}
-                                >
-                                    Back
-                                </Button>
-                                <Button
-                                    type="submit"
-                                    disabled={loading || otpCode.length < 6}
-                                    variant="contained"
-                                    fullWidth
-                                    sx={{
-                                        py: 1.5,
-                                        borderRadius: '8px',
-                                        bgcolor: pwcColors.primary,
-                                        color: '#fff',
-                                        fontWeight: 700,
-                                        '&:hover': { bgcolor: '#c2410c' }
-                                    }}
-                                >
-                                    {loading ? 'Verifying...' : 'Verify & Create'}
-                                </Button>
-                            </Box>
-                         </MotionItem>
-                    </MotionContainer>
-                )}
-
                 {/* STEP 3: SUCCESS & REDIRECT */}
                 {step === 3 && (
                     <MotionContainer sx={{ textAlign: 'center' }}>
@@ -424,7 +298,7 @@ const RegisterScreen = () => {
                             </Typography>
                             
                             <Typography variant="body1" sx={{ color: pwcColors.textMuted, mb: 4, maxWidth: '280px', mx: 'auto' }}>
-                                Your admin account has been created and 2FA is active.
+                                Your admin account has been created. You can sign in with your email and password.
                             </Typography>
 
                             <Button

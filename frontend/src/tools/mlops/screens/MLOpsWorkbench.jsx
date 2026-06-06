@@ -8,7 +8,7 @@
  *             (only shown when Expert mode is active)
  */
 import PwCLogo from '@assets/PwC_2025_Logo_1.png';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -30,19 +30,6 @@ import {
 } from '@mui/icons-material';
 
 import mlopsApi               from '../services/mlopsApi';
-import DataUploadScreen       from '../components/DataUploadScreen';
-import MuleWorkbenchScreen    from '../components/MuleWorkbenchScreen';
-import MasterDatasetScreen    from '../components/MasterDatasetScreen';
-import TargetVariableScreen   from '../components/TargetVariableScreen';
-import EDAScreen              from '../components/EDAScreen';
-import PreprocessingWorkbench from '../components/PreprocessingWorkbench';
-import ModelTrainingPanel     from '../components/ModelTrainingPanel';
-import ModelValidationScreen  from '../components/ModelValidationScreen';
-import DeploymentDashboard    from '../components/DeploymentDashboard';
-import GlobalModelRegistryScreen from '../components/GlobalModelRegistryScreen';
-import ModelReleaseScreen     from '../components/ModelReleaseScreen';
-import RunReport              from '../components/RunReport';
-import WorkbenchPipelinesScreen from '../components/WorkbenchPipelinesScreen';
 import AmlJourneyGuideDialog  from '../components/AmlJourneyGuideDialog';
 import BusinessStaleStepCard  from '../components/BusinessStaleStepCard';
 import StepSummaryModal       from '../components/StepSummaryModal';
@@ -58,6 +45,20 @@ import {
 } from '../utils/preprocessingNormalization';
 import { useAppContext } from '@context/AppContext';
 import { persistWorkbenchView } from '../../../utils/navigationPersistence';
+
+const DataUploadScreen = lazy(() => import('../components/DataUploadScreen'));
+const MuleWorkbenchScreen = lazy(() => import('../components/MuleWorkbenchScreen'));
+const MasterDatasetScreen = lazy(() => import('../components/MasterDatasetScreen'));
+const TargetVariableScreen = lazy(() => import('../components/TargetVariableScreen'));
+const EDAScreen = lazy(() => import('../components/EDAScreen'));
+const PreprocessingWorkbench = lazy(() => import('../components/PreprocessingWorkbench'));
+const ModelTrainingPanel = lazy(() => import('../components/ModelTrainingPanel'));
+const ModelValidationScreen = lazy(() => import('../components/ModelValidationScreen'));
+const DeploymentDashboard = lazy(() => import('../components/DeploymentDashboard'));
+const GlobalModelRegistryScreen = lazy(() => import('../components/GlobalModelRegistryScreen'));
+const ModelReleaseScreen = lazy(() => import('../components/ModelReleaseScreen'));
+const RunReport = lazy(() => import('../components/RunReport'));
+const WorkbenchPipelinesScreen = lazy(() => import('../components/WorkbenchPipelinesScreen'));
 
 // ── Design Tokens ─────────────────────────────────────────────────────────────
 const D = {
@@ -91,6 +92,22 @@ const D = {
   contextW:     280,
   topH:         48,
 };
+
+const WorkbenchScreenFallback = () => (
+  <Paper variant="outlined" sx={{ p: 3, borderRadius: 0, borderColor: D.border }}>
+    <Stack spacing={1.5} alignItems="flex-start">
+      <Stack direction="row" spacing={1.25} alignItems="center">
+        <CircularProgress size={22} sx={{ color: D.orange }} />
+        <Typography sx={{ fontSize: 18, fontWeight: 800, color: D.textBody }}>
+          Loading workbench screen
+        </Typography>
+      </Stack>
+      <Typography sx={{ fontSize: 13, color: D.textSoft, maxWidth: 640 }}>
+        Preparing the selected FCC module.
+      </Typography>
+    </Stack>
+  </Paper>
+);
 
 const ALLOW_LOCKED_NAV = true;
 const DEFAULT_EXPERIMENT_NAME = '';
@@ -465,6 +482,53 @@ const extractPersistentRunId = (pipeline = null) => String(
   || '',
 ).trim();
 
+const RUN_STATE_TO_WORKBENCH_STEP = {
+  data_upload: 'data',
+  master_dataset: 'master',
+  target_definition: 'target',
+  explore_data: 'eda',
+  feature_store: 'featurestore',
+  preprocessing: 'preprocess',
+  model_training: 'model',
+  validation: 'validation',
+  model_release: 'registry',
+  deployment_monitoring: 'dashboard',
+  reports: 'reports',
+};
+
+const getRunStateSteps = (runState = null) => {
+  const steps = runState?.steps_json || runState?.steps || {};
+  return steps && typeof steps === 'object' && !Array.isArray(steps) ? steps : {};
+};
+
+const getRunStateStep = (runState = null, stepName = '') => {
+  const key = String(stepName || '').trim().toLowerCase();
+  const steps = getRunStateSteps(runState);
+  const record = steps[key];
+  return record && typeof record === 'object' && !Array.isArray(record) ? record : null;
+};
+
+const getRunStateStepPayload = (runState = null, stepName = '') => {
+  const record = getRunStateStep(runState, stepName);
+  if (!record) return {};
+  const inputs = record.inputs && typeof record.inputs === 'object' && !Array.isArray(record.inputs) ? record.inputs : {};
+  const outputs = record.outputs && typeof record.outputs === 'object' && !Array.isArray(record.outputs) ? record.outputs : {};
+  return { ...inputs, ...outputs, ...record, inputs, outputs };
+};
+
+const deriveRunStateStaleSteps = (pipeline = null) => {
+  const runState = pipeline?.run_state || pipeline?.runState || null;
+  const steps = getRunStateSteps(runState);
+  const stale = [];
+  Object.entries(steps).forEach(([stepName, record]) => {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) return;
+    if (String(record.status || '').trim().toLowerCase() !== 'stale') return;
+    const workbenchStep = RUN_STATE_TO_WORKBENCH_STEP[String(stepName || '').trim().toLowerCase()];
+    if (workbenchStep) stale.push(workbenchStep);
+  });
+  return stale;
+};
+
 // ── Step Lock Logic ───────────────────────────────────────────────────────────
 function stepStatus(id, ctx) {
   const {
@@ -794,6 +858,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   const previousEnvIdRef = useRef(currentEnvId);
   const routeResumeRef = useRef('');
   const routeHydrationRef = useRef('');
+  const runStateFetchRef = useRef('');
+  const runStateRuntimeHydrationRef = useRef('');
   const manualStepSelectionRef = useRef({ pipelineId: null, step: '', ts: 0 });
   const workflowSessionFetchKeyRef = useRef('');
   const activePipelineRef = useRef({ pipeline_id: null, name: '', workflow_session_id: null, pipeline_type: '', run_id: null });
@@ -1846,6 +1912,104 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     routePipelineTypeHint,
     validActivePipelineId,
   ]);
+
+  useEffect(() => {
+    const runId = String(
+      persistentRunId
+      || extractPersistentRunId(activePipelineMeta)
+      || extractPersistentRunId(activeSavedPipeline)
+      || '',
+    ).trim();
+    if (!runId) {
+      runStateFetchRef.current = '';
+      return undefined;
+    }
+
+    const pipelineId = Number(
+      validActivePipelineId
+      || activePipelineId
+      || activePipelineMeta?.pipeline_id
+      || activeSavedPipeline?.pipeline_id
+      || 0,
+    ) || null;
+    const fetchKey = `${currentEnvId}:${pipelineId || ''}:${runId}`;
+    if (runStateFetchRef.current === fetchKey) return undefined;
+    runStateFetchRef.current = fetchKey;
+
+    let alive = true;
+    mlopsApi.getRunState(runId)
+      .then((res) => {
+        if (!alive) return;
+        const runState = unwrapApiPayload(res) || {};
+        const resolvedRunId = String(runState?.run_id || '').trim();
+        if (!resolvedRunId) return;
+        const resolvedPipelineId = Number(runState?.pipeline_id || pipelineId || 0) || null;
+        const resolvedPipelineName = String(runState?.pipeline_name || activePipelineName || '').trim();
+        const resolvedPipelineType = normalizePipelineFamily(runState?.pipeline_type || activePipelineType || 'fcc', 'fcc');
+
+        setPersistentRunId(resolvedRunId);
+        if (!activePipelineId && resolvedPipelineId) setActivePipelineId(resolvedPipelineId);
+        if (!String(activePipelineName || '').trim() && resolvedPipelineName) setActivePipelineName(resolvedPipelineName);
+        activePipelineRef.current = {
+          ...activePipelineRef.current,
+          pipeline_id: resolvedPipelineId || activePipelineRef.current?.pipeline_id || null,
+          name: resolvedPipelineName || activePipelineRef.current?.name || '',
+          pipeline_type: resolvedPipelineType || activePipelineRef.current?.pipeline_type || 'fcc',
+          run_id: resolvedRunId,
+        };
+        setActivePipelineMeta((prev) => {
+          const prevPipelineId = Number(prev?.pipeline_id || 0) || null;
+          if (prevPipelineId && resolvedPipelineId && prevPipelineId !== resolvedPipelineId) return prev;
+          return {
+            ...(prev || {}),
+            pipeline_id: prevPipelineId || resolvedPipelineId,
+            name: String(prev?.name || resolvedPipelineName || '').trim(),
+            pipeline_name: String(prev?.pipeline_name || resolvedPipelineName || '').trim(),
+            pipeline_type: normalizePipelineFamily(prev?.pipeline_type || prev?.model_family || resolvedPipelineType, resolvedPipelineType),
+            run_status: String(runState?.status || prev?.run_status || '').trim(),
+            run_state: runState,
+            run_state_id: resolvedRunId,
+            persistent_run_id: resolvedRunId,
+          };
+        });
+        if (resolvedPipelineId) {
+          setSavedPipelines((prev) => (Array.isArray(prev) ? prev.map((row) => (
+            Number(row?.pipeline_id || 0) === Number(resolvedPipelineId)
+              ? {
+                ...row,
+                run_state: runState,
+                run_state_id: resolvedRunId,
+                persistent_run_id: resolvedRunId,
+                run_status: String(runState?.status || row?.run_status || '').trim(),
+              }
+              : row
+          )) : prev));
+        }
+        writePipelineSession(currentEnvId, {
+          pipeline_id: resolvedPipelineId || pipelineId || activePipelineId || null,
+          name: resolvedPipelineName || activePipelineName || '',
+          workflow_session_id: String(workflowSessionRef.current?.session_id || '').trim() || null,
+          pipeline_type: resolvedPipelineType,
+          run_id: resolvedRunId,
+          run_state_id: resolvedRunId,
+        });
+      })
+      .catch(() => {
+        if (runStateFetchRef.current === fetchKey) runStateFetchRef.current = '';
+      });
+
+    return () => { alive = false; };
+  }, [
+    activePipelineId,
+    activePipelineMeta,
+    activePipelineName,
+    activePipelineType,
+    activeSavedPipeline,
+    currentEnvId,
+    persistentRunId,
+    validActivePipelineId,
+  ]);
+
   const hasPipelineContext = useMemo(() => {
     return Boolean(
       routePipelineId
@@ -2387,6 +2551,141 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     pipeline_type: activePipelineType,
     pipeline_name: activePipelineName,
   }), [activePipelineMeta?.pipeline_uuid, activePipelineName, activePipelineType, activeSavedPipeline?.pipeline_uuid, currentEnvId, currentLocalPipelineId]);
+
+  useEffect(() => {
+    const runState = activePipelineMeta?.run_state || activeSavedPipeline?.run_state || null;
+    const runId = String(runState?.run_id || '').trim();
+    if (!runId) return;
+    const datasetSignature = (datasets || [])
+      .map((dataset) => Number(dataset?.dataset_id || 0))
+      .filter((id) => Number.isFinite(id) && id > 0)
+      .sort((a, b) => a - b)
+      .join(',');
+    const signature = `${runId}:${String(runState?.updated_at || '').trim()}:${datasetSignature}`;
+    if (runStateRuntimeHydrationRef.current === signature) return;
+    runStateRuntimeHydrationRef.current = signature;
+
+    const datasetById = (id) => {
+      const numericId = Number(id || 0);
+      if (!Number.isFinite(numericId) || numericId <= 0) return null;
+      return (datasets || []).find((dataset) => Number(dataset?.dataset_id || 0) === numericId) || null;
+    };
+    const completedPayload = (stepName) => {
+      const record = getRunStateStep(runState, stepName);
+      if (String(record?.status || '').trim().toLowerCase() !== 'completed') return {};
+      return getRunStateStepPayload(runState, stepName);
+    };
+    const pickDataset = (...ids) => {
+      for (const id of ids) {
+        const hit = datasetById(id);
+        if (hit) return hit;
+      }
+      return null;
+    };
+
+    const dataState = completedPayload('data_upload');
+    if (Array.isArray(dataState?.dataset_ids) && dataState.dataset_ids.length > 0) {
+      const selectedIds = new Set(dataState.dataset_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0));
+      if (selectedIds.size > 0) {
+        const rawDatasets = (datasets || []).filter((dataset) => selectedIds.has(Number(dataset?.dataset_id || 0)));
+        if (rawDatasets.length > 0) setDatasets(rawDatasets);
+      }
+    }
+
+    const masterState = completedPayload('master_dataset');
+    const restoredMaster = pickDataset(
+      masterState?.builtMasterDatasetId,
+      masterState?.outputDatasetId,
+      masterState?.output_dataset_id,
+      masterState?.dataset_id,
+      masterState?.dataset?.dataset_id,
+    );
+    if (restoredMaster && isMasterDatasetSnapshot(restoredMaster)) {
+      setMasterDataset((prev) => prev || restoredMaster);
+    }
+
+    const featureStoreState = completedPayload('feature_store');
+    const restoredFeatureStore = pickDataset(
+      featureStoreState?.featureStoreDatasetId,
+      featureStoreState?.outputDatasetId,
+      featureStoreState?.output_dataset_id,
+      featureStoreState?.dataset_id,
+      featureStoreState?.dataset?.dataset_id,
+    );
+    if (restoredFeatureStore) {
+      setFeatureStoreDataset((prev) => prev || restoredFeatureStore);
+    }
+
+    const targetState = completedPayload('target_definition');
+    const restoredTarget = String(
+      targetState?.target_column
+      || targetState?.currentTargetColumn
+      || targetState?.selectedTargetColumn
+      || '',
+    ).trim();
+    if (restoredTarget && !String(targetColumn || '').trim()) {
+      setTargetColumn(restoredTarget);
+    }
+
+    const edaState = completedPayload('explore_data');
+    if (Object.keys(edaState).length > 0) {
+      setEdaDone(true);
+    }
+
+    const preprocessState = completedPayload('preprocessing');
+    const restoredPreprocess = pickDataset(
+      preprocessState?.preprocessedDatasetId,
+      preprocessState?.outputDatasetId,
+      preprocessState?.output_dataset_id,
+      preprocessState?.dataset_id,
+      preprocessState?.dataset?.dataset_id,
+    );
+    if (restoredPreprocess && isPreprocessDatasetSnapshot(restoredPreprocess)) {
+      setPreprocessDataset((prev) => prev || restoredPreprocess);
+    }
+    if (Array.isArray(preprocessState?.steps) && preprocessState.steps.length > 0 && !(preprocessSteps || []).length) {
+      setPreprocessSteps(normalizePreprocessSteps(preprocessState.steps));
+    }
+
+    const modelState = completedPayload('model_training');
+    const modelJobId = String(modelState?.job_id || modelState?.run_id || modelState?.model_id || '').trim();
+    if (modelJobId && !String(activeModelRun?.job_id || modelRun?.job_id || '').trim()) {
+      const restoredModel = {
+        ...modelState,
+        job_id: modelJobId,
+        run_id: modelState?.run_id || modelJobId,
+      };
+      setActiveModelRun(restoredModel);
+      setModelRun(restoredModel);
+    }
+
+    const validationState = completedPayload('validation');
+    if (Object.keys(validationState).length > 0 && !validationReport) {
+      setValidationReport(validationState);
+      const validationRunId = String(validationState?.job_id || validationState?.run_id || modelJobId || '').trim();
+      if (validationRunId && !String(reportRunId || '').trim()) setReportRunId(validationRunId);
+    }
+
+    const registryState = completedPayload('model_release');
+    const registryPayload = registryState?.entry || registryState?.registry_entry || registryState;
+    if (registryPayload && typeof registryPayload === 'object' && Object.keys(registryPayload).length > 0 && !registryEntry) {
+      setRegistryEntry(registryPayload);
+    }
+  }, [
+    activeModelRun?.job_id,
+    activePipelineMeta,
+    activeSavedPipeline,
+    datasets,
+    isMasterDatasetSnapshot,
+    isPreprocessDatasetSnapshot,
+    modelRun?.job_id,
+    preprocessSteps,
+    registryEntry,
+    reportRunId,
+    targetColumn,
+    validationReport,
+  ]);
+
   const localPipelineSyncBlocked = (
     !currentLocalPipelineId
     || activePipelineType === 'mule'
@@ -2718,8 +3017,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     [currentLocalPipelineId, currentLocalPipelineScope, savedLocalPipelineRun],
   );
   const rawStaleSteps = useMemo(
-    () => Array.isArray(activePipelineMeta?.stale_steps) ? activePipelineMeta.stale_steps : [],
-    [activePipelineMeta],
+    () => {
+      const legacy = Array.isArray(activePipelineMeta?.stale_steps) ? activePipelineMeta.stale_steps : [];
+      const runStateStale = deriveRunStateStaleSteps(activeSavedPipeline || activePipelineMeta || {});
+      return Array.from(new Set([...legacy, ...runStateStale].map((step) => String(step || '').trim()).filter(Boolean)));
+    },
+    [activePipelineMeta, activeSavedPipeline],
   );
   const pipelineIsCompleted = useMemo(() => {
     const status = String(activePipelineMeta?.status || activeSavedPipeline?.status || '').trim().toLowerCase();
@@ -2727,8 +3030,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   }, [activePipelineMeta?.status, activeSavedPipeline?.status, localPipelineComplete]);
   const effectiveStaleSteps = useMemo(() => {
     const hasDirtyEdits = Object.values(stepDirtyMap || {}).some(Boolean);
-    if (activePipelineType !== 'mule' && !hasDirtyEdits) return [];
-    if (pipelineIsCompleted && !hasDirtyEdits) return [];
+    const hasPersistedStale = (rawStaleSteps || []).length > 0;
+    if (activePipelineType !== 'mule' && !hasDirtyEdits && !hasPersistedStale) return [];
+    if (pipelineIsCompleted && !hasDirtyEdits && !hasPersistedStale) return [];
     const next = new Set((rawStaleSteps || []).map((step) => String(step).trim()).filter(Boolean));
     const currentModelJobId = String(activeModelRun?.job_id || modelRun?.job_id || '').trim();
     const validationJobId = String(validationReport?.job_id || validationReport?.run_id || '').trim();
@@ -3009,8 +3313,13 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   }, [activePipelineId, activePipelineType, currentEnvId, navigate, normalizedRouteRunId, resolveStepNavigation, shouldShowSummaryForStep, validActivePipelineId]);
   useEffect(() => {
     if (!normalizedRouteStep || !isWorkbenchStep(normalizedRouteStep)) return;
+    manualStepSelectionRef.current = {
+      pipelineId: normalizeWorkbenchRunId(validActivePipelineId || activePipelineId || normalizedRouteRunId) || null,
+      step: normalizedRouteStep,
+      ts: Date.now(),
+    };
     setActiveStep((prev) => (prev === normalizedRouteStep ? prev : normalizedRouteStep));
-  }, [normalizedRouteStep]);
+  }, [activePipelineId, normalizedRouteRunId, normalizedRouteStep, validActivePipelineId]);
   const activeSummaryStepKey = FCC_SUMMARY_STEP_MAP[String(summaryOverlayStep || activeStep || '').trim()] || '';
   const activeSummaryMetadata = activeSummaryStepKey ? (localSummaryMetadataByStep[activeSummaryStepKey] || {}) : {};
   const activeSummaryLabel = FCC_SUMMARY_STEP_LABELS[activeSummaryStepKey] || (flowSteps.find((step) => step.id === summaryOverlayStep)?.label || '');
@@ -4501,11 +4810,16 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       && routeHydrationRef.current === routeBaseKey;
 
     if (!routeHydrated) {
-      if (routeResumeRef.current === routeKey) return;
-      routeResumeRef.current = routeKey;
       if (normalizedRouteStep && isWorkbenchStep(normalizedRouteStep)) {
+        manualStepSelectionRef.current = {
+          pipelineId: normalizedRouteRunId,
+          step: normalizedRouteStep,
+          ts: Date.now(),
+        };
         setActiveStep((prev) => (prev === normalizedRouteStep ? prev : normalizedRouteStep));
       }
+      if (routeResumeRef.current === routeKey) return;
+      routeResumeRef.current = routeKey;
       const matchedPipeline = (savedPipelines || []).find(
         (row) => Number(row?.pipeline_id || 0) === Number(normalizedRouteRunId),
       );
@@ -5676,6 +5990,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.18 }}
               >
+                <Suspense fallback={<WorkbenchScreenFallback />}>
                   {isGlobalRegistryView && (
                     <GlobalModelRegistryScreen />
                   )}
@@ -5840,6 +6155,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       actionsMessage={staleMessageForStep('dashboard')}
                     />
                   )}
+                </Suspense>
                 </Box>
               </AnimatePresence>
             </Box>

@@ -45,7 +45,6 @@ import {
   Tab,
   Tabs,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import {
@@ -114,12 +113,12 @@ const D = {
 };
 
 const DEPLOYMENT_TAB = {
-  LIVE: 0,
-  MONITORING: 1,
-  DRIFT: 2,
-  LEDGER: 3,
-  LINEAGE: 4,
-  REGISTRY: 5,
+  DASHBOARD: 0,
+  REGISTRY: 1,
+  MONITORING: -1,
+  DRIFT: -2,
+  LEDGER: -3,
+  LINEAGE: -4,
 };
 
 // â”€â”€ Tiny helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -299,6 +298,7 @@ const StatCard = ({
   loading = false,
   tooltip,
 }) => {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const colours = {
     good:    { bg: '#fff', border: '#cce3d4', text: D.text },
     warn:    { bg: '#fff', border: '#f2e5c2', text: D.text },
@@ -309,48 +309,84 @@ const StatCard = ({
   const c = colours[tone] || colours.default;
 
   return (
-    <Paper
-      variant="outlined"
-      sx={{
-        p: 1.9,
-        borderRadius: 3,
-        minWidth: 150,
-        flex: '1 1 150px',
-        bgcolor: c.bg,
-        borderColor: c.border,
-        position: 'relative',
-        boxShadow: '0 10px 24px rgba(15, 23, 42, 0.04)',
-        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
-        '&:hover': {
-          transform: 'translateY(-2px)',
-          boxShadow: '0 16px 32px rgba(15, 23, 42, 0.08)',
-        },
-      }}
-    >
-      {Icon && (
-        <Icon sx={{ fontSize: 18, color: c.text, mb: 0.75, opacity: 0.82 }} />
-      )}
-      <Typography sx={{ fontSize: 10.5, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-        {label}
-      </Typography>
-      {loading ? (
-        <Skeleton width={80} height={28} />
-      ) : (
-        <Typography sx={{ fontSize: 19, fontWeight: 800, color: c.text, lineHeight: 1.2, mt: 0.35, fontFamily: '"IBM Plex Sans", "Inter", sans-serif' }}>
-          {value}
+    <>
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 1.9,
+          borderRadius: 3,
+          minWidth: 150,
+          flex: '1 1 150px',
+          bgcolor: c.bg,
+          borderColor: c.border,
+          position: 'relative',
+          boxShadow: '0 10px 24px rgba(15, 23, 42, 0.04)',
+          transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: '0 16px 32px rgba(15, 23, 42, 0.08)',
+          },
+        }}
+      >
+        {Icon && (
+          <Icon sx={{ fontSize: 18, color: c.text, mb: 0.75, opacity: 0.82 }} />
+        )}
+        <Typography sx={{ fontSize: 10.5, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          {label}
         </Typography>
-      )}
-      {sub && (
-        <Typography sx={{ fontSize: 11, color: D.muted, mt: 0.4, lineHeight: 1.45 }}>
-          {sub}
-        </Typography>
-      )}
+        {loading ? (
+          <Skeleton width={80} height={28} />
+        ) : (
+          <Typography sx={{ fontSize: 19, fontWeight: 800, color: c.text, lineHeight: 1.2, mt: 0.35, fontFamily: '"IBM Plex Sans", "Inter", sans-serif' }}>
+            {value}
+          </Typography>
+        )}
+        {sub && (
+          <Typography sx={{ fontSize: 11, color: D.muted, mt: 0.4, lineHeight: 1.45 }}>
+            {sub}
+          </Typography>
+        )}
+        {tooltip && (
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => setDetailsOpen(true)}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              minWidth: 0,
+              px: 0.75,
+              py: 0.15,
+              fontSize: 10,
+              lineHeight: 1.2,
+              textTransform: 'none',
+              color: D.muted,
+              borderColor: D.border,
+              bgcolor: '#fff',
+              '&:hover': { borderColor: D.orange, bgcolor: D.orangeLight, color: D.orange },
+            }}
+          >
+            Details
+          </Button>
+        )}
+      </Paper>
       {tooltip && (
-        <Tooltip title={tooltip} placement="top">
-          <Info sx={{ fontSize: 13, color: D.muted, position: 'absolute', top: 10, right: 10 }} />
-        </Tooltip>
+        <Dialog open={detailsOpen} onClose={() => setDetailsOpen(false)} maxWidth="xs" fullWidth>
+          <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 800, color: D.text }}>{label}</Typography>
+            <IconButton size="small" onClick={() => setDetailsOpen(false)}>
+              <Close sx={{ fontSize: 16 }} />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent>
+            <Typography sx={{ fontSize: 12.5, color: D.text, lineHeight: 1.7 }}>
+              {tooltip}
+            </Typography>
+          </DialogContent>
+        </Dialog>
       )}
-    </Paper>
+    </>
   );
 };
 
@@ -1035,7 +1071,7 @@ const DeploymentDashboard = ({
   );
 
   // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const [tab, setTab] = useState(DEPLOYMENT_TAB.LIVE);
+  const [tab, setTab] = useState(DEPLOYMENT_TAB.DASHBOARD);
   const [kpiSummary, setKpiSummary]       = useState(null);
   const [drift, setDrift]               = useState(null);
   const [alertVsCase, setAlertVsCase]   = useState(null);
@@ -1047,6 +1083,7 @@ const DeploymentDashboard = ({
   const [publishingToSentinel, setPublishingToSentinel] = useState(false);
   const [openingSentinel, setOpeningSentinel] = useState(false);
   const [publishNotice, setPublishNotice] = useState(null);
+  const [infoDialog, setInfoDialog] = useState(null);
   const [ledgerFilter, setLedgerFilter] = useState({ entity_type: modelGrain, decision: '' });
   const [inferRaw, setInferRaw] = useState(
     JSON.stringify(
@@ -1098,6 +1135,16 @@ const DeploymentDashboard = ({
     'Evaluating suppression and event loss',
     'Building investigator queue output',
   ]), []);
+
+  useEffect(() => {
+    if (tab === 5) {
+      setTab(DEPLOYMENT_TAB.REGISTRY);
+      return;
+    }
+    if (![DEPLOYMENT_TAB.DASHBOARD, DEPLOYMENT_TAB.REGISTRY].includes(tab)) {
+      setTab(DEPLOYMENT_TAB.DASHBOARD);
+    }
+  }, [tab]);
 
   useEffect(() => {
     if (!propDeploymentId) return;
@@ -1782,7 +1829,7 @@ const DeploymentDashboard = ({
     && Number(effectiveLiveGenerated || 0) <= 0
     && savedDashboardSummaryReady;
   const usingLiveHeadlineMetrics = Number(effectiveLiveGenerated || 0) > 0
-    && (tab === DEPLOYMENT_TAB.LIVE || !productionReady);
+    && (tab === DEPLOYMENT_TAB.DASHBOARD || !productionReady);
   const headlineScored = usingLiveHeadlineMetrics
     ? effectiveLiveGenerated
     : usingSavedDashboardFallback
@@ -1868,31 +1915,38 @@ const DeploymentDashboard = ({
       fill: item.tone,
     }))
   ), [liveDecisionFlow]);
+  const evidenceResultRows = [
+    {
+      step: 'Synthetic master data',
+      result: (simMasterPreview.rows || []).length ? `${fmt(simMasterPreview.rows.length)} rows generated` : 'Not run yet',
+      decision: 'Input batch ready for FCC scoring',
+    },
+    {
+      step: 'Model-ready features',
+      result: (simPreparedPreview.rows || []).length ? `${fmt(simPreparedPreview.rows.length)} rows prepared` : 'Not run yet',
+      decision: 'Feature layout aligned to deployed model',
+    },
+    {
+      step: 'FCC prediction output',
+      result: (simPredictionPreview.rows || []).length ? `${fmt(simPredictionPreview.rows.length)} rows scored` : 'Not run yet',
+      decision: `Threshold applied at ${dec(simThresholdApplied, 2)}`,
+    },
+    {
+      step: 'Retained for Sentinel',
+      result: `${fmt(effectiveLiveEscalated)} retained`,
+      decision: effectiveLiveEscalated > 0 ? 'Sentinel queue available' : 'No retained queue yet',
+    },
+    {
+      step: 'Stopped in FCC',
+      result: `${fmt(effectiveLiveSuppressed)} suppressed`,
+      decision: effectiveLiveSuppressed > 0 ? 'Low-signal volume removed before review' : 'No suppressed rows yet',
+    },
+  ];
   const deploymentTabMeta = useMemo(() => ([
     {
-      key: DEPLOYMENT_TAB.LIVE,
-      title: 'Live Simulation',
+      key: DEPLOYMENT_TAB.DASHBOARD,
+      title: 'Dashboard',
       subtitle: 'Simulate new unseen alert-like batches, score them in FCC, suppress low-signal volume, and show what reaches Sentinel.',
-    },
-    {
-      key: DEPLOYMENT_TAB.MONITORING,
-      title: 'Deployment Monitoring',
-      subtitle: 'Track business-facing operational KPIs after scoring has happened and understand ongoing analyst workload reduction.',
-    },
-    {
-      key: DEPLOYMENT_TAB.DRIFT,
-      title: 'Drift & Trends',
-      subtitle: 'Watch for changes in incoming alert behavior, score distributions, and suppression patterns over time.',
-    },
-    {
-      key: DEPLOYMENT_TAB.LEDGER,
-      title: 'Suppression Ledger',
-      subtitle: 'Review the detailed audit trail of which entities were scored, suppressed, retained, and why.',
-    },
-    {
-      key: DEPLOYMENT_TAB.LINEAGE,
-      title: 'Model Lineage',
-      subtitle: 'Trace which training run, validation threshold, preprocessing logic, and deployment record produced the live outcome.',
     },
     {
       key: DEPLOYMENT_TAB.REGISTRY,
@@ -2284,9 +2338,30 @@ const DeploymentDashboard = ({
             {bootstrapping && <Skeleton height={22} />}
             {runOptionsError && <Alert severity="warning">{runOptionsError}</Alert>}
             {switchError && <Alert severity="error">{switchError}</Alert>}
-            <Alert severity="info" sx={{ borderRadius: 2 }}>
-              The deployment threshold is locked from Model Release and remains immutable downstream. To change it, run validation and create a new approved release rather than editing live FCC scoring.
-            </Alert>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => setInfoDialog({
+                  title: 'Locked deployment threshold',
+                  content: `The deployment threshold is locked from Model Release and remains immutable downstream. To change it, run validation and create a new approved release rather than editing live FCC scoring. Current approved threshold: ${dec(threshold, 2)}.`,
+                })}
+                sx={{ textTransform: 'none', borderColor: D.border, color: D.text, bgcolor: '#fff' }}
+              >
+                Threshold rule
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => setInfoDialog({
+                  title: 'Dashboard guide',
+                  content: 'Dashboard is the primary FCC deployment sandbox for client demos and unseen-batch testing. It keeps simulation, FCC decision flow, Sentinel handoff, and detailed evidence together. Persist to ledger controls whether simulated retained rows are written into the operational ledger.',
+                })}
+                sx={{ textTransform: 'none', borderColor: D.border, color: D.text, bgcolor: '#fff' }}
+              >
+                Dashboard guide
+              </Button>
+            </Stack>
             {usingSavedDashboardFallback && (
               <Alert severity="success" sx={{ borderRadius: 2 }}>
                 Showing the last saved scored batch for this deployed FCC run: retained {fmt(savedSummaryRetained)} {modelGrain === 'case' ? 'cases' : 'alerts'}
@@ -2319,11 +2394,6 @@ const DeploymentDashboard = ({
                 {recommendedDemoRun ? ` Suggested run: ${runDisplayLabel(recommendedDemoRun)}.` : ''}
               </Alert>
             )}
-            <Alert severity="info" sx={{ borderRadius: 2 }}>
-              <strong>Live Simulation</strong> is the primary FCC deployment sandbox for client demos and unseen-batch testing.
-              <strong> Deployment Monitoring</strong> stays focused on production-style KPI tracking after scoring has happened, and
-              <strong> Persist to ledger</strong> controls whether simulated retained rows are written into the operational ledger.
-            </Alert>
           </Stack>
         </Paper>
       </Box>
@@ -2369,7 +2439,7 @@ const DeploymentDashboard = ({
             value={headlineReady ? pct(headlineSuppressionRate) : '-'}
             sub={headlineReady
               ? `${grainLabel.toLowerCase()}-grain model`
-              : (usingSavedDashboardFallback ? 'Restored from saved dashboard state' : 'Run the live simulation tab for unseen-batch scoring')}
+              : (usingSavedDashboardFallback ? 'Restored from saved dashboard state' : 'Run Dashboard for unseen-batch scoring')}
             tone="default"
             loading={loading.kpis || loading.avc || bootstrapping}
           />
@@ -2436,12 +2506,8 @@ const DeploymentDashboard = ({
           TabIndicatorProps={{ style: { backgroundColor: D.orange } }}
           sx={{ '& .MuiTab-root': { fontSize: 12, textTransform: 'none', minHeight: 42, fontWeight: 600 } }}
         >
-          <Tab label="Live Simulation" icon={<CloudDone sx={{ fontSize: 15 }} />} iconPosition="start" />
-          <Tab label="Deployment Monitoring" icon={<Shield sx={{ fontSize: 15 }} />} iconPosition="start" />
-          <Tab label="Drift & Trends" icon={<Timeline sx={{ fontSize: 15 }} />} iconPosition="start" />
-          <Tab label="Suppression Ledger" icon={<Assessment sx={{ fontSize: 15 }} />} iconPosition="start" />
-          <Tab label="Model Lineage" icon={<AccountTree sx={{ fontSize: 15 }} />} iconPosition="start" />
-          <Tab label="Model Registry" icon={<TableChart sx={{ fontSize: 15 }} />} iconPosition="start" />
+          <Tab value={DEPLOYMENT_TAB.DASHBOARD} label="Dashboard" icon={<CloudDone sx={{ fontSize: 15 }} />} iconPosition="start" />
+          <Tab value={DEPLOYMENT_TAB.REGISTRY} label="Model Registry" icon={<TableChart sx={{ fontSize: 15 }} />} iconPosition="start" />
         </Tabs>
       </Box>
 
@@ -2799,7 +2865,7 @@ const DeploymentDashboard = ({
         )}
 
         {/* Live Pipeline */}
-        {tab === DEPLOYMENT_TAB.LIVE && (
+        {tab === DEPLOYMENT_TAB.DASHBOARD && (
           <Stack spacing={2}>
             <Paper
               variant="outlined"
@@ -2814,7 +2880,7 @@ const DeploymentDashboard = ({
               <Stack spacing={1.75}>
                 <SectionHead
                   icon={CloudDone}
-                  title="Live Simulation"
+                  title="Dashboard"
                   sub="Simulate how newly arriving alert-like FCC records would be scored, suppressed, and handed to Sentinel before investigator review."
                 />
                 <Typography sx={{ fontSize: 12, color: D.text, lineHeight: 1.75 }}>
@@ -2938,13 +3004,31 @@ const DeploymentDashboard = ({
                   <MenuItem value="no">Do not persist simulation to ledger</MenuItem>
                   <MenuItem value="yes">Persist retained queue to ledger</MenuItem>
                 </Select>
-                <Alert severity="info" sx={{ minWidth: 360, flex: 1 }}>
-                  Live simulation and Sentinel handoff always use the locked approved threshold {dec(threshold, 2)}. If new unseen data suggests a different cutoff, take that back into validation and release governance.
-                </Alert>
+                <Box sx={{ minWidth: 260, flex: 1, display: 'flex', alignItems: 'center' }}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setInfoDialog({
+                      title: 'Simulation threshold',
+                      content: `Live simulation and Sentinel handoff always use the locked approved threshold ${dec(threshold, 2)}. If new unseen data suggests a different cutoff, take that back into validation and release governance.`,
+                    })}
+                    sx={{ textTransform: 'none', borderColor: D.border, color: D.text, bgcolor: '#fff' }}
+                  >
+                    Why threshold is locked
+                  </Button>
+                </Box>
               </Stack>
-              <Alert severity="info" sx={{ mt: 1.25 }}>
-                Use <strong>Run single batch</strong> for a demo snapshot, or <strong>Start live stream</strong> to generate recurring micro-batches and watch the operational flow update over time.
-              </Alert>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setInfoDialog({
+                  title: 'Demo run options',
+                  content: 'Use Run single batch for a demo snapshot, or Start live stream to generate recurring micro-batches and watch the operational flow update over time.',
+                })}
+                sx={{ mt: 1.1, alignSelf: 'flex-start', textTransform: 'none', color: D.orange, fontWeight: 700 }}
+              >
+                How to run this dashboard
+              </Button>
               {streamingActive && (
                 <Alert severity="success" sx={{ mt: 1.25 }}>
                   Live stream active: {simBatchHistory.length} batch{simBatchHistory.length !== 1 ? 'es' : ''} generated.
@@ -2961,14 +3045,34 @@ const DeploymentDashboard = ({
                 sub="Business-readable outcome from the current unseen batch or live stream."
               />
               {!simResult && !simLoading && (
-                <Alert severity="info" sx={{ mb: 1.25 }}>
-                  No simulation has been run yet. Configure the generation settings above, then run a batch to preview how FCC would reduce false-positive workload before Sentinel review.
-                </Alert>
+                <Box sx={{ mb: 1.25, p: 1.4, border: `1px solid ${D.border}`, borderRadius: 2, bgcolor: '#fff' }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+                    <Typography sx={{ fontSize: 12, color: D.text }}>
+                      No simulation has been run yet. Run a batch to preview the FCC result before Sentinel review.
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setInfoDialog({
+                        title: 'Before first run',
+                        content: 'Configure the generation settings, then run a single batch. The dashboard will show generated rows, scored rows, suppressed alerts, retained alerts, decision flow, and evidence tables.',
+                      })}
+                      sx={{ textTransform: 'none', borderColor: D.border, color: D.text, bgcolor: '#fff', flexShrink: 0 }}
+                    >
+                      What will appear
+                    </Button>
+                  </Stack>
+                </Box>
               )}
               {simLoading && (
-                <Alert severity="info" sx={{ mb: 1.25 }}>
-                  Backend progress: {simProgressSteps[simProgressIndex] || 'Running simulation'}
-                </Alert>
+                <Box sx={{ mb: 1.25, p: 1.2, border: `1px solid ${D.border}`, borderRadius: 2, bgcolor: '#fff' }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <CircularProgress size={16} sx={{ color: D.orange }} />
+                    <Typography sx={{ fontSize: 12, color: D.text }}>
+                      Backend progress: {simProgressSteps[simProgressIndex] || 'Running simulation'}
+                    </Typography>
+                  </Stack>
+                </Box>
               )}
               <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
                 <StatCard label="Rows generated" value={fmt(effectiveLiveGenerated)} sub={simResult?.source?.dataset || 'synthetic unseen batch'} tone="default" loading={simLoading && !simResult} />
@@ -3147,6 +3251,39 @@ const DeploymentDashboard = ({
               <Typography sx={{ fontSize: 11.5, color: D.muted }}>
                 Start with the run summary and FCC decision flow for business conversations, then use the detailed tables below for walkthroughs, evidence, and audit support.
               </Typography>
+              <Box sx={{ overflowX: 'auto', mt: 1.5 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['Evidence Step', 'Result', 'Decision / Meaning'].map((header) => (
+                        <th
+                          key={header}
+                          style={{
+                            textAlign: 'left',
+                            padding: '8px 10px',
+                            borderBottom: `1px solid ${D.border}`,
+                            color: D.muted,
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {evidenceResultRows.map((row) => (
+                      <tr key={row.step} style={{ borderBottom: `1px solid ${D.borderSoft}` }}>
+                        <td style={{ padding: '8px 10px', fontWeight: 700, color: D.text }}>{row.step}</td>
+                        <td style={{ padding: '8px 10px', color: D.text }}>{row.result}</td>
+                        <td style={{ padding: '8px 10px', color: D.muted }}>{row.decision}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Box>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
@@ -3294,9 +3431,24 @@ const DeploymentDashboard = ({
                   </Typography>
                 </Stack>
               ) : (
-                <Alert severity="info">
-                  OOT validation metrics are not available for this run yet. Run simulation with labelled synthetic pipeline data.
-                </Alert>
+                <Box sx={{ p: 1.4, border: `1px solid ${D.border}`, borderRadius: 2, bgcolor: '#fff' }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+                    <Typography sx={{ fontSize: 12, color: D.text }}>
+                      OOT validation metrics are not available for this run yet.
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setInfoDialog({
+                        title: 'OOT validation availability',
+                        content: 'Run simulation with labelled synthetic pipeline data to populate out-of-time validation metrics for this batch.',
+                      })}
+                      sx={{ textTransform: 'none', borderColor: D.border, color: D.text, bgcolor: '#fff', flexShrink: 0 }}
+                    >
+                      How to populate
+                    </Button>
+                  </Stack>
+                </Box>
               )}
             </Paper>
 
@@ -3381,7 +3533,24 @@ const DeploymentDashboard = ({
                   </Box>
                 </>
               ) : (
-                <Alert severity="info">Run simulation to view live flow stream.</Alert>
+                <Box sx={{ p: 1.4, border: `1px solid ${D.border}`, borderRadius: 2, bgcolor: '#fff' }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+                    <Typography sx={{ fontSize: 12, color: D.text }}>
+                      Run simulation to view the live flow stream.
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setInfoDialog({
+                        title: 'Live flow stream',
+                        content: 'The live flow stream appears after one or more batches. It shows how rows move through ingest, transform, prediction, suppression, and Sentinel handoff over time.',
+                      })}
+                      sx={{ textTransform: 'none', borderColor: D.border, color: D.text, bgcolor: '#fff', flexShrink: 0 }}
+                    >
+                      What this shows
+                    </Button>
+                  </Stack>
+                </Box>
               )}
             </Paper>
 
@@ -3613,6 +3782,26 @@ const DeploymentDashboard = ({
         )}
 
       </Box>
+
+      <Dialog open={Boolean(infoDialog)} onClose={() => setInfoDialog(null)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
+          <Typography sx={{ fontSize: 15, fontWeight: 800, color: D.text }}>
+            {infoDialog?.title || 'Information'}
+          </Typography>
+          <IconButton size="small" onClick={() => setInfoDialog(null)}>
+            <Close sx={{ fontSize: 16 }} />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          {React.isValidElement(infoDialog?.content) ? (
+            infoDialog.content
+          ) : (
+            <Typography sx={{ fontSize: 12.5, color: D.text, lineHeight: 1.7 }}>
+              {infoDialog?.content || ''}
+            </Typography>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Score Batch Dialog */}
       <ScoreBatchDialog

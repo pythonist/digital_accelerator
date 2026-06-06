@@ -771,7 +771,7 @@ const ComparisonTab = ({
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <CircularProgress size={16} sx={{ color: V.orange }} />
                           <Typography sx={{ fontSize: 11.25, color: V.textMuted }}>
-                            Loading score distribution and feature detail...
+                            Loading holdout score histogram and feature detail...
                           </Typography>
                         </Stack>
                       ) : null}

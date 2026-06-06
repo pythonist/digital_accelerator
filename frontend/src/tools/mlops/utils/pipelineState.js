@@ -3,7 +3,7 @@ const safeLower = (value) => String(value || '').trim().toLowerCase();
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const MANIFEST_STAGE_KEYS = ['data', 'master', 'target', 'eda', 'preprocess', 'model', 'validation', 'registry', 'ready', 'dashboard', 'reports'];
+const MANIFEST_STAGE_KEYS = ['data', 'master', 'target', 'eda', 'featurestore', 'preprocess', 'model', 'validation', 'registry', 'ready', 'dashboard', 'reports'];
 const RUN_STATE_TO_STAGE = {
   data_upload: 'data',
   master_dataset: 'master',

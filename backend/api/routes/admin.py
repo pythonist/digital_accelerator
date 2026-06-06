@@ -118,8 +118,7 @@ def admin_dashboard():
                 'total_users': len(tenant_users),
                 'active_sessions': active_sessions,
                 'total_environments': total_unique_envs,
-                'admin_count': sum(1 for u in tenant_users if u.get('role') == 'TENANT_ADMIN'),
-                'mfa_enabled_count': sum(1 for u in tenant_users if int(u.get('mfa_enabled') or 0) == 1)
+                'admin_count': sum(1 for u in tenant_users if u.get('role') == 'TENANT_ADMIN')
             }
         })
     except Exception as e:
@@ -254,7 +253,6 @@ def list_users():
                     "phone": "",
                     "role": u.get("role") or "TENANT_USER",
                     "status": "active" if email in active_by_email else "inactive",
-                    "mfa_enabled": bool(int(u.get("mfa_enabled") or 0)),
                     "created_at": u.get("created_at") or 0,
                     "last_login": last_login_by_email.get(email),
                     "disabled": bool(int(u.get("disabled") or 0)),
@@ -576,7 +574,6 @@ def get_users():
                     "email": u.get("email"),
                     "phone": "",
                     "role": u.get("role") or "TENANT_USER",
-                    "mfa_enabled": bool(int(u.get("mfa_enabled") or 0)),
                     "created_at": u.get("created_at") or time.time(),
                     "disabled": bool(int(u.get("disabled") or 0)),
                 }
@@ -622,8 +619,7 @@ def get_users():
             'sessions': sessions_list,
             'stats': {
                 'total_users': len(users_list),
-                'active_sessions': len(set([s.get('username') for s in sessions_list if s.get('is_active')])),
-                'mfa_enabled_count': len([u for u in users_list if u['mfa_enabled']])
+                'active_sessions': len(set([s.get('username') for s in sessions_list if s.get('is_active')]))
             }
         })
     except Exception as e:

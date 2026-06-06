@@ -303,11 +303,11 @@ const AdminDashboard = () => {
                 color="#8b5cf6" 
               />
               <Divider orientation="vertical" flexItem sx={{ height: 40, my: 'auto' }} />
-              <StatItem 
-                label="MFA Adoption" 
-                value={`${Math.round((stats?.mfa_enabled_count / (stats?.total_users || 1)) * 100)}%`} 
-                icon={<Security />} 
-                color={stats?.mfa_enabled_count < stats?.total_users ? "#f59e0b" : "#10b981"} 
+              <StatItem
+                label="Admin Users"
+                value={stats?.admin_count || 0}
+                icon={<AdminPanelSettings />}
+                color="#f59e0b"
               />
             </Paper>
 

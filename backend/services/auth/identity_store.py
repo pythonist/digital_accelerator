@@ -75,18 +75,6 @@ class IdentityStore:
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)")
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS user_mfa (
-                    user_id TEXT PRIMARY KEY,
-                    secret TEXT,
-                    enabled INTEGER DEFAULT 0,
-                    created_at REAL,
-                    updated_at REAL,
-                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-                )
-                """
-            )
             conn.commit()
         finally:
             conn.close()
@@ -151,19 +139,6 @@ class IdentityStore:
                     """,
                     (str(uuid.uuid4()), email_s, str(pwd_hash), tid, str(role), disabled, created_at, created_at),
                 )
-                cur.execute("SELECT user_id FROM users WHERE email = ?", (email_s,))
-                urow = cur.fetchone()
-                if urow:
-                    mfa_secret = (info or {}).get("mfa_secret")
-                    mfa_enabled = 1 if bool((info or {}).get("mfa_enabled", False)) else 0
-                    if mfa_secret:
-                        cur.execute(
-                            """
-                            INSERT OR REPLACE INTO user_mfa (user_id, secret, enabled, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?)
-                            """,
-                            (str(urow["user_id"]), str(mfa_secret), mfa_enabled, created_at, created_at),
-                        )
             conn.commit()
         finally:
             conn.close()
@@ -341,34 +316,6 @@ class IdentityStore:
         finally:
             conn.close()
 
-    def get_mfa(self, user_id: str) -> Optional[Dict[str, Any]]:
-        if not user_id:
-            return None
-        conn = self._connect()
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM user_mfa WHERE user_id = ?", (str(user_id),))
-            row = cur.fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
-
-    def set_mfa(self, user_id: str, secret: str, enabled: bool) -> None:
-        conn = self._connect()
-        try:
-            cur = conn.cursor()
-            now = float(time.time())
-            cur.execute(
-                """
-                INSERT OR REPLACE INTO user_mfa (user_id, secret, enabled, created_at, updated_at)
-                VALUES (?, ?, ?, COALESCE((SELECT created_at FROM user_mfa WHERE user_id = ?), ?), ?)
-                """,
-                (str(user_id), str(secret), 1 if enabled else 0, str(user_id), now, now),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
     def list_users_by_tenant(self, tenant_id: str) -> List[Dict[str, Any]]:
         if not tenant_id:
             return []
@@ -377,10 +324,8 @@ class IdentityStore:
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT u.user_id, u.email, u.tenant_id, u.role, u.disabled, u.created_at, u.updated_at,
-                       COALESCE(m.enabled, 0) AS mfa_enabled
+                SELECT u.user_id, u.email, u.tenant_id, u.role, u.disabled, u.created_at, u.updated_at
                 FROM users u
-                LEFT JOIN user_mfa m ON m.user_id = u.user_id
                 WHERE u.tenant_id = ?
                 ORDER BY u.created_at DESC
                 """,
@@ -418,7 +363,6 @@ class IdentityStore:
         conn = self._connect()
         try:
             cur = conn.cursor()
-            cur.execute("DELETE FROM user_mfa WHERE user_id = ?", (str(user_id),))
             cur.execute("DELETE FROM users WHERE user_id = ?", (str(user_id),))
             conn.commit()
         finally:

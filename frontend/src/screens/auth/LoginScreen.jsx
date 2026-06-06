@@ -3,7 +3,7 @@ import { useAppContext } from "../../context/AppContext";
 import { useNavigate } from 'react-router-dom';
 import SentinelLogo from '../../assets/PwC_2025_Logo.svg';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FadeIn, SlideSwitcher, ScaleIn } from "@components/MotionWrappers/MotionWrappers";
+import { FadeIn, ScaleIn } from "@components/MotionWrappers/MotionWrappers";
 
 import {
   Box, Typography, Button, OutlinedInput,
@@ -12,7 +12,7 @@ import {
 
 import {
   Lock, Person, ArrowForward, ErrorOutline,
-  Visibility, VisibilityOff, Smartphone
+  Visibility, VisibilityOff
 } from '@mui/icons-material';
 
 const colors = {
@@ -234,9 +234,6 @@ const LoginScreen = () => {
   const { handleLogin } = useAppContext();
   const navigate = useNavigate();
 
-  const [step, setStep] = useState(1);
-  const [otp, setOtp] = useState('');
-  const [loginTempToken, setLoginTempToken] = useState('');
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [fieldErrors, setFieldErrors] = useState({});
   const [showPassword, setShowPassword] = useState(false);
@@ -246,12 +243,8 @@ const LoginScreen = () => {
 
   const validate = () => {
     const errors = {};
-    if (step === 1) {
-      if (!formData.username.trim()) errors.username = 'Email required';
-      if (!formData.password) errors.password = 'Password required';
-    } else {
-      if (otp.length < 6) errors.otp = '6-digit code required';
-    }
+    if (!formData.username.trim()) errors.username = 'Email required';
+    if (!formData.password) errors.password = 'Password required';
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -262,33 +255,19 @@ const LoginScreen = () => {
     setIsLoading(true);
     setError('');
     try {
-      if (step === 1) {
-        const res = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
-        });
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) throw new Error("Invalid API response. Check backend connection.");
-        const data = await res.json();
-        if (res.ok) {
-          if (data.require_mfa) { setLoginTempToken(data.temp_token || ''); setStep(2); }
-          else if (data.success && data.token) { await handleLogin({ token: data.token, user: data.user }); navigate('/'); }
-          else setError('Unexpected server response.');
-        } else {
-          setError(data.error || 'Invalid credentials');
-        }
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) throw new Error("Invalid API response. Check backend connection.");
+      const data = await res.json();
+      if (res.ok) {
+        if (data.success && data.token) { await handleLogin({ token: data.token, user: data.user }); navigate('/'); }
+        else setError('Unexpected server response.');
       } else {
-        const res = await fetch('/api/login/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ temp_token: loginTempToken, code: otp, username: formData.username, password: formData.password })
-        });
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) throw new Error("Invalid API response during verification.");
-        const data = await res.json();
-        if (res.ok && data.success && data.token) { await handleLogin({ token: data.token, user: data.user }); navigate('/'); }
-        else setError(data.error || 'Invalid authentication code');
+        setError(data.error || 'Invalid credentials');
       }
     } catch (err) {
       setError(err.message || 'Connection error. Please try again.');
@@ -322,10 +301,10 @@ const LoginScreen = () => {
                 </Box>
               </Box>
               <Typography variant="h4" sx={{ fontWeight: 700, color: colors.pwcDark, mb: 1 }}>
-                {step === 1 ? 'Welcome Back' : 'Verify Identity'}
+                Welcome Back
               </Typography>
               <Typography variant="body1" sx={{ color: colors.slate600 }}>
-                {step === 1 ? 'Enter your credentials to access your workspace' : 'Enter the code from your authenticator app'}
+                Enter your credentials to access your workspace
               </Typography>
             </Box>
           </FadeIn>
@@ -342,85 +321,60 @@ const LoginScreen = () => {
           </AnimatePresence>
 
           <Box component="form" onSubmit={onSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-            <SlideSwitcher itemKey={step} direction={step === 1 ? -1 : 1}>
-              {step === 1 ? (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                  <FieldShell label="Email Address" helper={fieldErrors.username}>
-                    <OutlinedInput
-                      fullWidth
-                      name="username"
-                      type="email"
-                      autoComplete="username"
-                      value={formData.username}
-                      onChange={handleChange}
-                      onFocus={() => setActiveField('username')}
-                      onBlur={() => setActiveField('')}
-                      placeholder="your.email@company.com"
-                      startAdornment={
-                        <InputAdornment position="start">
-                          <Person sx={{ color: activeField === 'username' ? colors.pwcOrange : colors.slate400, fontSize: 20, transition: 'color 0.2s' }} />
-                        </InputAdornment>
-                      }
-                      sx={getInputSx(activeField === 'username')}
-                    />
-                  </FieldShell>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              <FieldShell label="Email Address" helper={fieldErrors.username}>
+                <OutlinedInput
+                  fullWidth
+                  name="username"
+                  type="email"
+                  autoComplete="username"
+                  value={formData.username}
+                  onChange={handleChange}
+                  onFocus={() => setActiveField('username')}
+                  onBlur={() => setActiveField('')}
+                  placeholder="your.email@company.com"
+                  startAdornment={
+                    <InputAdornment position="start">
+                      <Person sx={{ color: activeField === 'username' ? colors.pwcOrange : colors.slate400, fontSize: 20, transition: 'color 0.2s' }} />
+                    </InputAdornment>
+                  }
+                  sx={getInputSx(activeField === 'username')}
+                />
+              </FieldShell>
 
-                  <FieldShell label="Password" helper={fieldErrors.password}>
-                    <OutlinedInput
-                      fullWidth
-                      name="password"
-                      type={showPassword ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      value={formData.password}
-                      onChange={handleChange}
-                      onFocus={() => setActiveField('password')}
-                      onBlur={() => setActiveField('')}
-                      placeholder="Enter your password"
-                      startAdornment={
-                        <InputAdornment position="start">
-                          <Lock sx={{ color: activeField === 'password' ? colors.pwcOrange : colors.slate400, fontSize: 20, transition: 'color 0.2s' }} />
-                        </InputAdornment>
-                      }
-                      endAdornment={
-                        <InputAdornment position="end">
-                          <IconButton
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            onMouseDown={(e) => e.preventDefault()}
-                            edge="end"
-                            sx={{ color: colors.slate400, '&:hover': { color: colors.slate600 } }}
-                          >
-                            {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
-                          </IconButton>
-                        </InputAdornment>
-                      }
-                      sx={getInputSx(activeField === 'password')}
-                    />
-                  </FieldShell>
-                </Box>
-              ) : (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                  <FieldShell label="Authentication Code" helper={fieldErrors.otp}>
-                    <OutlinedInput
-                      fullWidth
-                      autoFocus
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value)}
-                      onFocus={() => setActiveField('otp')}
-                      onBlur={() => setActiveField('')}
-                      placeholder="000000"
-                      inputProps={{ maxLength: 6, style: { textAlign: 'center', letterSpacing: '0.25em', fontFamily: 'monospace', fontSize: '1.2rem', padding: '13px 14px' } }}
-                      startAdornment={
-                        <InputAdornment position="start">
-                          <Smartphone sx={{ color: activeField === 'otp' ? colors.pwcOrange : colors.slate400, fontSize: 20, transition: 'color 0.2s' }} />
-                        </InputAdornment>
-                      }
-                      sx={getInputSx(activeField === 'otp')}
-                    />
-                  </FieldShell>
-                </Box>
-              )}
-            </SlideSwitcher>
+              <FieldShell label="Password" helper={fieldErrors.password}>
+                <OutlinedInput
+                  fullWidth
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  onFocus={() => setActiveField('password')}
+                  onBlur={() => setActiveField('')}
+                  placeholder="Enter your password"
+                  startAdornment={
+                    <InputAdornment position="start">
+                      <Lock sx={{ color: activeField === 'password' ? colors.pwcOrange : colors.slate400, fontSize: 20, transition: 'color 0.2s' }} />
+                    </InputAdornment>
+                  }
+                  endAdornment={
+                    <InputAdornment position="end">
+                      <IconButton
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        onMouseDown={(e) => e.preventDefault()}
+                        edge="end"
+                        sx={{ color: colors.slate400, '&:hover': { color: colors.slate600 } }}
+                      >
+                        {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                      </IconButton>
+                    </InputAdornment>
+                  }
+                  sx={getInputSx(activeField === 'password')}
+                />
+              </FieldShell>
+            </Box>
 
             <Button
               type="submit"
@@ -441,30 +395,28 @@ const LoginScreen = () => {
               {isLoading ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <CircularProgress size={16} sx={{ color: colors.white }} />
-                  <span>Verifying...</span>
+                  <span>Signing in...</span>
                 </Box>
               ) : (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <span>{step === 1 ? 'Sign In' : 'Verify & Continue'}</span>
+                  <span>Sign In</span>
                   <ArrowForward sx={{ fontSize: 18 }} />
                 </Box>
               )}
             </Button>
 
-            {step === 1 && (
-              <Box sx={{ textAlign: 'center', pt: 0.5 }}>
-                <Typography variant="body2" sx={{ color: colors.slate600 }}>
-                  Don't have an account?{' '}
-                  <Button
-                    onClick={() => navigate('/register')}
-                    disableRipple
-                    sx={{ p: 0, minWidth: 0, fontWeight: 600, textTransform: 'none', color: colors.pwcOrange, '&:hover': { bgcolor: 'transparent', color: colors.pwcOrangeHover } }}
-                  >
-                    Register here
-                  </Button>
-                </Typography>
-              </Box>
-            )}
+            <Box sx={{ textAlign: 'center', pt: 0.5 }}>
+              <Typography variant="body2" sx={{ color: colors.slate600 }}>
+                Don't have an account?{' '}
+                <Button
+                  onClick={() => navigate('/register')}
+                  disableRipple
+                  sx={{ p: 0, minWidth: 0, fontWeight: 600, textTransform: 'none', color: colors.pwcOrange, '&:hover': { bgcolor: 'transparent', color: colors.pwcOrangeHover } }}
+                >
+                  Register here
+                </Button>
+              </Typography>
+            </Box>
           </Box>
 
           <FadeIn delay={0.6}>

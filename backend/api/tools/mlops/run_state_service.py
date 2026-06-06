@@ -270,6 +270,57 @@ def _deepcopy(value: Any) -> Any:
         return _jsonable(value)
 
 
+def _default_step_record(step_name: str) -> Dict[str, Any]:
+    step = canonical_step_name(step_name)
+    return {
+        "step": step,
+        "label": STEP_LABELS.get(step, step.replace("_", " ").title()),
+        "status": "not_started",
+        "inputs": {},
+        "outputs": {},
+        "input_signature": _signature({}),
+        "output_signature": _signature({}),
+        "version": 0,
+    }
+
+
+def _normalize_step_record(step_name: str, record: Any) -> Dict[str, Any]:
+    step = canonical_step_name(step_name)
+    base = _default_step_record(step)
+    if not isinstance(record, dict):
+        return base
+
+    normalized = {**base, **_compact_value(record, step)}
+    normalized["step"] = step
+    normalized["label"] = str(normalized.get("label") or base["label"])
+    status = str(normalized.get("status") or "not_started").strip().lower()
+    normalized["status"] = status if status in RUN_STATE_STATUSES else "not_started"
+    normalized["inputs"] = normalized.get("inputs") if isinstance(normalized.get("inputs"), dict) else {}
+    normalized["outputs"] = normalized.get("outputs") if isinstance(normalized.get("outputs"), dict) else {}
+    normalized["input_signature"] = str(normalized.get("input_signature") or _signature(normalized["inputs"]))
+    normalized["output_signature"] = str(normalized.get("output_signature") or _signature(normalized["outputs"]))
+    try:
+        normalized["version"] = int(normalized.get("version") or 0)
+    except Exception:
+        normalized["version"] = 0
+    return _flatten_common_fields(normalized)
+
+
+def _normalize_steps_json(steps: Any) -> Dict[str, Any]:
+    normalized = {step: _default_step_record(step) for step in DEFAULT_STEP_ORDER}
+    if isinstance(steps, dict):
+        for raw_step, record in steps.items():
+            step = canonical_step_name(raw_step)
+            normalized[step] = _normalize_step_record(step, record)
+    return normalized
+
+
+def _needs_step_backfill(steps: Any) -> bool:
+    if not isinstance(steps, dict):
+        return True
+    return any(step not in steps for step in DEFAULT_STEP_ORDER)
+
+
 def _compact_value(value: Any, key: str = "") -> Any:
     key_text = str(key or "")
     if key_text in OMIT_DATA_KEYS:
@@ -487,6 +538,7 @@ class RunStateService:
         steps = _safe_json_loads(row[9], {})
         if not isinstance(steps, dict):
             steps = {}
+        steps = _normalize_steps_json(steps)
         state = {
             "run_id": str(row[0]),
             "tenant_id": str(row[1]),
@@ -529,7 +581,10 @@ class RunStateService:
     ) -> Dict[str, Any]:
         run_id_text = str(run_id or "").strip() or _make_run_id(pipeline_type)
         now = _utc_now()
-        step_payload = steps if isinstance(steps, dict) else {}
+        step_payload = _normalize_steps_json(steps)
+        requested_status = str(status or "running").strip().lower()
+        derived_status = self._derive_run_status(step_payload)
+        run_status = requested_status if requested_status in {"failed", "stale"} else derived_status
         with get_connection(self.db_path) as conn:
             conn.execute(
                 """
@@ -556,7 +611,7 @@ class RunStateService:
                     pipeline_uuid,
                     pipeline_name,
                     str(pipeline_type or "fcc").strip().lower() or "fcc",
-                    status if status in {"running", "completed", "failed", "stale"} else "running",
+                    run_status,
                     canonical_step_name(current_step),
                     json.dumps(step_payload, default=str),
                     now,
@@ -589,7 +644,21 @@ class RunStateService:
             ).fetchone()
         if not row:
             raise ValueError(f"RUN_STATE {run_id_text} not found")
+        raw_steps = _safe_json_loads(row[9], {})
         run_state = self._row_to_state(row)
+        if _needs_step_backfill(raw_steps):
+            try:
+                with get_connection(self.db_path) as conn:
+                    conn.execute(
+                        """
+                        UPDATE mlops_run_state
+                        SET steps_json = ?
+                        WHERE run_id = ? AND tenant_id = ? AND env_id = ?
+                        """,
+                        [json.dumps(run_state["steps_json"], default=str), run_id_text, tenant_id, env_id],
+                    )
+            except Exception:
+                pass
         self._set_cache(run_state)
         return run_state
 
@@ -617,7 +686,21 @@ class RunStateService:
                 [tenant_id, env_id, int(pipeline_id)],
             ).fetchone()
         if row:
+            raw_steps = _safe_json_loads(row[9], {})
             run_state = self._row_to_state(row)
+            if _needs_step_backfill(raw_steps):
+                try:
+                    with get_connection(self.db_path) as conn:
+                        conn.execute(
+                            """
+                            UPDATE mlops_run_state
+                            SET steps_json = ?
+                            WHERE run_id = ? AND tenant_id = ? AND env_id = ?
+                            """,
+                            [json.dumps(run_state["steps_json"], default=str), run_state["run_id"], tenant_id, env_id],
+                        )
+                except Exception:
+                    pass
             self._set_cache(run_state)
             return run_state
         if not create_if_missing:
@@ -743,7 +826,9 @@ class RunStateService:
     ) -> Dict[str, Any]:
         run_state = self.get_run_state(tenant_id, env_id, run_id)
         step = canonical_step_name(step_name)
-        steps = _deepcopy(run_state.get("steps_json") if isinstance(run_state.get("steps_json"), dict) else {})
+        steps = _normalize_steps_json(
+            _deepcopy(run_state.get("steps_json") if isinstance(run_state.get("steps_json"), dict) else {})
+        )
         prev = steps.get(step) if isinstance(steps.get(step), dict) else {}
         next_inputs = _compact_value(inputs or {}, "inputs")
         next_outputs = _compact_value(outputs or {}, "outputs")
@@ -767,11 +852,13 @@ class RunStateService:
             "updated_at": now,
         }
         if next_status == "completed":
-            record["completed_at"] = record.get("completed_at") or now
+            record["completed_at"] = now if prior_input_signature != input_signature else (record.get("completed_at") or now)
             record.pop("stale_reason", None)
             record.pop("stale_from_step", None)
         elif next_status == "running":
             record["started_at"] = record.get("started_at") or now
+            if prior_input_signature != input_signature:
+                record.pop("completed_at", None)
         steps[step] = _flatten_common_fields(record)
 
         stale_steps: List[str] = []
@@ -858,15 +945,17 @@ class RunStateService:
         return self.get_run_state(tenant_id, env_id, run_id, use_cache=False)
 
     def _derive_run_status(self, steps: Dict[str, Any]) -> str:
-        statuses = [str((step or {}).get("status") or "").lower() for step in steps.values() if isinstance(step, dict)]
+        normalized_steps = _normalize_steps_json(steps)
+        statuses = [
+            str((normalized_steps.get(step_name) or {}).get("status") or "not_started").lower()
+            for step_name in DEFAULT_STEP_ORDER
+        ]
         if any(status == "failed" for status in statuses):
             return "failed"
         if any(status == "stale" for status in statuses):
             return "stale"
-        if statuses and all(status == "completed" for status in statuses):
-            return "completed"
         if any(status in {"completed", "running"} for status in statuses):
-            return "running"
+            return "completed" if all(status == "completed" for status in statuses) else "running"
         return "running"
 
     def get_step_data(self, tenant_id: str, env_id: str, run_id: str, step_name: str) -> Dict[str, Any]:

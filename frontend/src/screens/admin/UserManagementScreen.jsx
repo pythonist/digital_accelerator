@@ -22,24 +22,19 @@ import {
   Alert,
   AlertTitle,
   Divider,
-  Stack,
-  Tooltip
+  Stack
 } from '@mui/material';
 
 // Icons
 import {
   ArrowBack,
   Shield,
-  Smartphone,
   Phone,
   AccessTime,
-  CheckCircle,
-  Cancel,
   Person,
   Devices,
   Security,
-  Refresh,
-  Lock
+  Refresh
 } from '@mui/icons-material';
 
 const UserManagementScreen = () => {
@@ -202,9 +197,9 @@ const UserManagementScreen = () => {
                                     <Typography variant="caption">{user.phone || 'N/A'}</Typography>
                                   </Box>
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <Smartphone sx={{ fontSize: 14, color: user.mfa_enabled ? 'success.main' : 'text.disabled' }} />
-                                    <Typography variant="caption" color={user.mfa_enabled ? 'success.main' : 'text.disabled'} fontWeight="600">
-                                      {user.mfa_enabled ? '2FA Active' : '2FA Disabled'}
+                                    <Security sx={{ fontSize: 14, color: user.disabled ? 'text.disabled' : 'success.main' }} />
+                                    <Typography variant="caption" color={user.disabled ? 'text.disabled' : 'success.main'} fontWeight="600">
+                                      {user.disabled ? 'Access disabled' : 'Password login'}
                                     </Typography>
                                   </Box>
                                 </Stack>
@@ -213,15 +208,13 @@ const UserManagementScreen = () => {
                           />
                           
                           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                            {user.mfa_enabled ? (
-                               <Tooltip title="Security Compliance Met">
-                                 <CheckCircle color="success" fontSize="small" />
-                               </Tooltip>
-                            ) : (
-                               <Tooltip title="Security Risk: MFA Disabled">
-                                 <Cancel color="disabled" fontSize="small" />
-                               </Tooltip>
-                            )}
+                            <Chip
+                              label={user.disabled ? 'DISABLED' : 'ENABLED'}
+                              size="small"
+                              color={user.disabled ? 'default' : 'success'}
+                              variant="outlined"
+                              sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, borderRadius: 0.5 }}
+                            />
                           </Box>
                         </ListItem>
                         {idx < users.length - 1 && <Divider component="li" />}
@@ -309,9 +302,7 @@ const UserManagementScreen = () => {
               >
                 <AlertTitle sx={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e40af' }}>Security Policy Enforcement</AlertTitle>
                 <Typography variant="caption" sx={{ color: '#1e3a8a', lineHeight: 1.5 }}>
-                  All administrative accounts are required to maintain active 2-Factor Authentication. 
-                  Sessions automatically expire after 24 hours of inactivity.
-                  Audit logs are retained for 90 days.
+                  Password-based access is controlled by tenant administrators. Sessions automatically expire after 24 hours of inactivity, and audit logs are retained for 90 days.
                 </Typography>
               </Alert>
             </Stack>

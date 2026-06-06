@@ -301,8 +301,8 @@ export const getFeatureImportanceRows = (model, limit = 15) => {
 export const buildCurveGrid = (models, curveKey, xKey, yKey, step = 0.02) => {
   const baseGrid = Array.from({ length: Math.floor(1 / step) + 1 }, (_, i) => Number((i * step).toFixed(4)));
   const series = (models || []).map((model) => {
-    const raw = extractCurveFromValue(extractCurve(model, curveKey), xKey, yKey);
-    return { id: model?.job_id, label: normalizeLabel(model), points: raw };
+    const points = getCurvePoints(model, curveKey, xKey, yKey);
+    return { id: model?.job_id, label: normalizeLabel(model), points };
   });
   const hasData = series.some((item) => item.points.length > 1);
   if (!hasData) {

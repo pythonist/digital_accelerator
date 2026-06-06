@@ -612,6 +612,7 @@ const ModelReleaseScreen = ({
   const importRef = useRef(null);
 
   const [loading, setLoading] = useState(false);
+  const [registering, setRegistering] = useState(false);
   const [releaseError, setReleaseError] = useState(null);
   const [registryRows, setRegistryRows] = useState([]);
   const [trainingRuns, setTrainingRuns] = useState([]);
@@ -1098,6 +1099,7 @@ const ModelReleaseScreen = ({
     }
     const finalStage = String(stageOverride || lifecycleStage || 'candidate').toLowerCase();
     try {
+      setRegistering(true);
       setLoading(true);
       const validationPayload = {
         ...(effectiveValidationReport || {}),
@@ -1142,6 +1144,7 @@ const ModelReleaseScreen = ({
     } catch (error) {
       setReleaseError(error?.response?.data?.error || 'Failed to save the registry entry.');
     } finally {
+      setRegistering(false);
       setLoading(false);
     }
   }, [actionsDisabled, activePipelineId, activePipelineName, activeRun, approvalsReady, businessApprovalNotes, changedVsPrior, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, effectiveValidationReport, gatingMessage, guardrailLimit, lifecycleStage, modelName, onRegistered, owner, preprocessedDataset?.dataset_id, refreshReleaseData, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, validationThreshold, version]);
@@ -1551,6 +1554,353 @@ const ModelReleaseScreen = ({
     return JSON.stringify(sample, null, 2) || '{\n  "feature_1": 0\n}';
   }, [activeRun]);
 
+  if (String(persona || 'business')) {
+    return (
+      <Stack spacing={2}>
+        <Paper variant="outlined" sx={{ borderRadius: 0, p: 2.2, borderColor: T.border, bgcolor: '#fff' }}>
+          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', lg: 'center' }}>
+            <Box>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                Model Release
+              </Typography>
+              <Typography sx={{ fontSize: 21, fontWeight: 900, color: T.text, mt: 0.35 }}>
+                {modelName || getJobName(activeRun, currentRegistryEntry)}
+              </Typography>
+              <Typography sx={{ fontSize: 12.5, color: T.muted, mt: 0.55 }}>
+                Approve one validated model, keep the threshold locked, and deploy when ready.
+              </Typography>
+            </Box>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button variant="outlined" startIcon={<ArrowBack />} onClick={onBack} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                Back
+              </Button>
+              <Button variant="outlined" startIcon={<Save />} onClick={() => handleRegisterAction(lifecycleStage || 'candidate')} disabled={actionsDisabled || registering} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                {registering ? 'Saving...' : currentRegistryEntry ? 'Update Registry' : 'Register'}
+              </Button>
+              <Button variant="contained" startIcon={<RocketLaunch />} onClick={() => setDeployDialogOpen(true)} disabled={actionsDisabled || canDisable(Boolean(deployDisabledReason))} sx={{ textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
+                {activeDeployment?.deployment_id ? 'Create Version' : 'Deploy'}
+              </Button>
+            </Stack>
+          </Stack>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap' }}>
+            <StatusChip label="Validation" value={validationStatusText} />
+            <StatusChip label="Registry" value={registrationStatusText} />
+            <StatusChip label="Deployment" value={deploymentStatusText} />
+          </Stack>
+          {actionsDisabled ? <Alert severity="warning" sx={{ mt: 1.5, borderRadius: 0 }}>{gatingMessage}</Alert> : null}
+          {releaseError ? <Alert severity="error" sx={{ mt: 1.5, borderRadius: 0 }}>{releaseError}</Alert> : null}
+        </Paper>
+
+        <Box sx={{ display: 'grid', gap: 1.4, gridTemplateColumns: { xs: '1fr', lg: '1.05fr 0.95fr' } }}>
+          <Paper variant="outlined" sx={{ borderRadius: 0, p: 2, borderColor: T.border }}>
+            <Stack spacing={1.5}>
+              <Box>
+                <Typography sx={{ fontSize: 13.5, fontWeight: 900, color: T.text }}>Release decision</Typography>
+                <Typography sx={{ fontSize: 12, color: T.muted, mt: 0.4, lineHeight: 1.6 }}>
+                  {businessSummary?.headline || businessSummaryFallback.headline}
+                </Typography>
+              </Box>
+              <Select
+                size="small"
+                displayEmpty
+                value={effectiveCurrentJobId || ''}
+                onChange={(event) => {
+                  setSelectedReleaseJobId(String(event.target.value || '').trim());
+                  setReleaseError(null);
+                }}
+              >
+                {(trainingRuns || []).map((run) => (
+                  <MenuItem key={run.job_id} value={run.job_id}>
+                    {(run.model_name || run.label || run.algorithm_display || run.algorithm || String(run.job_id).slice(0, 8))}
+                    {` - ${fmtDate(run.trained_at)}`}
+                  </MenuItem>
+                ))}
+              </Select>
+              <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, minmax(0, 1fr))' } }}>
+                <SmallStat label="Review reduction" value={pct(currentSnapshot.suppression, 1)} />
+                <SmallStat label="Event loss" value={pct(currentSnapshot.eventLoss, 1)} />
+                <SmallStat label="Threshold" value={fmtMetric(deploymentThreshold, 2)} />
+                <SmallStat label="AUC" value={fmtMetric(currentSnapshot.rocAuc, 3)} />
+              </Box>
+              <Alert severity={guardrail.status === 'Safe' ? 'success' : 'warning'} sx={{ borderRadius: 0 }}>
+                {guardrail.status === 'Safe'
+                  ? `Ready to release at threshold ${fmtMetric(deploymentThreshold, 2)}. ${guardrail.detail}`
+                  : `${recommendation.reason} ${guardrail.detail}`}
+              </Alert>
+            </Stack>
+          </Paper>
+
+          <Paper variant="outlined" sx={{ borderRadius: 0, p: 2, borderColor: T.border }}>
+            <Typography sx={{ fontSize: 13.5, fontWeight: 900, color: T.text }}>Release setup</Typography>
+            <Box sx={{ mt: 1.3, display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+              <TextField size="small" label="Model name" value={modelName} onChange={(event) => setModelName(event.target.value)} />
+              <TextField size="small" label="Version" value={version} onChange={(event) => setVersion(event.target.value)} />
+              <TextField size="small" label="Owner" value={owner} onChange={(event) => setOwner(event.target.value)} />
+              <Select size="small" value={lifecycleStage} onChange={(event) => setLifecycleStage(event.target.value)}>
+                <MenuItem value="draft">Draft</MenuItem>
+                <MenuItem value="candidate">Candidate</MenuItem>
+                <MenuItem value="champion">Champion</MenuItem>
+                <MenuItem value="archived">Archived</MenuItem>
+              </Select>
+              <TextField size="small" label="Locked threshold" value={fmtMetric(lockedValidationThreshold, 2)} InputProps={{ readOnly: true }} />
+              <TextField size="small" label="Deployment version" value={deploymentVersionName} onChange={(event) => setDeploymentVersionName(event.target.value)} />
+            </Box>
+            <TextField size="small" fullWidth multiline minRows={2} sx={{ mt: 1 }} label="Release notes" value={registrationNotes} onChange={(event) => setRegistrationNotes(event.target.value)} />
+            <TextField size="small" fullWidth multiline minRows={2} sx={{ mt: 1 }} label="Deployment notes" value={deploymentNotes} onChange={(event) => setDeploymentNotes(event.target.value)} />
+            {deployDisabledReason ? <Alert severity="warning" sx={{ mt: 1.2, borderRadius: 0 }}>{deployDisabledReason}</Alert> : null}
+          </Paper>
+        </Box>
+
+        <Paper variant="outlined" sx={{ borderRadius: 0, p: 2, borderColor: T.border }}>
+          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between">
+            <Box sx={{ flex: 1 }}>
+              <Typography sx={{ fontSize: 13.5, fontWeight: 900, color: T.text }}>Registry & deployment history</Typography>
+              <Typography sx={{ fontSize: 11.8, color: T.muted, mt: 0.35 }}>
+                Recent governed releases only. Use details when you need the full audit trail.
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Button size="small" variant="outlined" startIcon={<Visibility />} onClick={() => onViewReport?.(effectiveCurrentJobId)} disabled={!effectiveCurrentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                Report
+              </Button>
+              <Button size="small" variant="outlined" startIcon={<CloudDownload />} onClick={() => handleExportModel('card')} disabled={!effectiveCurrentJobId || downloading === 'card'} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                Model Card
+              </Button>
+              <Button size="small" variant="outlined" startIcon={<FileDownload />} onClick={handleExportDeploymentConfig} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                Config
+              </Button>
+            </Stack>
+          </Stack>
+          <Box sx={{ mt: 1.3, overflowX: 'auto', border: `1px solid ${T.border}` }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+              <thead style={{ background: '#F8FAFC' }}>
+                <tr>
+                  {['Model', 'Stage', 'Threshold', 'Suppression', 'Event Loss', 'Deployment', 'Updated', 'Actions'].map((header) => (
+                    <th key={header} style={{ textAlign: 'left', padding: '9px 12px', borderBottom: `1px solid ${T.border}`, color: T.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {registryHistoryRows.slice(0, 6).map((row) => (
+                  <tr key={row.job_id}>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontWeight: 800, color: T.text }}>{row.model_name || row.job_id.slice(0, 8)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{stageLabel(row.stage)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.selected_threshold, 2)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.suppression_rate_pct, 1)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.event_loss_pct, 1)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{row.deployment_status}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{fmtDate(row.updated_at)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>
+                      <Stack direction="row" spacing={0.5}>
+                        <Button size="small" onClick={() => openDetailsDrawer(row)} sx={{ textTransform: 'none', minWidth: 0 }}>Details</Button>
+                        <Button size="small" onClick={() => handlePromoteStage(row.job_id, 'champion')} sx={{ textTransform: 'none', minWidth: 0 }}>Champion</Button>
+                        <Button size="small" onClick={() => setArchiveDialog({ open: true, row })} sx={{ textTransform: 'none', minWidth: 0 }}>Archive</Button>
+                      </Stack>
+                    </td>
+                  </tr>
+                ))}
+                {!registryHistoryRows.length ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '18px 12px' }}>
+                      <Alert severity="info" sx={{ borderRadius: 0 }}>No registered releases yet.</Alert>
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </Box>
+        </Paper>
+
+        <EnterpriseSection title="Advanced tools" subtitle="Comparison, sandbox scoring, import, and audit utilities" defaultOpen={false}>
+          <Stack spacing={2}>
+            <Box ref={compareRef}>
+              <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text, mb: 1 }}>Compare models</Typography>
+              {compareLoading ? (
+                <Stack alignItems="center" sx={{ py: 3 }}><CircularProgress size={22} sx={{ color: T.orange }} /></Stack>
+              ) : (
+                <>
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 1.2 }}>
+                    {registryRows.slice(0, 8).map((row) => {
+                      const checked = compareIds.includes(row.job_id);
+                      return (
+                        <Chip
+                          key={row.job_id}
+                          label={`${checked ? 'Selected' : 'Compare'}: ${row.model_name || row.job_id.slice(0, 8)}`}
+                          onClick={() => setCompareIds((previous) => {
+                            if (previous.includes(row.job_id)) return previous.filter((id) => id !== row.job_id);
+                            if (previous.length >= 5) return previous;
+                            return [...previous, row.job_id];
+                          })}
+                          sx={{ bgcolor: checked ? T.orangeSoft : '#FFF', color: checked ? T.orange : T.muted, border: `1px solid ${checked ? '#FED7AA' : T.border}`, cursor: 'pointer' }}
+                        />
+                      );
+                    })}
+                  </Stack>
+                  <Box sx={{ overflow: 'auto', border: `1px solid ${T.border}` }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                      <thead style={{ background: '#F8FAFC' }}>
+                        <tr>
+                          {['Model', 'AUC', 'Precision', 'Recall', 'F1', 'Threshold', 'Stage'].map((header) => (
+                            <th key={header} style={{ textAlign: 'left', padding: '9px 12px', borderBottom: `1px solid ${T.border}`, color: T.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {comparisonRows.map((row) => (
+                          <tr key={row.job_id} onClick={() => openDetailsDrawer(row)} style={{ cursor: 'pointer', background: String(row.job_id) === effectiveCurrentJobId ? '#FFF8F3' : '#FFF' }}>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontWeight: 800 }}>{row.model_name || row.label || row.job_id.slice(0, 8)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.roc_auc, 3)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.precision, 3)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.recall, 3)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.f1, 3)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.selected_threshold ?? row.optimal_threshold, 2)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{stageLabel(row.registry_stage)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Box>
+                </>
+              )}
+            </Box>
+
+            <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, borderColor: T.border }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Quick test</Typography>
+                <TextField multiline minRows={5} fullWidth value={testInput} onChange={(event) => setTestInput(event.target.value)} placeholder={featurePlaceholder} sx={{ mt: 1, '& .MuiInputBase-input': { fontFamily: T.mono, fontSize: 11.5 } }} />
+                <Button variant="contained" startIcon={testLoading ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <PlayArrow />} onClick={handleScoreSingleRecord} disabled={actionsDisabled || !testInput.trim() || testLoading} sx={{ mt: 1, textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
+                  {testLoading ? 'Scoring...' : 'Run test'}
+                </Button>
+                {testError ? <Alert severity="error" sx={{ mt: 1, borderRadius: 0 }}>{testError}</Alert> : null}
+                {testResult ? (
+                  <Stack spacing={0.3} sx={{ mt: 1 }}>
+                    <KeyValueRow label="Decision" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Retained for review' : 'Suppressed'} />
+                    <KeyValueRow label="Score" value={fmtMetric(testResult?.score, 4)} mono />
+                  </Stack>
+                ) : null}
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, borderColor: T.border }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Import or sandbox score</Typography>
+                <Box onClick={() => !actionsDisabled && document.getElementById('model-release-import-upload')?.click()} sx={{ mt: 1, p: 1.4, border: `1.5px dashed ${importFile ? T.orange : T.border}`, bgcolor: importFile ? T.orangeSoft : '#FCFCFD', cursor: actionsDisabled ? 'not-allowed' : 'pointer' }}>
+                  <input id="model-release-import-upload" type="file" accept=".pkl" style={{ display: 'none' }} onChange={(event) => { const file = event.target.files?.[0] || null; setImportFile(file); if (file) setImportName(file.name.replace(/\.pkl$/i, '')); }} />
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <CloudUpload sx={{ color: importFile ? T.orange : T.dim }} />
+                    <Typography sx={{ fontSize: 12, fontWeight: 800, color: importFile ? T.orange : T.text }}>{importFile ? importFile.name : 'Select .pkl model'}</Typography>
+                  </Stack>
+                </Box>
+                <Box sx={{ mt: 1, display: 'grid', gap: 1, gridTemplateColumns: '1fr 1fr' }}>
+                  <TextField size="small" label="Import name" value={importName} onChange={(event) => setImportName(event.target.value)} />
+                  <TextField size="small" label="Target" value={importTarget} onChange={(event) => setImportTarget(event.target.value)} />
+                  <Select size="small" value={importStage} onChange={(event) => setImportStage(event.target.value)}>
+                    <MenuItem value="candidate">Candidate</MenuItem>
+                    <MenuItem value="challenger">Challenger</MenuItem>
+                    <MenuItem value="champion">Champion</MenuItem>
+                  </Select>
+                  <TextField size="small" label="Threshold" type="number" value={importThreshold} onChange={(event) => setImportThreshold(event.target.value)} inputProps={{ min: 0, max: 1, step: 0.01 }} />
+                </Box>
+                <TextField size="small" fullWidth label="Import notes" value={importNotes} onChange={(event) => setImportNotes(event.target.value)} sx={{ mt: 1 }} />
+                <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+                  <Button variant="contained" startIcon={importUploading ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <UploadFile />} onClick={handleImportModel} disabled={!importFile || importUploading || actionsDisabled} sx={{ textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
+                    {importUploading ? 'Importing...' : 'Import'}
+                  </Button>
+                  <Box onClick={() => !actionsDisabled && document.getElementById('model-release-sandbox-upload')?.click()} sx={{ px: 1.3, py: 0.8, border: `1px solid ${sandboxFile ? T.orange : T.border}`, cursor: actionsDisabled ? 'not-allowed' : 'pointer' }}>
+                    <input id="model-release-sandbox-upload" type="file" accept=".csv" style={{ display: 'none' }} onChange={(event) => setSandboxFile(event.target.files?.[0] || null)} />
+                    <Typography sx={{ fontSize: 12, color: sandboxFile ? T.orange : T.muted }}>{sandboxFile ? sandboxFile.name : 'Choose CSV'}</Typography>
+                  </Box>
+                  <Button variant="outlined" startIcon={sandboxLoading ? <CircularProgress size={15} /> : <Assessment />} onClick={handleSandboxScore} disabled={!sandboxFile || sandboxLoading || actionsDisabled} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                    Score CSV
+                  </Button>
+                  <Button variant="outlined" startIcon={<FileDownload />} onClick={handleDownloadSandbox} disabled={!sandboxResult?.rows?.length} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                    Download
+                  </Button>
+                </Stack>
+                {importError ? <Alert severity="error" sx={{ mt: 1, borderRadius: 0 }}>{importError}</Alert> : null}
+                {sandboxError ? <Alert severity="error" sx={{ mt: 1, borderRadius: 0 }}>{sandboxError}</Alert> : null}
+              </Paper>
+            </Box>
+
+            <Box ref={auditRef} sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, borderColor: T.border }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Deployment history</Typography>
+                <Stack spacing={0.8} sx={{ mt: 1, maxHeight: 220, overflow: 'auto' }}>
+                  {deploymentHistory.slice(0, 8).map((row) => (
+                    <KeyValueRow key={row.deployment_id} label={row.deployment_name || row.deployment_id} value={row.active ? 'Active' : row.status || 'Inactive'} helper={`Threshold ${fmtMetric(row.threshold, 2)} - ${fmtDate(row.created_at)}`} />
+                  ))}
+                </Stack>
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 0, borderColor: T.border }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Audit trail</Typography>
+                <Stack spacing={0.8} sx={{ mt: 1, maxHeight: 220, overflow: 'auto' }}>
+                  {auditTimelineRows.slice(0, 10).map((entry, index) => (
+                    <Box key={`${entry.kind}-${index}`} sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: '#FFF' }}>
+                      <Typography sx={{ fontSize: 10, color: T.dim, textTransform: 'uppercase', letterSpacing: 0.6 }}>{entry.kind}</Typography>
+                      <Typography sx={{ mt: 0.35, fontSize: 11.5, color: T.ink, lineHeight: 1.5 }}>{entry.text}</Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              </Paper>
+            </Box>
+          </Stack>
+        </EnterpriseSection>
+
+        <Dialog open={deployDialogOpen} onClose={() => setDeployDialogOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+          <DialogTitle sx={{ fontSize: 18, fontWeight: 800 }}>Confirm deployment</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={0.8}>
+              <KeyValueRow label="Model Name" value={modelName} />
+              <KeyValueRow label="Version" value={version} />
+              <KeyValueRow label="Lifecycle Stage" value={stageLabel(currentRegistryEntry?.stage || lifecycleStage)} />
+              <KeyValueRow label="Registered Threshold" value={fmtMetric(registeredThreshold, 2)} mono />
+              <KeyValueRow label="Deployment Threshold" value={fmtMetric(deploymentThreshold, 2)} mono highlight />
+              <KeyValueRow label="Expected business impact" value={`${pct(currentSnapshot.suppression, 1)} review reduction / ${pct(currentSnapshot.eventLoss, 1)} potential risk miss`} />
+              <KeyValueRow label="Guardrail confirmation" value={guardrail.status} helper={guardrail.detail} />
+            </Stack>
+            <Alert severity="warning" sx={{ mt: 1.6, borderRadius: 2 }}>
+              You are deploying this model with threshold {fmtMetric(deploymentThreshold, 2)}. This threshold will be locked for deployment version {deploymentVersionName || 'new_release_version'}.
+            </Alert>
+            <TextField size="small" fullWidth multiline minRows={3} sx={{ mt: 1.6 }} label="Deployment notes" value={deploymentNotes} onChange={(event) => setDeploymentNotes(event.target.value)} />
+            {deployedThresholdDiffersFromValidation ? (
+              <Alert severity="info" sx={{ mt: 1.3, borderRadius: 2 }} onClick={() => setDiffAck((value) => !value)}>
+                <strong>{diffAck ? 'Acknowledged.' : 'Acknowledgement required.'}</strong> The deployment threshold differs from the locked validation threshold or active production history.
+              </Alert>
+            ) : null}
+          </DialogContent>
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button onClick={() => setDeployDialogOpen(false)} sx={{ textTransform: 'none', color: T.muted }}>Cancel</Button>
+            <Button variant="contained" startIcon={deploying ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <RocketLaunch />} onClick={executeDeploy} disabled={deploying || (deployedThresholdDiffersFromValidation && !diffAck)} sx={{ textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
+              {deploying ? 'Deploying...' : 'Confirm deploy'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={archiveDialog.open} onClose={() => setArchiveDialog({ open: false, row: null })} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+          <DialogTitle sx={{ fontSize: 17, fontWeight: 800 }}>Archive model</DialogTitle>
+          <DialogContent>
+            <Typography sx={{ fontSize: 12, color: T.muted, lineHeight: 1.6 }}>
+              This will archive {archiveDialog.row?.model_name || archiveDialog.row?.job_id || 'the selected model'} from the governed registry.
+            </Typography>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setArchiveDialog({ open: false, row: null })} sx={{ textTransform: 'none', color: T.muted }}>Cancel</Button>
+            <Button onClick={handleArchive} variant="contained" sx={{ textTransform: 'none', bgcolor: T.ink, '&:hover': { bgcolor: '#162234' } }}>Archive</Button>
+          </DialogActions>
+        </Dialog>
+
+        <Drawer anchor="right" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: { xs: '100%', md: 540 }, p: 2.5 } }}>
+          <Typography sx={{ fontSize: 20, fontWeight: 900, color: T.text }}>{drawerModel?.model_name || drawerModel?.label || drawerModel?.job_id?.slice(0, 8) || 'Model details'}</Typography>
+          <Typography sx={{ mt: 0.4, fontSize: 12, color: T.muted }}>{drawerModel?.algorithm_display || drawerModel?.algorithm || ''}</Typography>
+          <Tabs value={drawerTab} onChange={(_, value) => setDrawerTab(value)} variant="scrollable" scrollButtons="auto" sx={{ mt: 1.2 }}>
+            {['Overview', 'Metrics', 'Deployment'].map((label, index) => <Tab key={label} value={index} label={label} sx={{ textTransform: 'none', minHeight: 40 }} />)}
+          </Tabs>
+          <DrawerTabPanel value={drawerTab} index={0}><Stack spacing={0.4}><KeyValueRow label="Run ID" value={drawerModel?.job_id || '-'} mono /><KeyValueRow label="Stage" value={stageLabel(drawerModel?.stage || drawerModel?.registry_stage)} /><KeyValueRow label="Registered Threshold" value={fmtMetric(drawerModel?.selected_threshold, 2)} mono /></Stack></DrawerTabPanel>
+          <DrawerTabPanel value={drawerTab} index={1}><Stack spacing={0.4}><KeyValueRow label="ROC-AUC" value={fmtMetric(drawerModel?.metrics?.roc_auc, 4)} mono /><KeyValueRow label="Precision" value={fmtMetric(drawerModel?.metrics?.precision, 4)} mono /><KeyValueRow label="Recall" value={fmtMetric(drawerModel?.metrics?.recall, 4)} mono /><KeyValueRow label="F1" value={fmtMetric(drawerModel?.metrics?.f1, 4)} mono /></Stack></DrawerTabPanel>
+          <DrawerTabPanel value={drawerTab} index={2}><Stack spacing={0.4}><KeyValueRow label="Deployment version" value={drawerModel?.deployment?.deployment_name || drawerModel?.deployment?.deployment_id || '-'} /><KeyValueRow label="Deployed threshold" value={fmtMetric(drawerModel?.deployment?.threshold, 2)} mono highlight /><KeyValueRow label="Deployment date" value={fmtDate(drawerModel?.deployment?.created_at)} /></Stack></DrawerTabPanel>
+        </Drawer>
+      </Stack>
+    );
+  }
+
   return (
     <Stack spacing={2.5}>
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 2.2, borderColor: T.border }}>
@@ -1565,8 +1915,8 @@ const ModelReleaseScreen = ({
             <Button variant="outlined" startIcon={<CompareArrows />} onClick={() => scrollToRef(compareRef)} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
               Compare Models
             </Button>
-            <Button variant="outlined" startIcon={<Save />} onClick={() => handleRegisterAction('draft')} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
-              Save Draft
+            <Button variant="outlined" startIcon={<Save />} onClick={() => handleRegisterAction('draft')} disabled={actionsDisabled || registering} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+              {registering ? 'Saving...' : 'Save Draft'}
             </Button>
             <Button variant="outlined" startIcon={<History />} onClick={() => scrollToRef(auditRef)} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
               View Audit Log
@@ -1781,11 +2131,11 @@ const ModelReleaseScreen = ({
             </Stack>
 
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mt: 1.8 }} flexWrap="wrap" useFlexGap>
-              <Button variant="outlined" startIcon={<Save />} onClick={() => handleRegisterAction('draft')} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
-                Save Draft
+              <Button variant="outlined" startIcon={<Save />} onClick={() => handleRegisterAction('draft')} disabled={actionsDisabled || registering} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
+                {registering ? 'Saving...' : 'Save Draft'}
               </Button>
-              <Button variant="contained" startIcon={<FactCheck />} onClick={() => handleRegisterAction('candidate')} sx={{ textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
-                Register as Candidate
+              <Button variant="contained" startIcon={<FactCheck />} onClick={() => handleRegisterAction('candidate')} disabled={actionsDisabled || registering} sx={{ textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
+                {registering ? 'Saving...' : 'Register as Candidate'}
               </Button>
               <Button variant="outlined" startIcon={<CheckCircle />} onClick={() => handlePromoteStage(effectiveCurrentJobId, 'champion')} disabled={!currentRegistryEntry && !effectiveCurrentJobId} sx={{ textTransform: 'none', borderColor: T.border, color: T.muted }}>
                 Promote to Champion
