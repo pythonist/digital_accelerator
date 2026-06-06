@@ -23,7 +23,7 @@ import {
 import { Science, QueryStats } from '@mui/icons-material';
 import mlopsApi from '../../services/mlopsApi';
 import { V } from './validationTheme';
-import { unwrap, fmt, pct, num, normalizeLabel } from './validationUtils';
+import { getCurvePoints, unwrap, fmt, pct, num, normalizeLabel } from './validationUtils';
 import {
   ConfusionMatrixGrid,
   SectionCard,
@@ -140,6 +140,14 @@ const OOTValidationTab = ({
   const oot = result?.oot_validation || null;
   const thresholdTable = oot?.threshold_table || [];
   const stages = result?.pipeline_stages || [];
+  const ootRocData = useMemo(
+    () => getCurvePoints(oot || {}, 'roc_curve', 'fpr', 'tpr').map((point) => ({ fpr: point.x, tpr: point.y })),
+    [oot],
+  );
+  const ootPrData = useMemo(
+    () => getCurvePoints(oot || {}, 'pr_curve', 'recall', 'precision').map((point) => ({ recall: point.x, precision: point.y })),
+    [oot],
+  );
 
   return (
     <Stack spacing={2.5}>
@@ -251,26 +259,26 @@ const OOTValidationTab = ({
                 <Box sx={{ flex: 1 }}>
                   <Typography sx={{ fontSize: 10.5, color: V.textMuted, mb: 0.5 }}>ROC</Typography>
                   <ResponsiveContainer width="100%" height={190}>
-                    <LineChart data={oot.roc_curve || []} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
+                    <LineChart data={ootRocData} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#edf2f7" />
-                      <XAxis dataKey="fpr" tick={{ fontSize: 10 }} />
-                      <YAxis dataKey="tpr" tick={{ fontSize: 10 }} />
+                      <XAxis dataKey="fpr" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
+                      <YAxis dataKey="tpr" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="tpr" name="TPR" stroke={V.orange} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="tpr" name="TPR" stroke={V.orange} strokeWidth={2.5} dot={false} connectNulls isAnimationActive={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </Box>
                 <Box sx={{ flex: 1 }}>
                   <Typography sx={{ fontSize: 10.5, color: V.textMuted, mb: 0.5 }}>Precision-Recall</Typography>
                   <ResponsiveContainer width="100%" height={190}>
-                    <LineChart data={oot.pr_curve || []} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
+                    <LineChart data={ootPrData} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#edf2f7" />
-                      <XAxis dataKey="recall" tick={{ fontSize: 10 }} />
-                      <YAxis dataKey="precision" tick={{ fontSize: 10 }} />
+                      <XAxis dataKey="recall" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
+                      <YAxis dataKey="precision" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend />
-                      <Line type="monotone" dataKey="precision" name="Precision" stroke={V.navy} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="precision" name="Precision" stroke={V.navy} strokeWidth={2.5} dot={false} connectNulls isAnimationActive={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </Box>

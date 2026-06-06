@@ -23,7 +23,7 @@ class CaseExplainer:
         """
         
         if not self.ollama or not self.ollama.check_connection():
-            return "AI service unavailable. Ollama connection failed."
+            return "AI service unavailable. Configure the local AI provider first."
         
         # Validate input
         if "error" in case_summary:

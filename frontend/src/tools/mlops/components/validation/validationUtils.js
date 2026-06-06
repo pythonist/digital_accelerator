@@ -70,6 +70,24 @@ export const extractCurveFromValue = (curve, xKey, yKey) => {
   return [];
 };
 
+const sanitizeUnitCurvePoints = (points = []) => (
+  (points || [])
+    .map((point) => ({
+      x: clampNumber(safeNumber(point?.x, NaN), 0, 1),
+      y: clampNumber(safeNumber(point?.y, NaN), 0, 1),
+    }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .sort((a, b) => a.x - b.x)
+);
+
+export const curvePointsForChart = (curve, xKey, yKey) => (
+  sanitizeUnitCurvePoints(extractCurveFromValue(curve, xKey, yKey))
+    .map((point) => ({
+      [xKey]: point.x,
+      [yKey]: point.y,
+    }))
+);
+
 const extractCurve = (model, curveKey) => {
   const candidates = [
     model?.[curveKey],
@@ -134,9 +152,15 @@ const buildCurveFromThresholdTable = (model, curveKey) => {
 };
 
 export const getCurvePoints = (model, curveKey, xKey, yKey) => {
-  const directPoints = extractCurveFromValue(extractCurve(model, curveKey), xKey, yKey);
-  if (directPoints.length) return directPoints;
-  return buildCurveFromThresholdTable(model, curveKey);
+  const directPoints = sanitizeUnitCurvePoints(extractCurveFromValue(extractCurve(model, curveKey), xKey, yKey));
+  if (directPoints.length > 1) return directPoints;
+
+  const thresholdPoints = sanitizeUnitCurvePoints(buildCurveFromThresholdTable(model, curveKey));
+  if (thresholdPoints.length > 1) return thresholdPoints;
+
+  const displayEvaluation = buildDisplayEvaluation(model || {});
+  const fallbackPoints = sanitizeUnitCurvePoints(extractCurveFromValue(displayEvaluation?.metrics?.[curveKey], xKey, yKey));
+  return fallbackPoints;
 };
 
 export const totalFromConfusionMatrix = (cm) => (

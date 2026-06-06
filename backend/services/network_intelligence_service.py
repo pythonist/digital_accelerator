@@ -3,6 +3,40 @@ from services.graph_explainer_service import GraphExplainerService
 from services.network_findings_service import NetworkFindingsService
 from services.network_graph_builder_service import NetworkGraphBuilderService
 from services.network_report_adapter_service import NetworkReportAdapterService
+from datetime import date, datetime
+import math
+
+import pandas as pd
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(key): _json_safe(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, bool)):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    if isinstance(value, pd.Timestamp):
+        return value.to_pydatetime().replace(microsecond=0).isoformat() + "Z"
+    if isinstance(value, datetime):
+        return value.replace(microsecond=0).isoformat() + "Z"
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, int):
+        return value
+    if hasattr(value, "item"):
+        try:
+            return _json_safe(value.item())
+        except Exception:
+            pass
+    return str(value)
 
 
 class NetworkIntelligenceService:
@@ -57,7 +91,7 @@ class NetworkIntelligenceService:
             "top_entities": top_entities,
         }
 
-        return {
+        return _json_safe({
             "case_id": case_id,
             "graph": graph_payload.get("graph"),
             "visibility": graph_payload.get("visibility"),
@@ -72,4 +106,4 @@ class NetworkIntelligenceService:
             "report_snippets": findings.get("report_snippets"),
             "report_payload": report_payload,
             "narrative": executive_summary,
-        }
+        })

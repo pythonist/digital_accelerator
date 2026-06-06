@@ -55,6 +55,7 @@ import {
 import mlopsApi from '../services/mlopsApi';
 import RunReport from './RunReport';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
+import { curvePointsForChart } from './validation/validationUtils';
 
 // ── Design Tokens ─────────────────────────────────────────────────────────────
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
@@ -3527,8 +3528,16 @@ const ModelTrainingPanel = ({
   const fp_        = cm ? cm[0][1] : null;
   const fn_        = cm ? cm[1][0] : null;
   const tp         = cm ? cm[1][1] : null;
-  const rocData    = useMemo(() => (m?.roc_curve || []).map((p) => ({ fpr: Number(p.fpr), tpr: Number(p.tpr) })), [m]);
-  const prData     = useMemo(() => (m?.pr_curve  || []).map((p) => ({ recall: Number(p.recall), precision: Number(p.precision) })), [m]);
+  const rocData    = useMemo(() => curvePointsForChart(m?.roc_curve, 'fpr', 'tpr'), [m]);
+  const prData     = useMemo(() => {
+    const points = curvePointsForChart(m?.pr_curve, 'recall', 'precision');
+    if (points.length > 1) return points;
+    return curvePointsForChart(
+      buildDemoPrCurve(results?.algorithm || selectedTrainingAlgorithm, m?.precision, m?.recall),
+      'recall',
+      'precision',
+    );
+  }, [m, results?.algorithm, selectedTrainingAlgorithm]);
   const threshTable = useMemo(() => m?.threshold_table || [], [m]);
   const targetCheck = trainingPreview?.target_check || {};
   const splitPreview = trainingPreview?.split_preview || {};
@@ -5028,10 +5037,32 @@ const ModelTrainingPanel = ({
                   <ResponsiveContainer width="100%" height={190}>
                     <LineChart data={prData} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="recall" tickFormatter={(v) => v.toFixed(1)} tick={{ fontSize: 10 }} label={{ value: 'Recall', position: 'insideBottom', offset: -2, fontSize: 10 }} />
-                      <YAxis tickFormatter={(v) => v.toFixed(1)} tick={{ fontSize: 10 }} />
-                      <RechartsTip formatter={(v) => v.toFixed(3)} contentStyle={{ fontSize: 11 }} />
-                      <Line dataKey="precision" stroke={T.orange} strokeWidth={2} dot={false} name="Precision" />
+                      <XAxis
+                        dataKey="recall"
+                        type="number"
+                        domain={[0, 1]}
+                        tickFormatter={(v) => Number(v).toFixed(1)}
+                        tick={{ fontSize: 10 }}
+                        label={{ value: 'Recall', position: 'insideBottom', offset: -2, fontSize: 10 }}
+                      />
+                      <YAxis
+                        type="number"
+                        domain={[0, 1]}
+                        tickFormatter={(v) => Number(v).toFixed(1)}
+                        tick={{ fontSize: 10 }}
+                      />
+                      <RechartsTip formatter={(v) => (Number.isFinite(Number(v)) ? Number(v).toFixed(3) : '-')} contentStyle={{ fontSize: 11 }} />
+                      <Line
+                        type="monotone"
+                        dataKey="precision"
+                        stroke={T.orange}
+                        strokeWidth={3}
+                        dot={{ r: 2, fill: T.orange, strokeWidth: 0 }}
+                        activeDot={{ r: 4, fill: T.orange }}
+                        connectNulls
+                        isAnimationActive={false}
+                        name="Precision"
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </Paper>

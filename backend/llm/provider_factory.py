@@ -10,6 +10,12 @@ import os
 import traceback
 
 
+def _as_bool(raw, default=False):
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _instantiate_provider(provider: str):
     if provider == "gpt4all":
         from llm.gpt4all_wrapper import GPT4AllWrapper
@@ -25,11 +31,11 @@ def _instantiate_provider(provider: str):
 
 
 def load_llm_provider():
-    requested_provider = str(os.getenv("LLM_PROVIDER") or "ollama").strip().lower() or "ollama"
+    requested_provider = str(os.getenv("LLM_PROVIDER") or "gpt4all").strip().lower() or "gpt4all"
     fallback_chain = [requested_provider]
     if requested_provider == "ollama":
         fallback_chain.append("gpt4all")
-    elif requested_provider == "gpt4all":
+    elif requested_provider == "gpt4all" and _as_bool(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK"), default=False):
         fallback_chain.append("ollama")
 
     errors = []
@@ -46,8 +52,9 @@ def load_llm_provider():
             return instance
         except Exception as exc:
             errors.append(f"{provider}: {exc}")
-            print(f"AI provider unavailable ({provider}): {exc}")
-            traceback.print_exc()
+            if provider == requested_provider or _as_bool(os.getenv("LLM_DEBUG_PROVIDER_ERRORS"), default=False):
+                print(f"AI provider unavailable ({provider}): {exc}")
+                traceback.print_exc()
 
     print(
         "AI provider unavailable after fallback chain:",

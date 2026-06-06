@@ -225,13 +225,6 @@ def _get_case_resolution_llm_candidates():
         if candidate:
             candidates.append(candidate)
 
-    if not any(getattr(candidate, 'provider_name', '') == 'ollama' for candidate in candidates):
-        try:
-            from llm.ollama_wrapper import OllamaWrapper
-            candidates.append(OllamaWrapper())
-        except Exception:
-            pass
-
     gpt4all_wrapper = getattr(services, '_gpt4all_wrapper', None)
     if not gpt4all_wrapper:
         try:
@@ -242,6 +235,14 @@ def _get_case_resolution_llm_candidates():
             gpt4all_wrapper = None
     if gpt4all_wrapper:
         candidates.append(gpt4all_wrapper)
+
+    if str(os.getenv("LLM_PROVIDER") or "").strip().lower() == "ollama" or str(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        if not any(getattr(candidate, 'provider_name', '') == 'ollama' for candidate in candidates):
+            try:
+                from llm.ollama_wrapper import OllamaWrapper
+                candidates.append(OllamaWrapper())
+            except Exception:
+                pass
 
     deduped = []
     seen = set()

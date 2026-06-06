@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import math
 
 import pandas as pd
 
@@ -20,6 +21,18 @@ def _to_iso(value):
     if not isinstance(parsed, datetime):
         return None
     return parsed.replace(microsecond=0).isoformat() + "Z"
+
+
+def _safe_float(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return float(default)
+        if pd.isna(value):
+            return float(default)
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else float(default)
+    except Exception:
+        return float(default)
 
 
 def _coerce_datetime(value):
@@ -105,8 +118,8 @@ class NetworkGraphBuilderService:
                     "transaction_id": str(row.get("transaction_id") or "").strip(),
                     "account_id": account_id,
                     "counterparty": counterparty or "External Counterparty",
-                    "txn_timestamp": row.get("txn_timestamp"),
-                    "amount": float(row.get("amount") or 0),
+                    "txn_timestamp": _to_iso(row.get("txn_timestamp")),
+                    "amount": _safe_float(row.get("amount")),
                     "txn_type": str(row.get("txn_type") or "").strip(),
                     "channel": str(row.get("channel") or "").strip(),
                     "direction": str(row.get("direction") or "").strip().lower(),
@@ -184,7 +197,7 @@ class NetworkGraphBuilderService:
                 f"CUSTOMER::{customer_id}",
                 customer_id,
                 "customer",
-                risk_score=float(customer.get("CUSTOMER_RISK_RATING") or 0),
+                risk_score=_safe_float(customer.get("risk_score") or customer.get("RISK_SCORE") or customer.get("CUSTOMER_RISK_SCORE")),
                 pep_flag=bool(customer.get("PEP_FLAG")),
                 sanctions_flag=bool(customer.get("SANCTION_HIT")),
                 adverse_media_flag=bool(customer.get("ADVERSE_MEDIA_FLAG")),
@@ -201,8 +214,8 @@ class NetworkGraphBuilderService:
                 "account",
                 focal=account_id == focal_account,
                 account_type=str(account.get("account_type") or account.get("ACCOUNT_TYPE") or "").strip(),
-                risk_score=float(account.get("risk_score") or 0),
-                balance=float(account.get("CURRENT_BALANCE") or 0),
+                risk_score=_safe_float(account.get("risk_score") or account.get("RISK_SCORE") or account.get("account_risk_score") or account.get("ACCOUNT_RISK_SCORE")),
+                balance=_safe_float(account.get("current_balance") or account.get("CURRENT_BALANCE")),
             )
             links.append({"source": case_node_id, "target": f"ACCOUNT::{account_id}", "relationship_type": "belongs_to_case", "volume": 0.0})
 
@@ -214,7 +227,7 @@ class NetworkGraphBuilderService:
                 f"ALERT::{alert_id}",
                 alert_id,
                 "alert",
-                risk_score=float(alert.get("risk_score") or alert.get("RISK_SCORE") or 0),
+                risk_score=_safe_float(alert.get("risk_score") or alert.get("RISK_SCORE") or alert.get("fcc_score") or alert.get("FCC_SCORE")),
                 scenario=str(alert.get("rule_triggered") or alert.get("RULE_TRIGGERED") or alert.get("alert_type") or "").strip(),
             )
             links.append({"source": case_node_id, "target": f"ALERT::{alert_id}", "relationship_type": "linked_to_alert", "volume": 0.0})
@@ -238,8 +251,8 @@ class NetworkGraphBuilderService:
                 "source": source_id,
                 "target": target_id,
                 "relationship_type": "transacted_with",
-                "amount": float(txn.get("amount") or 0),
-                "volume": float(txn.get("amount") or 0),
+                "amount": _safe_float(txn.get("amount")),
+                "volume": _safe_float(txn.get("amount")),
                 "timestamp": _to_iso(ts),
                 "txn_type": txn.get("txn_type"),
                 "channel": txn.get("channel"),
@@ -250,7 +263,7 @@ class NetworkGraphBuilderService:
             for entity_id in (source_id, target_id):
                 stats = entity_stats[entity_id]
                 stats["txn_count"] += 1
-                stats["total_amount"] += float(txn.get("amount") or 0)
+                stats["total_amount"] += _safe_float(txn.get("amount"))
                 if txn.get("beneficiary_country"):
                     stats["countries"].add(txn.get("beneficiary_country"))
                 if isinstance(ts, datetime):

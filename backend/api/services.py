@@ -706,7 +706,7 @@ class ServiceContainer:
             if ollama:
                 print("PDF Generator initialized WITH AI explanations")
             else:
-                print("WARNING: PDF Generator initialized WITHOUT AI (Ollama not available)")
+                print("WARNING: PDF Generator initialized WITHOUT AI provider")
         
         return self._pdf_generator_service
     

@@ -89,6 +89,7 @@ import ModelRegistryPanel from './ModelRegistryPanel';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
 import { useAppContext } from '../../../context/AppContext';
 import { persistFccSentinelHandoff } from '../../../utils/fccSentinelHandoff';
+import { getCurvePoints } from './validation/validationUtils';
 
 // â”€â”€ Design tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
@@ -1929,6 +1930,14 @@ const DeploymentDashboard = ({
   const kpiError = errors.kpis || errors.avc || errors.drift || null;
   const liveQueue = simResult?.investigator_queue || [];
   const simOOT = simResult?.oot_validation || null;
+  const simOotRocData = useMemo(
+    () => getCurvePoints(simOOT || {}, 'roc_curve', 'fpr', 'tpr').map((point) => ({ fpr: point.x, tpr: point.y })),
+    [simOOT],
+  );
+  const simOotPrData = useMemo(
+    () => getCurvePoints(simOOT || {}, 'pr_curve', 'recall', 'precision').map((point) => ({ recall: point.x, precision: point.y })),
+    [simOOT],
+  );
   const simLabelledRows = simResult?.label_summary?.evaluation_labelled_rows
     ?? simResult?.label_summary?.labelled_rows
     ?? null;
@@ -3734,12 +3743,12 @@ const DeploymentDashboard = ({
                         ROC Curve
                       </Typography>
                       <ResponsiveContainer width="100%" height={170}>
-                        <LineChart data={simOOT?.roc_curve || []} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
+                        <LineChart data={simOotRocData} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                          <XAxis dataKey="fpr" tick={{ fontSize: 10 }} />
-                          <YAxis dataKey="tpr" tick={{ fontSize: 10 }} />
+                          <XAxis dataKey="fpr" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
+                          <YAxis dataKey="tpr" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
                           <RTooltip formatter={(v) => dec(v, 4)} />
-                          <Line type="monotone" dataKey="tpr" stroke={D.orange} strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="tpr" stroke={D.orange} strokeWidth={2.5} dot={false} connectNulls isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
                     </Paper>
@@ -3748,12 +3757,12 @@ const DeploymentDashboard = ({
                         Precision-Recall Curve
                       </Typography>
                       <ResponsiveContainer width="100%" height={170}>
-                        <LineChart data={simOOT?.pr_curve || []} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
+                        <LineChart data={simOotPrData} margin={{ top: 4, right: 12, left: -12, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                          <XAxis dataKey="recall" tick={{ fontSize: 10 }} />
-                          <YAxis dataKey="precision" tick={{ fontSize: 10 }} />
+                          <XAxis dataKey="recall" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
+                          <YAxis dataKey="precision" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
                           <RTooltip formatter={(v) => dec(v, 4)} />
-                          <Line type="monotone" dataKey="precision" stroke={D.blue} strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="precision" stroke={D.blue} strokeWidth={2.5} dot={false} connectNulls isAnimationActive={false} />
                         </LineChart>
                       </ResponsiveContainer>
                     </Paper>
