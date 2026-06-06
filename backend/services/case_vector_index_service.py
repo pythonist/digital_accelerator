@@ -238,8 +238,21 @@ class CaseVectorIndexService:
             results.append({"case_id": candidate_id, "score": max(0.0, min(1.0, float(score)))})
         return results
 
-    def index_status(self) -> Dict:
-        metadata = self.ensure_index()
+    def index_status(self, build_if_missing: bool = False) -> Dict:
+        try:
+            metadata = self.ensure_index() if build_if_missing else (self._metadata or self._load_from_disk())
+        except Exception:
+            metadata = None
+        if metadata is None:
+            return {
+                "case_count": 0,
+                "component_dimensions": {},
+                "hybrid_dimension": 0,
+                "last_rebuilt_at": None,
+                "backend": "faiss" if _FAISS_OK else "numpy_fallback",
+                "hybrid_weights": DEFAULT_HYBRID_WEIGHTS,
+                "index_ready": False,
+            }
         component_dimensions = metadata.get("component_dimensions") or {}
         return {
             "case_count": len(metadata.get("case_ids") or []),
@@ -248,4 +261,5 @@ class CaseVectorIndexService:
             "last_rebuilt_at": metadata.get("last_rebuilt_at"),
             "backend": metadata.get("backend") or ("faiss" if _FAISS_OK else "numpy_fallback"),
             "hybrid_weights": metadata.get("hybrid_weights") or DEFAULT_HYBRID_WEIGHTS,
+            "index_ready": True,
         }

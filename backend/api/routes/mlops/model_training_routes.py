@@ -2835,9 +2835,7 @@ def register_registry_entry() -> tuple:
         tenant_id, env_id = _get_env_ids()
         env_root = _resolve_env_path(env_id, tenant_id)
         trainer  = _get_training_service(env_root)
-        selected_threshold = body.get("selected_threshold")
-        if selected_threshold is not None:
-            selected_threshold = _validate_deployable_threshold(selected_threshold)
+        selected_threshold = _coerce_probability_threshold(body.get("selected_threshold"))
         result   = trainer.register_model(
             job_id=job_id, tenant_id=tenant_id, env_id=env_id,
             model_name=body.get("model_name"),

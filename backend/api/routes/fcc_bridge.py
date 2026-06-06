@@ -151,8 +151,8 @@ def import_published_run():
             target_env_id=target_env_id,
             replace_existing=_bool_value(body.get("replace_existing"), default=True),
             merge_existing=_bool_value(body.get("merge_existing"), default=False),
-            rerank_after_import=_bool_value(body.get("rerank_after_import"), default=True),
-            prepare_investigation_context=_bool_value(body.get("prepare_investigation_context"), default=True),
+            rerank_after_import=_bool_value(body.get("rerank_after_import"), default=False),
+            prepare_investigation_context=_bool_value(body.get("prepare_investigation_context"), default=False),
             context_profile=str(body.get("context_profile") or "balanced").strip() or "balanced",
         )
         return jsonify({"success": True, "import": result})

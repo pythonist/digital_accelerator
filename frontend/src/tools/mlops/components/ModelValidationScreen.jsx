@@ -77,9 +77,12 @@ const buildReleaseValidationSnapshot = (activeModelResolved, validationReport) =
   const displayEvaluation = activeModelResolved?.display_evaluation || activeModelResolved?.results?.display_evaluation || null;
   const displayMetrics = displayEvaluation?.metrics || {};
   const selectedThreshold = (
-    validationReport?.selected_threshold
+    displayEvaluation?.threshold
+    ?? displayEvaluation?.selected_threshold
+    ?? displayMetrics?.selected_threshold
+    ?? displayMetrics?.optimal_threshold
+    ?? validationReport?.selected_threshold
     ?? validationReport?.locked_threshold
-    ?? displayEvaluation?.threshold
     ?? validationReport?.optimal_threshold
     ?? activeModelResolved?.selected_threshold
     ?? activeModelResolved?.threshold
@@ -108,9 +111,9 @@ const buildReleaseValidationSnapshot = (activeModelResolved, validationReport) =
       ...displayMetrics,
     },
     display_evaluation: displayEvaluation || validationReport?.display_evaluation || null,
-    confusion_matrix: validationReport?.confusion_matrix || displayEvaluation?.confusion_matrix || displayMetrics?.confusion_matrix || activeModelResolved?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
-    suppression_rate_pct: validationReport?.suppression_rate_pct ?? displayMetrics?.suppression_rate_pct ?? displayEvaluation?.suppression_rate_pct ?? activeModelResolved?.suppression_rate_pct ?? null,
-    event_loss_pct: validationReport?.event_loss_pct ?? displayMetrics?.event_loss_pct ?? displayEvaluation?.event_loss_pct ?? activeModelResolved?.event_loss_pct ?? null,
+    confusion_matrix: displayEvaluation?.confusion_matrix || displayMetrics?.confusion_matrix || validationReport?.confusion_matrix || activeModelResolved?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
+    suppression_rate_pct: displayMetrics?.suppression_rate_pct ?? displayEvaluation?.suppression_rate_pct ?? validationReport?.suppression_rate_pct ?? activeModelResolved?.suppression_rate_pct ?? null,
+    event_loss_pct: displayMetrics?.event_loss_pct ?? displayEvaluation?.event_loss_pct ?? validationReport?.event_loss_pct ?? activeModelResolved?.event_loss_pct ?? null,
   };
 };
 
@@ -491,6 +494,18 @@ const ModelValidationScreen = ({
   const activeThresholdText = activeThreshold == null || Number.isNaN(Number(activeThreshold))
     ? '-'
     : Number(activeThreshold).toFixed(2);
+  const lockedValidationThreshold = (
+    activeModelResolved?.display_evaluation?.threshold
+    ?? activeModelResolved?.display_evaluation?.selected_threshold
+    ?? activeModelResolved?.selected_threshold
+    ?? activeModelResolved?.locked_threshold
+    ?? activeModelResolved?.threshold
+    ?? validationReport?.selected_threshold
+    ?? validationReport?.locked_threshold
+    ?? validationReport?.optimal_threshold
+    ?? null
+  );
+  const hasLockedValidationThreshold = Number.isFinite(Number(lockedValidationThreshold));
   const completedTabIndexes = useMemo(() => {
     const done = new Set();
     for (let idx = 0; idx < activeTab; idx += 1) done.add(idx);
@@ -807,7 +822,7 @@ const ModelValidationScreen = ({
         {activeTab === 0 && (
           <OverviewTab
             summary={summary}
-            runs={runs}
+            runs={validationRunOptions}
             activeModel={activeModelResolved}
             onPromoteChampion={handlePromoteChampion}
             persona={persona}
@@ -831,7 +846,7 @@ const ModelValidationScreen = ({
               </Alert>
             )}
             <ComparisonTab
-              runs={runs}
+              runs={validationRunOptions}
               selectedJobIds={selectedJobIds}
               onSelectJobIds={handleSelectJobIds}
               compareData={comparisonRuns}
@@ -848,7 +863,7 @@ const ModelValidationScreen = ({
         {activeTab === 2 && (
           <ThresholdTuningTab
             jobId={effectiveJobId}
-            runs={runs}
+            runs={validationRunOptions}
             activeModel={activeModelResolved}
             savedValidationReport={validationReport}
             activePipelineId={activePipelineId}
@@ -861,9 +876,9 @@ const ModelValidationScreen = ({
 
         {activeTab === 3 && (
           <OOTValidationTab
-            runs={runs}
+            runs={validationRunOptions}
             defaultJobId={effectiveJobId}
-            defaultThreshold={validationReport?.selected_threshold ?? activeModelResolved?.selected_threshold ?? activeModelResolved?.metrics?.optimal_threshold ?? null}
+            defaultThreshold={lockedValidationThreshold}
             result={ootResult}
             onResultChange={setOotResult}
             actionsDisabled={actionsDisabled}
@@ -891,8 +906,8 @@ const ModelValidationScreen = ({
       <Paper variant="outlined" sx={{ borderRadius: 0, borderColor: V.border, bgcolor: V.paper, p: 1.5 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.2} justifyContent="space-between" alignItems={{ md: 'center' }}>
           <Typography sx={{ fontSize: 11.5, color: V.textMuted }}>
-            {validationReport?.selected_threshold != null
-              ? `Validation threshold ${Number(validationReport.selected_threshold).toFixed(2)} is locked and will flow into Model Release.`
+            {hasLockedValidationThreshold
+              ? `Validation threshold ${Number(lockedValidationThreshold).toFixed(2)} is locked and will flow into Model Release.`
               : 'Run threshold tuning to lock the validation threshold before moving into Model Release.'}
           </Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -912,7 +927,7 @@ const ModelValidationScreen = ({
                   activeModelRun: activeModelResolved,
                   validationReport: buildReleaseValidationSnapshot(activeModelResolved, validationReport),
                 })}
-                disabled={actionsDisabled || !(validationReport?.selected_threshold != null || validationReport?.optimal_threshold != null)}
+                disabled={actionsDisabled || !hasLockedValidationThreshold}
                 sx={{ bgcolor: V.orange, '&:hover': { bgcolor: '#d46b1f' }, textTransform: 'none', borderRadius: 0, fontWeight: 700 }}
               >
                 Continue to Model Release

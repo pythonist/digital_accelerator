@@ -272,6 +272,54 @@ const titleCaseKey = (value) => String(value || '')
   .replace(/_/g, ' ')
   .replace(/\b\w/g, (m) => m.toUpperCase());
 
+const normalizePreviewTable = (value, preferredColumns = []) => {
+  const table = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const rows = Array.isArray(value)
+    ? value
+    : Array.isArray(table.rows)
+      ? table.rows
+      : Array.isArray(table.records)
+        ? table.records
+        : Array.isArray(table.data)
+          ? table.data
+          : [];
+  const explicitColumns = Array.isArray(table.columns)
+    ? table.columns
+    : Array.isArray(table.headers)
+      ? table.headers
+      : [];
+  const rowColumns = rows.reduce((acc, row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return acc;
+    Object.keys(row).forEach((key) => {
+      if (!acc.includes(key)) acc.push(key);
+    });
+    return acc;
+  }, []);
+  const available = explicitColumns.length ? explicitColumns : rowColumns;
+  const ordered = [];
+  const addColumn = (column) => {
+    const key = String(column || '').trim();
+    if (!key || ordered.includes(key)) return;
+    if (available.includes(key) || rowColumns.includes(key) || explicitColumns.includes(key)) ordered.push(key);
+  };
+  preferredColumns.forEach(addColumn);
+  available.forEach(addColumn);
+  return {
+    ...table,
+    row_count: Number(table.row_count ?? table.total ?? rows.length) || rows.length,
+    columns: ordered.slice(0, Math.max(ordered.length, 1)),
+    rows,
+  };
+};
+
+const firstPreviewTable = (preferredColumns, ...candidates) => {
+  for (const candidate of candidates) {
+    const normalized = normalizePreviewTable(candidate, preferredColumns);
+    if ((normalized.rows || []).length || (normalized.columns || []).length) return normalized;
+  }
+  return normalizePreviewTable(null, preferredColumns);
+};
+
 const runQualityFlags = (run = {}) => Array.isArray(run?.quality_flags) ? run.quality_flags : [];
 
 const deriveEventLossFromRunMeta = (runMeta = {}) => {
@@ -1054,19 +1102,19 @@ const DeploymentDashboard = ({
   ).toLowerCase() === 'case' ? 'case' : 'alert';
   const gatingMessage = actionsMessage || 'Deployment actions are blocked because this run is outdated. Rerun the upstream stages first.';
   const savedRunId = String(savedDashboardState?.run_id || '').trim();
-  const savedDeploymentId = propDeploymentId ? String(savedDashboardState?.deployment_id || '').trim() : '';
-  const savedThreshold = propDeploymentId
-    ? Number(savedDashboardState?.threshold ?? propThreshold ?? 0.5)
-    : Number(propThreshold ?? 0.5);
+  const savedDeploymentId = String(savedDashboardState?.deployment_id || '').trim();
+  const resolvedDeploymentId = propDeploymentId || savedDeploymentId;
+  const resolvedRunId = propRunId || savedRunId || registryEntry?.job_id || '';
+  const savedThreshold = Number(savedDashboardState?.threshold ?? propThreshold ?? 0.5);
   const hasSavedPipelineBinding = Boolean(
-    activePipelineId && propDeploymentId && (savedRunId || savedDeploymentId || savedDashboardState?.simulation_result),
+    activePipelineId && resolvedDeploymentId && (savedRunId || savedDeploymentId || savedDashboardState?.simulation_result),
   );
 
   const [activeDeployment, setActiveDeployment] = useState(() => (
-    propDeploymentId
+    resolvedDeploymentId
       ? {
-        deployment_id: propDeploymentId,
-        job_id: propRunId || registryEntry?.job_id || '',
+        deployment_id: resolvedDeploymentId,
+        job_id: resolvedRunId,
         threshold: propThreshold,
         grain: propGrain,
         stage: registryEntry?.stage || 'DEPLOYED',
@@ -1077,17 +1125,17 @@ const DeploymentDashboard = ({
   const [runOptionsLoading, setRunOptionsLoading] = useState(false);
   const [runOptionsError, setRunOptionsError] = useState(null);
   const [selectedRunId, setSelectedRunId] = useState(
-    propRunId || (propDeploymentId ? savedRunId : ''),
+    resolvedRunId,
   );
   const [selectedThreshold, setSelectedThreshold] = useState(
-    propDeploymentId ? propThreshold : savedThreshold,
+    resolvedDeploymentId ? savedThreshold : propThreshold,
   );
   const [switchingDeployment, setSwitchingDeployment] = useState(false);
   const [switchError, setSwitchError] = useState(null);
   const [bootstrapping, setBootstrapping] = useState(true);
 
-  const deploymentId = activeDeployment?.deployment_id || '';
-  const runId = selectedRunId || activeDeployment?.job_id || propRunId || '';
+  const deploymentId = activeDeployment?.deployment_id || resolvedDeploymentId || '';
+  const runId = selectedRunId || activeDeployment?.job_id || resolvedRunId || '';
   const selectedRunMeta = useMemo(() => {
     const option = runOptions.find((r) => String(r?.job_id || '') === String(runId || '')) || null;
     const activeMatches = String(activeModelRun?.job_id || '') === String(runId || '');
@@ -1123,6 +1171,7 @@ const DeploymentDashboard = ({
     || propThreshold
     || 0.5,
   );
+  const dashboardActionBlocked = Boolean(actionsDisabled && !(deploymentId && runId));
 
   // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [tab, setTab] = useState(DEPLOYMENT_TAB.DASHBOARD);
@@ -1242,7 +1291,7 @@ const DeploymentDashboard = ({
             propRunId,
             registryEntry?.job_id,
             activeModelRun?.job_id,
-            propDeploymentId ? savedRunId : '',
+            resolvedDeploymentId ? savedRunId : '',
           ].map((value) => String(value || '').trim()).filter(Boolean));
           const scopedRows = fetchedRows.filter((row) => {
             const jobId = String(row?.job_id || row?.run_id || '').trim();
@@ -1293,7 +1342,7 @@ const DeploymentDashboard = ({
               .map((value) => String(value || '').trim())
               .filter(Boolean)
               .includes(String(active?.job_id || '').trim());
-          const allowActiveDeployment = !pipelineId || Boolean(propDeploymentId || registryEntry?.deployment_id);
+          const allowActiveDeployment = !pipelineId || Boolean(resolvedDeploymentId || registryEntry?.deployment_id);
           if (active?.deployment_id && !hasSavedPipelineBinding && activeMatchesCurrentPipeline && allowActiveDeployment) {
             setActiveDeployment(active);
             setSelectedRunId(String(active.job_id || ''));
@@ -1310,7 +1359,7 @@ const DeploymentDashboard = ({
       }
     })();
     return () => { alive = false; };
-  }, [activeModelRun, activePipelineId, hasSavedPipelineBinding, propDeploymentId, propRunId, propThreshold, registryEntry, savedRunId]);
+  }, [activeModelRun, activePipelineId, hasSavedPipelineBinding, propDeploymentId, propRunId, propThreshold, registryEntry, resolvedDeploymentId, savedRunId]);
 
   useEffect(() => {
     if (!selectedRunId && activeDeployment?.job_id) {
@@ -1566,7 +1615,7 @@ const DeploymentDashboard = ({
 
   const runInferenceExplain = useCallback(async () => {
     if (!runId) return;
-    if (actionsDisabled) {
+    if (dashboardActionBlocked) {
       setInferError(gatingMessage);
       return;
     }
@@ -1586,7 +1635,7 @@ const DeploymentDashboard = ({
     } finally {
       setInferLoading(false);
     }
-  }, [actionsDisabled, gatingMessage, runId, inferRaw, threshold]);
+  }, [dashboardActionBlocked, gatingMessage, runId, inferRaw, threshold]);
 
   const appendStreamBatch = useCallback((data) => {
     setSimBatchHistory((prev) => {
@@ -1633,7 +1682,7 @@ const DeploymentDashboard = ({
 
   const runLiveSimulation = useCallback(async () => {
     if (!deploymentId || !runId) return;
-    if (actionsDisabled) {
+    if (dashboardActionBlocked) {
       setSimError(gatingMessage);
       return;
     }
@@ -1657,7 +1706,7 @@ const DeploymentDashboard = ({
     } finally {
       setSimLoading(false);
     }
-  }, [actionsDisabled, gatingMessage, deploymentId, runId, simConfig.persist_to_ledger, executeLiveSimulation, fetchKpis, fetchAlertVsCase, fetchDrift, fetchLedger]);
+  }, [dashboardActionBlocked, gatingMessage, deploymentId, runId, simConfig.persist_to_ledger, executeLiveSimulation, fetchKpis, fetchAlertVsCase, fetchDrift, fetchLedger]);
 
   const seedDeploymentLedger = useCallback(async (nextDeploymentId, nextRunId, nextThreshold) => {
     if (!nextDeploymentId || !nextRunId) return null;
@@ -1678,7 +1727,7 @@ const DeploymentDashboard = ({
 
   const activateSelectedDeployment = useCallback(async () => {
     if (!selectedRunId) return;
-    if (actionsDisabled) {
+    if (dashboardActionBlocked) {
       setSwitchError(gatingMessage);
       return;
     }
@@ -1714,7 +1763,7 @@ const DeploymentDashboard = ({
       setSwitchingDeployment(false);
     }
   }, [
-    actionsDisabled,
+    dashboardActionBlocked,
     gatingMessage,
     selectedRunId,
     selectedThreshold,
@@ -1905,11 +1954,56 @@ const DeploymentDashboard = ({
   const simHealthFlags = Array.isArray(simHealth?.flags) ? simHealth.flags : [];
   const simLeakageFeatures = Array.isArray(simHealth?.leakage_features) ? simHealth.leakage_features : [];
   const simPreviewTables = simResult?.preview_tables || {};
-  const simMasterPreview = simPreviewTables?.master_data || { columns: [], rows: [] };
-  const simPreparedPreview = simPreviewTables?.prepared_features || { columns: [], rows: [] };
-  const simPredictionPreview = simPreviewTables?.prediction_output || { columns: [], rows: [] };
-  const simRetainedPreview = simPreviewTables?.retained_queue || { columns: [], rows: [] };
-  const simSuppressedPreview = simPreviewTables?.suppressed_queue || { columns: [], rows: [] };
+  const simPredictionPreview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'RISK_SCORE', 'TXN_AMOUNT', 'actual_label', 'model_score', 'threshold', 'decision', 'queue_target'],
+    simPreviewTables?.prediction_output,
+    simResult?.prediction_preview,
+    simResult?.scored_preview,
+    simResult?.ledger_preview,
+    simResult?.investigator_queue,
+  );
+  const simUnseenPreview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'CUSTOMER_ID', 'ACCOUNT_ID', 'RULE_TRIGGERED', 'RISK_SCORE', 'TXN_AMOUNT', 'CHANNEL', 'CASE_STATUS'],
+    simPreviewTables?.unseen_input,
+    simPreviewTables?.master_data,
+    simResult?.master_data_preview,
+    simPredictionPreview,
+  );
+  const simMasterPreview = firstPreviewTable(
+    ['entity_id', 'CUSTOMER_ID', 'ACCOUNT_ID', 'ALERT_ID', 'CASE_ID', 'RULE_TRIGGERED', 'RISK_SCORE', 'TXN_AMOUNT', 'CHANNEL', 'CASE_STATUS'],
+    simPreviewTables?.master_data,
+    simResult?.master_data_preview,
+    simUnseenPreview,
+  );
+  const simPreparedPreview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'RULE_TRIGGERED', 'RISK_SCORE', 'TXN_AMOUNT', 'CUSTOMER_RISK_RATING', 'PEP_FLAG', 'ACCT_ALERT_COUNT', 'TXN_COUNT'],
+    simPreviewTables?.prepared_features,
+    simResult?.prepared_feature_preview,
+    simPreviewTables?.model_ready_features,
+    simPredictionPreview,
+  );
+  const simRetainedPreview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'RISK_SCORE', 'TXN_AMOUNT', 'model_score', 'threshold', 'decision', 'queue_target'],
+    simPreviewTables?.retained_queue,
+    simResult?.retained_preview,
+    (simPredictionPreview.rows || []).filter((row) => String(row?.decision || '').toLowerCase() === 'escalated'),
+  );
+  const simSuppressedPreview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'RISK_SCORE', 'TXN_AMOUNT', 'model_score', 'threshold', 'decision'],
+    simPreviewTables?.suppressed_queue,
+    simResult?.suppressed_preview,
+    (simPredictionPreview.rows || []).filter((row) => String(row?.decision || '').toLowerCase() === 'suppressed'),
+  );
+  const traceStep1Preview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'RULE_TRIGGERED', 'RISK_SCORE', 'TXN_AMOUNT', 'CHANNEL'],
+    simUnseenPreview,
+    simMasterPreview,
+  );
+  const traceStep2Preview = firstPreviewTable(
+    ['entity_id', 'alert_id', 'case_id', 'model_score', 'threshold', 'decision', 'queue_target'],
+    simPredictionPreview,
+    simPreparedPreview,
+  );
   const retainedQueueRowsForDisplay = (simRetainedPreview?.rows || []).length
     ? simRetainedPreview.rows
     : (effectiveLiveQueue || []).filter((row) => String(row?.decision || '').toLowerCase() === 'escalated');
@@ -2129,8 +2223,9 @@ const DeploymentDashboard = ({
         publish_id: payload?.publish_id,
         replace_existing: true,
         merge_existing: false,
-        rerank_after_import: true,
-        prepare_investigation_context: true,
+        rerank_after_import: false,
+        prepare_investigation_context: false,
+        context_profile: 'minimal',
       });
       const importBody = unwrap(importRes);
       const importPayload = importBody?.import || importBody || {};
@@ -2195,7 +2290,7 @@ const DeploymentDashboard = ({
 
   const openSentinelCaseManager = useCallback(async () => {
     if (!deploymentId || !runId) return;
-    if (actionsDisabled) {
+    if (dashboardActionBlocked) {
       setPublishNotice({
         severity: 'warning',
         message: gatingMessage,
@@ -2222,7 +2317,9 @@ const DeploymentDashboard = ({
         preferred_screen: 'fcc_bridge',
         replace_existing: true,
         merge_existing: false,
-        rerank_after_import: true,
+        rerank_after_import: false,
+        prepare_investigation_context: false,
+        context_profile: 'minimal',
         force_refresh: true,
       };
       const rememberedBatchId = String(simResult?.scoring?.batch_id || '').trim();
@@ -2288,7 +2385,7 @@ const DeploymentDashboard = ({
       setOpeningSentinel(false);
     }
   }, [
-    actionsDisabled,
+    dashboardActionBlocked,
     activeEnv,
     activePipelineId,
     activePipelineName,
@@ -2424,7 +2521,7 @@ const DeploymentDashboard = ({
             variant="outlined"
             startIcon={<BarChart sx={{ fontSize: 15 }} />}
             onClick={() => setScoreBatchOpen(true)}
-            disabled={actionsDisabled || canDisable(!deploymentId || !runId)}
+            disabled={dashboardActionBlocked || canDisable(!deploymentId || !runId)}
             sx={{ textTransform: 'none', fontSize: 12 }}
           >
             Score Batch
@@ -2437,7 +2534,7 @@ const DeploymentDashboard = ({
               batchId: simResult?.scoring?.batch_id || null,
               publishLabel: 'dashboard_current',
             })}
-            disabled={publishingToSentinel || actionsDisabled || canDisable(!deploymentId || !runId || !simResult?.scoring?.batch_id || effectiveLiveEscalated <= 0)}
+            disabled={publishingToSentinel || dashboardActionBlocked || canDisable(!deploymentId || !runId || !simResult?.scoring?.batch_id || effectiveLiveEscalated <= 0)}
             sx={{ textTransform: 'none', fontSize: 12 }}
           >
             {publishingToSentinel ? 'Publishing...' : 'Send To Sentinel'}
@@ -2447,7 +2544,7 @@ const DeploymentDashboard = ({
             variant="contained"
             startIcon={openingSentinel ? <CircularProgress size={14} color="inherit" /> : <ArrowForward sx={{ fontSize: 15 }} />}
             onClick={openSentinelCaseManager}
-            disabled={openingSentinel || publishingToSentinel || actionsDisabled || canDisable(!deploymentId || !runId)}
+            disabled={openingSentinel || publishingToSentinel || dashboardActionBlocked || canDisable(!deploymentId || !runId)}
             sx={{ bgcolor: D.blue, '&:hover': { bgcolor: '#1e40af' }, textTransform: 'none', fontSize: 12, fontWeight: 700 }}
           >
             {openingSentinel ? 'Opening Sentinel...' : 'Open Case Manager Sentinel'}
@@ -2528,7 +2625,7 @@ const DeploymentDashboard = ({
                   size="small"
                   variant="contained"
                   onClick={activateSelectedDeployment}
-                  disabled={actionsDisabled || canDisable(!selectedRunId || switchingDeployment || selectedRunAlreadyActive)}
+                  disabled={dashboardActionBlocked || canDisable(!selectedRunId || switchingDeployment || selectedRunAlreadyActive)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, minWidth: 190 }}
                 >
                   {switchingDeployment
@@ -3015,7 +3112,7 @@ const DeploymentDashboard = ({
                     size="small"
                     variant="contained"
                     onClick={() => setScoreBatchOpen(true)}
-                    disabled={actionsDisabled || canDisable(!deploymentId || !runId)}
+                    disabled={dashboardActionBlocked || canDisable(!deploymentId || !runId)}
                     sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontSize: 12, fontWeight: 700 }}
                   >
                     Score New Batch
@@ -3135,7 +3232,7 @@ const DeploymentDashboard = ({
                   size="small"
                   variant="contained"
                   onClick={runLiveSimulation}
-                  disabled={actionsDisabled || canDisable(!runId || !deploymentId || simLoading)}
+                  disabled={dashboardActionBlocked || canDisable(!runId || !deploymentId || simLoading)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, height: 36, minWidth: 140 }}
                 >
                   {simLoading ? 'Running...' : 'Run single batch'}
@@ -3154,7 +3251,7 @@ const DeploymentDashboard = ({
                     setLastStreamAt(null);
                     setStreamingActive(true);
                   }}
-                  disabled={actionsDisabled || canDisable(!runId || !deploymentId)}
+                  disabled={dashboardActionBlocked || canDisable(!runId || !deploymentId)}
                   sx={{
                     textTransform: 'none',
                     fontWeight: 700,
@@ -3325,6 +3422,28 @@ const DeploymentDashboard = ({
                       }
                     />
                   </Box>
+                  <Box sx={{ mt: 1.5, display: 'grid', gap: 1.25, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+                    <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, borderColor: D.border, minWidth: 0 }}>
+                      <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55, mb: 0.8 }}>
+                        Step 1 table: incoming batch
+                      </Typography>
+                      <PreviewTable
+                        columns={(traceStep1Preview.columns || []).slice(0, 7)}
+                        rows={(traceStep1Preview.rows || []).slice(0, 6)}
+                        emptyMessage={simLoading ? 'Backend is creating the incoming batch...' : 'Run a batch to show incoming FCC rows.'}
+                      />
+                    </Paper>
+                    <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, borderColor: D.border, minWidth: 0 }}>
+                      <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55, mb: 0.8 }}>
+                        Step 2 table: scored by FCC
+                      </Typography>
+                      <PreviewTable
+                        columns={(traceStep2Preview.columns || []).slice(0, 7)}
+                        rows={(traceStep2Preview.rows || []).slice(0, 6)}
+                        emptyMessage={simLoading ? 'Backend is scoring the batch...' : 'Run a batch to show FCC scoring rows.'}
+                      />
+                    </Paper>
+                  </Box>
                 </Box>
                 <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: D.border }}>
                   <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55, mb: 0.75 }}>
@@ -3391,7 +3510,7 @@ const DeploymentDashboard = ({
                         batchId: simResult?.scoring?.batch_id || null,
                         publishLabel: 'live_simulation',
                       })}
-                      disabled={actionsDisabled || canDisable(!deploymentId || !runId || publishingToSentinel || effectiveLiveEscalated <= 0)}
+                      disabled={dashboardActionBlocked || canDisable(!deploymentId || !runId || publishingToSentinel || effectiveLiveEscalated <= 0)}
                       sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700 }}
                     >
                       {publishingToSentinel ? 'Sending...' : 'Send retained queue to Sentinel'}
@@ -3400,7 +3519,7 @@ const DeploymentDashboard = ({
                       size="small"
                       variant="outlined"
                       onClick={openSentinelCaseManager}
-                      disabled={actionsDisabled || canDisable(!deploymentId || !runId || openingSentinel)}
+                      disabled={dashboardActionBlocked || canDisable(!deploymentId || !runId || openingSentinel)}
                       sx={{ textTransform: 'none', fontWeight: 700, borderColor: D.blue, color: D.blue }}
                     >
                       {openingSentinel ? 'Opening...' : 'Open Sentinel case manager'}
@@ -3915,7 +4034,7 @@ const DeploymentDashboard = ({
                     size="small"
                     variant="contained"
                     onClick={runInferenceExplain}
-                    disabled={actionsDisabled || canDisable(!runId || inferLoading)}
+                    disabled={dashboardActionBlocked || canDisable(!runId || inferLoading)}
                     sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700 }}
                   >
                     {inferLoading ? 'Running...' : 'Run Inference Explain'}
@@ -4025,7 +4144,7 @@ const DeploymentDashboard = ({
         runId={runId}
         threshold={threshold}
         modelGrain={modelGrain}
-        actionsDisabled={actionsDisabled}
+        actionsDisabled={dashboardActionBlocked}
         actionsMessage={gatingMessage}
         onScored={(result) => {
           fetchAlertVsCase();

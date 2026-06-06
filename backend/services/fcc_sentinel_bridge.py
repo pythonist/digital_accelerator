@@ -1050,6 +1050,12 @@ class FCCSentinelBridgeService:
         self.scored_batches_dir.mkdir(parents=True, exist_ok=True)
         self.publish_dir.mkdir(parents=True, exist_ok=True)
 
+    def _clear_case_retrieval_index(self, target_env_root: Path) -> None:
+        index_dir = Path(target_env_root) / "investigation" / "case_retrieval"
+        if index_dir.exists():
+            shutil.rmtree(index_dir, ignore_errors=True)
+        index_dir.mkdir(parents=True, exist_ok=True)
+
     def _batch_dir(self, batch_id: str) -> Path:
         return self.scored_batches_dir / str(batch_id)
 
@@ -1463,8 +1469,8 @@ class FCCSentinelBridgeService:
         target_env_id: str,
         replace_existing: bool = False,
         merge_existing: bool = False,
-        rerank_after_import: bool = True,
-        prepare_investigation_context: bool = True,
+        rerank_after_import: bool = False,
+        prepare_investigation_context: bool = False,
         context_profile: str = "balanced",
     ) -> Dict[str, Any]:
         publish_dir = self._publish_dir(publish_id)
@@ -1539,6 +1545,7 @@ class FCCSentinelBridgeService:
                 for table_name in self.CORE_REPLACE_TABLES:
                     cursor.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                 conn.commit()
+                self._clear_case_retrieval_index(target_env_root)
 
             for table_name, df in tables.items():
                 if df.empty:
@@ -1935,6 +1942,9 @@ class FCCSentinelBridgeService:
         finally:
             db_manager.close_connection(conn)
 
+        if deleted_rows:
+            self._clear_case_retrieval_index(target_env_root)
+
         focus_result = None
         conn = db_manager.connect()
         try:
@@ -2024,6 +2034,9 @@ class FCCSentinelBridgeService:
             conn.commit()
         finally:
             db_manager.close_connection(conn)
+
+        if deleted_tables:
+            self._clear_case_retrieval_index(target_env_root)
 
         return {
             "success": True,

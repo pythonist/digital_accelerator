@@ -17,9 +17,6 @@
  *   ⑧ ConfigureTab - defined as a nested function inside render, causing
  *      remount on every parent render; extracted to a stable inner component
  *      with props passed explicitly (same pattern applied to all inner tabs)
- *   ⑨ mockLearningCurve - computed with Math.random() at module level, so
- *      values change every HMR reload; memo-ised with useMemo inside the
- *      component that renders it
  *   ⑩ Tab index 4 badge - tabBadge(4) was called with a closure but the
  *      function only ever checks idx===4, so it was simplified inline
  *   ⑪ HMLThresholdEditor estimate logic - highCount estimate was wrong:
@@ -53,7 +50,7 @@ import {
 } from '@mui/icons-material';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip as RechartsTip, ResponsiveContainer, ReferenceLine, Cell, ScatterChart, Scatter, Legend,
+  Tooltip as RechartsTip, ResponsiveContainer, ScatterChart, Scatter, Legend,
 } from 'recharts';
 import mlopsApi from '../services/mlopsApi';
 import RunReport from './RunReport';
@@ -781,7 +778,7 @@ const buildDemoThresholdRows = (algorithmId, total, positives, baseSuppressionPc
   return thresholds.map((thr, idx) => {
     const shift = (thr - threshold) * 45;
     const localSuppPct = clampNumber(baseSuppressionPct + shift + (((seed + idx * 7) % 5) - 2) * 0.18, 45, 50);
-    const missedPct = clampNumber(1.2 + idx * 0.35 + ((seed + idx) % 3) * 0.22, 0.6, 4.8);
+    const missedPct = clampNumber(2.1 + idx * 0.32 + ((seed + idx) % 3) * 0.22, 2, 4.8);
     const fn = Math.max(1, Math.min(positives - 1, Math.round((missedPct / 100) * positives)));
     const tp = Math.max(0, positives - fn);
     const suppressed = Math.round((localSuppPct / 100) * total);
@@ -824,7 +821,7 @@ const buildDemoEvaluation = ({ algorithmId, totalRows, threshold = DEFAULT_BUSIN
   const negatives = Math.max(1, total - positives);
   const targetSuppressionPct = 45 + (c * 5);
   const targetSuppressed = Math.round(total * (targetSuppressionPct / 100));
-  let fn = Math.max(1, Math.round(positives * (0.012 + b * 0.026)));
+  let fn = Math.max(1, Math.round(positives * (0.021 + b * 0.027)));
   fn = Math.min(fn, Math.max(1, positives - 1));
   let tn = targetSuppressed - fn;
   tn = Math.round(clampNumber(tn, 0, negatives));
@@ -843,7 +840,7 @@ const buildDemoEvaluation = ({ algorithmId, totalRows, threshold = DEFAULT_BUSIN
   const confusionMatrix = [[tn, fp], [fn, tp]];
   const thresholdRows = buildDemoThresholdRows(algoKey, total, positives, suppressionRatePct, threshold);
   return {
-    source: 'demo_display',
+    source: 'display_synthetic',
     total,
     algorithm_id: algoKey,
     confusion_matrix: confusionMatrix,
@@ -970,9 +967,7 @@ function inferActiveStage(logs = [], currentStage = '') {
   return DAG_STAGES[0].id;
 }
 
-// ── Static mock data (module-level constants - no random recalculation) ────────
-// FIX ⑨: mockLearningCurve was computed with Math.random() at module level,
-// causing new values on every HMR reload. Seeded deterministically here.
+// Static tree data for the decision path preview.
 const mockTreeData = {
   feature: 'RISK_SCORE', threshold: 65, samples: 10195, impurity: 0.421,
   left: {
@@ -998,26 +993,6 @@ const mockTreeData = {
     },
   },
 };
-
-// Deterministic learning curve - no Math.random()
-const mockLearningCurve = Array.from({ length: 20 }, (_, i) => ({
-  round: (i + 1) * 15,
-  train: Math.min(0.999, 0.72 + i * 0.015),
-  val:   Math.min(0.985, 0.68 + i * 0.013 + (i > 14 ? (i - 14) * -0.002 : 0)),
-}));
-
-const mockCoefficients = [
-  { feature: 'SANCTION_HIT',         coef:  1.82 },
-  { feature: 'COMBINED_RISK_FLAGS',  coef:  1.64 },
-  { feature: 'RISK_SCORE',           coef:  1.41 },
-  { feature: 'PEP_FLAG',             coef:  1.28 },
-  { feature: 'CASH_INTENSITY',       coef:  0.97 },
-  { feature: 'IS_HIGH_RISK_ACCT',    coef:  0.83 },
-  { feature: 'IS_DORMANT',           coef:  0.71 },
-  { feature: 'LOG_TOTAL_TXN_VOLUME', coef: -0.44 },
-  { feature: 'KYC_COMPLETENESS_PCT', coef: -0.62 },
-  { feature: 'ACCOUNT_AGE_DAYS',     coef: -0.78 },
-];
 
 // Deterministic mock ledger rows - seeded via index arithmetic, no Math.random()
 const buildMockLedger = (grain, hmlHigh, hmlLow, jobId) => {
@@ -1335,128 +1310,6 @@ const TreeNode = ({ node, depth = 0, highlightedNodeIds = [] }) => {
         </Box>
       )}
     </Box>
-  );
-};
-
-// ── Algorithm Internals Panel ─────────────────────────────────────────────────
-const AlgorithmInternals = ({ algoId, results, persona }) => {
-  const viz = ALGO_VIZ[algoId];
-  if (!viz) return null;
-
-  const featureImportance = results?.feature_importance || [
-    { feature: 'RISK_SCORE',           importance: 0.198 },
-    { feature: 'COMBINED_RISK_FLAGS',  importance: 0.156 },
-    { feature: 'CUSTOMER_RISK_RATING', importance: 0.124 },
-    { feature: 'CASH_INTENSITY',       importance: 0.098 },
-    { feature: 'PEP_FLAG',             importance: 0.089 },
-    { feature: 'LOG_TOTAL_TXN_VOL',    importance: 0.071 },
-    { feature: 'SANCTION_HIT',         importance: 0.064 },
-    { feature: 'IS_DORMANT',           importance: 0.052 },
-    { feature: 'VELOCITY_RATIO',       importance: 0.041 },
-    { feature: 'KYC_COMPLETENESS',     importance: 0.038 },
-  ];
-
-  return (
-    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-        <VisibilityOutlined sx={{ fontSize: 15, color: T.orange }} />
-        <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>Model Internals - {viz.vizLabel}</Typography>
-      </Stack>
-      <Typography sx={{ fontSize: 11.5, color: T.textMuted, mb: 1.75, lineHeight: 1.6 }}>{viz.description}</Typography>
-
-      {viz.vizType === 'tree' && (
-        <Box>
-          <Alert severity="info" sx={{ ...neutralAlertSx, mb: 1.5, fontSize: 11.5, borderRadius: 1.5 }}>
-            Interactive tree - click any internal node to expand/collapse branches.
-          </Alert>
-          <Box sx={{ overflowX: 'auto', overflowY: 'visible', pb: 2 }}>
-            <Box sx={{ display: 'inline-block', minWidth: 'max-content' }}>
-              <TreeNode node={mockTreeData} depth={0} />
-            </Box>
-          </Box>
-          <Divider sx={{ mt: 1, mb: 1 }} />
-          <Typography sx={{ fontSize: 11, color: T.textMuted }}>
-            Root split: <strong>RISK_SCORE ≤ 65</strong> partitions {mockTreeData.samples.toLocaleString()} alerts.
-          </Typography>
-        </Box>
-      )}
-
-      {viz.vizType === 'learning_curve' && (
-        <Box>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={mockLearningCurve} margin={{ top: 4, right: 12, left: -10, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="round" tick={{ fontSize: 10 }} label={{ value: 'Boosting Round', position: 'insideBottom', offset: -2, fontSize: 10 }} />
-              <YAxis domain={[0.6, 1.0]} tickFormatter={(v) => v.toFixed(2)} tick={{ fontSize: 10 }} />
-              <RechartsTip formatter={(v) => v.toFixed(4)} contentStyle={{ fontSize: 11 }} />
-              <ReferenceLine y={0.95} stroke={T.textDim} strokeDasharray="3 3" label={{ value: 'Target', fontSize: 9, fill: T.textDim }} />
-              <Line dataKey="train" stroke={T.orange} strokeWidth={2} dot={false} name="Train AUC" />
-              <Line dataKey="val"   stroke={T.done}   strokeWidth={2} dot={false} name="Val AUC" strokeDasharray="5 3" />
-            </LineChart>
-          </ResponsiveContainer>
-          <Stack direction="row" spacing={2} mt={0.75}>
-            <Stack direction="row" alignItems="center" spacing={0.5}>
-              <Box sx={{ width: 20, height: 2, bgcolor: T.orange }} />
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted }}>Train AUC</Typography>
-            </Stack>
-            <Stack direction="row" alignItems="center" spacing={0.5}>
-              <Box sx={{ width: 20, height: 2, bgcolor: T.done, backgroundImage: 'repeating-linear-gradient(to right, #6b7280 0, #6b7280 5px, transparent 5px, transparent 8px)' }} />
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted }}>Validation AUC</Typography>
-            </Stack>
-          </Stack>
-          {persona === 'technical' && (
-            <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 1 }}>
-              Validation curve stabilises after round ~240. No overfitting detected. Consider early stopping at round 250.
-            </Typography>
-          )}
-        </Box>
-      )}
-
-      {viz.vizType === 'coefficients' && (
-        <Box>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={mockCoefficients} layout="vertical" margin={{ top: 4, right: 20, left: 120, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 10 }} label={{ value: 'Log-Odds Coefficient', position: 'insideBottom', offset: -2, fontSize: 10 }} />
-              <YAxis type="category" dataKey="feature" tick={{ fontSize: 10, fontFamily: T.mono }} width={115} />
-              <ReferenceLine x={0} stroke={T.border} strokeWidth={1.5} />
-              <RechartsTip formatter={(v) => v.toFixed(3)} contentStyle={{ fontSize: 11 }} />
-              <Bar dataKey="coef" radius={[0, 3, 3, 0]}>
-                {mockCoefficients.map((d, i) => (
-                  <Cell key={i} fill={d.coef > 0 ? T.red : T.done} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          <Stack direction="row" spacing={2} mt={0.75}>
-            <Stack direction="row" alignItems="center" spacing={0.5}>
-              <Box sx={{ width: 12, height: 12, borderRadius: 0.5, bgcolor: T.red }} />
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted }}>Pushes toward ESCALATE</Typography>
-            </Stack>
-            <Stack direction="row" alignItems="center" spacing={0.5}>
-              <Box sx={{ width: 12, height: 12, borderRadius: 0.5, bgcolor: T.done }} />
-              <Typography sx={{ fontSize: 10.5, color: T.textMuted }}>Pushes toward SUPPRESS</Typography>
-            </Stack>
-          </Stack>
-        </Box>
-      )}
-
-      {viz.vizType === 'feature_importance' && (
-        <Box>
-          {featureImportance.slice(0, 10).map((f, i) => (
-            <Box key={i} sx={{ mb: 1 }}>
-              <Stack direction="row" justifyContent="space-between" mb={0.25}>
-                <Typography sx={{ fontSize: 11, color: T.textPrimary, fontFamily: persona === 'technical' ? T.mono : 'inherit' }}>{f.feature}</Typography>
-                <Typography sx={{ fontSize: 11, color: T.orange, fontWeight: 700, fontFamily: T.mono }}>{(f.importance * 100).toFixed(1)}%</Typography>
-              </Stack>
-              <Box sx={{ height: 6, bgcolor: '#f1f5f9', borderRadius: 3, overflow: 'hidden' }}>
-                <Box sx={{ height: '100%', width: `${(f.importance / featureImportance[0].importance) * 100}%`, background: `linear-gradient(to right, ${T.orange}, ${T.orangeMid})`, borderRadius: 3, transition: 'width 0.4s ease' }} />
-              </Box>
-            </Box>
-          ))}
-        </Box>
-      )}
-    </Paper>
   );
 };
 
@@ -4977,10 +4830,6 @@ const ModelTrainingPanel = ({
               </Stack>
             </Stack>
 
-            <Alert severity="info" sx={neutralAlertSx}>
-              Binary-first decision story: alerts below the approved threshold are suppressed in FCC, and the remaining alerts are escalated for downstream review.
-            </Alert>
-
             {results?.mode === 'supervised' && (
               <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff8f4', borderColor: '#f1d5c7' }}>
                 <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between">
@@ -5122,19 +4971,6 @@ const ModelTrainingPanel = ({
               </Stack>
             </Paper>
 
-            {results?.feature_diagnostics && (
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, mb: 1 }}>Feature Engineering Diagnostics</Typography>
-                <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                  <MetricBox label="Raw Cols"    value={results.feature_diagnostics.raw_feature_columns}  />
-                  <MetricBox label="Numeric"     value={results.feature_diagnostics.numeric_columns}      />
-                  <MetricBox label="Categorical" value={results.feature_diagnostics.categorical_columns}  />
-                  <MetricBox label="Encoded"     value={results.feature_diagnostics.encoded_feature_count} />
-                  <MetricBox label="Expansion x" value={results.feature_diagnostics.feature_multiplier}   />
-                </Stack>
-              </Paper>
-            )}
-
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
               <Stack spacing={2}>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
@@ -5187,20 +5023,6 @@ const ModelTrainingPanel = ({
               </Stack>
 
               <Stack spacing={2}>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 0.25 }}>ROC Curve</Typography>
-                  <Typography sx={{ fontSize: 11, color: T.textMuted, mb: 1.5 }}>AUC = {m.roc_auc?.toFixed(4) ?? '-'}</Typography>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={rocData} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="fpr" tickFormatter={(v) => v.toFixed(1)} tick={{ fontSize: 10 }} label={{ value: 'FPR', position: 'insideBottom', offset: -2, fontSize: 10 }} />
-                      <YAxis tickFormatter={(v) => v.toFixed(1)} tick={{ fontSize: 10 }} />
-                      <RechartsTip formatter={(v) => v.toFixed(3)} contentStyle={{ fontSize: 11 }} />
-                      <Line dataKey="tpr" stroke={T.orange} strokeWidth={2} dot={false} name="TPR" />
-                      <Line data={[{ fpr: 0, tpr: 0 }, { fpr: 1, tpr: 1 }]} dataKey="tpr" stroke="#94a3b8" strokeWidth={1} strokeDasharray="4 4" dot={false} name="Baseline" legendType="none" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Paper>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
                   <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.5 }}>Precision-Recall Curve</Typography>
                   <ResponsiveContainer width="100%" height={190}>
@@ -5268,7 +5090,6 @@ const ModelTrainingPanel = ({
             )}
 
             <HMLThresholdEditor hmlHigh={hmlHigh} hmlLow={hmlLow} setHmlHigh={setHmlHigh} setHmlLow={setHmlLow} totalAlerts={(tp ?? 0) + (tn ?? 0) + (fp_ ?? 0) + (fn_ ?? 0) || 2039} summary={hmlSummary} loading={hmlLoading} />
-            {results?.mode === 'supervised' && <AlgorithmInternals algoId={results?.algorithm || selectedAlgo} results={results} persona={persona} />}
 
             <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
               <Button variant="contained" startIcon={<SaveAlt />} onClick={handleSaveRun} disabled={canDisable(!results || savedRuns.some((r) => r.job_id === jobId))}

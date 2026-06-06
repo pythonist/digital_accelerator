@@ -3365,10 +3365,17 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       'fcc',
     );
     const statuses = derivePipelineStepStatuses(pipeline || {});
+    const completion = derivePipelineStepCompletion(pipeline || {});
     const firstAttentionStep = flowSteps.find((step) => (
       ['in_progress', 'invalidated', 'failed'].includes(String(statuses?.[step.id] || '').toLowerCase())
     ));
-    if (firstAttentionStep) return firstAttentionStep.id;
+    if (firstAttentionStep) {
+      const attentionId = String(firstAttentionStep.id || '').trim();
+      const dashboardAttentionBeforeRelease = pipelineFamily !== 'mule'
+        && ['dashboard', 'deployment_monitoring'].includes(attentionId)
+        && !completion.registry;
+      if (!dashboardAttentionBeforeRelease) return attentionId;
+    }
     const explicit = normalizeWorkbenchStep(
       pipeline?.workflow_manifest?.current_step
       || pipeline?.current_step
@@ -3379,7 +3386,6 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       || '',
     );
     if (explicit && isWorkbenchStep(explicit)) return explicit;
-    const completion = derivePipelineStepCompletion(pipeline || {});
     if (pipelineFamily === 'mule') {
       if (completion.validation) return 'validation';
       if (completion.model) return 'validation';
@@ -3388,7 +3394,16 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       if (completion.master) return 'featurestore';
       return 'data';
     }
-    if (completion.registry) return 'dashboard';
+    const registryState = getScreenState(pipeline?.steps, 'registry') || getScreenState(pipeline?.steps, 'model_release') || {};
+    const dashboardState = getScreenState(pipeline?.steps, 'dashboard') || getScreenState(pipeline?.steps, 'deployment_monitoring') || {};
+    const deploymentId = (
+      nestedDeploymentId(registryState)
+      || nestedDeploymentId(dashboardState)
+      || nestedDeploymentId(pipeline)
+      || String(pipeline?.deployment_id || pipeline?.active_deployment?.deployment_id || '').trim()
+    );
+    if (completion.dashboard && (deploymentId || completion.registry)) return 'dashboard';
+    if (completion.registry) return deploymentId ? 'dashboard' : 'registry';
     if (completion.validation) return 'registry';
     if (completion.model) return 'validation';
     if (completion.preprocess) return 'model';
@@ -6250,7 +6265,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       savedDashboardState={savedDashboardState}
                       savedDashboardMetadata={savedLocalPipelineRun?.steps?.live_dashboard?.metadata || localDashboardMetadata}
                       validationReport={effectiveValidationReport || validationReport} registryEntry={effectiveRegistryEntry || registryEntry} onBack={() => openWorkbenchStep('registry', { skipGuardRedirect: true })}
-                      actionsDisabled={staleStepSet.has('dashboard')}
+                      actionsDisabled={staleStepSet.has('dashboard') && !Boolean(
+                        nestedDeploymentId(effectiveRegistryEntry || registryEntry) || nestedDeploymentId(savedDashboardState),
+                      )}
                       actionsMessage={staleMessageForStep('dashboard')}
                     />
                   )}
