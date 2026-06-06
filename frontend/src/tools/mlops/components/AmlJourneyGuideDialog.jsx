@@ -51,20 +51,20 @@ const JOURNEY_STEPS = [
     title: 'Train the FCC suppression model',
     icon: ModelTraining,
     purpose: 'Train a model that learns which alerts are likely false positives and which should still be escalated.',
-    value: 'The output to the bank is a governed false-positive reduction model with measurable precision, recall, and event-loss controls.',
+    value: 'The output to the bank is a governed false-positive reduction model with measurable precision, recall, and review-gap controls.',
   },
   {
     id: 'validation',
     title: 'Validate threshold and guardrails',
     icon: Flag,
-    purpose: 'Tune the threshold so suppression volume increases without exceeding acceptable event-loss limits.',
+    purpose: 'Tune the threshold so suppression volume increases without exceeding acceptable review-gap limits.',
     value: 'This is where the bank sees the operating trade-off: how much analyst effort is saved versus how much residual risk is tolerated.',
   },
   {
     id: 'dashboard',
     title: 'Score unseen synthetic data',
     icon: CloudDone,
-    purpose: 'Generate a fresh unseen FCC batch so the demo behaves like a production scoring cycle instead of replaying training data.',
+    purpose: 'Generate a fresh unseen FCC batch so the operating flow behaves like a production scoring cycle instead of replaying training data.',
     value: 'This proves the deployed model can act on new alerts, not just historical examples used during build.',
   },
   {
@@ -79,7 +79,7 @@ const JOURNEY_STEPS = [
     title: 'Investigate in Sentinel',
     icon: Gavel,
     purpose: 'Open Sentinel case packs, graph analysis, and copilot on the FCC-retained population.',
-    value: 'The demo becomes a full AML journey: monitoring -> suppression -> analyst investigation -> explainable case management.',
+    value: 'The workflow becomes a full AML journey: monitoring -> suppression -> analyst investigation -> explainable case management.',
   },
 ];
 
@@ -193,7 +193,7 @@ const AmlJourneyGuideDialog = ({
             <Assessment sx={{ color: '#c2410c' }} />
             <Box>
               <Typography sx={{ fontSize: 13, fontWeight: 700 }}>
-                Demo shortcut
+                Dashboard shortcut
               </Typography>
               <Typography sx={{ fontSize: 12, color: 'text.secondary', lineHeight: 1.65 }}>
                 Once the model is deployed, use the dashboard action to generate unseen FCC data, publish the retained queue, import it into Sentinel, and open case investigation in one flow.

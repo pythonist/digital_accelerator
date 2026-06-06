@@ -68,7 +68,7 @@ const buildSummaryPayload = ({ activeModel, comparisonRuns, validationReport, oo
       `The validation split is ${formatSplitLabel(activeContext).toLowerCase()} with ${Number.isFinite(activeContext.testRows) ? activeContext.testRows.toLocaleString() : 'saved'} holdout rows.`,
       selectedThreshold != null ? `The locked validation threshold is ${fmt(selectedThreshold, 2)}.` : 'A locked validation threshold has not been confirmed yet.',
       validationReport?.suppression_rate_pct != null ? `At the locked threshold the model suppresses ${pct(validationReport.suppression_rate_pct, 1)} of the queue.` : 'Suppression impact is not available yet.',
-      validationReport?.event_loss_pct != null ? `Potential event loss at the locked threshold is ${pct(validationReport.event_loss_pct, 1)}.` : 'Event-loss evidence is not available yet.',
+      validationReport?.event_loss_pct != null ? `Event loss at the locked threshold is ${pct(validationReport.event_loss_pct, 1)}.` : 'Event-loss evidence is not available yet.',
       oot?.defined ? `OOT validation completed with ROC-AUC ${fmt(oot.roc_auc, 3)} and event loss ${pct(oot.event_loss_pct, 1)} on unseen data.` : 'OOT validation has not been completed yet.',
       `The stability and risk review finished with ${stability.summary.good} healthy checks, ${stability.summary.warn} watch items, and ${stability.summary.bad} review items.`,
       comparisonRuns.length >= 2

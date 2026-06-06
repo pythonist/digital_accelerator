@@ -16,7 +16,9 @@ from pathlib import Path
 import os
 import re
 import json
+import logging
 import shutil
+import time
 import traceback
 from datetime import datetime
 
@@ -27,6 +29,34 @@ from api.tools.mlops.run_state_service import RunStateService
 
 
 mlops_workbench_bp = Blueprint("mlops_workbench", __name__)
+logger = logging.getLogger(__name__)
+
+PIPELINE_GET_CACHE_TTL_SECONDS = 15.0
+_PIPELINE_GET_CACHE = {}
+
+
+def _pipeline_get_cache_key(tenant_id: str, env_id: str, pipeline_id: int) -> tuple:
+    return (str(tenant_id or ""), str(env_id or ""), int(pipeline_id or 0))
+
+
+def _pipeline_get_cache_get(tenant_id: str, env_id: str, pipeline_id: int):
+    key = _pipeline_get_cache_key(tenant_id, env_id, pipeline_id)
+    cached = _PIPELINE_GET_CACHE.get(key)
+    if not cached:
+        return None
+    if (time.perf_counter() - float(cached.get("at") or 0.0)) > PIPELINE_GET_CACHE_TTL_SECONDS:
+        _PIPELINE_GET_CACHE.pop(key, None)
+        return None
+    return cached.get("data")
+
+
+def _pipeline_get_cache_set(tenant_id: str, env_id: str, pipeline_id: int, data):
+    key = _pipeline_get_cache_key(tenant_id, env_id, pipeline_id)
+    _PIPELINE_GET_CACHE[key] = {"at": time.perf_counter(), "data": data}
+
+
+def _pipeline_get_cache_invalidate(tenant_id: str, env_id: str, pipeline_id: int):
+    _PIPELINE_GET_CACHE.pop(_pipeline_get_cache_key(tenant_id, env_id, pipeline_id), None)
 
 # â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1338,7 +1368,18 @@ def mlops_preprocess_plan():
         env_root   = _resolve_env_path(env_id, tenant_id)
         mlops_svc  = _get_mlops_service(env_root)
         dataset    = _require_dataset(mlops_svc, tenant_id, env_id, body)
-        result     = mlops_svc.preprocess_plan(dataset, int(body.get("sample_rows") or 5000))
+        sample_rows = max(100, min(int(body.get("sample_rows") or 1500), 5000))
+        started = time.perf_counter()
+        logger.warning("[PreprocessPlan] start dataset_id=%s sample_rows=%s", dataset.get("dataset_id"), sample_rows)
+        result     = mlops_svc.preprocess_plan(dataset, sample_rows)
+        logger.warning(
+            "[PreprocessPlan] done dataset_id=%s suggestions=%s rows=%s columns=%s duration=%.2fs",
+            dataset.get("dataset_id"),
+            len(result.get("suggestions") or []),
+            result.get("rows_analyzed"),
+            result.get("columns_analyzed"),
+            time.perf_counter() - started,
+        )
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
@@ -1350,15 +1391,37 @@ def mlops_preprocess_plan():
 def mlops_preprocess_preview():
     try:
         body = request.get_json(silent=True) or {}
+        raw_steps = body.get("steps") or []
+        raw_sample_rows = int(body.get("sample_rows") or 25)
+        sample_rows = max(5, min(raw_sample_rows, 50))
+        print(
+            f"[PreprocessPreview] REQUEST dataset_id={body.get('dataset_id')} steps={len(raw_steps)} sample_rows={sample_rows}",
+            flush=True,
+        )
         tenant_id, env_id = _get_env_ids()
         env_root   = _resolve_env_path(env_id, tenant_id)
         mlops_svc  = _get_mlops_service(env_root)
         dataset    = _require_dataset(mlops_svc, tenant_id, env_id, body)
+        steps = raw_steps
+        started = time.perf_counter()
+        logger.warning("[PreprocessPreview] start dataset_id=%s steps=%s sample_rows=%s", dataset.get("dataset_id"), len(steps), sample_rows)
         result     = mlops_svc.preprocess_preview(
             dataset,
-            body.get("steps") or [],
-            int(body.get("sample_rows") or 100),
+            steps,
+            sample_rows,
             target_column=str(body.get("target_column") or "").strip() or None,
+        )
+        logger.warning(
+            "[PreprocessPreview] done dataset_id=%s steps=%s rows=%s columns=%s duration=%.2fs",
+            dataset.get("dataset_id"),
+            len(steps),
+            result.get("row_count"),
+            len(result.get("columns") or []),
+            time.perf_counter() - started,
+        )
+        print(
+            f"[PreprocessPreview] DONE dataset_id={dataset.get('dataset_id')} rows={result.get('row_count')} columns={len(result.get('columns') or [])} duration={time.perf_counter() - started:.2f}s",
+            flush=True,
         )
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
@@ -1378,9 +1441,18 @@ def mlops_preprocess_run():
         output_name = _safe_dataset_type(body.get("output_name") or "preprocessed_dataset")
         pipeline_id_raw = body.get("pipeline_id")
         pipeline_id = int(pipeline_id_raw) if pipeline_id_raw not in (None, "", []) else None
+        steps = body.get("steps") or []
+        started = time.perf_counter()
+        logger.warning(
+            "[PreprocessRun] start dataset_id=%s output=%s steps=%s rows=%s",
+            dataset.get("dataset_id"),
+            output_name,
+            len(steps),
+            dataset.get("row_count"),
+        )
         stateful_inputs = {
             "dataset_id": int(dataset.get("dataset_id") or body.get("dataset_id") or 0),
-            "steps": body.get("steps") or [],
+            "steps": steps,
             "target_column": str(body.get("target_column") or "").strip() or None,
             "output_name": output_name,
         }
@@ -1420,9 +1492,17 @@ def mlops_preprocess_run():
                 }), 200
         result = mlops_svc.preprocess_run(
             tenant_id, env_id, dataset,
-            body.get("steps") or [],
+            steps,
             output_name,
             target_column=str(body.get("target_column") or "").strip() or None,
+        )
+        logger.warning(
+            "[PreprocessRun] done dataset_id=%s output=%s steps=%s preprocessed_dataset_id=%s duration=%.2fs",
+            dataset.get("dataset_id"),
+            output_name,
+            len(steps),
+            ((result.get("dataset") or {}).get("dataset_id") if isinstance(result, dict) else None),
+            time.perf_counter() - started,
         )
         if run_state_svc and pipeline_id and run_state_gate:
             try:
@@ -1609,6 +1689,8 @@ def mlops_pipeline_save():
         mlops_svc = _get_mlops_service(env_root)
         pipeline_id = int(result.get("pipeline_id") or 0)
         hydrated = mlops_svc.load_pipeline(tenant_id, env_id, pipeline_id) if pipeline_id > 0 else result
+        if pipeline_id > 0:
+            _pipeline_get_cache_set(tenant_id, env_id, pipeline_id, hydrated)
         return jsonify({"success": True, "data": hydrated}), 200
     except Exception as exc:
         traceback.print_exc()
@@ -1620,9 +1702,16 @@ def mlops_pipeline_get(pipeline_id):
     """GET /api/mlops/pipeline/<id> â€” Load the full pipeline definition."""
     try:
         tenant_id, env_id = _get_env_ids()
+        refresh_raw = str(request.args.get("_refresh") or request.args.get("refresh") or "").strip().lower()
+        force_refresh = refresh_raw in {"1", "true", "yes", "on"}
+        if not force_refresh:
+            cached = _pipeline_get_cache_get(tenant_id, env_id, pipeline_id)
+            if cached is not None:
+                return jsonify({"success": True, "data": cached}), 200
         env_root  = _resolve_env_path(env_id, tenant_id)
         mlops_svc = _get_mlops_service(env_root)
         result    = mlops_svc.load_pipeline(tenant_id, env_id, pipeline_id)
+        _pipeline_get_cache_set(tenant_id, env_id, pipeline_id, result)
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "NOT_FOUND"}), 404
@@ -1662,6 +1751,7 @@ def mlops_pipeline_rename(pipeline_id):
         env_root = _resolve_env_path(env_id, tenant_id)
         mlops_svc = _get_mlops_service(env_root)
         result = mlops_svc.rename_pipeline(tenant_id, env_id, int(pipeline_id), next_name)
+        _pipeline_get_cache_invalidate(tenant_id, env_id, int(pipeline_id))
         return jsonify({"success": True, "data": result}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400

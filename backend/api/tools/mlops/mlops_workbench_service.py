@@ -7,6 +7,7 @@ import uuid
 import threading
 import pickle
 import logging
+import time
 from datetime import datetime
 from contextlib import nullcontext
 
@@ -2812,6 +2813,10 @@ class MLOpsWorkbenchService:
         file_path: Path,
         pipeline_type: str = "fcc",
         pipeline_id: Optional[int] = None,
+        row_count_override: Optional[int] = None,
+        columns_override: Optional[List[str]] = None,
+        column_types_override: Optional[Dict[str, Any]] = None,
+        auto_profile: bool = True,
     ) -> Dict:
         normalized_pipeline_type = _normalize_pipeline_type(pipeline_type)
         try:
@@ -2820,13 +2825,25 @@ class MLOpsWorkbenchService:
             normalized_pipeline_id = None
         if normalized_pipeline_id is not None and normalized_pipeline_id <= 0:
             normalized_pipeline_id = None
-        rel = self._relation_expr(file_path, sample_size=20000)
-        with duckdb.connect() as meta_conn:
-            row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
-            columns = meta_conn.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()
+        if row_count_override is not None and columns_override is not None:
+            row_count = int(row_count_override or 0)
+            column_names = [str(c) for c in columns_override or []]
+            known_columns = set(column_names)
+            column_types = {
+                str(k): str(v)
+                for k, v in (column_types_override or {}).items()
+                if str(k) in known_columns
+            }
+            for col in column_names:
+                column_types.setdefault(col, "UNKNOWN")
+        else:
+            rel = self._relation_expr(file_path, sample_size=20000)
+            with duckdb.connect() as meta_conn:
+                row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
+                columns = meta_conn.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()
 
-        column_names = [c[0] for c in columns]
-        column_types = {c[0]: c[1] for c in columns}
+            column_names = [c[0] for c in columns]
+            column_types = {c[0]: c[1] for c in columns}
         columns_json = json.dumps(column_names, default=str)
         column_types_json = json.dumps(column_types, default=str)
 
@@ -2905,10 +2922,11 @@ class MLOpsWorkbenchService:
             "dataset_type": dataset_type,
             "pipeline_type": normalized_pipeline_type,
         }
-        try:
-            self._auto_profile_background(dataset_meta, int(row_count or 0))
-        except Exception:
-            pass  # profiling failure must never break the upload response
+        if auto_profile:
+            try:
+                self._auto_profile_background(dataset_meta, int(row_count or 0))
+            except Exception:
+                pass  # profiling failure must never break the upload response
 
         try:
             with get_connection(self.db_path) as conn:
@@ -2971,7 +2989,7 @@ class MLOpsWorkbenchService:
             "row_count": int(row_count or 0),
             "columns": column_names,
             "column_types": column_types,
-            "auto_profile": self._get_cached_profile(int(dataset_id)),
+            "auto_profile": self._get_cached_profile(int(dataset_id)) if auto_profile else None,
         }
 
     # ── Auto-profile helpers ───────────────────────────────────────────────────
@@ -7902,13 +7920,15 @@ class MLOpsWorkbenchService:
 
             datetime_hint = any(k in name for k in ["date", "time", "timestamp", "dob", "created"])
             parse_ratio = 0.0
-            if len(non_null) and (series.dtype == "object" or datetime_hint):
-                sample_parse = pd.to_datetime(non_null.head(1000), errors="coerce")
+            if len(non_null) and datetime_hint:
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    sample_parse = pd.to_datetime(non_null.head(250), errors="coerce", cache=True)
                 parse_ratio = float(sample_parse.notna().mean()) if len(sample_parse) else 0.0
             is_datetime_like = (
                 pd.api.types.is_datetime64_any_dtype(series)
                 or (datetime_hint and parse_ratio >= 0.30)
-                or parse_ratio >= 0.80
             )
 
             if is_id_like:
@@ -7975,7 +7995,11 @@ class MLOpsWorkbenchService:
                 str(item.get("type") or ""),
             )
         )
-        return {"suggestions": suggestions}
+        return {
+            "suggestions": suggestions,
+            "rows_analyzed": int(df.shape[0]),
+            "columns_analyzed": int(df.shape[1]),
+        }
 
     def _impute_knn(self, df: pd.DataFrame, column: str, k: int = 5, max_rows: int = 1500):
         if column not in df.columns:
@@ -8243,6 +8267,7 @@ class MLOpsWorkbenchService:
     def apply_preprocessing(self, df: pd.DataFrame, steps: List[Dict], include_trace: bool = False):
         trace_steps: List[Dict[str, Any]] = []
         for idx, raw_step in enumerate(steps or [], start=1):
+            step_started = time.perf_counter()
             step = raw_step if isinstance(raw_step, dict) else {}
             stype = str(step.get("type") or "").lower()
             columns = step.get("columns") or []
@@ -8250,6 +8275,19 @@ class MLOpsWorkbenchService:
             before_rows = int(df.shape[0])
             before_columns = list(df.columns)
             affected_columns, requested_columns, missing_columns = self._preprocess_step_columns(step, before_columns)
+            if include_trace:
+                print(
+                    f"[PreprocessStep] START #{idx} type={stype or 'unknown'} rows={before_rows} columns={len(before_columns)} requested_columns={len(requested_columns)}",
+                    flush=True,
+                )
+                logger.warning(
+                    "[PreprocessStep] start #%s type=%s rows=%s columns=%s requested_columns=%s",
+                    idx,
+                    stype or "unknown",
+                    before_rows,
+                    len(before_columns),
+                    len(requested_columns),
+                )
 
             if stype in {"mapping_id", "tag_mapping_id", "keep_mapping"}:
                 # Marker-only step: keep these columns in dataset for traceability.
@@ -8401,18 +8439,37 @@ class MLOpsWorkbenchService:
                     df[f"{col}_has_num"] = s.str.contains(r"\d").astype(int)
 
             if include_trace:
-                trace_steps.append(
-                    self._build_preprocess_trace_step(
-                        step_index=idx,
-                        step=step,
-                        before_columns=before_columns,
-                        after_columns=list(df.columns),
-                        before_rows=before_rows,
-                        after_rows=int(df.shape[0]),
-                        affected_columns=affected_columns,
-                        requested_columns=requested_columns,
-                        missing_columns=missing_columns,
-                    )
+                duration_ms = round((time.perf_counter() - step_started) * 1000.0, 2)
+                trace_item = self._build_preprocess_trace_step(
+                    step_index=idx,
+                    step=step,
+                    before_columns=before_columns,
+                    after_columns=list(df.columns),
+                    before_rows=before_rows,
+                    after_rows=int(df.shape[0]),
+                    affected_columns=affected_columns,
+                    requested_columns=requested_columns,
+                    missing_columns=missing_columns,
+                )
+                trace_item["duration_ms"] = duration_ms
+                trace_item["duration_label"] = (
+                    f"{duration_ms / 1000.0:.2f}s" if duration_ms >= 1000 else f"{duration_ms:.0f}ms"
+                )
+                trace_steps.append(trace_item)
+                print(
+                    f"[PreprocessStep] DONE #{idx} {trace_item.get('label')} status={trace_item.get('status')} rows={before_rows}->{int(df.shape[0])} cols={len(before_columns)}->{len(df.columns)} duration={trace_item.get('duration_label')}",
+                    flush=True,
+                )
+                logger.warning(
+                    "[PreprocessStep] #%s %s status=%s rows=%s->%s cols=%s->%s duration=%s",
+                    idx,
+                    trace_item.get("label"),
+                    trace_item.get("status"),
+                    before_rows,
+                    int(df.shape[0]),
+                    len(before_columns),
+                    len(df.columns),
+                    trace_item.get("duration_label"),
                 )
 
         if include_trace:
@@ -8442,10 +8499,24 @@ class MLOpsWorkbenchService:
         return self.apply_preprocessing(df, steps)
 
     def preview_preprocessing(self, dataset: Dict, steps: List[Dict], sample_rows: int, target_column: Optional[str] = None) -> Dict:
+        started = time.perf_counter()
+        print(
+            f"[PreprocessPreviewService] LOAD path={dataset.get('file_path')} sample_rows={sample_rows} steps={len(steps or [])}",
+            flush=True,
+        )
         df = self._load_sample_df(Path(dataset["file_path"]), None, sample_rows)
         input_rows = int(df.shape[0])
         input_columns = int(df.shape[1])
+        print(
+            f"[PreprocessPreviewService] LOADED rows={input_rows} columns={input_columns} duration={time.perf_counter() - started:.2f}s",
+            flush=True,
+        )
+        print("[PreprocessPreviewService] APPLY starting", flush=True)
         df, trace_steps = self._apply_preprocessing_preserve_target(df, steps, target_column, include_trace=True)
+        print(
+            f"[PreprocessPreviewService] APPLY done rows={int(df.shape[0])} columns={int(df.shape[1])} duration={time.perf_counter() - started:.2f}s",
+            flush=True,
+        )
         summary = self._summarize_preprocess_trace(
             trace_steps=trace_steps,
             input_rows=input_rows,
@@ -8461,16 +8532,26 @@ class MLOpsWorkbenchService:
         })
 
     def run_preprocessing(self, dataset: Dict, steps: List[Dict], output_path: Path, target_column: Optional[str] = None) -> Dict:
+        started = time.perf_counter()
+        logger.warning("[PreprocessService] loading dataset path=%s steps=%s", dataset.get("file_path"), len(steps or []))
         rel = self._relation_expr(Path(dataset["file_path"]), sample_size=None)
         with duckdb.connect() as conn:
             df = conn.execute(f"SELECT * FROM {rel}").df()
         input_rows = int(df.shape[0])
         input_columns = int(df.shape[1])
+        logger.warning("[PreprocessService] loaded rows=%s columns=%s", input_rows, input_columns)
         df, trace_steps = self._apply_preprocessing_preserve_target(df, steps, target_column, include_trace=True)
         output_rows = int(df.shape[0])
         output_columns = int(df.shape[1])
         output_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(output_path, index=False)
+        logger.warning(
+            "[PreprocessService] saved output=%s rows=%s columns=%s duration=%.2fs",
+            output_path,
+            output_rows,
+            output_columns,
+            time.perf_counter() - started,
+        )
         summary = self._summarize_preprocess_trace(
             trace_steps=trace_steps,
             input_rows=input_rows,
@@ -8478,10 +8559,12 @@ class MLOpsWorkbenchService:
             output_rows=output_rows,
             output_columns=output_columns,
         )
+        column_types = {str(col): str(dtype) for col, dtype in df.dtypes.items()}
         return _json_safe_value({
             "rows": output_rows,
             "path": str(output_path),
             "columns": list(df.columns),
+            "column_types": column_types,
             "trace": {
                 "summary": summary,
                 "steps": trace_steps,
@@ -10151,6 +10234,10 @@ class MLOpsWorkbenchService:
             dataset_type=output_name,
             filename=output_path.name,
             file_path=output_path,
+            row_count_override=int(result.get("rows") or 0),
+            columns_override=result.get("columns") or [],
+            column_types_override=result.get("column_types") or {},
+            auto_profile=False,
         )
         return {"output": result, "dataset": reg}
 

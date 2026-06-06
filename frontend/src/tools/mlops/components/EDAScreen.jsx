@@ -4900,7 +4900,7 @@ const AdvancedEDATab = ({ ds, persona, targetColumn, colNames, detectedCols }) =
         {persona==='technical'&&(
           <Typography variant="caption" color="text.secondary" sx={{ fontSize:10 }}>
             Estimate based on: total_alerts x fp_rate x target_suppression_rate x avg_review_time (15 min/alert).
-            Actual savings depend on threshold selection and event loss constraint.
+            Actual savings depend on threshold selection and the review-gap constraint.
           </Typography>
         )}
       </Card>

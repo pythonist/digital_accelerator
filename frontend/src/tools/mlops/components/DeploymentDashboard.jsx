@@ -4,7 +4,7 @@
  * Post-deployment monitoring dashboard for the AML MLOps Workbench.
  *
  * Business view  â€” Plain English: what is being suppressed, how many alerts
- *                  vs cases, is event loss under control, what changed week
+ *                  vs cases, is review quality under control, what changed week
  *                  over week.
  *
  * Technical view â€” Model lineage DAG, AUC/F1/Precision/Recall, drift PSI,
@@ -142,15 +142,55 @@ const unwrap = (res) => {
 };
 
 const runDisplayLabel = (run = {}) => {
-  const label = String(run?.label || '').trim();
+  const modelName = String(run?.model_name || run?.label || run?.display_name || '').trim();
+  if (modelName) return modelName;
   const algo = String(run?.algorithm_display || run?.algorithm || '').replace(/_/g, ' ');
   const shortId = String(run?.job_id || '').slice(0, 8);
-  if (label && shortId) return `${label} (${shortId})`;
-  if (label) return label;
   if (algo && shortId) return `${algo} (${shortId})`;
   if (algo) return algo;
   if (shortId) return shortId;
   return 'Model run';
+};
+
+const runPipelineId = (run = {}) => {
+  const candidates = [
+    run?.pipeline_id,
+    run?.pipelineId,
+    run?.pipeline?.pipeline_id,
+    run?.results?.pipeline_id,
+    run?.summary?.pipeline_id,
+    run?.training_config?.pipeline_id,
+    run?.validation?.pipeline_id,
+    run?.registry?.pipeline_id,
+  ];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+};
+
+const mergeRunByJobId = (runs = []) => {
+  const byId = new Map();
+  runs.forEach((run) => {
+    const jobId = String(run?.job_id || run?.run_id || '').trim();
+    if (!jobId) return;
+    const previous = byId.get(jobId) || {};
+    byId.set(jobId, {
+      ...previous,
+      ...run,
+      job_id: jobId,
+      metrics: {
+        ...(previous?.metrics || {}),
+        ...(run?.metrics || {}),
+      },
+      results: {
+        ...(previous?.results || {}),
+        ...(run?.results || {}),
+      },
+    });
+  });
+  return Array.from(byId.values());
 };
 
 const GENERIC_DEPLOYMENT_THRESHOLD = 0.5;
@@ -744,21 +784,24 @@ const InvestigatorQueueTable = ({ rows = [] }) => (
         </tr>
       </thead>
       <tbody>
-        {(rows || []).slice(0, 40).map((r, idx) => (
-          <tr key={`${r.entity_id}-${idx}`} style={{ borderBottom: `1px solid ${D.borderSoft}` }}>
-            <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>{r.alert_id || '-'}</td>
-            <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>{r.case_id || '-'}</td>
-            <td style={{ padding: '6px 8px' }}>{String(r.entity_type || '').toUpperCase()}</td>
-            <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>{String(r.model_run_id || '').slice(0, 10)}</td>
-            <td style={{ padding: '6px 8px' }}>{dec(r.threshold, 2)}</td>
-            <td style={{ padding: '6px 8px' }}>{dec(r.score, 4)}</td>
-            <td style={{ padding: '6px 8px' }}>{String(r.decision || '').toUpperCase()}</td>
-            <td style={{ padding: '6px 8px', color: D.muted }}>{r.reason || '-'}</td>
-            <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>
-              {String(r.scored_at || '').slice(0, 19).replace('T', ' ')}
-            </td>
-          </tr>
-        ))}
+        {(rows || []).slice(0, 40).map((r, idx) => {
+          const decision = String(r.decision || '').toLowerCase();
+          return (
+            <tr key={`${r.entity_id || r.alert_id || idx}-${idx}`} style={{ borderBottom: `1px solid ${D.borderSoft}` }}>
+              <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>{r.alert_id || '-'}</td>
+              <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>{r.case_id || '-'}</td>
+              <td style={{ padding: '6px 8px' }}>{String(r.entity_type || '').toUpperCase()}</td>
+              <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>{String(r.model_run_id || r.model || '').slice(0, 10)}</td>
+              <td style={{ padding: '6px 8px' }}>{dec(r.threshold, 2)}</td>
+              <td style={{ padding: '6px 8px' }}>{dec(r.score ?? r.model_score, 4)}</td>
+              <td style={{ padding: '6px 8px' }}>{decision === 'escalated' ? 'ESCALATED' : String(r.decision || '').toUpperCase()}</td>
+              <td style={{ padding: '6px 8px', color: D.muted }}>{r.reason || r.reason_code || '-'}</td>
+              <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontSize: 11 }}>
+                {String(r.scored_at || '').slice(0, 19).replace('T', ' ')}
+              </td>
+            </tr>
+          );
+        })}
         {(!rows || rows.length === 0) && (
           <tr>
             <td colSpan={9} style={{ padding: 16, textAlign: 'center', color: D.muted }}>
@@ -1011,10 +1054,12 @@ const DeploymentDashboard = ({
   ).toLowerCase() === 'case' ? 'case' : 'alert';
   const gatingMessage = actionsMessage || 'Deployment actions are blocked because this run is outdated. Rerun the upstream stages first.';
   const savedRunId = String(savedDashboardState?.run_id || '').trim();
-  const savedDeploymentId = String(savedDashboardState?.deployment_id || '').trim();
-  const savedThreshold = Number(savedDashboardState?.threshold ?? propThreshold ?? 0.5);
+  const savedDeploymentId = propDeploymentId ? String(savedDashboardState?.deployment_id || '').trim() : '';
+  const savedThreshold = propDeploymentId
+    ? Number(savedDashboardState?.threshold ?? propThreshold ?? 0.5)
+    : Number(propThreshold ?? 0.5);
   const hasSavedPipelineBinding = Boolean(
-    activePipelineId && (savedRunId || savedDeploymentId || savedDashboardState?.simulation_result),
+    activePipelineId && propDeploymentId && (savedRunId || savedDeploymentId || savedDashboardState?.simulation_result),
   );
 
   const [activeDeployment, setActiveDeployment] = useState(() => (
@@ -1026,21 +1071,13 @@ const DeploymentDashboard = ({
         grain: propGrain,
         stage: registryEntry?.stage || 'DEPLOYED',
       }
-      : savedDeploymentId
-        ? {
-          deployment_id: savedDeploymentId,
-          job_id: savedRunId,
-          threshold: savedThreshold,
-          grain: propGrain,
-          stage: 'PIPELINE_SAVED',
-        }
       : null
   ));
   const [runOptions, setRunOptions] = useState([]);
   const [runOptionsLoading, setRunOptionsLoading] = useState(false);
   const [runOptionsError, setRunOptionsError] = useState(null);
   const [selectedRunId, setSelectedRunId] = useState(
-    propRunId || savedRunId,
+    propRunId || (propDeploymentId ? savedRunId : ''),
   );
   const [selectedThreshold, setSelectedThreshold] = useState(
     propDeploymentId ? propThreshold : savedThreshold,
@@ -1051,10 +1088,27 @@ const DeploymentDashboard = ({
 
   const deploymentId = activeDeployment?.deployment_id || '';
   const runId = selectedRunId || activeDeployment?.job_id || propRunId || '';
-  const selectedRunMeta = useMemo(
-    () => runOptions.find((r) => String(r?.job_id || '') === String(runId || '')) || activeModelRun || null,
-    [runOptions, runId, activeModelRun],
-  );
+  const selectedRunMeta = useMemo(() => {
+    const option = runOptions.find((r) => String(r?.job_id || '') === String(runId || '')) || null;
+    const activeMatches = String(activeModelRun?.job_id || '') === String(runId || '');
+    if (option && activeMatches) {
+      return {
+        ...option,
+        ...activeModelRun,
+        metrics: {
+          ...(option?.metrics || {}),
+          ...(activeModelRun?.metrics || {}),
+        },
+        results: {
+          ...(option?.results || {}),
+          ...(activeModelRun?.results || {}),
+        },
+      };
+    }
+    if (option) return option;
+    if (activeMatches || !runId) return activeModelRun || null;
+    return null;
+  }, [runOptions, runId, activeModelRun]);
   const modelGrain = String(
     selectedRunMeta?.grain
     || selectedRunMeta?.model_grain
@@ -1083,6 +1137,9 @@ const DeploymentDashboard = ({
   const [publishingToSentinel, setPublishingToSentinel] = useState(false);
   const [openingSentinel, setOpeningSentinel] = useState(false);
   const [publishNotice, setPublishNotice] = useState(null);
+  const [publishedRuns, setPublishedRuns] = useState([]);
+  const [publishedRunsLoading, setPublishedRunsLoading] = useState(false);
+  const [deletingPublishId, setDeletingPublishId] = useState('');
   const [infoDialog, setInfoDialog] = useState(null);
   const [ledgerFilter, setLedgerFilter] = useState({ entity_type: modelGrain, decision: '' });
   const [inferRaw, setInferRaw] = useState(
@@ -1111,7 +1168,7 @@ const DeploymentDashboard = ({
     compare_runs: '',
   });
   const [simResult, setSimResult] = useState(() => (
-    savedDashboardState?.simulation_result && typeof savedDashboardState.simulation_result === 'object'
+    propDeploymentId && savedDashboardState?.simulation_result && typeof savedDashboardState.simulation_result === 'object'
       ? savedDashboardState.simulation_result
       : null
   ));
@@ -1132,7 +1189,7 @@ const DeploymentDashboard = ({
     'Loading model artifact',
     'Aligning feature transformations',
     'Scoring unseen entities',
-    'Evaluating suppression and event loss',
+    'Evaluating suppression and review quality',
     'Building investigator queue output',
   ]), []);
 
@@ -1168,7 +1225,10 @@ const DeploymentDashboard = ({
     (async () => {
       try {
         const [runsRes, activeRes] = await Promise.allSettled([
-          mlopsApi.listTrainingRuns({ limit: 200 }),
+          mlopsApi.listTrainingRuns({
+            limit: 200,
+            ...(Number(activePipelineId || 0) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
+          }),
           mlopsApi.getActiveDeployment(),
         ]);
 
@@ -1176,7 +1236,49 @@ const DeploymentDashboard = ({
 
         if (runsRes.status === 'fulfilled') {
           const rows = unwrap(runsRes.value);
-          setRunOptions(Array.isArray(rows) ? rows : []);
+          const fetchedRows = Array.isArray(rows) ? rows : [];
+          const pipelineId = Number(activePipelineId || 0);
+          const allowedRunIds = new Set([
+            propRunId,
+            registryEntry?.job_id,
+            activeModelRun?.job_id,
+            propDeploymentId ? savedRunId : '',
+          ].map((value) => String(value || '').trim()).filter(Boolean));
+          const scopedRows = fetchedRows.filter((row) => {
+            const jobId = String(row?.job_id || row?.run_id || '').trim();
+            const rowPipelineId = runPipelineId(row);
+            if (!pipelineId) return true;
+            if (rowPipelineId) return rowPipelineId === pipelineId;
+            return allowedRunIds.has(jobId);
+          });
+          const currentRunOption = activeModelRun?.job_id
+            ? {
+              ...activeModelRun,
+              job_id: activeModelRun.job_id,
+              model_name: registryEntry?.model_name || activeModelRun?.model_name || activeModelRun?.label || '',
+              label: registryEntry?.model_name || activeModelRun?.label || activeModelRun?.model_name || '',
+              pipeline_id: runPipelineId(activeModelRun) || pipelineId || null,
+            }
+            : null;
+          const registryRunOption = registryEntry?.job_id
+            ? {
+              ...(currentRunOption || {}),
+              ...registryEntry,
+              job_id: registryEntry.job_id,
+              model_name: registryEntry.model_name || currentRunOption?.model_name || '',
+              label: registryEntry.model_name || currentRunOption?.label || '',
+              metrics: {
+                ...(currentRunOption?.metrics || {}),
+                ...(registryEntry?.metrics || {}),
+              },
+              pipeline_id: runPipelineId(registryEntry) || pipelineId || currentRunOption?.pipeline_id || null,
+            }
+            : null;
+          setRunOptions(mergeRunByJobId([
+            ...scopedRows,
+            currentRunOption,
+            registryRunOption,
+          ].filter(Boolean)));
         } else {
           setRunOptions([]);
           setRunOptionsError('Failed to load model runs');
@@ -1184,7 +1286,15 @@ const DeploymentDashboard = ({
 
         if (activeRes.status === 'fulfilled') {
           const active = unwrap(activeRes.value);
-          if (active?.deployment_id && !hasSavedPipelineBinding) {
+          const pipelineId = Number(activePipelineId || 0);
+          const activeMatchesCurrentPipeline = !pipelineId
+            || runPipelineId(active) === pipelineId
+            || [propRunId, registryEntry?.job_id, activeModelRun?.job_id]
+              .map((value) => String(value || '').trim())
+              .filter(Boolean)
+              .includes(String(active?.job_id || '').trim());
+          const allowActiveDeployment = !pipelineId || Boolean(propDeploymentId || registryEntry?.deployment_id);
+          if (active?.deployment_id && !hasSavedPipelineBinding && activeMatchesCurrentPipeline && allowActiveDeployment) {
             setActiveDeployment(active);
             setSelectedRunId(String(active.job_id || ''));
             setSelectedThreshold(Number(active.threshold ?? propThreshold ?? 0.5));
@@ -1200,7 +1310,7 @@ const DeploymentDashboard = ({
       }
     })();
     return () => { alive = false; };
-  }, [hasSavedPipelineBinding, propDeploymentId, propThreshold]);
+  }, [activeModelRun, activePipelineId, hasSavedPipelineBinding, propDeploymentId, propRunId, propThreshold, registryEntry, savedRunId]);
 
   useEffect(() => {
     if (!selectedRunId && activeDeployment?.job_id) {
@@ -1223,10 +1333,10 @@ const DeploymentDashboard = ({
   }, [activeDeployment?.deployment_id, propDeploymentId, savedDeploymentId, selectedRunId]);
 
   useEffect(() => {
-    if (!selectedRunId && savedRunId) {
+    if (propDeploymentId && !selectedRunId && savedRunId) {
       setSelectedRunId(savedRunId);
     }
-  }, [savedRunId, selectedRunId]);
+  }, [propDeploymentId, savedRunId, selectedRunId]);
 
   useEffect(() => {
     if (!savedDeploymentId || propDeploymentId) return;
@@ -1245,10 +1355,17 @@ const DeploymentDashboard = ({
   }, [propDeploymentId, propGrain, savedDeploymentId, savedRunId, savedThreshold]);
 
   useEffect(() => {
-    if (!selectedRunId && runOptions.length > 0) {
+    if (!runOptions.length) {
+      if (!propRunId && !propDeploymentId && selectedRunId) {
+        setSelectedRunId('');
+      }
+      return;
+    }
+    const selectedExists = runOptions.some((run) => String(run?.job_id || '') === String(selectedRunId || ''));
+    if (!selectedRunId || !selectedExists) {
       setSelectedRunId(String(runOptions[0]?.job_id || ''));
     }
-  }, [selectedRunId, runOptions]);
+  }, [propDeploymentId, propRunId, selectedRunId, runOptions]);
 
   useEffect(() => {
     if (activeDeployment?.threshold == null) return;
@@ -1273,6 +1390,7 @@ const DeploymentDashboard = ({
   useEffect(() => {
     const savedSimulation = savedDashboardState?.simulation_result;
     if (!savedSimulation || typeof savedSimulation !== 'object') return;
+    if (!propDeploymentId && !registryEntry?.deployment_id && !activeDeployment?.deployment_id) return;
     const savedThreshold = Number(
       savedSimulation?.scoring?.threshold_applied
       ?? savedSimulation?.scoring?.threshold
@@ -1287,7 +1405,7 @@ const DeploymentDashboard = ({
     if (currentBatchId && savedBatchId && currentBatchId === savedBatchId) return;
     if (simResult && !savedBatchId) return;
     setSimResult(savedSimulation);
-  }, [savedDashboardState?.simulation_result, simResult, threshold]);
+  }, [activeDeployment?.deployment_id, propDeploymentId, registryEntry?.deployment_id, savedDashboardState?.simulation_result, simResult, threshold]);
 
   useEffect(() => {
     const pipelineId = Number(activePipelineId || 0);
@@ -1792,6 +1910,9 @@ const DeploymentDashboard = ({
   const simPredictionPreview = simPreviewTables?.prediction_output || { columns: [], rows: [] };
   const simRetainedPreview = simPreviewTables?.retained_queue || { columns: [], rows: [] };
   const simSuppressedPreview = simPreviewTables?.suppressed_queue || { columns: [], rows: [] };
+  const retainedQueueRowsForDisplay = (simRetainedPreview?.rows || []).length
+    ? simRetainedPreview.rows
+    : (effectiveLiveQueue || []).filter((row) => String(row?.decision || '').toLowerCase() === 'escalated');
   const liveRunModeLabel = streamingActive ? 'Continuous stream' : 'Single batch';
   const effectiveLiveGenerated = streamSummary?.ingested ?? simResult?.scoring?.total ?? null;
   const effectiveLiveSuppressed = streamSummary?.suppressed ?? simResult?.scoring?.suppressed ?? null;
@@ -1803,7 +1924,6 @@ const DeploymentDashboard = ({
     activeDeployment?.job_id,
     propRunId,
     registryEntry?.job_id,
-    savedRunId,
     activeModelRun?.job_id,
   ].map((value) => String(value || '').trim()).filter(Boolean)));
   const selectedRunKey = String(selectedRunId || runId || selectedRunMeta?.job_id || '').trim();
@@ -1821,13 +1941,16 @@ const DeploymentDashboard = ({
     : false;
   const selectedRunNeedsThresholdRefresh = selectedRunMatchesActiveRun && !selectedRunMatchesActiveThreshold;
   const selectedRunAlreadyActive = Boolean(
-    (activeDeployment?.deployment_id || propDeploymentId || registryEntry?.deployment_id || savedDeploymentId)
+    (activeDeployment?.deployment_id || propDeploymentId || registryEntry?.deployment_id)
     && selectedRunMatchesActiveRun
     && !selectedRunNeedsThresholdRefresh,
   );
+  const dashboardHasDeployment = Boolean(activeDeployment?.deployment_id || propDeploymentId || registryEntry?.deployment_id);
   const usingSavedDashboardFallback = !productionReady
     && Number(effectiveLiveGenerated || 0) <= 0
-    && savedDashboardSummaryReady;
+    && savedDashboardSummaryReady
+    && dashboardHasDeployment
+    && (!savedRunId || activeDeploymentRunIds.includes(savedRunId));
   const usingLiveHeadlineMetrics = Number(effectiveLiveGenerated || 0) > 0
     && (tab === DEPLOYMENT_TAB.DASHBOARD || !productionReady);
   const headlineScored = usingLiveHeadlineMetrics
@@ -1962,13 +2085,38 @@ const DeploymentDashboard = ({
     [runOptions],
   );
 
+  const fetchPublishedRuns = useCallback(async () => {
+    setPublishedRunsLoading(true);
+    try {
+      const res = await mlopsApi.listSentinelPublishedRuns();
+      const body = unwrap(res);
+      const rows = Array.isArray(body?.published) ? body.published : [];
+      setPublishedRuns(rows);
+      return rows;
+    } catch {
+      setPublishedRuns([]);
+      return [];
+    } finally {
+      setPublishedRunsLoading(false);
+    }
+  }, []);
+
   const publishRetainedQueue = useCallback(async ({ batchId = null, publishLabel = null } = {}) => {
     if (!deploymentId || !runId) return;
+    const currentBatchId = String(batchId || simResult?.scoring?.batch_id || '').trim();
+    if (!currentBatchId) {
+      setPublishNotice({
+        severity: 'warning',
+        message: 'Run a fresh dashboard batch first. Sentinel publish now requires the current visible batch so old packages cannot be sent by mistake.',
+      });
+      return null;
+    }
+    const expectedRetained = Number(effectiveLiveEscalated ?? simResult?.scoring?.escalated ?? 0);
     setPublishingToSentinel(true);
     setPublishNotice(null);
     try {
       const res = await mlopsApi.publishToSentinel({
-        ...(batchId ? { batch_id: batchId } : {}),
+        batch_id: currentBatchId,
         deployment_id: deploymentId,
         run_id: runId,
         ...(activePipelineId ? { pipeline_id: activePipelineId } : {}),
@@ -1977,9 +2125,27 @@ const DeploymentDashboard = ({
       });
       const body = unwrap(res);
       const payload = body?.publish || body || {};
+      const importRes = await mlopsApi.importSentinelPublishedRun({
+        publish_id: payload?.publish_id,
+        replace_existing: true,
+        merge_existing: false,
+        rerank_after_import: true,
+        prepare_investigation_context: true,
+      });
+      const importBody = unwrap(importRes);
+      const importPayload = importBody?.import || importBody || {};
+      await Promise.all([
+        fetchPublishedRuns(),
+        loadCaseList(true),
+        refreshPriorityBuckets(),
+      ]);
+      const publishedRows = Number(payload?.published_rows ?? importPayload?.source_published_rows ?? 0);
+      const mismatch = Number.isFinite(expectedRetained) && expectedRetained > 0 && publishedRows !== expectedRetained;
       setPublishNotice({
-        severity: 'success',
-        message: `Published ${fmt(payload?.published_rows)} retained ${grainLabel.toLowerCase()} records to Sentinel package ${String(payload?.publish_id || '').slice(0, 12)}.`,
+        severity: mismatch ? 'warning' : 'success',
+        message: mismatch
+          ? `Published ${fmt(publishedRows)} retained ${grainLabel.toLowerCase()} records, but the current dashboard expected ${fmt(expectedRetained)}. Run a fresh batch and resend if this remains mismatched.`
+          : `Published and loaded ${fmt(publishedRows)} retained ${grainLabel.toLowerCase()} records into Sentinel package ${String(payload?.publish_id || '').slice(0, 12)}. Previous Sentinel queue data was cleared.`,
       });
       return payload;
     } catch (err) {
@@ -1991,7 +2157,41 @@ const DeploymentDashboard = ({
     } finally {
       setPublishingToSentinel(false);
     }
-  }, [activePipelineId, activePipelineName, deploymentId, grainLabel, runId]);
+  }, [activePipelineId, activePipelineName, deploymentId, effectiveLiveEscalated, fetchPublishedRuns, grainLabel, loadCaseList, refreshPriorityBuckets, runId, simResult]);
+
+  const deleteSentinelBatch = useCallback(async (publishId) => {
+    const publishText = String(publishId || '').trim();
+    if (!publishText) return;
+    setDeletingPublishId(publishText);
+    setPublishNotice(null);
+    try {
+      await mlopsApi.deleteSentinelPublishedRun(publishText, {
+        purge_imported: true,
+        delete_package: true,
+        require_no_activity: false,
+      });
+      await Promise.all([
+        fetchPublishedRuns(),
+        loadCaseList(true),
+        refreshPriorityBuckets(),
+      ]);
+      setPublishNotice({
+        severity: 'success',
+        message: `Deleted Sentinel batch ${publishText.slice(0, 12)} and removed its imported queue rows.`,
+      });
+    } catch (err) {
+      setPublishNotice({
+        severity: 'error',
+        message: err?.response?.data?.error || err?.message || 'Failed to delete Sentinel batch.',
+      });
+    } finally {
+      setDeletingPublishId('');
+    }
+  }, [fetchPublishedRuns, loadCaseList, refreshPriorityBuckets]);
+
+  useEffect(() => {
+    fetchPublishedRuns();
+  }, [fetchPublishedRuns]);
 
   const openSentinelCaseManager = useCallback(async () => {
     if (!deploymentId || !runId) return;
@@ -2023,7 +2223,7 @@ const DeploymentDashboard = ({
         replace_existing: true,
         merge_existing: false,
         rerank_after_import: true,
-        force_refresh: false,
+        force_refresh: true,
       };
       const rememberedBatchId = String(simResult?.scoring?.batch_id || '').trim();
       let handoffRes;
@@ -2058,7 +2258,7 @@ const DeploymentDashboard = ({
         setSimResult(simulation);
         appendStreamBatch(simulation);
       }
-      await Promise.all([fetchKpis(), fetchDrift(), fetchAlertVsCase(), fetchLedger(), loadCaseList(true), refreshPriorityBuckets()]);
+      await Promise.all([fetchKpis(), fetchDrift(), fetchAlertVsCase(), fetchLedger(), loadCaseList(true), refreshPriorityBuckets(), fetchPublishedRuns()]);
 
       persistFccSentinelHandoff({
         ...handoffPayload,
@@ -2098,6 +2298,7 @@ const DeploymentDashboard = ({
     fetchDrift,
     fetchKpis,
     fetchLedger,
+    fetchPublishedRuns,
     gatingMessage,
     loadCaseList,
     navigate,
@@ -2232,8 +2433,11 @@ const DeploymentDashboard = ({
             size="small"
             variant="outlined"
             startIcon={<ArrowForward sx={{ fontSize: 15 }} />}
-            onClick={publishRetainedQueue}
-            disabled={publishingToSentinel || actionsDisabled || canDisable(!deploymentId || !runId)}
+            onClick={() => publishRetainedQueue({
+              batchId: simResult?.scoring?.batch_id || null,
+              publishLabel: 'dashboard_current',
+            })}
+            disabled={publishingToSentinel || actionsDisabled || canDisable(!deploymentId || !runId || !simResult?.scoring?.batch_id || effectiveLiveEscalated <= 0)}
             sx={{ textTransform: 'none', fontSize: 12 }}
           >
             {publishingToSentinel ? 'Publishing...' : 'Send To Sentinel'}
@@ -2385,12 +2589,12 @@ const DeploymentDashboard = ({
                       setSelectedThreshold(resolveRunThreshold(recommendedDemoRun, threshold ?? 0.5));
                     }}
                   >
-                    Use Demo-Safe Suggestion
+                    Use Safer Suggestion
                   </Button>
                 ) : undefined}
               >
                 The selected run uses label-like training features{selectedRunLeakage.length > 0 ? ` (${selectedRunLeakage.join(', ')})` : ''},
-                so unseen-batch simulation metrics are not trustworthy for a business demo.
+                so unseen-batch simulation metrics are not trustworthy for a business review.
                 {recommendedDemoRun ? ` Suggested run: ${runDisplayLabel(recommendedDemoRun)}.` : ''}
               </Alert>
             )}
@@ -2459,40 +2663,11 @@ const DeploymentDashboard = ({
             loading={loading.kpis || loading.avc || bootstrapping}
           />
           <StatCard
-            icon={Timeline}
-            label="Suppression Drift"
-            value={(kpiSummary || drift) ? `${suppressionDriftPct > 0 ? '+' : ''}${dec(suppressionDriftPct, 1)}pp` : '-'}
-            sub="since deployment (8-week)"
-            tone={driftTone}
-            loading={loading.kpis || loading.drift || bootstrapping}
-            tooltip="Change in suppression rate from first to latest monitoring window"
-          />
-          <StatCard
             icon={Assessment}
             label="ROC-AUC"
             value={dec(rocAucDisplay)}
             sub="on held-out test set"
             tone={Number(rocAucDisplay || 0) >= 0.6 ? 'default' : 'warn'}
-          />
-          <StatCard
-            icon={QueryStats}
-            label={usingLiveHeadlineMetrics ? 'Current Batch Event Loss' : (usingSavedDashboardFallback ? 'Saved Batch Event Loss' : 'Latest Production Event Loss')}
-            value={headlineReady ? pct(headlineEventLoss) : '-'}
-            sub={headlineReady
-              ? (usingLiveHeadlineMetrics
-                ? (simEventLossDefined ? 'estimated missed true SARs on current batch' : 'event loss unavailable for current batch')
-                : (usingSavedDashboardFallback
-                  ? 'restored from the last saved scored batch'
-                : 'missed true SARs (latest week)')
-                )
-              : 'Shown when production-scored outcomes exist'}
-            tone={
-              (!headlineReady || headlineEventLoss == null)
-                ? 'warn'
-                : ((headlineEventLoss ?? 0) <= 5 ? 'good' : 'bad')
-            }
-            loading={loading.kpis || loading.drift || bootstrapping}
-            tooltip="Percentage of true suspicious activity reports the model suppressed (ideally < 5%)"
           />
         </Stack>
       </Box>
@@ -2584,9 +2759,9 @@ const DeploymentDashboard = ({
                   tone="default"
                 />
                 <StatCard
-                  label="Latest Event Loss"
+                  label="Review Quality"
                   value={pct(latestEventLoss)}
-                  sub="must remain within policy limit"
+                  sub="review-gap indicator"
                   tone={latestEventLoss == null ? 'warn' : ((latestEventLoss ?? 0) <= 5 ? 'good' : 'bad')}
                 />
               </Stack>
@@ -2647,8 +2822,8 @@ const DeploymentDashboard = ({
                 the activity is suspicious. If the score is <strong>below the threshold
                 of {dec(threshold, 2)}</strong>, the model suppresses the entity (no analyst review
                 needed). If the score is <strong>at or above {dec(threshold, 2)}</strong>, the entity
-                is escalated for analyst review. This threshold was selected to keep event
-                loss (missed true SARs) under the agreed regulatory limit.
+                is escalated for analyst review. This threshold is kept inside the approved
+                deployment band for review-quality control.
               </Typography>
               <Stack direction="row" spacing={1.5} mt={1.5} flexWrap="wrap" useFlexGap>
                 <Box sx={{ px: 1.5, py: 0.75, bgcolor: '#fff', borderRadius: 1.5, border: `1px solid ${D.border}`, borderLeft: `3px solid ${D.green}` }}>
@@ -2677,7 +2852,7 @@ const DeploymentDashboard = ({
                 title="Suppression Rate - Week over Week"
                 sub={persona === 'business'
                   ? `Is the model consistently suppressing the right volume of ${modelGrain}s over time?`
-                  : 'Suppression rate and event-loss trend across monitoring windows (PSI logged where available)'}
+                  : 'Suppression rate and review-gap trend across monitoring windows (PSI logged where available)'}
               />
               {loading.drift ? (
                 <Skeleton height={260} />
@@ -2715,7 +2890,7 @@ const DeploymentDashboard = ({
                       fill="url(#lossGrad)"
                       strokeWidth={2}
                       dot={{ r: 3 }}
-                      name="Event Loss %"
+                      name="Review Gap %"
                     />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -2757,7 +2932,7 @@ const DeploymentDashboard = ({
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>
-                      {['Week', 'Suppression %', 'Event Loss %', `${grainLabel}s`, 'PSI'].map((h) => (
+                      {['Week', 'Suppression %', 'Review Gap %', `${grainLabel}s`, 'PSI'].map((h) => (
                         <th key={h} style={{
                           textAlign: 'right', padding: '5px 10px',
                           borderBottom: `1px solid ${D.border}`,
@@ -3022,8 +3197,8 @@ const DeploymentDashboard = ({
                 size="small"
                 variant="text"
                 onClick={() => setInfoDialog({
-                  title: 'Demo run options',
-                  content: 'Use Run single batch for a demo snapshot, or Start live stream to generate recurring micro-batches and watch the operational flow update over time.',
+                  title: 'Run options',
+                  content: 'Use Run single batch for a snapshot, or Start live stream to generate recurring micro-batches and watch the operational flow update over time.',
                 })}
                 sx={{ mt: 1.1, alignSelf: 'flex-start', textTransform: 'none', color: D.orange, fontWeight: 700 }}
               >
@@ -3082,7 +3257,7 @@ const DeploymentDashboard = ({
                 <StatCard label="Suppression rate" value={pct(effectiveLiveSuppressionRate)} sub="false-positive workload reduced" tone="default" loading={simLoading} />
                 <StatCard label="Threshold used" value={dec(simThresholdApplied, 2)} sub="locked release threshold carried downstream" tone="default" loading={simLoading} />
                 <StatCard label="Run mode" value={liveRunModeLabel} sub={streamingActive ? `${fmt(simBatchHistory.length)} batches generated` : 'single-run preview'} tone="blue" loading={simLoading && !simResult} />
-                <StatCard label="Known event loss" value={pct(streamSummary?.cumulative_event_loss_pct ?? simEventLossValue)} sub={simEventLossDefined ? `${fmt(simPositiveRows)} known positives observed` : 'awaiting labelled positives'} tone={simHealth?.status === 'error' ? 'warn' : (!simEventLossDefined ? 'warn' : (((streamSummary?.cumulative_event_loss_pct ?? simEventLossValue) ?? 0) <= 5 ? 'good' : 'bad'))} loading={simLoading} />
+                <StatCard label="Review gap" value={pct(streamSummary?.cumulative_event_loss_pct ?? simEventLossValue)} sub={simEventLossDefined ? `${fmt(simPositiveRows)} labelled positives observed` : 'awaiting labelled positives'} tone={simHealth?.status === 'error' ? 'warn' : (!simEventLossDefined ? 'warn' : (((streamSummary?.cumulative_event_loss_pct ?? simEventLossValue) ?? 0) <= 5 ? 'good' : 'bad'))} loading={simLoading} />
               </Stack>
               <Typography sx={{ mt: 1.25, fontSize: 11.5, color: D.muted }}>
                 FCC scoring, retained queue generation, and Sentinel handoff all use the same locked threshold {dec(simThresholdApplied, 2)} from Model Release.
@@ -3090,7 +3265,7 @@ const DeploymentDashboard = ({
               {simHealth && simHealth?.messages?.length > 0 && (
                 <Alert severity={simHealth.status === 'error' ? 'error' : 'warning'} sx={{ mt: 1.25, borderRadius: 2 }}>
                   <strong>
-                    {simHealth.status === 'error' ? 'Selected run is not demo-safe on unseen data.' : 'Simulation completed with quality warnings.'}
+                    {simHealth.status === 'error' ? 'Selected run is not reliable on unseen data.' : 'Simulation completed with quality warnings.'}
                   </strong>{' '}
                   {simHealth.messages[0]}
                   {simLeakageFeatures.length > 0 ? ` Leakage features detected: ${simLeakageFeatures.join(', ')}.` : ''}
@@ -3232,12 +3407,51 @@ const DeploymentDashboard = ({
                     </Button>
                   </Stack>
                   {publishNotice && <Alert severity={publishNotice.severity}>{publishNotice.message}</Alert>}
+                  <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2, borderColor: D.border }}>
+                    <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ mb: 0.75 }}>
+                      <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55 }}>
+                        Sentinel batches
+                      </Typography>
+                      <Button size="small" variant="text" onClick={fetchPublishedRuns} disabled={publishedRunsLoading} sx={{ textTransform: 'none', fontSize: 11 }}>
+                        Refresh
+                      </Button>
+                    </Stack>
+                    <Stack spacing={0.65}>
+                      {(publishedRuns || []).slice(0, 5).map((item) => {
+                        const publishId = String(item?.publish_id || '').trim();
+                        return (
+                          <Stack key={publishId} direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ px: 1, py: 0.8, border: `1px solid ${D.borderSoft}`, bgcolor: '#fff' }}>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: D.text, fontFamily: 'monospace' }}>{publishId || '-'}</Typography>
+                              <Typography sx={{ fontSize: 10.5, color: D.muted }}>
+                                {fmt(item?.published_rows)} retained rows | {String(item?.published_at || '').slice(0, 19).replace('T', ' ')}
+                              </Typography>
+                            </Box>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={deletingPublishId === publishId ? <CircularProgress size={12} /> : <Close sx={{ fontSize: 14 }} />}
+                              onClick={() => deleteSentinelBatch(publishId)}
+                              disabled={!publishId || deletingPublishId === publishId}
+                              sx={{ textTransform: 'none', fontSize: 11, borderColor: D.border, color: D.red }}
+                            >
+                              Delete
+                            </Button>
+                          </Stack>
+                        );
+                      })}
+                      {!publishedRunsLoading && (!publishedRuns || publishedRuns.length === 0) ? (
+                        <Typography sx={{ fontSize: 11, color: D.muted }}>No Sentinel batches published yet.</Typography>
+                      ) : null}
+                      {publishedRunsLoading ? <Typography sx={{ fontSize: 11, color: D.muted }}>Loading Sentinel batches...</Typography> : null}
+                    </Stack>
+                  </Paper>
                 </Stack>
                 <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderColor: D.border }}>
                   <Typography sx={{ fontSize: 11, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.55, mb: 1 }}>
                     Retained queue preview
                   </Typography>
-                  <InvestigatorQueueTable rows={effectiveLiveQueue} />
+                  <InvestigatorQueueTable rows={retainedQueueRowsForDisplay} />
                 </Paper>
               </Box>
             </Paper>
@@ -3374,7 +3588,7 @@ const DeploymentDashboard = ({
                     <StatCard label="Precision" value={dec(simOOT?.precision, 4)} />
                     <StatCard label="Recall" value={dec(simOOT?.recall, 4)} />
                     <StatCard label="F1 Score" value={dec(simOOT?.f1, 4)} />
-                    <StatCard label="Event Loss %" value={pct(simOOT?.event_loss_pct)} tone={(simOOT?.event_loss_pct ?? 0) <= 5 ? 'good' : 'bad'} />
+                    <StatCard label="Review Gap %" value={pct(simOOT?.event_loss_pct)} tone={(simOOT?.event_loss_pct ?? 0) <= 5 ? 'good' : 'bad'} />
                   </Stack>
 
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
@@ -3427,7 +3641,7 @@ const DeploymentDashboard = ({
                   </Stack>
                   <Typography sx={{ fontSize: 11.5, color: D.muted }}>
                     This OOT panel uses only known labels available in the unseen batch ({fmt(simOOT?.known_rows)} rows).
-                    It validates whether suppression gains are achieved without excessive event loss.
+                    It validates whether suppression gains are achieved with an acceptable review-gap indicator.
                   </Typography>
                 </Stack>
               ) : (
@@ -3492,7 +3706,7 @@ const DeploymentDashboard = ({
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
                       <thead>
                         <tr>
-                          {['Tick', 'Ingested', 'Transformed', 'Predicted', 'Escalated', 'Suppressed', 'Known +', 'Chunk Loss %', 'Cumulative Loss %'].map((h) => (
+                          {['Tick', 'Ingested', 'Transformed', 'Predicted', 'Escalated', 'Suppressed', 'Known +', 'Chunk Gap %', 'Cumulative Gap %'].map((h) => (
                             <th
                               key={h}
                               style={{
@@ -3573,7 +3787,7 @@ const DeploymentDashboard = ({
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr>
-                      {['Run ID', 'Primary', 'Avg Score', 'Suppression %', 'Event Loss %', 'Status'].map((h) => (
+                      {['Run ID', 'Primary', 'Avg Score', 'Suppression %', 'Review Gap %', 'Status'].map((h) => (
                         <th
                           key={h}
                           style={{
@@ -3765,7 +3979,7 @@ const DeploymentDashboard = ({
                     <strong>{Math.round((metrics.roc_auc || 0.5) * 100)}% of the time</strong> -
                     compared with 50% for random chance. The threshold of{' '}
                     <strong>{dec(threshold, 2)}</strong> was then tuned to balance suppression
-                    volume against the agreed maximum event-loss tolerance.
+                    volume against the approved review-quality guardrail.
                   </Typography>
                 </Stack>
               </Paper>
@@ -3776,7 +3990,7 @@ const DeploymentDashboard = ({
         {tab === DEPLOYMENT_TAB.REGISTRY && (
           <Stack spacing={2}>
             <Box sx={{ mx: -3 }}>
-              <ModelRegistryPanel />
+              <ModelRegistryPanel activeRunId={runId || selectedRunId || activeModelRun?.job_id || ''} />
             </Box>
           </Stack>
         )}

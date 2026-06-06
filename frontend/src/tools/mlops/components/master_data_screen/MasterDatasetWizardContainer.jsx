@@ -124,7 +124,6 @@ const MasterDatasetWizardContainer = ({
 
   const [currentStepId, setCurrentStepId] = useState(initialCurrentStepId || 'base');
   const [completedSteps, setCompletedSteps] = useState(new Set());
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [containerWidth, setContainerWidth] = useState(1600);
   const activePipelineKey = Number(activePipelineId || 0) || null;
@@ -939,9 +938,6 @@ const MasterDatasetWizardContainer = ({
     }
     return (
       <StepPreviewBuild
-        summaryLines={summaryLines}
-        anchorType={anchorType}
-        activeJoins={activeJoins}
         datasets={datasets}
         estimatedOutputRows={estimatedOutputRows}
         previewData={previewData}
@@ -956,10 +952,6 @@ const MasterDatasetWizardContainer = ({
         onContinue={() => onStepAdvance?.('target')}
         error={error}
         buildLog={buildLog}
-        advancedOpen={advancedOpen}
-        onToggleAdvanced={() => setAdvancedOpen((v) => !v)}
-        rowImpact={rowImpact}
-        tableSchemas={tableSchemas}
         targetLabelName="str_label"
       />
     );

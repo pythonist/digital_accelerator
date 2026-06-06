@@ -1071,6 +1071,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       accuracy: Number(row?.accuracy ?? 0) || 0,
       suppression_rate_pct: Number(row?.suppression_rate_pct ?? row?.suppression_pct ?? 0) || 0,
       event_loss_pct: Number(row?.event_loss_pct ?? 0) || 0,
+      review_gap_pct: Number(row?.review_gap_pct ?? row?.missed_review_pct ?? row?.event_loss_pct ?? 0) || 0,
+      missed_review_pct: Number(row?.missed_review_pct ?? row?.review_gap_pct ?? row?.event_loss_pct ?? 0) || 0,
     }));
   }, []);
 
@@ -1104,12 +1106,28 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
         specificity: metrics?.specificity ?? null,
         suppression_rate_pct: metrics?.suppression_rate_pct ?? null,
         event_loss_pct: metrics?.event_loss_pct ?? null,
+        review_gap_pct: metrics?.review_gap_pct ?? null,
         optimal_threshold: metrics?.optimal_threshold ?? run.threshold ?? null,
         confusion_matrix: metrics?.confusion_matrix || null,
         roc_curve: Array.isArray(metrics?.roc_curve) ? metrics.roc_curve.slice(0, 200) : [],
         pr_curve: Array.isArray(metrics?.pr_curve) ? metrics.pr_curve.slice(0, 200) : [],
         threshold_table: compactThresholdTable(metrics?.threshold_table),
       },
+      display_evaluation: run.display_evaluation && typeof run.display_evaluation === 'object'
+        ? {
+          source: run.display_evaluation.source || 'demo_display',
+          total: run.display_evaluation.total ?? null,
+          algorithm_id: run.display_evaluation.algorithm_id || run.algorithm_id || run.algorithm || '',
+          confusion_matrix: run.display_evaluation.confusion_matrix || metrics?.confusion_matrix || null,
+          suppression_rate_pct: run.display_evaluation.suppression_rate_pct ?? metrics?.suppression_rate_pct ?? null,
+          missed_review_pct: run.display_evaluation.missed_review_pct ?? metrics?.event_loss_pct ?? null,
+          threshold: run.display_evaluation.threshold ?? run.threshold ?? null,
+          metrics: {
+            ...(run.display_evaluation.metrics || {}),
+            threshold_table: compactThresholdTable(run.display_evaluation.metrics?.threshold_table || metrics?.threshold_table),
+          },
+        }
+        : null,
       results: {
         summary: results?.summary || null,
         feature_importance: featureImportance,
@@ -2497,7 +2515,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
 
   useEffect(() => {
     if (!masterDataset || activePipelineType === 'mule') return;
-    mlopsApi.preprocessPlan({ dataset_id: masterDataset.dataset_id })
+    mlopsApi.preprocessPlan({ dataset_id: masterDataset.dataset_id, sample_rows: 1500 })
       .then((res) => {
         const payload = unwrapApiPayload(res) || {};
         setPreprocessPlan(normalizePreprocessSuggestions(payload.suggestions || []));
@@ -4177,22 +4195,27 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
           target_column: targetColumn || 'mule_flag',
           steps: stepsToUse,
           output_table_name: `mule_feature_studio_${Number(validActivePipelineId)}`,
-          sample_rows: 100,
+          sample_rows: 25,
         });
         const payload = unwrapApiPayload(res);
         const normalized = payload?.preview_contract || payload?.preview || payload;
         setPreprocessPreview(normalized);
         return normalized;
       }
-      const res = await mlopsApi.preprocessPreview({ dataset_id: preprocessingInput.dataset_id, steps: stepsToUse, target_column: targetColumn });
+      const res = await mlopsApi.preprocessPreview({
+        dataset_id: preprocessingInput.dataset_id,
+        steps: stepsToUse,
+        target_column: targetColumn,
+        sample_rows: 25,
+      });
       const normalized = res.data || res;
       setPreprocessPreview(normalized);
       return normalized;
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); throw e; }
     return null;
   }, [activePipelineType, featureStoreDataset, masterDataset, preprocessSteps, targetColumn, validActivePipelineId]);
 
-  const handlePreprocessRun = useCallback(async (outputName, stepsOverride = null) => {
+  const handlePreprocessRun = useCallback(async (outputName, stepsOverride = null, options = {}) => {
     const preprocessingInput = featureStoreDataset || masterDataset;
     if (!preprocessingInput) return;
     const stepsToUse = normalizePreprocessSteps(Array.isArray(stepsOverride) ? stepsOverride : preprocessSteps);
@@ -4212,7 +4235,9 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
         if (previewLike) setPreprocessPreview(previewLike);
         if (built?.dataset_id) {
           setPreprocessDataset(built);
-          await loadDatasets({ sync: true });
+          Promise.resolve()
+            .then(() => loadDatasets({ sync: true, pipelineId: Number(validActivePipelineId) || null }))
+            .catch((refreshError) => console.warn('[FCC preprocessing] background dataset refresh failed', refreshError));
         }
         return payload;
       }
@@ -4224,9 +4249,14 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
         ...(Number(validActivePipelineId || 0) > 0 ? { pipeline_id: Number(validActivePipelineId) } : {}),
       });
       const built = res.data?.dataset || res.dataset || res.data || res;
-      if (built?.dataset_id) { setPreprocessDataset(built); await loadDatasets(); }
+      if (built?.dataset_id) {
+        setPreprocessDataset(built);
+        Promise.resolve()
+          .then(() => loadDatasets({ sync: true, pipelineId: Number(validActivePipelineId) || null }))
+          .catch((refreshError) => console.warn('[FCC preprocessing] background dataset refresh failed', refreshError));
+      }
       return res?.data || res;
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); throw e; }
     return null;
   }, [activePipelineType, featureStoreDataset, masterDataset, preprocessSteps, targetColumn, loadDatasets, validActivePipelineId]);
 
@@ -4925,6 +4955,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       algorithm: run?.algorithm || run?.algorithm_display || run?.algorithm_id || run?.algo_id || run?.results?.algorithm || activeModelRun?.algorithm,
       auc: run?.auc ?? run?.results?.metrics?.roc_auc ?? run?.metrics?.roc_auc ?? activeModelRun?.auc,
       metrics: run?.results?.metrics || run?.metrics || activeModelRun?.metrics || {},
+      display_evaluation: run?.display_evaluation || run?.results?.display_evaluation || activeModelRun?.display_evaluation || null,
+      confusion_matrix: run?.confusion_matrix || run?.results?.display_evaluation?.confusion_matrix || run?.results?.metrics?.confusion_matrix || run?.metrics?.confusion_matrix || activeModelRun?.confusion_matrix || null,
+      suppression_rate_pct: run?.suppression_rate_pct ?? run?.results?.metrics?.suppression_rate_pct ?? run?.metrics?.suppression_rate_pct ?? activeModelRun?.suppression_rate_pct,
+      event_loss_pct: run?.event_loss_pct ?? run?.results?.metrics?.event_loss_pct ?? run?.metrics?.event_loss_pct ?? activeModelRun?.event_loss_pct,
+      review_gap_pct: run?.review_gap_pct ?? run?.results?.metrics?.review_gap_pct ?? run?.metrics?.review_gap_pct ?? activeModelRun?.review_gap_pct,
       selected_threshold: nextThreshold,
       threshold: nextThreshold,
     };
@@ -4951,6 +4986,11 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
         auc: normalizedRun.auc,
         metrics: normalizedRun.metrics || {},
         results: normalizedRun.results,
+        display_evaluation: normalizedRun.display_evaluation || null,
+        confusion_matrix: normalizedRun.confusion_matrix || null,
+        suppression_rate_pct: normalizedRun.suppression_rate_pct ?? null,
+        event_loss_pct: normalizedRun.event_loss_pct ?? null,
+        review_gap_pct: normalizedRun.review_gap_pct ?? null,
         grain: normalizedRun.grain,
         threshold: normalizedRun.selected_threshold ?? normalizedRun.threshold,
         selected_threshold: normalizedRun.selected_threshold ?? normalizedRun.threshold,
@@ -5120,12 +5160,70 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
 
   const handleModelComplete = useCallback((run, options = {}) => {
     flushSync(() => {
-      adoptModelRun(run, { resetDownstream: !options?.resumeExisting });
+      adoptModelRun(run, {
+        resetDownstream: !options?.resumeExisting,
+        nextStep: options?.nextStep,
+      });
     });
-    openWorkbenchStep('validation', { skipGuardRedirect: true });
-  }, [adoptModelRun, openWorkbenchStep]);
+  }, [adoptModelRun]);
 
-  const handleRegistered = useCallback((entry) => { setRegistryEntry(entry); }, []);
+  const handleRegistered = useCallback((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      setRegistryEntry(entry);
+      return;
+    }
+    const registeredModelName = String(entry?.model_name || entry?.label || entry?.display_name || '').trim();
+    const registeredJobId = String(entry?.job_id || entry?.run_id || entry?.entry?.run_id || '').trim();
+    const sourceMetrics = entry?.metrics
+      || entry?.validation?.metrics
+      || validationReport?.metrics
+      || activeModelRun?.metrics
+      || modelRun?.metrics
+      || {};
+    const normalizedEntry = {
+      ...entry,
+      ...(registeredModelName ? { model_name: registeredModelName, label: registeredModelName, display_name: registeredModelName } : {}),
+      metrics: sourceMetrics,
+      confusion_matrix: entry?.confusion_matrix
+        || entry?.validation?.confusion_matrix
+        || validationReport?.confusion_matrix
+        || activeModelRun?.confusion_matrix
+        || sourceMetrics?.confusion_matrix
+        || null,
+      suppression_rate_pct: entry?.suppression_rate_pct
+        ?? entry?.validation?.suppression_rate_pct
+        ?? validationReport?.suppression_rate_pct
+        ?? activeModelRun?.suppression_rate_pct
+        ?? sourceMetrics?.suppression_rate_pct
+        ?? null,
+      event_loss_pct: entry?.event_loss_pct
+        ?? entry?.validation?.event_loss_pct
+        ?? validationReport?.event_loss_pct
+        ?? activeModelRun?.event_loss_pct
+        ?? sourceMetrics?.event_loss_pct
+        ?? null,
+      review_gap_pct: entry?.review_gap_pct
+        ?? entry?.validation?.review_gap_pct
+        ?? validationReport?.review_gap_pct
+        ?? activeModelRun?.review_gap_pct
+        ?? sourceMetrics?.review_gap_pct
+        ?? null,
+    };
+    setRegistryEntry(normalizedEntry);
+    if (registeredModelName && registeredJobId) {
+      const stampName = (prev) => {
+        if (!prev || String(prev?.job_id || prev?.run_id || '').trim() !== registeredJobId) return prev;
+        return {
+          ...prev,
+          model_name: registeredModelName,
+          label: registeredModelName,
+          display_name: registeredModelName,
+        };
+      };
+      setActiveModelRun(stampName);
+      setModelRun(stampName);
+    }
+  }, [activeModelRun, modelRun, validationReport]);
 
   const handleEdaComplete = useCallback(() => {
     setEdaDone(true);
@@ -6142,6 +6240,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       runId={reportRunId || activeModelRun?.job_id || modelRun?.job_id || ''}
                       pipelineId={validActivePipelineId || null}
                       onRunIdChange={setReportRunId}
+                      demoEvaluation={(effectiveActiveModelRun || activeModelRun || modelRun)?.display_evaluation || null}
                     />
                   )}
                   {!routePipelineHydrating && activeStep === 'dashboard' && (

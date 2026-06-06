@@ -215,11 +215,6 @@ const PREPROCESS_TAB_GUIDES = {
     note: 'No predictive model is trained here. This workbench blocks leakage, target proxies, post-investigation fields, and weak or redundant features before they reach AML model training.',
   },
   4: {
-    title: 'Preview the Pipeline Output',
-    subtitle: 'Inspect schema changes, before-versus-after samples, and the expected impact of the current preprocessing plan.',
-    note: 'Use this screen to confirm that the planned deterministic transformations are changing the data the way you expect.',
-  },
-  5: {
     title: 'Run the Preprocessing Pipeline',
     subtitle: 'Execute the approved transformation plan on the full dataset and save the model-ready output.',
     note: 'Running this stage applies the deterministic preprocessing graph to the full dataset and persists the output for model training.',
@@ -248,11 +243,6 @@ const MULE_PREPROCESS_TAB_GUIDES = {
     note: 'No predictive model is trained here. This workbench blocks leakage, target proxies, post-outcome fields, and weak or redundant variables before they reach Mule model training.',
   },
   4: {
-    title: 'Preview the Pipeline Output',
-    subtitle: 'Inspect schema changes, before-versus-after samples, and the expected impact of the current Mule preprocessing plan.',
-    note: 'Use this screen to confirm that the planned deterministic transformations are shaping the account-level feature set the way you expect.',
-  },
-  5: {
     title: 'Run the Preprocessing Pipeline',
     subtitle: 'Execute the approved Mule transformation plan on the full dataset and save the model-ready output.',
     note: 'Running this stage applies the deterministic preprocessing graph to the full Mule dataset and persists the output for model training.',
@@ -748,6 +738,44 @@ const STEPS = {
 };
 
 const stepMeta = t => STEPS[t] || { cat: 'clean', Icon: Settings, label: t, bg: T.bgClean };
+
+const STEP_RUNTIME_HINTS = {
+  mapping_id: { tier: 'Instant', estimate: '<1s', color: T.done, bg: T.doneBg, note: 'Metadata mapping marker only.' },
+  tag_mapping_id: { tier: 'Instant', estimate: '<1s', color: T.done, bg: T.doneBg, note: 'Traceability tag marker only.' },
+  keep_mapping: { tier: 'Instant', estimate: '<1s', color: T.done, bg: T.doneBg, note: 'Keeps mapping columns for traceability.' },
+  drop_columns: { tier: 'Instant', estimate: '<1s', color: T.done, bg: T.doneBg, note: 'Column removal is usually very fast.' },
+  imputation: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Depends on row count and selected columns.' },
+  drop_duplicates: { tier: 'Medium', estimate: '3-10s', color: T.warn, bg: T.warnBg, note: 'Scans rows for duplicates.' },
+  encoding_label: { tier: 'Fast', estimate: '1-4s', color: T.info, bg: T.infoBg, note: 'Maps categories to integers.' },
+  encoding_frequency: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Counts category frequency per selected column.' },
+  encoding_ordinal: { tier: 'Fast', estimate: '1-4s', color: T.info, bg: T.infoBg, note: 'Applies configured category order.' },
+  encoding_onehot: { tier: 'Can be slow', estimate: '5s+', color: T.warn, bg: T.warnBg, note: 'High-cardinality columns can expand many features.' },
+  scaling_standard: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Numeric vector calculation.' },
+  scaling_minmax: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Numeric vector calculation.' },
+  scaling_robust: { tier: 'Medium', estimate: '3-8s', color: T.warn, bg: T.warnBg, note: 'Quantile calculation can take longer.' },
+  normalize_l2: { tier: 'Medium', estimate: '3-8s', color: T.warn, bg: T.warnBg, note: 'Vector normalization over selected columns.' },
+  feature_ratio: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Creates simple ratio features.' },
+  feature_interaction: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Creates simple pairwise products.' },
+  feature_polynomial: { tier: 'Medium', estimate: '3-8s', color: T.warn, bg: T.warnBg, note: 'Adds powers for selected numeric columns.' },
+  feature_aggregation: { tier: 'Can be slow', estimate: '5s+', color: T.warn, bg: T.warnBg, note: 'Group-by aggregation over the full master data.' },
+  datetime_extract: { tier: 'Fast', estimate: '1-5s', color: T.info, bg: T.infoBg, note: 'Parses dates and creates calendar fields.' },
+  text_features: { tier: 'Medium', estimate: '3-8s', color: T.warn, bg: T.warnBg, note: 'String processing on full text columns.' },
+};
+
+const stepRuntimeHint = (type) => STEP_RUNTIME_HINTS[String(type || '').toLowerCase()] || {
+  tier: 'Medium',
+  estimate: '3-8s',
+  color: T.warn,
+  bg: T.warnBg,
+  note: 'Runtime depends on selected rows and columns.',
+};
+
+const fmtDuration = (seconds) => {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return mins ? `${mins}m ${String(secs).padStart(2, '0')}s` : `${secs}s`;
+};
 
 const CLEAN_ENCODE_TYPES  = ['mapping_id','tag_mapping_id','keep_mapping','imputation','drop_duplicates','encoding_label','encoding_onehot','encoding_ordinal','encoding_frequency'];
 const SCALE_TYPES         = ['scaling_standard','scaling_minmax','scaling_robust','normalize_l2'];
@@ -1607,21 +1635,48 @@ const StepForm = ({
 const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
   const [local,   setLocal]   = useState(normalizePreprocessSuggestions(suggestions || []));
   const [loading, setLoading] = useState(false);
+  const [scanComplete, setScanComplete] = useState(false);
+  const [scanError, setScanError] = useState('');
+  const [scanStats, setScanStats] = useState({ rows: null, columns: null });
   const [applied, setApplied] = useState(new Set());
 
   const rescan = useCallback(async () => {
     if (!masterDataset?.dataset_id) return;
     setLoading(true);
+    setScanError('');
     try {
-      const res = await mlopsApi.preprocessPlan({ dataset_id: masterDataset.dataset_id, sample_rows: 5000 });
+      const res = await mlopsApi.preprocessPlan({ dataset_id: masterDataset.dataset_id, sample_rows: 1500 });
       const payload = unwrapApiPayload(res) || {};
       setLocal(normalizePreprocessSuggestions(payload.suggestions || []));
+      setScanStats({
+        rows: payload.rows_analyzed ?? payload.row_count ?? null,
+        columns: payload.columns_analyzed ?? payload.column_count ?? null,
+      });
       setApplied(new Set());
-    } catch (e) { console.error(e); }
+      setScanComplete(true);
+    } catch (e) {
+      console.error(e);
+      setScanError(e?.message || 'Backend scan failed.');
+      setScanComplete(false);
+    }
     finally { setLoading(false); }
   }, [masterDataset?.dataset_id]);
 
-  useEffect(() => { setLocal(normalizePreprocessSuggestions(suggestions || [])); }, [suggestions]);
+  useEffect(() => {
+    const normalized = normalizePreprocessSuggestions(suggestions || []);
+    setLocal(normalized);
+    if (normalized.length > 0) setScanComplete(true);
+  }, [suggestions]);
+
+  useEffect(() => {
+    setScanComplete(false);
+    setScanError('');
+    setScanStats({ rows: null, columns: null });
+    setApplied(new Set());
+    if (masterDataset?.dataset_id) {
+      rescan();
+    }
+  }, [masterDataset?.dataset_id, rescan]);
 
   const applyOne = (s, idx) => {
     onStepsChange([...steps, s]);
@@ -1636,6 +1691,18 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
   };
 
   const availableCols = masterDataset?.columns || [];
+  const rowCount = Number(scanStats.rows ?? masterDataset?.row_count ?? 0);
+  const scannedColumnCount = Number(scanStats.columns ?? availableCols.length);
+  const hasDataset = Boolean(masterDataset?.dataset_id);
+  const hasScanMetadata = hasDataset && (rowCount > 0 || scannedColumnCount > 0);
+  const showScanWaiting = !loading && local.length === 0 && (!scanComplete || !hasScanMetadata);
+  const scanSubtitle = loading
+    ? `Backend scan running on ${hasScanMetadata ? `${fmt(rowCount)} rows and ${fmt(scannedColumnCount)} columns` : 'the selected master dataset'}...`
+    : scanComplete && hasScanMetadata
+      ? `Scanned ${fmt(rowCount)} rows - ${fmt(scannedColumnCount)} columns for nulls, dtypes, cardinality`
+      : hasDataset
+        ? 'Backend scan is preparing dataset metadata. Results will appear here after rows and columns are available.'
+        : 'Waiting for a master dataset before scanning quality issues.';
   const pendingCount = local.filter((_, i) => !applied.has(i)).length;
 
   return (
@@ -1645,7 +1712,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
           <Box>
             <Typography sx={{ fontWeight: 700, fontSize: 14, mb: 0.2 }}>Auto-Detected Issues</Typography>
             <Typography variant="caption" color="text.secondary">
-              Scanned {fmt(masterDataset?.row_count)} rows · {fmt(availableCols.length)} columns for nulls, dtypes, cardinality
+              {scanSubtitle}
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.75}>
@@ -1662,7 +1729,19 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
 
         {loading && <Spinner label="Scanning dataset…" />}
 
-        {!loading && local.length === 0 && (
+        {scanError && (
+          <Alert severity="error" icon={<Warning />} sx={{ borderRadius: 2, mb: 1 }}>
+            {scanError}
+          </Alert>
+        )}
+
+        {showScanWaiting && (
+          <Alert severity="info" icon={<CircularProgress size={18} />} sx={{ borderRadius: 2 }}>
+            Backend scan is still loading. Waiting for valid row and column metadata before showing issue results.
+          </Alert>
+        )}
+
+        {!loading && !showScanWaiting && scanComplete && local.length === 0 && (
           <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 2 }}>
             <strong>No issues detected.</strong> Dataset looks clean. Use the Builder tab if you still want to add custom cleaning, encoding, scaling, or feature-engineering steps.
           </Alert>
@@ -1741,7 +1820,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
       <Alert severity="info" icon={<Build />} sx={{ borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
         <Typography fontWeight={700} sx={{ fontSize: 13, mb: 0.25 }}>Grouped planning is enabled</Typography>
         <Typography variant="body2" sx={{ fontSize: 12 }}>
-          Repetitive single-column actions are now collapsed into shared steps. Review the recommended groups here, then move to the Builder tab for custom workbench-style step design across {fmt(availableCols.length)} available columns.
+          Repetitive single-column actions are now collapsed into shared steps. Review the recommended groups here, then move to the Builder tab for custom workbench-style step design{scannedColumnCount ? ` across ${fmt(scannedColumnCount)} available columns.` : ' after column metadata is available.'}
         </Typography>
       </Alert>
     </Stack>
@@ -2529,7 +2608,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
       const response = await mlopsApi.featureSelectionWorkbench({
         dataset_id: masterDataset.dataset_id,
         target_column: targetColumn,
-        sample_rows: 8000,
+        sample_rows: 2500,
         top_n: topN,
         var_threshold: varThresh,
         corr_threshold: corrThresh,
@@ -3825,17 +3904,17 @@ const PreviewTab = ({
       let payload = null;
       if (onPreview) {
         payload = await onPreview(steps);
-      }
-      if (!payload) {
+      } else {
         const res = await mlopsApi.preprocessPreview({
           dataset_id: masterDataset.dataset_id,
           dataset: masterDataset,
           steps,
-          sample_rows: 100,
+          sample_rows: 25,
           target_column: targetColumn,
         });
         payload = res?.data || res;
       }
+      if (!payload) throw new Error('Preview returned no result.');
       setLocalPreview(payload);
     } catch (e) { setErr(e?.message || 'Preview failed'); }
     finally { setLoading(false); }
@@ -3906,7 +3985,7 @@ const PreviewTab = ({
           <Box>
             <Typography sx={{ fontWeight: 700, fontSize: 14 }}>Transformation Preview</Typography>
             <Typography variant="caption" color="text.secondary">
-              Runs {steps.length} step{steps.length > 1 ? 's' : ''} on 100 sample rows.
+              Runs {steps.length} step{steps.length > 1 ? 's' : ''} on 25 sample rows.
               Full {fmt(masterDataset?.row_count)}-row run happens in the Run tab.
             </Typography>
           </Box>
@@ -3919,7 +3998,7 @@ const PreviewTab = ({
       </Card>
 
       {err && <Alert severity="error" sx={{ borderRadius: 2 }}>{err}</Alert>}
-      {loading && <Spinner label="Applying pipeline to 100 rows…" />}
+      {loading && <Spinner label="Applying pipeline to 25 rows. If this takes more than 12 seconds, the request will stop and the Flask console will show the active stage." />}
 
       {pv && !loading && (
         <>
@@ -4082,14 +4161,15 @@ const PreviewTab = ({
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 5 - RUN
 // ═══════════════════════════════════════════════════════════════════════════════
-const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun, onComplete, activePipelineId = null }) => {
+const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete, activePipelineId = null }) => {
   const [outputName, setOutputName] = useState('preprocessed_dataset');
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(null);
   const [err, setErr] = useState(null);
   const [tracePayload, setTracePayload] = useState(null);
-  const [traceHydrating, setTraceHydrating] = useState(false);
   const [activeStage, setActiveStage] = useState('');
+  const [runStartedAt, setRunStartedAt] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const laneMeta = {
     clean:  { label: 'Cleaning', bg: T.bgClean, border: '#bfdbfe' },
@@ -4128,11 +4208,6 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
   const hasAppliedTrace = useMemo(() => (
     Array.isArray(tracePayload?.steps) && tracePayload.steps.some((s) => s?.status === 'applied')
   ), [tracePayload]);
-  const traceStepCount = useMemo(
-    () => (Array.isArray(tracePayload?.steps) ? tracePayload.steps.length : 0),
-    [tracePayload],
-  );
-
   const plannedTraceSteps = useMemo(
     () => steps.map((s, i) => {
       const affected = inferAffectedColumns(s);
@@ -4155,6 +4230,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
         added_columns_sample: [],
         dropped_columns_sample: [],
         notes: s?.strategy ? [`strategy=${s.strategy}`] : [],
+        runtime_hint: stepRuntimeHint(s?.type),
       };
     }),
     [inferAffectedColumns, steps],
@@ -4163,7 +4239,17 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
   useEffect(() => {
     setTracePayload(null);
     setActiveStage('');
+    setRunStartedAt(null);
+    setElapsedSeconds(0);
   }, [masterDataset?.dataset_id, steps, targetColumn]);
+
+  useEffect(() => {
+    if (!running || !runStartedAt) return undefined;
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - runStartedAt) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [runStartedAt, running]);
 
   useEffect(() => {
     const previewTrace = readTrace(preview);
@@ -4171,43 +4257,6 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
       setTracePayload(previewTrace);
     }
   }, [hasAppliedTrace, preview, readTrace]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!masterDataset?.dataset_id || !steps.length || hasAppliedTrace) return undefined;
-
-    if (traceStepCount > 0) return undefined;
-
-    const loadTrace = async () => {
-      setTraceHydrating(true);
-      try {
-        let payload = null;
-        if (onPreview) {
-          payload = await onPreview(steps);
-        }
-        if (!payload) {
-          const res = await mlopsApi.preprocessPreview({
-            dataset_id: masterDataset.dataset_id,
-            dataset: masterDataset,
-            steps,
-            sample_rows: 100,
-            target_column: targetColumn,
-          });
-          payload = res;
-        }
-        if (cancelled) return;
-        const inferred = readTrace(payload);
-        if (inferred) setTracePayload(inferred);
-      } catch (_) {
-        // Keep UI usable with planned steps if trace hydration fails.
-      } finally {
-        if (!cancelled) setTraceHydrating(false);
-      }
-    };
-
-    loadTrace();
-    return () => { cancelled = true; };
-  }, [hasAppliedTrace, masterDataset?.dataset_id, readTrace, steps, targetColumn, traceStepCount]);
 
   const traceSteps = useMemo(() => {
     const fromApi = tracePayload?.steps;
@@ -4352,24 +4401,44 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
       const affected = Array.isArray(step?.affected_columns) && step.affected_columns.length
         ? step.affected_columns
         : inferAffectedColumns(step);
+      const runtime = step?.runtime_hint || stepRuntimeHint(step?.step_type || step?.type || '');
+      const durationText = step?.duration_label
+        || (step?.duration_ms != null
+          ? (Number(step.duration_ms) >= 1000 ? `${(Number(step.duration_ms) / 1000).toFixed(2)}s` : `${Math.round(Number(step.duration_ms))}ms`)
+          : '');
       return {
         stage: laneMeta[step?.category]?.label || laneMeta[meta.cat]?.label || 'Transformation',
         label: step?.label || meta.label,
         status: step?.status === 'applied' ? 'Applied' : (step?.status || 'Planned'),
         index: step?.step_index || idx + 1,
-        rowsText: fmtTransition(step?.before_rows, step?.after_rows),
-        columnsText: fmtTransition(step?.before_columns_count, step?.after_columns_count),
-        deltaText: fmtAddDrop(step?.added_columns_count, step?.dropped_columns_count),
+        runtime,
+        speedText: durationText ? `${durationText} actual` : `${runtime.tier} (${runtime.estimate})`,
         affectedText: affected.length ? affected.join(', ') : '-',
         notesText: Array.isArray(step?.notes) && step.notes.length ? step.notes.join(' | ') : '-',
       };
     }),
-    [fmtAddDrop, fmtTransition, inferAffectedColumns, laneMeta, traceSteps],
+    [inferAffectedColumns, laneMeta, traceSteps],
+  );
+
+  const slowExecutionRows = useMemo(
+    () => executionLedgerRows.filter((row) => ['Can be slow', 'Medium'].includes(row?.runtime?.tier)).slice(0, 4),
+    [executionLedgerRows],
+  );
+
+  const runningLogRows = useMemo(
+    () => executionLedgerRows.map((row) => ({
+      ...row,
+      message: `${row.label} | ${row.speedText} | ${row.affectedText === '-' ? 'all relevant columns' : clip(row.affectedText, 70)}`,
+    })),
+    [executionLedgerRows],
   );
 
   const run = async () => {
     if (!masterDataset?.dataset_id || !steps.length) return;
     setRunning(true);
+    const started = Date.now();
+    setRunStartedAt(started);
+    setElapsedSeconds(0);
     setDone(null);
     setErr(null);
     setTracePayload(null);
@@ -4384,11 +4453,11 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
       let result = null;
       if (onRun) {
         result = await onRun(outputName, steps);
-      }
-      if (!result) {
+      } else {
         const res = await mlopsApi.preprocessRun(payload);
         result = res?.data || res;
       }
+      if (!result) throw new Error('Preprocessing run returned no result.');
       const ds = result?.dataset || result;
       const trace = result?.output?.trace || result?.trace || null;
       setTracePayload(trace);
@@ -4448,23 +4517,45 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
       </Card>
 
       <Card>
-        <SLabel>Execution Checklist</SLabel>
-        <Box sx={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }} justifyContent="space-between" sx={{ mb: 1.4 }}>
+          <Box>
+            <Typography sx={{ fontSize: 14, fontWeight: 800, color: T.text }}>
+              Execution Checklist
+            </Typography>
+            <Typography sx={{ fontSize: 11.5, color: T.textSec, mt: 0.3 }}>
+              Transformation ledger with execution status, runtime hints, and affected fields.
+            </Typography>
+          </Box>
+          <Chip
+            size="small"
+            label={`${fmt(executionLedgerRows.length)} stage${executionLedgerRows.length === 1 ? '' : 's'}`}
+            sx={{ height: 24, fontSize: 10.5, fontWeight: 700, bgcolor: T.surface, border: `1px solid ${T.border}` }}
+          />
+        </Stack>
+        <Box
+          sx={{
+            overflowX: 'auto',
+            border: `1px solid ${T.border}`,
+            borderRadius: 0,
+            bgcolor: '#fff',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 12, minWidth: 780 }}>
             <thead>
-              <tr style={{ background: '#f8fafc' }}>
-                {['#', 'Stage', 'Transformation', 'Status', 'Rows', 'Columns', '+/-', 'Substeps / affected columns'].map((header) => (
+              <tr style={{ background: '#111827' }}>
+                {['#', 'Stage', 'Transformation', 'Speed / duration', 'Status', 'Substeps / affected columns'].map((header) => (
                   <th
                     key={header}
                     style={{
-                      padding: '8px 10px',
+                      padding: '10px 12px',
                       textAlign: 'left',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: T.textSec,
+                      fontSize: 10.25,
+                      fontWeight: 800,
+                      color: '#ffffff',
                       textTransform: 'uppercase',
-                      letterSpacing: 0.4,
-                      borderBottom: `1px solid ${T.border}`,
+                      letterSpacing: 0.55,
+                      borderBottom: `1px solid #111827`,
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {header}
@@ -4474,30 +4565,50 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
             </thead>
             <tbody>
               {executionLedgerRows.map((row) => (
-                <tr key={`ledger-${row.index}`} style={{ borderBottom: `1px solid ${T.border}`, verticalAlign: 'top' }}>
-                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 52 }}>{row.index}</td>
-                  <td style={{ padding: '8px 10px', width: 140 }}>
-                    <Typography sx={{ fontSize: 11.25, fontWeight: 700 }}>{row.stage}</Typography>
+                <tr key={`ledger-${row.index}`} style={{ verticalAlign: 'top' }}>
+                  <td style={{ padding: '11px 12px', fontFamily: 'monospace', color: T.textSec, width: 56, borderBottom: `1px solid ${T.border}` }}>{row.index}</td>
+                  <td style={{ padding: '11px 12px', width: 150, borderBottom: `1px solid ${T.border}` }}>
+                    <Box sx={{ display: 'inline-flex', px: 1, py: 0.35, borderRadius: 0, bgcolor: '#f8fafc', border: `1px solid ${T.border}` }}>
+                      <Typography sx={{ fontSize: 11.25, fontWeight: 800, color: T.text }}>{row.stage}</Typography>
+                    </Box>
                   </td>
-                  <td style={{ padding: '8px 10px', width: 180 }}>
-                    <Typography sx={{ fontSize: 11.5, fontWeight: 700 }}>{row.label}</Typography>
+                  <td style={{ padding: '11px 12px', width: 210, borderBottom: `1px solid ${T.border}` }}>
+                    <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text, lineHeight: 1.35 }}>{row.label}</Typography>
                   </td>
-                  <td style={{ padding: '8px 10px', width: 92 }}>
+                  <td style={{ padding: '11px 12px', width: 150, borderBottom: `1px solid ${T.border}` }}>
+                    <Chip
+                      size="small"
+                      label={row.speedText}
+                      sx={{
+                        height: 22,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        bgcolor: row.runtime?.bg || T.surface,
+                        color: row.runtime?.color || T.textSec,
+                        border: `1px solid ${T.border}`,
+                      }}
+                    />
+                  </td>
+                  <td style={{ padding: '11px 12px', width: 110, borderBottom: `1px solid ${T.border}` }}>
                     <Chip
                       size="small"
                       label={row.status}
-                      sx={{ height: 18, fontSize: 9, bgcolor: row.status === 'Applied' ? T.doneBg : T.surface }}
+                      sx={{
+                        height: 22,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        bgcolor: row.status === 'Applied' ? T.doneBg : T.surface,
+                        color: row.status === 'Applied' ? T.done : T.textSec,
+                        border: `1px solid ${row.status === 'Applied' ? T.doneBorder : T.border}`,
+                      }}
                     />
                   </td>
-                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 120 }}>{row.rowsText}</td>
-                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 120 }}>{row.columnsText}</td>
-                  <td style={{ padding: '8px 10px', fontFamily: 'monospace', color: T.textSec, width: 100 }}>{row.deltaText}</td>
-                  <td style={{ padding: '8px 10px', minWidth: 260 }}>
-                    <Typography sx={{ fontSize: 11, color: T.textSec, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.55 }}>
+                  <td style={{ padding: '11px 12px', minWidth: 320, borderBottom: `1px solid ${T.border}` }}>
+                    <Typography sx={{ fontSize: 11.25, color: T.text, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.6 }}>
                       {row.affectedText}
                     </Typography>
                     {row.notesText !== '-' && (
-                      <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 0.45, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.5 }}>
+                      <Typography sx={{ fontSize: 10.75, color: T.textSec, mt: 0.55, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.55 }}>
                         {row.notesText}
                       </Typography>
                     )}
@@ -4511,11 +4622,6 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
 
       <Card>
         <SLabel>Logical Preprocessing Diagram</SLabel>
-        {traceHydrating && !running && (
-          <Typography variant="caption" sx={{ color: T.textSec, display: 'block', mb: 1 }}>
-            Computing transformation metrics from preview trace...
-          </Typography>
-        )}
         <Box
           sx={{
             maxHeight: 320,
@@ -4626,7 +4732,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
               <thead>
                 <tr style={{ background: '#f8fafc' }}>
-                  {['#', 'Transformation', 'Status', 'Rows', 'Columns', '+/-', 'Affected columns'].map((h) => (
+                  {['#', 'Transformation', 'Status', 'Affected columns'].map((h) => (
                     <th
                       key={h}
                       style={{
@@ -4663,15 +4769,6 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
                           label={step?.status === 'applied' ? 'Applied' : (step?.status || 'Planned')}
                           sx={{ height: 18, fontSize: 9, bgcolor: step?.status === 'applied' ? T.doneBg : T.surface }}
                         />
-                      </td>
-                      <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: T.textSec }}>
-                        {fmtTransition(step?.before_rows, step?.after_rows)}
-                      </td>
-                      <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: T.textSec }}>
-                        {fmtTransition(step?.before_columns_count, step?.after_columns_count)}
-                      </td>
-                      <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: T.textSec }}>
-                        {fmtAddDrop(step?.added_columns_count, step?.dropped_columns_count)}
                       </td>
                       <td style={{ padding: '7px 10px', minWidth: 260 }}>
                         <Typography sx={{ fontSize: 11, color: T.textSec }}>
@@ -4761,17 +4858,57 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onPreview, onRun,
               {running ? 'Running pipeline...' : `Run ${steps.length}-step pipeline`}
             </Button>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Processes all {fmt(masterDataset?.row_count)} rows | output saved as {outputName}
+              Full run applies the selected preprocessing steps to {fmt(masterDataset?.row_count)} rows and saves the model-ready output.
             </Typography>
           </Box>
         </>
       )}
 
       {running && (
-        <Card sx={{ bgcolor: '#f8fafc' }}>
-          <Typography sx={{ fontFamily: 'monospace', fontSize: 11.5, color: T.textSec }}>
-            Executing preprocessing pipeline ({steps.length} steps)...
-          </Typography>
+        <Card accent="orange" sx={{ bgcolor: '#0f172a', color: '#e5e7eb' }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }} justifyContent="space-between" sx={{ mb: 1.2 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <CircularProgress size={18} sx={{ color: T.orange }} />
+              <Box>
+                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#fff' }}>
+                  Executing preprocessing pipeline ({steps.length} steps)
+                </Typography>
+                <Typography sx={{ fontSize: 11.5, color: '#cbd5e1' }}>
+                  Elapsed {fmtDuration(elapsedSeconds)}. The backend is applying the full run to {fmt(masterDataset?.row_count)} master rows.
+                </Typography>
+              </Box>
+            </Stack>
+            {!!slowExecutionRows.length && (
+              <Stack direction="row" spacing={0.6} useFlexGap flexWrap="wrap">
+                {slowExecutionRows.map((row) => (
+                  <Chip
+                    key={`slow-${row.index}`}
+                    label={`${row.label}: ${row.runtime?.tier}`}
+                    size="small"
+                    sx={{ bgcolor: row.runtime?.bg || T.warnBg, color: row.runtime?.color || T.warn, fontWeight: 800 }}
+                  />
+                ))}
+              </Stack>
+            )}
+          </Stack>
+          <Box sx={{ border: '1px solid #334155', bgcolor: '#020617', maxHeight: 210, overflow: 'auto', p: 1, fontFamily: 'monospace' }}>
+            {runningLogRows.map((row) => (
+              <Box key={`run-log-${row.index}`} sx={{ display: 'grid', gridTemplateColumns: '42px 96px 1fr', gap: 1, py: 0.35, borderBottom: '1px solid rgba(148, 163, 184, 0.15)' }}>
+                <Typography sx={{ fontFamily: 'monospace', fontSize: 11, color: '#94a3b8' }}>
+                  #{row.index}
+                </Typography>
+                <Typography sx={{ fontFamily: 'monospace', fontSize: 11, color: row.runtime?.color || '#cbd5e1', fontWeight: 800 }}>
+                  {row.runtime?.tier || 'Step'}
+                </Typography>
+                <Typography sx={{ fontFamily: 'monospace', fontSize: 11, color: '#e2e8f0', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                  {row.message}
+                </Typography>
+              </Box>
+            ))}
+            <Typography sx={{ fontFamily: 'monospace', fontSize: 11, color: '#fbbf24', mt: 0.8 }}>
+              [{fmtDuration(elapsedSeconds)}] Waiting for backend trace. Actual per-step durations will appear in the checklist after completion.
+            </Typography>
+          </Box>
         </Card>
       )}
 
@@ -4829,7 +4966,7 @@ const PreprocessingWorkbench = ({
   }, [tab]);
 
   const activeGuideMap = isMuleVariant ? MULE_PREPROCESS_TAB_GUIDES : PREPROCESS_TAB_GUIDES;
-  const activeGuide = activeGuideMap[tab] || activeGuideMap[0];
+  const activeGuide = activeGuideMap[tab] || activeGuideMap[4] || activeGuideMap[0];
   const completedTabIndexes = useMemo(() => {
     const done = new Set();
     if (visitedTabs.has(0) || (Array.isArray(steps) && steps.length)) {
@@ -4846,11 +4983,10 @@ const PreprocessingWorkbench = ({
     if (visitedTabs.has(2) || hasEngineerWork) {
       done.add(2);
     }
-    if ((visitedTabs.has(3) && Array.isArray(steps) && steps.length > 0) || ((Array.isArray(steps) && steps.length > 0) && (preview || preprocessedDataset))) done.add(3);
-    if (visitedTabs.has(4) || preview || preprocessedDataset) done.add(4);
-    if (preprocessedDataset?.dataset_id) done.add(5);
+    if (visitedTabs.has(3) || (Array.isArray(steps) && steps.length > 0)) done.add(3);
+    if (preprocessedDataset?.dataset_id) done.add(4);
     return done;
-  }, [preprocessedDataset, preview, steps, visitedTabs]);
+  }, [preprocessedDataset, steps, visitedTabs]);
 
   const removeStep = idx     => onStepsChange(steps.filter((_, i) => i !== idx));
   const moveStep   = (a, b) => {
@@ -4866,9 +5002,14 @@ const PreprocessingWorkbench = ({
     { Icon: Code,       label: 'Builder',   biz: 'Builder',    tip: 'Custom preprocessing workbench with column explorer' },
     { Icon: TrendingUp, label: 'Engineer',  biz: isMuleVariant ? 'Mule Signals' : 'Add Features', tip: isMuleVariant ? 'Mule signal templates + reusable feature engineering' : 'AML domain templates + reusable feature engineering' },
     { Icon: QueryStats, label: 'Governance', biz: 'Feature Review', tip: 'Governed feature approval, leakage blocking, timing checks, and redundancy review' },
-    { Icon: TableChart, label: 'Preview',   biz: 'Preview',     tip: 'Before/after schema diff + 100-row sample table' },
     { Icon: PlayArrow,  label: 'Run',       biz: 'Run',         tip: 'Execute pipeline on full dataset' },
   ];
+
+  useEffect(() => {
+    if (tab >= TAB_DEFS.length) {
+      setTab(TAB_DEFS.length - 1);
+    }
+  }, [tab, TAB_DEFS.length]);
 
   return (
     <Box sx={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
@@ -4976,23 +5117,11 @@ const PreprocessingWorkbench = ({
             />
           )}
           {tab === 4 && (
-            <PreviewTab
-              masterDataset={masterDataset}
-              preprocessedDataset={preprocessedDataset}
-              targetColumn={targetColumn}
-              steps={steps}
-              onPreview={onPreview}
-              preview={preview}
-              persona={persona}
-            />
-          )}
-          {tab === 5 && (
             <RunTab
               masterDataset={masterDataset}
               steps={steps}
               targetColumn={targetColumn}
               preview={preview}
-              onPreview={onPreview}
               onRun={onRun}
               onComplete={onComplete}
               activePipelineId={activePipelineId}
@@ -5010,7 +5139,7 @@ const PreprocessingWorkbench = ({
         onLoad={loaded => onStepsChange(loaded || [])}
         onLoadState={(loaded) => {
           onStepsChange(loaded?.steps || []);
-          if (Number.isInteger(loaded?.activeTab)) setTab(loaded.activeTab);
+          if (Number.isInteger(loaded?.activeTab)) setTab(Math.min(Math.max(loaded.activeTab, 0), TAB_DEFS.length - 1));
           if (Array.isArray(loaded?.visitedTabs) && loaded.visitedTabs.length > 0) {
             setVisitedTabs(new Set(loaded.visitedTabs.filter((value) => Number.isInteger(value))));
           }

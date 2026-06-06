@@ -148,6 +148,19 @@ export const mergeValidationModel = (baseModel, detailModel) => {
   const detail = detailModel || {};
   const baseMetrics = isRecord(base.metrics) ? base.metrics : {};
   const detailMetrics = isRecord(detail.metrics) ? detail.metrics : {};
+  const displayEvaluation = (
+    isRecord(detail.display_evaluation) ? detail.display_evaluation
+      : isRecord(base.display_evaluation) ? base.display_evaluation
+        : isRecord(detail.results?.display_evaluation) ? detail.results.display_evaluation
+          : isRecord(base.results?.display_evaluation) ? base.results.display_evaluation
+            : {}
+  );
+  const displayMetrics = isRecord(displayEvaluation.metrics) ? displayEvaluation.metrics : {};
+  const thresholdTable = pickFirst(displayMetrics.threshold_table, detail.threshold_table, base.threshold_table, detailMetrics.threshold_table, baseMetrics.threshold_table, []);
+  const confusionMatrix = pickFirst(displayEvaluation.confusion_matrix, displayMetrics.confusion_matrix, detail.confusion_matrix, base.confusion_matrix, detailMetrics.confusion_matrix, baseMetrics.confusion_matrix);
+  const suppressionRatePct = pickFirst(displayMetrics.suppression_rate_pct, displayEvaluation.suppression_rate_pct, detail.suppression_rate_pct, base.suppression_rate_pct, detailMetrics.suppression_rate_pct, baseMetrics.suppression_rate_pct);
+  const eventLossPct = pickFirst(displayMetrics.event_loss_pct, displayEvaluation.event_loss_pct, displayEvaluation.missed_review_pct, detail.event_loss_pct, base.event_loss_pct, detailMetrics.event_loss_pct, baseMetrics.event_loss_pct);
+  const selectedThreshold = pickFirst(detail.selected_threshold, detail.locked_threshold, displayEvaluation.threshold, base.selected_threshold, base.locked_threshold, detail.threshold, base.threshold);
   const summary = isRecord(detail.summary)
     ? detail.summary
     : (isRecord(base.summary) ? base.summary : {});
@@ -160,16 +173,25 @@ export const mergeValidationModel = (baseModel, detailModel) => {
     ...base,
     ...detail,
     summary,
+    display_evaluation: Object.keys(displayEvaluation).length ? displayEvaluation : pickFirst(detail.display_evaluation, base.display_evaluation),
     metrics: {
       ...baseMetrics,
       ...detailMetrics,
+      ...displayMetrics,
     },
     split_summary: splitSummary,
-    roc_curve: pickFirst(detail.roc_curve, base.roc_curve, detailMetrics.roc_curve, baseMetrics.roc_curve),
-    pr_curve: pickFirst(detail.pr_curve, base.pr_curve, detailMetrics.pr_curve, baseMetrics.pr_curve),
+    roc_curve: pickFirst(displayMetrics.roc_curve, detail.roc_curve, base.roc_curve, detailMetrics.roc_curve, baseMetrics.roc_curve),
+    pr_curve: pickFirst(displayMetrics.pr_curve, detail.pr_curve, base.pr_curve, detailMetrics.pr_curve, baseMetrics.pr_curve),
     feature_importance: pickFirst(detail.feature_importance, base.feature_importance, detailMetrics.feature_importance, baseMetrics.feature_importance, []),
-    threshold_table: pickFirst(detail.threshold_table, base.threshold_table, detailMetrics.threshold_table, baseMetrics.threshold_table, []),
-    confusion_matrix: pickFirst(detail.confusion_matrix, base.confusion_matrix, detailMetrics.confusion_matrix, baseMetrics.confusion_matrix),
+    threshold_table: thresholdTable,
+    confusion_matrix: confusionMatrix,
+    suppression_rate_pct: suppressionRatePct,
+    event_loss_pct: eventLossPct,
+    review_gap_pct: eventLossPct,
+    missed_review_pct: eventLossPct,
+    selected_threshold: selectedThreshold,
+    locked_threshold: pickFirst(detail.locked_threshold, base.locked_threshold, selectedThreshold),
+    threshold: pickFirst(detail.threshold, base.threshold, selectedThreshold),
     train_rows: pickFirst(detail.train_rows, base.train_rows, splitSummary.train_rows, summary.train_rows),
     test_rows: pickFirst(detail.test_rows, base.test_rows, splitSummary.test_rows, summary.test_rows),
     split_strategy: pickFirst(detail.split_strategy, base.split_strategy, splitSummary.split_strategy),

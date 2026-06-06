@@ -16,7 +16,10 @@ Also add to mlopsApi.js under the eda section:
 from flask import Blueprint, request, jsonify
 from pathlib import Path
 import json
+import logging
+import os
 import re
+import time
 
 # Re-use the shared env/tenant resolution from workbench_routes
 # (copy the helpers here so this file is self-contained)
@@ -28,6 +31,7 @@ from api.tools.mlops.path_utils import resolve_env_root
 eda_bp = Blueprint("eda", __name__)
 
 _eda_svc = EDAService()
+logger = logging.getLogger(__name__)
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -507,16 +511,36 @@ def eda_feature_selection_workbench():
     try:
         body = request.get_json(silent=True) or {}
         ds = _require_dataset(body)
+        requested_sample_rows = int(body.get("sample_rows") or 50_000)
+        feature_sample_cap = int(os.getenv("MLOPS_FEATURE_SELECTION_SAMPLE_ROWS", "2500"))
+        sample_rows = max(500, min(requested_sample_rows, feature_sample_cap))
+        technique_ids = body.get("technique_ids") or body.get("selected_techniques") or []
+        if isinstance(technique_ids, str):
+            technique_ids = [item.strip() for item in technique_ids.split(",") if item.strip()]
+        started = time.perf_counter()
+        logger.warning(
+            "[FeatureSelection] start dataset_id=%s sample_rows=%s techniques=%s",
+            ds.get("dataset_id"),
+            sample_rows,
+            ",".join(map(str, technique_ids)) or "default",
+        )
         result = _eda_svc.feature_selection_workbench(
             ds,
             target_col=_get_target_col(body) or None,
-            sample_rows=int(body.get("sample_rows") or 50_000),
+            sample_rows=sample_rows,
             selected_columns=_get_columns(body) or None,
+            selected_technique_ids=technique_ids,
             top_n=int(body.get("top_n") or 20),
             var_threshold=float(body.get("var_threshold") or 0.01),
             corr_threshold=float(body.get("corr_threshold") or 0.95),
             mad_threshold=(float(body["mad_threshold"]) if body.get("mad_threshold") is not None else None),
             dispersion_threshold=(float(body["dispersion_threshold"]) if body.get("dispersion_threshold") is not None else None),
+        )
+        logger.warning(
+            "[FeatureSelection] done dataset_id=%s techniques=%s duration=%.2fs",
+            ds.get("dataset_id"),
+            ",".join(result.get("computed_techniques") or []),
+            time.perf_counter() - started,
         )
         return _ok(result)
     except ValueError as e:

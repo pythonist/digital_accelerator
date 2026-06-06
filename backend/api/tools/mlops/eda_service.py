@@ -22,7 +22,9 @@ Covers:
 from __future__ import annotations
 
 import math
+import logging
 import re
+import time
 import warnings
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 warnings.filterwarnings("ignore")
+logger = logging.getLogger(__name__)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -176,13 +179,13 @@ def _load_df(dataset: dict, sample_rows: int | None = None) -> pd.DataFrame:
         raise FileNotFoundError(f"Dataset file not found: {file_path}")
 
     path = Path(str(file_path))
+    nrows = int(sample_rows) if sample_rows and int(sample_rows) > 0 else None
     if path.suffix.lower() == ".parquet":
         df = pd.read_parquet(path)
+        if nrows and len(df) > nrows:
+            df = df.sample(n=nrows, random_state=42).reset_index(drop=True)
     else:
-        df = pd.read_csv(path, low_memory=False)
-
-    if sample_rows and len(df) > sample_rows:
-        df = df.sample(n=sample_rows, random_state=42).reset_index(drop=True)
+        df = pd.read_csv(path, low_memory=False, nrows=nrows)
 
     return df
 
@@ -1497,12 +1500,14 @@ class EDAService:
         target_col: str | None = None,
         sample_rows: int = 50_000,
         selected_columns: list[str] | None = None,
+        selected_technique_ids: list[str] | None = None,
         top_n: int = 20,
         var_threshold: float = 0.01,
         corr_threshold: float = 0.95,
         mad_threshold: float | None = None,
         dispersion_threshold: float | None = None,
     ) -> dict:
+        total_started = time.perf_counter()
         df = _load_df(dataset, sample_rows)
 
         if target_col and target_col not in df.columns:
@@ -1518,8 +1523,33 @@ class EDAService:
         inventory_lookup = {item["name"]: item for item in inventory}
         feature_columns = [item["name"] for item in inventory if not item.get("is_id")]
 
+        valid_technique_ids = {str(tech["id"]) for tech in FEATURE_SELECTION_LIBRARY}
+        requested_technique_ids = [
+            str(item).strip()
+            for item in (selected_technique_ids or [])
+            if str(item).strip() in valid_technique_ids
+        ]
+        if not requested_technique_ids:
+            requested_technique_ids = [
+                tech_id for tech_id in [
+                    "information_value",
+                    "chi_square",
+                    "variance_threshold",
+                    "information_gain",
+                ]
+                if tech_id in valid_technique_ids
+            ]
+        requested_technique_set = set(requested_technique_ids)
+        score_technique_ids = {str(tech["id"]) for tech in FEATURE_SELECTION_SCORE_TECHNIQUES}
+        needs_supervised_scores = bool(target_col and (requested_technique_set & score_technique_ids))
+
+        def wants(tech_id: str) -> bool:
+            return str(tech_id) in requested_technique_set
+
         target_result = None
-        if target_col:
+        if needs_supervised_scores:
+            stage_started = time.perf_counter()
+            logger.warning("[FeatureSelection] computing supervised scores techniques=%s", ",".join(sorted(requested_technique_set & score_technique_ids)))
             target_result = self.feature_target_analysis(
                 dataset,
                 target_col=target_col,
@@ -1527,6 +1557,7 @@ class EDAService:
                 feature_columns=feature_columns,
                 max_features=max(len(feature_columns), 1),
             )
+            logger.warning("[FeatureSelection] supervised scores done duration=%.2fs", time.perf_counter() - stage_started)
         feature_lookup = {
             feat.get("column"): feat
             for feat in (target_result.get("features") if target_result else [])
@@ -1548,32 +1579,36 @@ class EDAService:
         technique_results: dict[str, Any] = {}
 
         leak_name_rows = []
-        for col in feature_columns:
-            matches = [kw for kw in LEAKAGE_NAME_KEYWORDS if kw in col.lower()]
-            if not matches:
-                continue
-            meta = inventory_lookup.get(col, {})
-            leak_name_rows.append({
-                "feature": col,
-                "score": float(len(matches)),
-                "role": meta.get("role"),
-                "dtype": meta.get("dtype"),
-                "missing_pct": meta.get("missing_pct"),
-                "sample_values": meta.get("sample_values", []),
-                "reason": f"Matched leakage keywords: {', '.join(matches[:4])}",
-            })
-        leak_name_rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
-        technique_results["leakage_name_scan"] = {
-            "technique_id": "leakage_name_scan",
-            "scope": "filter",
-            "rows": leak_name_rows,
-            "selected_count": len(leak_name_rows),
-            "suggested_drop": [row["feature"] for row in leak_name_rows],
-            "message": "Name-based outcome leakage scan.",
-        }
+        if wants("leakage_name_scan"):
+            stage_started = time.perf_counter()
+            for col in feature_columns:
+                matches = [kw for kw in LEAKAGE_NAME_KEYWORDS if kw in col.lower()]
+                if not matches:
+                    continue
+                meta = inventory_lookup.get(col, {})
+                leak_name_rows.append({
+                    "feature": col,
+                    "score": float(len(matches)),
+                    "role": meta.get("role"),
+                    "dtype": meta.get("dtype"),
+                    "missing_pct": meta.get("missing_pct"),
+                    "sample_values": meta.get("sample_values", []),
+                    "reason": f"Matched leakage keywords: {', '.join(matches[:4])}",
+                })
+            leak_name_rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
+            technique_results["leakage_name_scan"] = {
+                "technique_id": "leakage_name_scan",
+                "scope": "filter",
+                "rows": leak_name_rows,
+                "selected_count": len(leak_name_rows),
+                "suggested_drop": [row["feature"] for row in leak_name_rows],
+                "message": "Name-based outcome leakage scan.",
+            }
+            logger.warning("[FeatureSelection] leakage_name_scan done rows=%s duration=%.2fs", len(leak_name_rows), time.perf_counter() - stage_started)
 
         leak_corr_rows = []
-        if target_col:
+        if wants("leakage_target_corr") and target_col:
+            stage_started = time.perf_counter()
             leakage = self.leakage_checks(dataset, target_col=target_col, sample_rows=sample_rows)
             for risk in leakage.get("risks", []):
                 column = risk.get("column")
@@ -1591,15 +1626,17 @@ class EDAService:
                     "risk_level": risk.get("risk_level"),
                     "reason": risk.get("reason"),
                 })
-        leak_corr_rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
-        technique_results["leakage_target_corr"] = {
-            "technique_id": "leakage_target_corr",
-            "scope": "filter",
-            "rows": leak_corr_rows,
-            "selected_count": len(leak_corr_rows),
-            "suggested_drop": [row["feature"] for row in leak_corr_rows],
-            "message": "Target-correlation leakage scan." if target_col else "Target column required.",
-        }
+            leak_corr_rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
+            logger.warning("[FeatureSelection] leakage_target_corr done rows=%s duration=%.2fs", len(leak_corr_rows), time.perf_counter() - stage_started)
+        if wants("leakage_target_corr"):
+            technique_results["leakage_target_corr"] = {
+                "technique_id": "leakage_target_corr",
+                "scope": "filter",
+                "rows": leak_corr_rows,
+                "selected_count": len(leak_corr_rows),
+                "suggested_drop": [row["feature"] for row in leak_corr_rows],
+                "message": "Target-correlation leakage scan." if target_col else "Target column required.",
+            }
 
         numeric_inventory = [
             item for item in inventory
@@ -1614,87 +1651,100 @@ class EDAService:
             else (float(np.quantile(dispersion_values, 0.10)) if dispersion_values else None)
         )
 
-        variance_rows = [
-            {
-                "feature": item["name"],
-                "score": float(item["variance"]),
-                "role": item.get("role"),
-                "dtype": item.get("dtype"),
-                "missing_pct": item.get("missing_pct"),
-                "sample_values": item.get("sample_values", []),
-                "mean_abs_deviation": item.get("mean_abs_deviation"),
-                "dispersion_ratio": item.get("dispersion_ratio"),
-                "reason": f"Variance {float(item['variance']):.6f} <= threshold {float(var_threshold):.6f}",
+        variance_rows = []
+        if wants("variance_threshold"):
+            stage_started = time.perf_counter()
+            variance_rows = [
+                {
+                    "feature": item["name"],
+                    "score": float(item["variance"]),
+                    "role": item.get("role"),
+                    "dtype": item.get("dtype"),
+                    "missing_pct": item.get("missing_pct"),
+                    "sample_values": item.get("sample_values", []),
+                    "mean_abs_deviation": item.get("mean_abs_deviation"),
+                    "dispersion_ratio": item.get("dispersion_ratio"),
+                    "reason": f"Variance {float(item['variance']):.6f} <= threshold {float(var_threshold):.6f}",
+                }
+                for item in numeric_inventory
+                if item.get("variance") is not None and float(item["variance"]) <= float(var_threshold)
+            ]
+            variance_rows.sort(key=lambda item: (float(item["score"]), str(item["feature"])))
+            technique_results["variance_threshold"] = {
+                "technique_id": "variance_threshold",
+                "scope": "filter",
+                "rows": variance_rows,
+                "selected_count": len(variance_rows),
+                "suggested_drop": [row["feature"] for row in variance_rows],
+                "threshold": float(var_threshold),
+                "message": "Low-variance stability filter.",
             }
-            for item in numeric_inventory
-            if item.get("variance") is not None and float(item["variance"]) <= float(var_threshold)
-        ]
-        variance_rows.sort(key=lambda item: (float(item["score"]), str(item["feature"])))
-        technique_results["variance_threshold"] = {
-            "technique_id": "variance_threshold",
-            "scope": "filter",
-            "rows": variance_rows,
-            "selected_count": len(variance_rows),
-            "suggested_drop": [row["feature"] for row in variance_rows],
-            "threshold": float(var_threshold),
-            "message": "Low-variance stability filter.",
-        }
+            logger.warning("[FeatureSelection] variance_threshold done rows=%s duration=%.2fs", len(variance_rows), time.perf_counter() - stage_started)
 
-        mad_rows = [
-            {
-                "feature": item["name"],
-                "score": float(item["mean_abs_deviation"]),
-                "role": item.get("role"),
-                "dtype": item.get("dtype"),
-                "missing_pct": item.get("missing_pct"),
-                "sample_values": item.get("sample_values", []),
-                "variance": item.get("variance"),
-                "dispersion_ratio": item.get("dispersion_ratio"),
-                "reason": f"MAD {float(item['mean_abs_deviation']):.6f} <= threshold {float(effective_mad_threshold):.6f}",
+        mad_rows = []
+        if wants("mean_abs_deviation"):
+            stage_started = time.perf_counter()
+            mad_rows = [
+                {
+                    "feature": item["name"],
+                    "score": float(item["mean_abs_deviation"]),
+                    "role": item.get("role"),
+                    "dtype": item.get("dtype"),
+                    "missing_pct": item.get("missing_pct"),
+                    "sample_values": item.get("sample_values", []),
+                    "variance": item.get("variance"),
+                    "dispersion_ratio": item.get("dispersion_ratio"),
+                    "reason": f"MAD {float(item['mean_abs_deviation']):.6f} <= threshold {float(effective_mad_threshold):.6f}",
+                }
+                for item in numeric_inventory
+                if effective_mad_threshold is not None and item.get("mean_abs_deviation") is not None and float(item["mean_abs_deviation"]) <= effective_mad_threshold
+            ]
+            mad_rows.sort(key=lambda item: (float(item["score"]), str(item["feature"])))
+            technique_results["mean_abs_deviation"] = {
+                "technique_id": "mean_abs_deviation",
+                "scope": "filter",
+                "rows": mad_rows,
+                "selected_count": len(mad_rows),
+                "suggested_drop": [row["feature"] for row in mad_rows],
+                "threshold": effective_mad_threshold,
+                "message": "Low-spread filter using mean absolute deviation.",
             }
-            for item in numeric_inventory
-            if effective_mad_threshold is not None and item.get("mean_abs_deviation") is not None and float(item["mean_abs_deviation"]) <= effective_mad_threshold
-        ]
-        mad_rows.sort(key=lambda item: (float(item["score"]), str(item["feature"])))
-        technique_results["mean_abs_deviation"] = {
-            "technique_id": "mean_abs_deviation",
-            "scope": "filter",
-            "rows": mad_rows,
-            "selected_count": len(mad_rows),
-            "suggested_drop": [row["feature"] for row in mad_rows],
-            "threshold": effective_mad_threshold,
-            "message": "Low-spread filter using mean absolute deviation.",
-        }
+            logger.warning("[FeatureSelection] mean_abs_deviation done rows=%s duration=%.2fs", len(mad_rows), time.perf_counter() - stage_started)
 
-        dispersion_rows = [
-            {
-                "feature": item["name"],
-                "score": float(item["dispersion_ratio"]),
-                "role": item.get("role"),
-                "dtype": item.get("dtype"),
-                "missing_pct": item.get("missing_pct"),
-                "sample_values": item.get("sample_values", []),
-                "variance": item.get("variance"),
-                "mean_abs_deviation": item.get("mean_abs_deviation"),
-                "reason": f"Dispersion ratio {float(item['dispersion_ratio']):.6f} <= threshold {float(effective_dispersion_threshold):.6f}",
+        dispersion_rows = []
+        if wants("dispersion_ratio"):
+            stage_started = time.perf_counter()
+            dispersion_rows = [
+                {
+                    "feature": item["name"],
+                    "score": float(item["dispersion_ratio"]),
+                    "role": item.get("role"),
+                    "dtype": item.get("dtype"),
+                    "missing_pct": item.get("missing_pct"),
+                    "sample_values": item.get("sample_values", []),
+                    "variance": item.get("variance"),
+                    "mean_abs_deviation": item.get("mean_abs_deviation"),
+                    "reason": f"Dispersion ratio {float(item['dispersion_ratio']):.6f} <= threshold {float(effective_dispersion_threshold):.6f}",
+                }
+                for item in numeric_inventory
+                if effective_dispersion_threshold is not None and item.get("dispersion_ratio") is not None and float(item["dispersion_ratio"]) <= effective_dispersion_threshold
+            ]
+            dispersion_rows.sort(key=lambda item: (float(item["score"]), str(item["feature"])))
+            technique_results["dispersion_ratio"] = {
+                "technique_id": "dispersion_ratio",
+                "scope": "filter",
+                "rows": dispersion_rows,
+                "selected_count": len(dispersion_rows),
+                "suggested_drop": [row["feature"] for row in dispersion_rows],
+                "threshold": effective_dispersion_threshold,
+                "message": "Low-dispersion filter relative to feature magnitude.",
             }
-            for item in numeric_inventory
-            if effective_dispersion_threshold is not None and item.get("dispersion_ratio") is not None and float(item["dispersion_ratio"]) <= effective_dispersion_threshold
-        ]
-        dispersion_rows.sort(key=lambda item: (float(item["score"]), str(item["feature"])))
-        technique_results["dispersion_ratio"] = {
-            "technique_id": "dispersion_ratio",
-            "scope": "filter",
-            "rows": dispersion_rows,
-            "selected_count": len(dispersion_rows),
-            "suggested_drop": [row["feature"] for row in dispersion_rows],
-            "threshold": effective_dispersion_threshold,
-            "message": "Low-dispersion filter relative to feature magnitude.",
-        }
+            logger.warning("[FeatureSelection] dispersion_ratio done rows=%s duration=%.2fs", len(dispersion_rows), time.perf_counter() - stage_started)
 
         corr_rows = []
         numeric_cols = [item["name"] for item in numeric_inventory]
-        if len(numeric_cols) >= 2:
+        if wants("correlation_filter") and len(numeric_cols) >= 2:
+            stage_started = time.perf_counter()
             corr = df[numeric_cols].apply(pd.to_numeric, errors="coerce").corr(method="pearson")
             drop_map: dict[str, dict[str, Any]] = {}
 
@@ -1740,63 +1790,72 @@ class EDAService:
                 )
                 row["reason"] = f"Highly correlated with {partner_text}" if partner_text else "Highly correlated feature"
                 corr_rows.append(row)
-        corr_rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
-        technique_results["correlation_filter"] = {
-            "technique_id": "correlation_filter",
-            "scope": "filter",
-            "rows": corr_rows,
-            "selected_count": len(corr_rows),
-            "suggested_drop": [row["feature"] for row in corr_rows],
-            "threshold": float(corr_threshold),
-            "message": "Pairwise Pearson correlation filter.",
-        }
+            corr_rows.sort(key=lambda item: (-float(item["score"]), str(item["feature"])))
+            logger.warning("[FeatureSelection] correlation_filter done rows=%s numeric_cols=%s duration=%.2fs", len(corr_rows), len(numeric_cols), time.perf_counter() - stage_started)
+        if wants("correlation_filter"):
+            technique_results["correlation_filter"] = {
+                "technique_id": "correlation_filter",
+                "scope": "filter",
+                "rows": corr_rows,
+                "selected_count": len(corr_rows),
+                "suggested_drop": [row["feature"] for row in corr_rows],
+                "threshold": float(corr_threshold),
+                "message": "Pairwise Pearson correlation filter.",
+            }
 
-        vif_scored_rows = _vif_rows(
-            df,
-            [
-                item["name"]
-                for item in numeric_inventory
-                if item.get("name") in feature_columns
-            ],
-            max_features=min(max(len(numeric_inventory), 2), 40),
-        )
+        vif_scored_rows = []
         vif_threshold = 5.0
         vif_warning_threshold = 10.0
         vif_rows = []
-        for row in vif_scored_rows:
-            meta = inventory_lookup.get(str(row.get("feature") or ""), {})
-            score = float(row.get("score") or 0.0)
-            if score < vif_threshold:
-                continue
-            vif_rows.append({
-                "feature": row.get("feature"),
-                "score": score,
-                "role": meta.get("role"),
-                "dtype": meta.get("dtype"),
-                "missing_pct": meta.get("missing_pct"),
-                "sample_values": meta.get("sample_values", []),
-                "risk_level": "critical" if score >= vif_warning_threshold else "high",
-                "reason": (
-                    f"VIF {score:.2f} suggests severe multicollinearity"
-                    if score >= vif_warning_threshold
-                    else f"VIF {score:.2f} suggests multicollinearity review"
-                ),
-            })
-        technique_results["vif_multicollinearity"] = {
-            "technique_id": "vif_multicollinearity",
-            "scope": "filter",
-            "rows": vif_rows,
-            "scored_rows": vif_scored_rows,
-            "selected_count": len(vif_rows),
-            "suggested_drop": [row["feature"] for row in vif_rows],
-            "threshold": vif_threshold,
-            "warning_threshold": vif_warning_threshold,
-            "message": "Variance inflation factor scan for multicollinearity.",
-        }
+        if wants("vif_multicollinearity"):
+            stage_started = time.perf_counter()
+            vif_scored_rows = _vif_rows(
+                df,
+                [
+                    item["name"]
+                    for item in numeric_inventory
+                    if item.get("name") in feature_columns
+                ],
+                max_features=min(max(len(numeric_inventory), 2), 40),
+            )
+            for row in vif_scored_rows:
+                meta = inventory_lookup.get(str(row.get("feature") or ""), {})
+                score = float(row.get("score") or 0.0)
+                if score < vif_threshold:
+                    continue
+                vif_rows.append({
+                    "feature": row.get("feature"),
+                    "score": score,
+                    "role": meta.get("role"),
+                    "dtype": meta.get("dtype"),
+                    "missing_pct": meta.get("missing_pct"),
+                    "sample_values": meta.get("sample_values", []),
+                    "risk_level": "critical" if score >= vif_warning_threshold else "high",
+                    "reason": (
+                        f"VIF {score:.2f} suggests severe multicollinearity"
+                        if score >= vif_warning_threshold
+                        else f"VIF {score:.2f} suggests multicollinearity review"
+                    ),
+                })
+            technique_results["vif_multicollinearity"] = {
+                "technique_id": "vif_multicollinearity",
+                "scope": "filter",
+                "rows": vif_rows,
+                "scored_rows": vif_scored_rows,
+                "selected_count": len(vif_rows),
+                "suggested_drop": [row["feature"] for row in vif_rows],
+                "threshold": vif_threshold,
+                "warning_threshold": vif_warning_threshold,
+                "message": "Variance inflation factor scan for multicollinearity.",
+            }
+            logger.warning("[FeatureSelection] vif_multicollinearity done rows=%s scored=%s duration=%.2fs", len(vif_rows), len(vif_scored_rows), time.perf_counter() - stage_started)
 
         score_feature_rows = target_result.get("features", []) if target_result else []
         for tech in FEATURE_SELECTION_SCORE_TECHNIQUES:
             tech_id = tech["id"]
+            if not wants(tech_id):
+                continue
+            stage_started = time.perf_counter()
             rows = []
             for feat in score_feature_rows:
                 column = feat.get("column")
@@ -1828,6 +1887,7 @@ class EDAService:
                 "suggested_drop": [row["feature"] for row in rows[keep_count:]],
                 "message": "Binary-target supervised ranking." if target_result else "Target column required.",
             }
+            logger.warning("[FeatureSelection] %s done rows=%s duration=%.2fs", tech_id, len(rows), time.perf_counter() - stage_started)
 
         recommended_filters = [
             {
@@ -2104,15 +2164,24 @@ class EDAService:
             f"{len(decision_buckets['needs_review'])} fields still need review, and {len(decision_buckets['weak_redundant'])} are excluded as weak or redundant."
         )
         technical_summary = (
-            "Governance combines leakage name scans, target-correlation checks, timing availability rules, "
-            f"variance filters, correlation filters, and VIF>{vif_threshold:.1f} multicollinearity screening. "
+            "Governance combines the selected scoring or filter techniques with timing availability rules. "
             "High predictive power alone does not approve a feature."
+        )
+        computed_techniques = list(technique_results.keys())
+        logger.warning(
+            "[FeatureSelection] complete computed=%s rows=%s columns=%s duration=%.2fs",
+            ",".join(computed_techniques),
+            int(len(df)),
+            len(feature_columns),
+            time.perf_counter() - total_started,
         )
 
         return {
             "target_column": target_col,
             "rows_analyzed": int(len(df)),
             "candidate_columns": len(feature_columns),
+            "requested_techniques": requested_technique_ids,
+            "computed_techniques": computed_techniques,
             "columns": inventory,
             "available_techniques": FEATURE_SELECTION_LIBRARY,
             "technique_results": technique_results,

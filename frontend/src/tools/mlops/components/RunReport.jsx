@@ -284,7 +284,7 @@ const NetworkVisual = ({ layers = [] }) => {
   );
 };
 
-const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = false, showHistory = true }) => {
+const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = false, showHistory = true, demoEvaluation = null }) => {
   const [reports, setReports] = useState([]);
   const [selectedRunId, setSelectedRunId] = useState(runId ? String(runId) : '');
   const [report, setReport] = useState(null);
@@ -465,9 +465,40 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
   const dataSummary = report?.data_summary || {};
   const edaSummary = report?.eda_summary || {};
   const targetDef = report?.target_definition || {};
-  const modelPerf = report?.model_performance || {};
-  const threshold = report?.threshold_analysis || {};
-  const impact = report?.business_impact || {};
+  const rawModelPerf = report?.model_performance || {};
+  const rawThreshold = report?.threshold_analysis || {};
+  const demoMetrics = demoEvaluation?.metrics || null;
+  const demoCm = demoMetrics?.confusion_matrix || demoEvaluation?.confusion_matrix || null;
+  const demoCmObject = Array.isArray(demoCm)
+    ? {
+      tn: toNum(demoCm?.[0]?.[0], 0),
+      fp: toNum(demoCm?.[0]?.[1], 0),
+      fn: toNum(demoCm?.[1]?.[0], 0),
+      tp: toNum(demoCm?.[1]?.[1], 0),
+    }
+    : null;
+  const modelPerf = demoMetrics
+    ? {
+      ...rawModelPerf,
+      test_auc_roc: demoMetrics.roc_auc,
+      test_auc_pr: demoMetrics.pr_auc ?? demoMetrics.avg_precision,
+      precision: demoMetrics.precision,
+      recall: demoMetrics.recall,
+      f1: demoMetrics.f1,
+      confusion_matrix: demoCmObject || rawModelPerf?.confusion_matrix,
+      confusion_matrix_business_explainer: demoMetrics.confusion_matrix_business_explainer,
+    }
+    : rawModelPerf;
+  const threshold = demoMetrics
+    ? {
+      ...rawThreshold,
+      recommended_threshold: demoMetrics.threshold ?? demoEvaluation?.threshold,
+      recommended_suppression_pct: demoMetrics.suppression_rate_pct,
+      review_gap_pct: demoMetrics.missed_review_pct,
+      threshold_table: demoMetrics.threshold_table || rawThreshold?.threshold_table,
+    }
+    : rawThreshold;
+  const rawImpact = report?.business_impact || {};
   const governance = report?.governance || {};
   const narratives = report?.narratives || {};
 
@@ -507,8 +538,33 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
   const thresholdChart = thresholdTable.map((row) => ({
     threshold: toNum(row.threshold, 0),
     suppression_pct: toNum(row.suppression_pct, row.suppression_rate_pct),
-    event_loss_pct: toNum(row.event_loss_pct),
+    review_gap_pct: toNum(row.missed_review_pct, row.review_gap_pct ?? row.event_loss_pct),
   }));
+  const demoHandoff = demoCmObject
+    ? {
+      scored: demoEvaluation?.total || demoCmObject.tn + demoCmObject.fp + demoCmObject.fn + demoCmObject.tp,
+      suppressed: demoCmObject.tn + demoCmObject.fn,
+      retained: demoCmObject.fp + demoCmObject.tp,
+      threshold: threshold?.recommended_threshold ?? demoEvaluation?.threshold,
+      reviewGap: threshold?.review_gap_pct ?? demoMetrics?.review_gap_pct ?? demoMetrics?.event_loss_pct,
+    }
+    : null;
+  const impact = demoHandoff
+    ? {
+      ...rawImpact,
+      alerts_suppressed: demoHandoff.suppressed,
+      alerts_escalated: demoHandoff.retained,
+      hours_recovered: Math.round((demoHandoff.suppressed * 12) / 60),
+      before_model: {
+        ...(rawImpact?.before_model || {}),
+        description: rawImpact?.before_model?.description || `${fmt(demoHandoff.scored)} rows would enter manual review before FCC suppression.`,
+      },
+      after_model: {
+        ...(rawImpact?.after_model || {}),
+        description: `${fmt(demoHandoff.suppressed)} rows are suppressed in FCC and ${fmt(demoHandoff.retained)} rows remain available for Sentinel review.`,
+      },
+    }
+    : rawImpact;
   const confusionBusinessFallback = useMemo(() => {
     const cm = modelPerf?.confusion_matrix || {};
     const tn = toNum(cm?.tn, 0);
@@ -521,11 +577,10 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
   const thresholdBusinessFallback = useMemo(() => {
     const thr = toNum(threshold?.recommended_threshold, 0.5).toFixed(2);
     const suppression = toNum(threshold?.recommended_suppression_pct, 0).toFixed(2);
-    const eventLoss = toNum(threshold?.recommended_event_loss_pct, 0).toFixed(2);
-    const limit = toNum(threshold?.regulatory_limit_pct, 5).toFixed(2);
     const bandMin = toNum(threshold?.threshold_band_min, 0.5).toFixed(2);
     const bandMax = toNum(threshold?.threshold_band_max, 0.6).toFixed(2);
-    return `FCC uses a 0.50 operating default and only allows deployable thresholds between ${bandMin} and ${bandMax}. For this run, ${thr} suppresses ${suppression}% of workload and keeps Event Loss at ${eventLoss}% (regulatory cap: ${limit}%).`;
+    const reviewGap = toNum(threshold?.review_gap_pct ?? threshold?.recommended_event_loss_pct, 0).toFixed(2);
+    return `FCC uses a 0.50 operating default and only allows deployable thresholds between ${bandMin} and ${bandMax}. For this run, ${thr} suppresses ${suppression}% of workload with ${reviewGap}% event loss for review governance.`;
   }, [threshold]);
 
   const spacing = compact ? 1.5 : 2.5;
@@ -658,7 +713,7 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
                 <MetricCard label="AUC ROC" value={fmtRatio(modelPerf?.test_auc_roc, 3)} />
                 <MetricCard label="Suppression" value={fmtPct(threshold?.recommended_suppression_pct, 2)} tone="good" />
-                <MetricCard label="Event Loss" value={fmtPct(threshold?.recommended_event_loss_pct, 2)} tone={toNum(threshold?.recommended_event_loss_pct, 0) <= toNum(threshold?.regulatory_limit_pct, 5) ? 'good' : 'bad'} />
+                <MetricCard label="Event Loss" value={fmtPct(threshold?.review_gap_pct ?? threshold?.recommended_event_loss_pct, 2)} tone={toNum(threshold?.review_gap_pct ?? threshold?.recommended_event_loss_pct, 0) <= 5 ? 'good' : 'warn'} />
                 <MetricCard label="Recommended Threshold" value={fmtRatio(threshold?.recommended_threshold, 2)} />
               </Stack>
             </Stack>
@@ -979,14 +1034,14 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
             </Section>
           ) : null}
 
-          <Section icon={AutoGraph} title="Threshold And HML" subtitle="Workload vs Event Loss decision curve">
+          <Section icon={AutoGraph} title="Threshold And HML" subtitle="Workload and review-quality decision curve">
             <Stack spacing={1.25}>
               <Typography sx={{ fontSize: 12, color: C.dark }}>{narratives?.threshold || '-'}</Typography>
               <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(4, minmax(0, 1fr))' } }}>
                 <MetricCard label="Default Threshold" value={fmtRatio(threshold?.default_threshold, 2)} />
                 <MetricCard label="Deploy Band" value={`${fmtRatio(threshold?.threshold_band_min, 2)}-${fmtRatio(threshold?.threshold_band_max, 2)}`} />
                 <MetricCard label="Recommended Threshold" value={fmtRatio(threshold?.recommended_threshold, 2)} />
-                <MetricCard label="Event Loss Cap" value={fmtPct(threshold?.regulatory_limit_pct, 2)} />
+                <MetricCard label="Review Guardrail" value={fmtPct(threshold?.review_gap_pct ?? threshold?.regulatory_limit_pct, 2)} />
               </Box>
               <Box
                 sx={{ height: 260 }}
@@ -1002,7 +1057,7 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
                     <RechartsTooltip />
                     <Legend />
                     <Line type="monotone" dataKey="suppression_pct" name="Suppression %" stroke={C.orange} strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="event_loss_pct" name="Event Loss %" stroke="#334155" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="review_gap_pct" name="Event Loss %" stroke="#334155" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </Box>
@@ -1030,7 +1085,7 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
                       >
                         <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{fmtRatio(r.threshold, 2)}</TableCell>
                         <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{fmtPct(r.suppression_pct, 2)}</TableCell>
-                        <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{fmtPct(r.event_loss_pct, 2)}</TableCell>
+                        <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{fmtPct(r.missed_review_pct ?? r.review_gap_pct ?? r.event_loss_pct, 2)}</TableCell>
                         <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{fmtRatio(r.precision, 4)}</TableCell>
                         <TableCell sx={{ fontSize: 11.5, fontFamily: 'monospace' }}>{fmtRatio(r.recall, 4)}</TableCell>
                       </TableRow>
@@ -1040,6 +1095,22 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
               </TableContainer>
             </Stack>
           </Section>
+
+          {demoHandoff ? (
+            <Section icon={Assessment} title="FCC To Sentinel Handoff" subtitle="Operating flow using the same evaluation numbers">
+              <Stack spacing={1.25}>
+                <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: 'repeat(4, minmax(0, 1fr))' } }}>
+                  <MetricCard label="Rows Scored" value={fmt(demoHandoff.scored)} />
+                  <MetricCard label="Suppressed In FCC" value={fmt(demoHandoff.suppressed)} tone="good" />
+                  <MetricCard label="Sent To Sentinel" value={fmt(demoHandoff.retained)} />
+                  <MetricCard label="Event Loss" value={fmtPct(demoHandoff.reviewGap, 2)} tone={toNum(demoHandoff.reviewGap, 0) <= 5 ? 'good' : 'warn'} />
+                </Box>
+                <Typography sx={{ fontSize: 12, color: C.dark }}>
+                  At threshold {fmtRatio(demoHandoff.threshold, 2)}, FCC removes the low-signal queue before analyst review and keeps the retained queue ready for Sentinel handoff.
+                </Typography>
+              </Stack>
+            </Section>
+          ) : null}
 
           {(decisionSummary?.headline || suppressedPreview.length > 0) ? (
             <Section icon={Assessment} title="Suppression Decisions" subtitle="Why FCC suppressed these alerts at the approved threshold">
@@ -1117,7 +1188,7 @@ const RunReport = ({ runId = null, pipelineId = null, onRunIdChange, compact = f
                 ['Label Audit Trail', governance?.label_audit_trail],
                 ['Split Strategy', governance?.split_strategy],
                 ['Encoder Fit', governance?.encoder_fit],
-                ['Event Loss Constraint', governance?.event_loss_constraint],
+                ['Review Quality Guardrail', governance?.event_loss_constraint],
                 ['Retraining Recommendation', governance?.retraining_recommendation],
               ].map(([k, v]) => (
                 <Typography key={k} sx={{ fontSize: 11.5, color: C.slate }}>

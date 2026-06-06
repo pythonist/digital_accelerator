@@ -13,6 +13,42 @@
 
 import apiClient from '@services/api';
 
+const PIPELINE_GET_CACHE_TTL_MS = 15000;
+const pipelineGetCache = new Map();
+const pipelineGetInFlight = new Map();
+
+const getActiveEnvKey = () => {
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      const stored = sessionStorage.getItem('active_env');
+      if (stored) return stored;
+    }
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('env') || '';
+    }
+  } catch {
+    return '';
+  }
+  return '';
+};
+
+const pipelineGetCacheKey = (pipelineId) => `${getActiveEnvKey()}::${String(pipelineId)}`;
+
+const clearPipelineGetCache = (pipelineId = null) => {
+  if (pipelineId == null) {
+    pipelineGetCache.clear();
+    pipelineGetInFlight.clear();
+    return;
+  }
+  const suffix = `::${String(pipelineId)}`;
+  Array.from(pipelineGetCache.keys()).forEach((key) => {
+    if (key.endsWith(suffix)) pipelineGetCache.delete(key);
+  });
+  Array.from(pipelineGetInFlight.keys()).forEach((key) => {
+    if (key.endsWith(suffix)) pipelineGetInFlight.delete(key);
+  });
+};
+
 const mlopsApi = {
 
   // ── Dataset management ──────────────────────────────────────────────────────
@@ -198,7 +234,7 @@ const mlopsApi = {
     return apiClient.post('/api/mlops/preprocess/plan', payload);
   },
   preprocessPreview: async (payload) => {
-    return apiClient.post('/api/mlops/preprocess/preview', payload);
+    return apiClient.post('/api/mlops/preprocess/preview', payload, { timeout: 12000 });
   },
   preprocessRun: async (payload) => {
     return apiClient.post('/api/mlops/preprocess/run', payload);
@@ -231,10 +267,14 @@ const mlopsApi = {
     let lastError = null;
     for (const candidate of candidates) {
       try {
+        let response;
         if (candidate.method === 'put') {
-          return await apiClient.put(candidate.url, payload);
+          response = await apiClient.put(candidate.url, payload);
+        } else {
+          response = await apiClient.post(candidate.url, payload);
         }
-        return await apiClient.post(candidate.url, payload);
+        clearPipelineGetCache(response?.pipeline_id || response?.data?.pipeline_id || payload?.pipeline_id || null);
+        return response;
       } catch (error) {
         lastError = error;
         const message = String(error?.message || '').toLowerCase();
@@ -266,8 +306,32 @@ const mlopsApi = {
   },
 
   /** Load one saved pipeline definition. */
-  pipelineGet: async (pipelineId) => {
-    return apiClient.get(`/api/mlops/pipeline/${pipelineId}`);
+  pipelineGet: async (pipelineId, options = {}) => {
+    const key = pipelineGetCacheKey(pipelineId);
+    const now = Date.now();
+    const force = Boolean(options?.force);
+
+    if (!force) {
+      const cached = pipelineGetCache.get(key);
+      if (cached && now - cached.at < PIPELINE_GET_CACHE_TTL_MS) {
+        return cached.data;
+      }
+      const inFlight = pipelineGetInFlight.get(key);
+      if (inFlight) return inFlight;
+    }
+
+    const request = apiClient
+      .get(`/api/mlops/pipeline/${pipelineId}`, force ? { _refresh: now } : {})
+      .then((data) => {
+        pipelineGetCache.set(key, { at: Date.now(), data });
+        return data;
+      })
+      .finally(() => {
+        pipelineGetInFlight.delete(key);
+      });
+
+    pipelineGetInFlight.set(key, request);
+    return request;
   },
 
   /** Fetch the canonical workflow manifest for one FCC run. */
@@ -277,12 +341,16 @@ const mlopsApi = {
 
   /** Rename one saved pipeline without creating a duplicate. */
   pipelineRename: async (pipelineId, name) => {
-    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/rename`, { name });
+    const response = await apiClient.post(`/api/mlops/pipeline/${pipelineId}/rename`, { name });
+    clearPipelineGetCache(pipelineId);
+    return response;
   },
 
   /** Save lightweight screen state for autosave and resume. */
   pipelineSaveScreenState: async (pipelineId, payload) => {
-    return apiClient.post(`/api/mlops/pipeline/${pipelineId}/screen-state`, payload);
+    const response = await apiClient.post(`/api/mlops/pipeline/${pipelineId}/screen-state`, payload);
+    // Autosaves are frequent; keep the short pipelineGet cache so UI hydration does not hammer Flask.
+    return response;
   },
 
   /** Persistent Vertex-style RUN_STATE APIs. */
@@ -363,7 +431,7 @@ const mlopsApi = {
   },
   mulePreprocessingPreview: async (pipelineId, payload = {}) => {
     const pid = encodeURIComponent(String(pipelineId));
-    return apiClient.post(`/api/mule/preprocessing/preview?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload });
+    return apiClient.post(`/api/mule/preprocessing/preview?pipeline_id=${pid}`, { pipeline_id: pipelineId, ...payload }, { timeout: 12000 });
   },
   mulePreprocessingRun: async (pipelineId, payload = {}) => {
     const pid = encodeURIComponent(String(pipelineId));
@@ -890,6 +958,9 @@ const mlopsApi = {
   },
   importSentinelPublishedRun: async (payload = {}) => {
     return apiClient.importFccPublishedRun(payload);
+  },
+  deleteSentinelPublishedRun: async (publishId, payload = {}) => {
+    return apiClient.deleteFccPublishedRun(publishId, payload);
   },
   listScoredBatches: async (params = {}) => {
     return apiClient.listFccScoredBatches(params);

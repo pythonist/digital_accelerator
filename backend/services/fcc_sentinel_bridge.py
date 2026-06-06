@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -43,6 +44,91 @@ def _records_to_df(records: Iterable[Dict[str, Any]]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).replace({pd.NA: None})
+
+
+def _with_sentinel_aliases(df: pd.DataFrame, aliases: Dict[str, Any]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    out = df.copy()
+    lowered = {str(col).lower(): col for col in out.columns}
+    for source, alias in aliases.items():
+        source_col = lowered.get(str(source).lower())
+        if not source_col:
+            continue
+        alias_list = alias if isinstance(alias, (list, tuple, set)) else [alias]
+        for target_alias in alias_list:
+            if target_alias in out.columns:
+                continue
+            out[target_alias] = out[source_col]
+    return out
+
+
+def _ready_for_sentinel(tables: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+    return {
+        "cases": _with_sentinel_aliases(
+            tables.get("cases", pd.DataFrame()),
+            {
+                "case_id": ["CASE_ID", "Case_ID"],
+                "alert_type": "ALERT_TYPE",
+                "created_at": "CREATED_AT",
+                "risk_rating": "RISK_RATING",
+                "customer_id": ["CUSTOMER_ID", "Customer_ID"],
+                "account_id": ["ACCOUNT_ID", "Account_ID"],
+                "risk_score": "RISK_SCORE",
+                "status": "STATUS",
+            },
+        ),
+        "alerts": _with_sentinel_aliases(
+            tables.get("alerts", pd.DataFrame()),
+            {
+                "alert_id": ["ALERT_ID", "Alert_ID"],
+                "case_id": ["CASE_ID", "Case_ID"],
+                "account_id": ["ACCOUNT_ID", "Account_ID"],
+                "customer_id": ["CUSTOMER_ID", "Customer_ID"],
+                "transaction_id": ["TRANSACTION_ID", "Transaction_ID"],
+                "amount": "AMOUNT",
+                "severity": "SEVERITY",
+                "status": "STATUS",
+                "fcc_score": "FCC_SCORE",
+            },
+        ),
+        "transactions": _with_sentinel_aliases(
+            tables.get("transactions", pd.DataFrame()),
+            {
+                "transaction_id": ["TRANSACTION_ID", "Transaction_ID"],
+                "case_id": ["CASE_ID", "Case_ID"],
+                "account_id": ["ACCOUNT_ID", "Account_ID"],
+                "customer_id": ["CUSTOMER_ID", "Customer_ID"],
+                "counterparty_account": "COUNTERPARTY_ACCOUNT",
+                "txn_timestamp": "TXN_TIMESTAMP",
+                "amount": "AMOUNT",
+                "direction": "DIRECTION",
+                "fcc_score": "FCC_SCORE",
+            },
+        ),
+        "accounts": _with_sentinel_aliases(
+            tables.get("accounts", pd.DataFrame()),
+            {
+                "account_id": ["ACCOUNT_ID", "Account_ID"],
+                "case_id": ["CASE_ID", "Case_ID"],
+                "customer_id": ["CUSTOMER_ID", "Customer_ID"],
+                "account_type": "ACCOUNT_TYPE",
+                "risk_rating": "RISK_RATING",
+                "status": "STATUS",
+            },
+        ),
+        "customers": _with_sentinel_aliases(
+            tables.get("customers", pd.DataFrame()),
+            {
+                "customer_id": ["CUSTOMER_ID", "Customer_ID"],
+                "case_id": ["CASE_ID", "Case_ID"],
+                "customer_name": "CUSTOMER_NAME",
+                "risk_rating": "RISK_RATING",
+                "segment": "SEGMENT",
+                "country": "COUNTRY",
+            },
+        ),
+    }
 
 
 def _prepare_sqlite_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -692,7 +778,9 @@ def build_investigation_tables(
     for idx, raw_row in enumerate(scored_rows, start=1):
         row = {str(k): _json_safe(v) for k, v in dict(raw_row).items()}
         entity_id = str(row.get("entity_id") or "").strip() or f"FCC-{idx:06d}"
-        score = float(row.get("model_score") or 0.0)
+        score = _safe_float(row.get("model_score") or row.get("fcc_score"), 0.0)
+        if score > 1:
+            score = min(score / 100.0, 1.0)
         scored_at = row.get("scored_at") or _now_iso()
 
         source_case_id = _coalesce(row, "case_id", "caseid")
@@ -725,6 +813,14 @@ def build_investigation_tables(
         if customer_id is not None:
             customer_id = str(customer_id)
 
+        account_seed = _numeric_suffix(account_id or entity_id or alert_id or idx) or f"{idx:06d}"
+        if not account_id:
+            account_id = f"ACCT-{account_seed.zfill(6)[-6:]}"
+        if not customer_id:
+            customer_id = f"CUST-{account_seed.zfill(6)[-6:]}"
+        if not transaction_id:
+            transaction_id = f"TXN-{account_seed.zfill(6)[-6:]}-{idx:03d}"
+
         created_at = _coalesce(
             row,
             "created_at",
@@ -736,6 +832,8 @@ def build_investigation_tables(
             "time",
         ) or scored_at
         amount = _coalesce(row, "txn_amount", "transaction_amount", "amount", "amt", "value")
+        if amount is None:
+            amount = round(2500.0 + (score * 125000.0) + (idx * 97.35), 2)
         counterparty_account = _coalesce(
             row,
             "counterparty_account",
@@ -745,6 +843,8 @@ def build_investigation_tables(
             "receiver_account",
             "cp_account",
         )
+        if not counterparty_account:
+            counterparty_account = f"CP-{(idx * 17) % 999999:06d}"
         customer_name = _coalesce(row, "customer_name", "name", "customer")
         alert_type = _coalesce(
             row,
@@ -813,60 +913,59 @@ def build_investigation_tables(
             },
         )
 
-        if transaction_id or account_id or amount or counterparty_account:
-            txn_key = str(transaction_id or f"TXN-{alert_id}")
-            transactions.setdefault(
-                txn_key,
-                {
-                    "transaction_id": txn_key,
-                    "case_id": case_id,
-                    "account_id": account_id,
-                    "customer_id": customer_id,
-                    "counterparty_account": counterparty_account,
-                    "txn_timestamp": str(created_at),
-                    "amount": amount,
-                    "direction": _coalesce(row, "direction", "dr_cr", "debit_credit", "type"),
-                    "fcc_score": round(score, 6),
-                    "fcc_decision": row.get("decision"),
-                    "fcc_pipeline_id": pipeline_id,
-                    "fcc_pipeline_name": pipeline_name,
-                    "fcc_publish_id": publish_id,
-                },
-            )
+        txn_key = str(transaction_id or f"TXN-{alert_id}")
+        transactions.setdefault(
+            txn_key,
+            {
+                "transaction_id": txn_key,
+                "case_id": case_id,
+                "account_id": account_id,
+                "customer_id": customer_id,
+                "counterparty_account": counterparty_account,
+                "txn_timestamp": str(created_at),
+                "amount": amount,
+                "direction": _coalesce(row, "direction", "dr_cr", "debit_credit", "type") or "DEBIT",
+                "fcc_score": round(score, 6),
+                "fcc_decision": row.get("decision"),
+                "fcc_pipeline_id": pipeline_id,
+                "fcc_pipeline_name": pipeline_name,
+                "fcc_publish_id": publish_id,
+            },
+        )
 
-        if account_id:
-            accounts.setdefault(
-                account_id,
-                {
-                    "account_id": account_id,
-                    "case_id": case_id,
-                    "customer_id": customer_id,
-                    "account_type": account_type,
-                    "risk_rating": str(risk_level),
-                    "status": "ACTIVE",
-                },
-            )
+        accounts.setdefault(
+            account_id,
+            {
+                "account_id": account_id,
+                "case_id": case_id,
+                "customer_id": customer_id,
+                "account_type": account_type or "Operating Account",
+                "risk_rating": str(risk_level),
+                "status": "ACTIVE",
+            },
+        )
 
-        if customer_id:
-            customers.setdefault(
-                customer_id,
-                {
-                    "customer_id": customer_id,
-                    "case_id": case_id,
-                    "customer_name": str(customer_name or customer_id),
-                    "risk_rating": str(risk_level),
-                    "segment": customer_segment,
-                    "country": customer_country,
-                },
-            )
+        customers.setdefault(
+            customer_id,
+            {
+                "customer_id": customer_id,
+                "case_id": case_id,
+                "customer_name": str(customer_name or customer_id),
+                "risk_rating": str(risk_level),
+                "segment": customer_segment or "Commercial",
+                "country": customer_country or "US",
+            },
+        )
 
-    return {
-        "cases": _records_to_df(cases.values()),
-        "alerts": _records_to_df(alerts.values()),
-        "transactions": _records_to_df(transactions.values()),
-        "accounts": _records_to_df(accounts.values()),
-        "customers": _records_to_df(customers.values()),
-    }
+    return _ready_for_sentinel(
+        {
+            "cases": _records_to_df(cases.values()),
+            "alerts": _records_to_df(alerts.values()),
+            "transactions": _records_to_df(transactions.values()),
+            "accounts": _records_to_df(accounts.values()),
+            "customers": _records_to_df(customers.values()),
+        }
+    )
 
 
 class FCCSentinelBridgeService:
@@ -1300,7 +1399,9 @@ class FCCSentinelBridgeService:
         publish_dir = self._publish_dir(publish_id)
         publish_dir.mkdir(parents=True, exist_ok=True)
         publish_label_value = str(publish_label or f"FCC publish {resolved_batch_id[:8]}").strip()
-        for row in prepared_rows:
+        for idx, row in enumerate(prepared_rows, start=1):
+            if not row.get("record_id"):
+                row["record_id"] = f"{publish_id}-REC-{idx:06d}"
             row["fcc_publish_id"] = publish_id
             row["fcc_publish_label"] = publish_label_value
 
@@ -1396,6 +1497,22 @@ class FCCSentinelBridgeService:
                 scored_records = json.loads(scored_records_path.read_text(encoding="utf-8"))
             except Exception:
                 scored_records = []
+        for idx, row in enumerate(scored_records, start=1):
+            if isinstance(row, dict) and not row.get("record_id"):
+                row["record_id"] = f"{publish_id}-REC-{idx:06d}"
+
+        missing_core_tables = any(
+            tables.get(table_name, pd.DataFrame()).empty
+            for table_name in ("cases", "alerts", "transactions", "accounts", "customers")
+        )
+        if missing_core_tables and scored_records:
+            rebuilt_tables = build_investigation_tables(
+                scored_records,
+                model_grain=str(manifest.get("model_grain") or manifest.get("entity_type") or "alert"),
+            )
+            for table_name, rebuilt_df in rebuilt_tables.items():
+                if tables.get(table_name, pd.DataFrame()).empty and not rebuilt_df.empty:
+                    tables[table_name] = rebuilt_df
 
         if prepare_investigation_context:
             tables = _build_investigation_context(
@@ -1403,6 +1520,7 @@ class FCCSentinelBridgeService:
                 manifest=manifest,
                 context_profile=str(context_profile or "balanced"),
             )
+        tables = _ready_for_sentinel(tables)
 
         conn = db_manager.connect()
         try:
@@ -1839,6 +1957,44 @@ class FCCSentinelBridgeService:
             "deleted_case_count": len(case_ids),
             "deleted_alert_count": len(alert_ids),
             "focus_result": focus_result,
+        }
+
+    def delete_published_run(
+        self,
+        *,
+        publish_id: str,
+        tenant_id: str,
+        target_env_id: str,
+        purge_imported: bool = True,
+        delete_package: bool = True,
+        require_no_activity: bool = False,
+    ) -> Dict[str, Any]:
+        publish_text = str(publish_id or "").strip()
+        if not publish_text:
+            raise ValueError("publish_id is required")
+
+        purge_result: Dict[str, Any] | None = None
+        if purge_imported:
+            purge_result = self.purge_imported_run(
+                publish_id=publish_text,
+                tenant_id=tenant_id,
+                target_env_id=target_env_id,
+                require_no_activity=bool(require_no_activity),
+            )
+
+        package_deleted = False
+        package_dir = self._publish_dir(publish_text)
+        if delete_package and package_dir.exists():
+            shutil.rmtree(package_dir)
+            package_deleted = True
+
+        return {
+            "success": True,
+            "publish_id": publish_text,
+            "target_env_id": target_env_id,
+            "purged_imported": bool(purge_imported),
+            "purge_result": purge_result,
+            "package_deleted": package_deleted,
         }
 
     def clear_imported_queue(

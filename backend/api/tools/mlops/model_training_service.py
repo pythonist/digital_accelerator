@@ -5930,6 +5930,7 @@ class ModelTrainingService:
             target_within_tolerance = abs(target_gap_pct) <= target_tolerance_pct
 
         configured_threshold = float(result.get("selected_threshold") or BUSINESS_DEFAULT_THRESHOLD)
+        selected_threshold = float(optimal_row["threshold"]) if optimal_row else configured_threshold
         selected_row = _closest_threshold_row(table, configured_threshold) if table else None
         deploy_policy = _build_deploy_threshold_policy(
             table,
@@ -5943,8 +5944,8 @@ class ModelTrainingService:
             "threshold_table":     table,
             "optimal_threshold":   optimal_row["threshold"] if optimal_row else None,
             "configured_threshold": configured_threshold,
-            "selected_threshold": configured_threshold,
-            "locked_threshold": configured_threshold,
+            "selected_threshold": selected_threshold,
+            "locked_threshold": selected_threshold,
             "deployable_threshold": deploy_policy.get("deployable_threshold"),
             "threshold_band_min":   DEPLOYABLE_THRESHOLD_MIN,
             "threshold_band_max":   DEPLOYABLE_THRESHOLD_MAX,
@@ -5961,7 +5962,7 @@ class ModelTrainingService:
             "active_threshold_metrics": dict(selected_row or {}),
             "optimal_threshold_metrics": dict(optimal_row or {}),
         }
-        display_row = selected_row or optimal_row
+        display_row = optimal_row or selected_row
         if display_row is not None:
             out.update({
                 "suppression_rate_pct": display_row["suppression_rate_pct"],
@@ -5981,8 +5982,8 @@ class ModelTrainingService:
                 job_id,
                 {
                     "report": dict(out),
-                    "selected_threshold": configured_threshold,
-                    "locked_threshold": configured_threshold,
+                    "selected_threshold": selected_threshold,
+                    "locked_threshold": selected_threshold,
                     "recommended_threshold": out.get("optimal_threshold"),
                     "max_event_loss_pct": max_event_loss_pct,
                     "optimization_mode": optimization_mode,

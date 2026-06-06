@@ -74,9 +74,12 @@ const isValidationCapableRun = (run, validationReport) => {
 };
 
 const buildReleaseValidationSnapshot = (activeModelResolved, validationReport) => {
+  const displayEvaluation = activeModelResolved?.display_evaluation || activeModelResolved?.results?.display_evaluation || null;
+  const displayMetrics = displayEvaluation?.metrics || {};
   const selectedThreshold = (
     validationReport?.selected_threshold
     ?? validationReport?.locked_threshold
+    ?? displayEvaluation?.threshold
     ?? validationReport?.optimal_threshold
     ?? activeModelResolved?.selected_threshold
     ?? activeModelResolved?.threshold
@@ -102,8 +105,12 @@ const buildReleaseValidationSnapshot = (activeModelResolved, validationReport) =
     metrics: {
       ...(activeModelResolved?.metrics || {}),
       ...(validationReport?.metrics || {}),
+      ...displayMetrics,
     },
-    confusion_matrix: validationReport?.confusion_matrix || activeModelResolved?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
+    display_evaluation: displayEvaluation || validationReport?.display_evaluation || null,
+    confusion_matrix: validationReport?.confusion_matrix || displayEvaluation?.confusion_matrix || displayMetrics?.confusion_matrix || activeModelResolved?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
+    suppression_rate_pct: validationReport?.suppression_rate_pct ?? displayMetrics?.suppression_rate_pct ?? displayEvaluation?.suppression_rate_pct ?? activeModelResolved?.suppression_rate_pct ?? null,
+    event_loss_pct: validationReport?.event_loss_pct ?? displayMetrics?.event_loss_pct ?? displayEvaluation?.event_loss_pct ?? activeModelResolved?.event_loss_pct ?? null,
   };
 };
 
@@ -164,8 +171,11 @@ const ModelValidationScreen = ({
       const nextRuns = Array.isArray(data) ? data.slice() : [];
       const activeRun = activeModelRunRef.current;
       const activeJobId = String(activeRun?.job_id || '').trim();
-      if (activeJobId && !nextRuns.some((run) => String(run?.job_id || '') === activeJobId)) {
-        nextRuns.unshift(activeRun);
+      if (activeJobId) {
+        const activeIndex = nextRuns.findIndex((run) => String(run?.job_id || '') === activeJobId);
+        const mergedActive = mergeValidationModel(activeIndex >= 0 ? nextRuns[activeIndex] : {}, activeRun);
+        if (activeIndex >= 0) nextRuns.splice(activeIndex, 1);
+        nextRuns.unshift(mergedActive);
       }
       setRuns(nextRuns);
     } catch (e) {
@@ -316,8 +326,8 @@ const ModelValidationScreen = ({
   }, [compareData.length, selectedJobIds.length]);
 
   const activeModel = useMemo(() => (
-    [...runs, ...compareData].find((r) => String(r?.job_id || '') === String(currentJobId || ''))
-    || (String(activeModelRun?.job_id || '') === String(currentJobId || '') ? activeModelRun : null)
+    (String(activeModelRun?.job_id || '') === String(currentJobId || '') ? activeModelRun : null)
+    || [...runs, ...compareData].find((r) => String(r?.job_id || '') === String(currentJobId || ''))
     || activeModelRun
     || runs.find((r) => String(r?.job_id || '') === String(selectedJobIds[0] || ''))
     || compareData.find((r) => String(r?.job_id || '') === String(selectedJobIds[0] || ''))
@@ -329,8 +339,9 @@ const ModelValidationScreen = ({
   useEffect(() => {
     if (!activeModelRun?.job_id || !activeModelRun?.results) return;
     setRunDetailsByJobId((prev) => {
-      if (prev[activeModelRun.job_id]) return prev;
-      return { ...prev, [activeModelRun.job_id]: activeModelRun.results };
+      const currentDetail = prev[activeModelRun.job_id] || {};
+      const nextDetail = mergeValidationModel(currentDetail, activeModelRun);
+      return { ...prev, [activeModelRun.job_id]: nextDetail };
     });
   }, [activeModelRun?.job_id, activeModelRun?.results]);
 
@@ -384,19 +395,23 @@ const ModelValidationScreen = ({
     };
   }, [requestedDetailIds, runDetailsByJobId]);
 
-  const activeModelResolved = useMemo(
-    () => mergeValidationModel(activeModel, runDetailsByJobId[effectiveJobId] || activeModel?.results || activeModelRun?.results),
-    [activeModel, activeModelRun?.results, effectiveJobId, runDetailsByJobId],
-  );
+  const activeModelResolved = useMemo(() => {
+    const detail = runDetailsByJobId[effectiveJobId] || activeModel?.results || activeModelRun?.results;
+    const merged = mergeValidationModel(activeModel, detail);
+    const activeSameRun = String(activeModelRun?.job_id || '') === String(merged?.job_id || effectiveJobId || '');
+    return activeSameRun ? mergeValidationModel(merged, activeModelRun) : merged;
+  }, [activeModel, activeModelRun, effectiveJobId, runDetailsByJobId]);
 
   const comparisonRuns = useMemo(() => {
     const order = new Map((selectedJobIds || []).map((job_id, idx) => [String(job_id), idx]));
     const compareMap = new Map((compareData || []).map((model) => [String(model?.job_id || ''), model]));
     const runMap = new Map((runs || []).map((run) => [String(run?.job_id || ''), run]));
+    const activeRunId = String(activeModelRun?.job_id || '').trim();
     return (selectedJobIds || [])
       .map((job_id) => {
         const normalizedId = String(job_id || '');
-        const baseModel = compareMap.get(normalizedId)
+        const baseModel = (activeRunId && normalizedId === activeRunId ? activeModelRun : null)
+          || compareMap.get(normalizedId)
           || runMap.get(normalizedId)
           || { job_id: normalizedId };
         const detailModel = runDetailsByJobId[normalizedId];
@@ -405,7 +420,7 @@ const ModelValidationScreen = ({
       })
       .filter(Boolean)
       .sort((left, right) => (order.get(String(left?.job_id || '')) ?? 999) - (order.get(String(right?.job_id || '')) ?? 999));
-  }, [compareData, runDetailsByJobId, runs, selectedJobIds]);
+  }, [activeModelRun, compareData, runDetailsByJobId, runs, selectedJobIds]);
 
   const validationRunOptions = useMemo(() => {
     const baseRuns = Array.isArray(runs) ? runs : [];

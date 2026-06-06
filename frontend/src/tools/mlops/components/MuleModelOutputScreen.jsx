@@ -414,7 +414,7 @@ const MuleModelOutputScreen = ({ activePipelineId, workspace = null }) => {
               { label: 'High Risk', value: validationSummary.high_risk_count ?? 'N/A', helper: 'Accounts above the high-risk cutoff.' },
               { label: 'Medium Risk', value: validationSummary.medium_risk_count ?? 'N/A', helper: 'Accounts in the review band.' },
               { label: 'Low Risk', value: validationSummary.low_risk_count ?? 'N/A', helper: 'Accounts below the review threshold.' },
-              { label: 'Event Loss', value: formatMetric(validationSummary.event_loss_rate), helper: 'Missed known mules at the current threshold.' },
+              { label: 'Review Gap', value: formatMetric(validationSummary.event_loss_rate), helper: 'Known mule cases needing follow-up review at the current threshold.' },
             ]}
           />
 

@@ -162,7 +162,7 @@ const PIPELINE_STEPS = [
   {
     icon: Shield,
     step: 'Release Governance',
-    definition: 'Only candidates with acceptable alert suppression and true-event protection move forward for review.',
+    definition: 'Only candidates with acceptable review-load control and true-event protection move forward for review.',
   },
 ];
 
@@ -192,7 +192,7 @@ const MODEL_DEFINITIONS = [
   {
     algorithm: 'XGBoost',
     runId: '87jk0923k',
-    note: 'Gradient boosted tree run focused on stronger ranking quality and lower event loss on the review set.',
+    note: 'Gradient boosted tree run focused on stronger ranking quality and lower missed-event risk on the review set.',
     train: { total: 8420, tp: 640, tn: 6972, fp: 790, fn: 18, auc: 0.8240, logLoss: 0.2387, brier: 0.0542, cvAuc: 0.8090 },
     test: { total: 2106, tp: 145, tn: 1759, fp: 198, fn: 4, auc: 0.8120, logLoss: 0.2714, brier: 0.0618 },
     hyperparameters: [
@@ -304,7 +304,7 @@ const MODEL_DEFINITIONS = [
   {
     algorithm: 'Random Forest',
     runId: 's834ad0p1',
-    note: 'Alternate forest run calibrated to avoid over-suppression while maintaining acceptable missed-event control.',
+    note: 'Alternate forest run calibrated to avoid over-filtering while maintaining acceptable missed-event control.',
     train: { total: 8420, tp: 590, tn: 6553, fp: 1250, fn: 27, auc: 0.7510, logLoss: 0.3036, brier: 0.0702, cvAuc: 0.7390 },
     test: { total: 2106, tp: 141, tn: 1656, fp: 302, fn: 7, auc: 0.7390, logLoss: 0.3277, brier: 0.0756 },
     hyperparameters: [
@@ -348,7 +348,7 @@ const MODEL_DEFINITIONS = [
   {
     algorithm: 'XGBoost',
     runId: 'h3n8s6p1v',
-    note: 'Strong review candidate with balanced alert suppression, consistent holdout ranking quality, and stable calibration.',
+    note: 'Strong review candidate with balanced alert triage, consistent holdout ranking quality, and stable calibration.',
     train: { total: 8420, tp: 647, tn: 6976, fp: 780, fn: 17, auc: 0.8200, logLoss: 0.2419, brier: 0.0549, cvAuc: 0.8060 },
     test: { total: 2106, tp: 162, tn: 1728, fp: 210, fn: 6, auc: 0.8090, logLoss: 0.2763, brier: 0.0627 },
     hyperparameters: [
@@ -582,8 +582,8 @@ const RegistryTable = ({
             <MenuItem value="f1">F1</MenuItem>
             <MenuItem value="precision">Precision</MenuItem>
             <MenuItem value="detection">True event detection rate</MenuItem>
-            <MenuItem value="suppression">Suppression rate</MenuItem>
-            <MenuItem value="eventLoss">Event loss</MenuItem>
+            <MenuItem value="suppression">Review load control</MenuItem>
+            <MenuItem value="eventLoss">Missed-event risk</MenuItem>
           </Select>
           <Select
             size="small"
@@ -607,7 +607,7 @@ const RegistryTable = ({
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ background: D.soft }}>
-              {['#', 'Algorithm', 'Date', 'Threshold', 'AUC', 'F1', 'Precision', 'True Event Detection Rate', 'Suppression Rate', 'Event Loss', 'Missed True Events'].map((header) => (
+              {['#', 'Algorithm', 'Date', 'Threshold', 'AUC', 'F1', 'Precision', 'True Event Detection Rate', 'Missed True Events'].map((header) => (
                 <th
                   key={header}
                   style={{
@@ -630,9 +630,6 @@ const RegistryTable = ({
           <tbody>
             {rows.map((run, index) => {
               const isSelected = run.runId === selectedRunId;
-              const suppressionColor = suppressionTone(run.testMetrics.suppressionPct);
-              const eventLossColor = eventLossTone(run.testMetrics.eventLossPct);
-
               return (
                 <tr
                   key={run.runId}
@@ -657,12 +654,6 @@ const RegistryTable = ({
                   <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{dec(run.testMetrics.f1)}</td>
                   <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{pct(run.testMetrics.precisionPct)}</td>
                   <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{pct(run.testMetrics.detectionPct)}</td>
-                  <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: 'monospace', color: suppressionColor ? toneText[suppressionColor] : D.text, fontWeight: 700 }}>
-                    {pct(run.testMetrics.suppressionPct)}
-                  </td>
-                  <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: 'monospace', color: eventLossColor ? toneText[eventLossColor] : D.text, fontWeight: 700 }}>
-                    {pct(run.testMetrics.eventLossPct)}
-                  </td>
                   <td style={{ padding: '9px 10px', textAlign: 'right', fontFamily: 'monospace', color: D.red, fontWeight: 700 }}>
                     {fmt(run.testMetrics.fn)}
                   </td>
@@ -683,25 +674,25 @@ const ConfusionMatrixView = ({ splitMetrics, splitLabel }) => {
       escalatedTitle: 'True Events Escalated',
       escalatedSubtitle: 'True Positives',
       escalatedValue: splitMetrics.tp,
-      suppressedTitle: 'Missed True Events',
+      setAsideTitle: 'Missed True Events',
       suppressedSubtitle: 'False Negatives',
-      suppressedValue: splitMetrics.fn,
+      setAsideValue: splitMetrics.fn,
     },
     {
       row: 'Actual Non-Events',
       escalatedTitle: 'False Positives',
       escalatedSubtitle: 'Benign Alerts Escalated',
       escalatedValue: splitMetrics.fp,
-      suppressedTitle: 'Correctly Suppressed Alerts',
-      suppressedSubtitle: 'True Negatives',
-      suppressedValue: splitMetrics.tn,
+      setAsideTitle: 'Correctly Set Aside Alerts',
+      setAsideSubtitle: 'True Negatives',
+      setAsideValue: splitMetrics.tn,
     },
   ];
 
   return (
     <Box>
       <Typography sx={{ fontSize: 11, color: D.muted, lineHeight: 1.6, mb: 1.2 }}>
-        {splitLabel} confusion review shows how many alerts were escalated for review versus safely suppressed, using business-friendly AML terminology with the statistical mapping shown under each cell.
+        {splitLabel} confusion review shows how many alerts were escalated for review versus safely set aside, using business-friendly AML terminology with the statistical mapping shown under each cell.
       </Typography>
 
       <Box sx={{ overflowX: 'auto' }}>
@@ -715,7 +706,7 @@ const ConfusionMatrixView = ({ splitMetrics, splitLabel }) => {
                 Escalated for review
               </th>
               <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 9.5, color: D.muted, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: `1px solid ${D.border}` }}>
-                Suppressed
+                Set Aside
               </th>
             </tr>
           </thead>
@@ -738,15 +729,15 @@ const ConfusionMatrixView = ({ splitMetrics, splitLabel }) => {
                     {fmt(row.escalatedValue)}
                   </Typography>
                 </td>
-                <td style={{ padding: '10px', minWidth: 220, background: row.suppressedTitle === 'Missed True Events' ? D.redBg : D.greenBg }}>
+                <td style={{ padding: '10px', minWidth: 220, background: row.setAsideTitle === 'Missed True Events' ? D.redBg : D.greenBg }}>
                   <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: D.text }}>
-                    {row.suppressedTitle}
+                    {row.setAsideTitle}
                   </Typography>
                   <Typography sx={{ fontSize: 10.2, color: D.muted, mt: 0.15 }}>
-                    {row.suppressedSubtitle}
+                    {row.setAsideSubtitle}
                   </Typography>
-                  <Typography sx={{ fontSize: 20, fontWeight: 800, color: row.suppressedTitle === 'Missed True Events' ? D.red : D.green, mt: 0.45, fontFamily: 'monospace' }}>
-                    {fmt(row.suppressedValue)}
+                  <Typography sx={{ fontSize: 20, fontWeight: 800, color: row.setAsideTitle === 'Missed True Events' ? D.red : D.green, mt: 0.45, fontFamily: 'monospace' }}>
+                    {fmt(row.setAsideValue)}
                   </Typography>
                 </td>
               </tr>
@@ -758,10 +749,10 @@ const ConfusionMatrixView = ({ splitMetrics, splitLabel }) => {
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
         <DetailStat label="Actual True Events" value={fmt(splitMetrics.actualTrueEvents)} />
         <DetailStat label="False Positives" value={fmt(splitMetrics.fp)} tone="amber" />
-        <DetailStat label="Correctly Suppressed Alerts" value={fmt(splitMetrics.tn)} tone="green" />
+        <DetailStat label="Correctly Set Aside Alerts" value={fmt(splitMetrics.tn)} tone="green" />
         <DetailStat label="Missed True Events" value={fmt(splitMetrics.fn)} tone="red" />
         <DetailStat label="True Event Detection Rate" value={pct(splitMetrics.detectionPct)} tone="green" />
-        <DetailStat label="Suppression Rate" value={pct(splitMetrics.suppressionPct)} tone={suppressionTone(splitMetrics.suppressionPct)} />
+        <DetailStat label="Review Load Control" value={pct(splitMetrics.suppressionPct)} tone={suppressionTone(splitMetrics.suppressionPct)} />
       </Stack>
     </Box>
   );
@@ -774,7 +765,7 @@ const DetailCard = ({ run }) => {
   const featureMax = Math.max(...run.featureImportance.map((item) => item.share));
   const queueShape = [
     { name: 'Escalated', value: run.testMetrics.escalatedCount, fill: D.orange },
-    { name: 'Suppressed', value: run.testMetrics.suppressedCount, fill: '#94a3b8' },
+    { name: 'Set Aside', value: run.testMetrics.suppressedCount, fill: '#94a3b8' },
   ];
 
   return (
@@ -803,8 +794,8 @@ const DetailCard = ({ run }) => {
           <DetailStat label="Holdout F1" value={dec(run.testMetrics.f1)} />
           <DetailStat label="Precision" value={pct(run.testMetrics.precisionPct)} />
           <DetailStat label="True Event Detection Rate" value={pct(run.testMetrics.detectionPct)} tone="green" />
-          <DetailStat label="Suppression Rate" value={pct(run.testMetrics.suppressionPct)} tone={suppressionTone(run.testMetrics.suppressionPct)} />
-          <DetailStat label="Event Loss" value={pct(run.testMetrics.eventLossPct)} tone={eventLossTone(run.testMetrics.eventLossPct)} />
+          <DetailStat label="Review Load Control" value={pct(run.testMetrics.suppressionPct)} tone={suppressionTone(run.testMetrics.suppressionPct)} />
+          <DetailStat label="Missed True Events %" value={pct(run.testMetrics.eventLossPct)} tone={eventLossTone(run.testMetrics.eventLossPct)} />
         </Stack>
 
         <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', xl: '0.9fr 1.1fr' }, mt: 2 }}>
@@ -864,15 +855,15 @@ const DetailCard = ({ run }) => {
                     ['F1', dec(run.trainMetrics.f1), dec(run.testMetrics.f1)],
                     ['Precision', pct(run.trainMetrics.precisionPct), pct(run.testMetrics.precisionPct)],
                     ['True Event Detection Rate', pct(run.trainMetrics.detectionPct), pct(run.testMetrics.detectionPct)],
-                    ['Suppression Rate', pct(run.trainMetrics.suppressionPct), pct(run.testMetrics.suppressionPct)],
-                    ['Event Loss', pct(run.trainMetrics.eventLossPct), pct(run.testMetrics.eventLossPct)],
+                    ['Review Load Control', pct(run.trainMetrics.suppressionPct), pct(run.testMetrics.suppressionPct)],
+                    ['Missed True Events %', pct(run.trainMetrics.eventLossPct), pct(run.testMetrics.eventLossPct)],
                     ['Alerts Escalated', fmt(run.trainMetrics.escalatedCount), fmt(run.testMetrics.escalatedCount)],
-                    ['Alerts Suppressed', fmt(run.trainMetrics.suppressedCount), fmt(run.testMetrics.suppressedCount)],
+                    ['Alerts Set Aside', fmt(run.trainMetrics.suppressedCount), fmt(run.testMetrics.suppressedCount)],
                   ].map(([label, trainValue, testValue], index) => (
                     <tr key={label} style={{ borderBottom: `1px solid ${D.border}`, background: index % 2 === 0 ? '#fff' : '#fafbfd' }}>
                       <td style={{ padding: '6px 10px', color: D.text, fontWeight: 600 }}>{label}</td>
                       <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: D.text }}>{trainValue}</td>
-                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: label === 'Event Loss' ? toneText[eventLossTone(run.testMetrics.eventLossPct)] || D.text : D.text, fontWeight: label === 'Event Loss' ? 700 : 400 }}>{testValue}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: label === 'Missed True Events %' ? toneText[eventLossTone(run.testMetrics.eventLossPct)] || D.text : D.text, fontWeight: label === 'Missed True Events %' ? 700 : 400 }}>{testValue}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -913,7 +904,7 @@ const DetailCard = ({ run }) => {
               </BarChart>
             </ResponsiveContainer>
             <Typography sx={{ fontSize: 10.8, color: D.muted, lineHeight: 1.6 }}>
-              Holdout queue shape shows how much alert volume remains with investigators after low-signal suppression is applied.
+              Holdout queue shape shows how much alert volume remains with investigators after low-signal triage is applied.
             </Typography>
           </Paper>
         </Box>

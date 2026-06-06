@@ -2672,26 +2672,28 @@ class DeploymentDashboardService:
             else ("warning" if health_flags else "healthy")
         )
 
-        if persist_to_ledger:
-            scored_records = self._build_scored_batch_records(
-                records=batch_df.to_dict(orient="records"),
-                persisted_rows=persisted["ledger_rows"],
-                run_id=run_id,
-                deployment_id=deployment_id,
-                feature_coverage=coverage,
-            )
-            self._persist_scored_batch_package(
-                batch_id=str(persisted["batch_id"]),
-                run_id=run_id,
-                deployment_id=deployment_id,
-                model_grain=model_grain,
-                threshold=float(threshold_applied),
-                persisted=persisted,
-                scored_records=scored_records,
-                feature_coverage=coverage,
-                pipeline_id=pipeline_id,
-                pipeline_name=pipeline_name,
-            )
+        # Always persist the scored batch package used for FCC -> Sentinel handoff.
+        # When persist_to_ledger is false this writes only the transient handoff
+        # package, not the production-style ledger rows.
+        scored_records = self._build_scored_batch_records(
+            records=batch_df.to_dict(orient="records"),
+            persisted_rows=persisted["ledger_rows"],
+            run_id=run_id,
+            deployment_id=deployment_id,
+            feature_coverage=coverage,
+        )
+        self._persist_scored_batch_package(
+            batch_id=str(persisted["batch_id"]),
+            run_id=run_id,
+            deployment_id=deployment_id,
+            model_grain=model_grain,
+            threshold=float(threshold_applied),
+            persisted=persisted,
+            scored_records=scored_records,
+            feature_coverage=coverage,
+            pipeline_id=pipeline_id,
+            pipeline_name=pipeline_name,
+        )
 
         alert_total = sum(1 for t in entity_types if t == "alert")
         case_total = sum(1 for t in entity_types if t == "case")

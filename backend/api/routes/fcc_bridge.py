@@ -164,6 +164,31 @@ def import_published_run():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
+@fcc_bridge_bp.route("/fcc-bridge/published/<publish_id>/delete", methods=["POST", "DELETE"])
+def delete_published_run(publish_id):
+    try:
+        tenant_id, env_id = _resolve_source_context()
+        body = request.get_json(silent=True) or {}
+        source_env_id = str(body.get("source_env_id") or env_id).strip() or env_id
+        target_env_id = str(body.get("target_env_id") or env_id).strip() or env_id
+        bridge = FCCSentinelBridgeService(resolve_env_root(source_env_id, tenant_id, create_if_missing=True))
+        result = bridge.delete_published_run(
+            publish_id=str(publish_id or "").strip(),
+            tenant_id=str(tenant_id),
+            target_env_id=target_env_id,
+            purge_imported=_bool_value(body.get("purge_imported"), default=True),
+            delete_package=_bool_value(body.get("delete_package"), default=True),
+            require_no_activity=_bool_value(body.get("require_no_activity"), default=False),
+        )
+        return jsonify({"success": True, "data": result})
+    except FileNotFoundError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @fcc_bridge_bp.route("/fcc-bridge/imported-queue/reset", methods=["POST"])
 def clear_imported_queue():
     try:

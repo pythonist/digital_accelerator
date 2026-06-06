@@ -189,8 +189,10 @@ class APIClient {
   _handleError(error) {
     if (error.response) {
       return new Error(error.response.data?.error || error.response.data?.message || 'Request failed');
+    } else if (error.code === 'ECONNABORTED') {
+      return new Error('Request timed out while the backend was still working. Check the Flask console for the active step log.');
     } else if (error.request) {
-      return new Error('No response from server');
+      return new Error('Backend connection failed. If Flask is running, check whether this route printed an [API START] log.');
     } else {
       return new Error(error.message || 'Unknown error');
     }
@@ -367,6 +369,10 @@ class APIClient {
 
   async importFccPublishedRun(payload = {}) {
     return this.post('/api/v2/fcc-bridge/import', payload);
+  }
+
+  async deleteFccPublishedRun(publishId, payload = {}) {
+    return this.post(`/api/v2/fcc-bridge/published/${encodeURIComponent(String(publishId || ''))}/delete`, payload);
   }
 
   async clearFccImportedQueue(payload = {}) {

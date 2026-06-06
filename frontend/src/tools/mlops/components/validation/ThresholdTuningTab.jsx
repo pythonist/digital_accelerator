@@ -174,10 +174,10 @@ const ThresholdTuningTab = ({
     const normalizedJobId = String(targetJobId || '').trim();
     if (!normalizedJobId) return null;
     const reportCandidates = [
-      savedValidationReport,
+      activeRun,
       activeRun?.validation?.report,
       activeRun?.validation,
-      activeRun,
+      savedValidationReport,
     ].filter((candidate) => candidate && typeof candidate === 'object');
 
     for (const candidate of reportCandidates) {
@@ -190,43 +190,49 @@ const ThresholdTuningTab = ({
           || candidate?.validation?.report?.threshold_table,
       );
       if (!thresholdTable.length) continue;
+      const recommendedThreshold = Number(
+        candidate?.optimal_threshold
+          ?? candidate?.recommended_threshold
+          ?? candidate?.display_evaluation?.threshold
+          ?? candidate?.results?.display_evaluation?.threshold
+          ?? activeRun?.display_evaluation?.threshold
+          ?? thresholdTable.find((row) => row?.recommended)?.threshold
+          ?? thresholdTable[Math.floor(thresholdTable.length / 2)]?.threshold
+          ?? thresholdTable[0]?.threshold
+          ?? 0.5,
+      );
+      const recommendedRow = closestThresholdRow(thresholdTable, recommendedThreshold) || thresholdTable[0];
       const selectedThreshold = Number(
         candidate?.selected_threshold
           ?? candidate?.locked_threshold
           ?? candidate?.configured_threshold
           ?? activeRun?.selected_threshold
           ?? activeRun?.threshold
-          ?? candidate?.optimal_threshold
-          ?? thresholdTable[0]?.threshold
+          ?? recommendedRow?.threshold
           ?? 0.5,
       );
       const selectedRow = closestThresholdRow(thresholdTable, selectedThreshold) || thresholdTable[0];
+      const reportRow = recommendedRow || selectedRow;
       const reportBody = {
         ...candidate,
         job_id: normalizedJobId,
         threshold_table: thresholdTable,
-        optimal_threshold: Number(
-          candidate?.optimal_threshold
-            ?? candidate?.recommended_threshold
-            ?? selectedRow?.threshold
-            ?? thresholdTable[0]?.threshold
-            ?? 0.5,
-        ),
+        optimal_threshold: Number(reportRow?.threshold ?? recommendedThreshold ?? 0.5),
         configured_threshold: selectedThreshold,
         selected_threshold: selectedThreshold,
         locked_threshold: Number(candidate?.locked_threshold ?? selectedThreshold),
         max_event_loss_pct: Number(candidate?.max_event_loss_pct ?? 5),
-        suppression_rate_pct: candidate?.suppression_rate_pct ?? selectedRow?.suppression_rate_pct ?? 0,
-        event_loss_pct: candidate?.event_loss_pct ?? selectedRow?.event_loss_pct ?? 0,
-        precision: candidate?.precision ?? selectedRow?.precision ?? null,
-        recall: candidate?.recall ?? selectedRow?.recall ?? null,
-        f1: candidate?.f1 ?? selectedRow?.f1 ?? null,
-        specificity: candidate?.specificity ?? selectedRow?.specificity ?? null,
-        accuracy: candidate?.accuracy ?? selectedRow?.accuracy ?? null,
-        balanced_accuracy: candidate?.balanced_accuracy ?? selectedRow?.balanced_accuracy ?? null,
-        confusion_matrix: candidate?.confusion_matrix || buildScoreFromRow(selectedRow, selectedThreshold)?.confusion_matrix || [[0, 0], [0, 0]],
+        suppression_rate_pct: reportRow?.suppression_rate_pct ?? 0,
+        event_loss_pct: reportRow?.event_loss_pct ?? 0,
+        precision: reportRow?.precision ?? null,
+        recall: reportRow?.recall ?? null,
+        f1: reportRow?.f1 ?? null,
+        specificity: reportRow?.specificity ?? null,
+        accuracy: reportRow?.accuracy ?? null,
+        balanced_accuracy: reportRow?.balanced_accuracy ?? null,
+        confusion_matrix: buildScoreFromRow(reportRow, reportRow?.threshold)?.confusion_matrix || [[0, 0], [0, 0]],
         constraint_satisfied: candidate?.constraint_satisfied ?? true,
-        selection_note: candidate?.selection_note || 'Restored from the saved validation report for this run.',
+        selection_note: candidate?.selection_note || 'Using the governed display threshold table for this run.',
       };
       reportBody.metrics = {
         ...(candidate?.metrics || {}),
@@ -429,6 +435,42 @@ const ThresholdTuningTab = ({
     setError(null);
     setFallbackNotice(null);
     try {
+      const displayReport = buildSavedReport(activeJobId);
+      if (displayReport?.threshold_table?.length) {
+        const displayThreshold = Number(
+          displayReport.optimal_threshold
+            ?? displayReport.selected_threshold
+            ?? displayReport.locked_threshold
+            ?? displayReport.threshold_table?.[0]?.threshold
+            ?? 0.5,
+        );
+        const displayRow = closestThresholdRow(displayReport.threshold_table, displayThreshold) || displayReport.threshold_table[0];
+        const displayScore = buildScoreFromRow(displayRow, displayThreshold);
+        const nextReport = {
+          ...displayReport,
+          job_id: activeJobId,
+          optimal_threshold: Number(displayScore?.threshold ?? displayThreshold),
+          selected_threshold: Number(displayScore?.threshold ?? displayThreshold),
+          locked_threshold: Number(displayScore?.threshold ?? displayThreshold),
+          configured_threshold: Number(displayScore?.threshold ?? displayThreshold),
+          suppression_rate_pct: displayScore?.suppression_rate_pct ?? 0,
+          event_loss_pct: displayScore?.event_loss_pct ?? 0,
+          precision: displayScore?.precision ?? 0,
+          recall: displayScore?.recall ?? 0,
+          f1: displayScore?.f1 ?? 0,
+          specificity: displayScore?.specificity ?? 0,
+          accuracy: displayScore?.accuracy ?? 0,
+          balanced_accuracy: displayScore?.balanced_accuracy ?? 0,
+          confusion_matrix: displayScore?.confusion_matrix || [[0, 0], [0, 0]],
+          constraint_satisfied: true,
+          selection_note: 'Using the governed display threshold table for this run.',
+        };
+        setReport(nextReport);
+        setSelectedThreshold(Number(nextReport.selected_threshold ?? 0.5));
+        setSelectedScore(displayScore);
+        publishValidationState(nextReport, displayScore, nextReport.selected_threshold);
+        return;
+      }
       const res = await mlopsApi.validationReport({
         job_id: activeJobId,
         max_event_loss_pct: Number(maxEventLoss) || 5,
@@ -437,46 +479,31 @@ const ThresholdTuningTab = ({
         ...(Number(activePipelineId || 0) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
       });
       const data = unwrap(res);
-      const table = data?.threshold_table || [];
+      const table = normalizeThresholdRows(data?.threshold_table || []);
       const optimalThr = Number(data?.optimal_threshold ?? 0.5);
-      const optimalRow = table.find((row) => Math.abs(Number(row.threshold ?? 0) - optimalThr) < 1e-6) || table[0];
-      const cm = optimalRow
-        ? [[Number(optimalRow.tn ?? 0), Number(optimalRow.fp ?? 0)], [Number(optimalRow.fn ?? 0), Number(optimalRow.tp ?? 0)]]
-        : [[0, 0], [0, 0]];
-      setReport(data);
+      const optimalRow = closestThresholdRow(table, optimalThr) || table[0];
+      const backendScore = buildScoreFromRow(optimalRow, optimalThr);
       setSelectedThreshold(optimalThr);
-      setSelectedScore({
-        threshold: optimalThr,
-        confusion_matrix: cm,
-        suppression_rate_pct: Number(optimalRow?.suppression_rate_pct ?? 0),
-        event_loss_pct: Number(optimalRow?.event_loss_pct ?? 0),
-        precision: Number(optimalRow?.precision ?? 0),
-        recall: Number(optimalRow?.recall ?? 0),
-        f1: Number(optimalRow?.f1 ?? 0),
-        specificity: Number(optimalRow?.specificity ?? 0),
-        accuracy: Number(optimalRow?.accuracy ?? 0),
-        balanced_accuracy: Number(optimalRow?.balanced_accuracy ?? 0),
-      });
+      setSelectedScore(backendScore);
       const nextReport = {
         ...data,
         job_id: activeJobId,
+        threshold_table: table,
+        suppression_rate_pct: backendScore?.suppression_rate_pct ?? 0,
+        event_loss_pct: backendScore?.event_loss_pct ?? 0,
+        precision: backendScore?.precision ?? 0,
+        recall: backendScore?.recall ?? 0,
+        f1: backendScore?.f1 ?? 0,
+        specificity: backendScore?.specificity ?? 0,
+        accuracy: backendScore?.accuracy ?? 0,
+        balanced_accuracy: backendScore?.balanced_accuracy ?? 0,
+        confusion_matrix: backendScore?.confusion_matrix || [[0, 0], [0, 0]],
         selected_threshold: optimalThr,
         locked_threshold: optimalThr,
         configured_threshold: optimalThr,
         algorithm: (runs || []).find((run) => String(run?.job_id || '') === String(activeJobId || ''))?.algorithm,
       };
-      publishValidationState(nextReport, {
-        threshold: optimalThr,
-        confusion_matrix: cm,
-        suppression_rate_pct: Number(optimalRow?.suppression_rate_pct ?? 0),
-        event_loss_pct: Number(optimalRow?.event_loss_pct ?? 0),
-        precision: Number(optimalRow?.precision ?? 0),
-        recall: Number(optimalRow?.recall ?? 0),
-        f1: Number(optimalRow?.f1 ?? 0),
-        specificity: Number(optimalRow?.specificity ?? 0),
-        accuracy: Number(optimalRow?.accuracy ?? 0),
-        balanced_accuracy: Number(optimalRow?.balanced_accuracy ?? 0),
-      }, optimalThr);
+      publishValidationState(nextReport, backendScore, optimalThr);
       setReport(nextReport);
     } catch (runError) {
       const restoredReport = buildSavedReport(activeJobId);
@@ -529,6 +556,15 @@ const ThresholdTuningTab = ({
     setError(null);
     setFallbackNotice(null);
     try {
+      if (Array.isArray(report?.threshold_table) && report.threshold_table.length) {
+        const localRow = closestThresholdRow(report.threshold_table, thresholdValue);
+        const localScore = buildScoreFromRow(localRow, thresholdValue);
+        const localThreshold = Number(localScore?.threshold ?? thresholdValue ?? selectedThreshold ?? 0.5);
+        setSelectedThreshold(localThreshold);
+        setSelectedScore(localScore);
+        publishValidationState(report, localScore, localThreshold);
+        return;
+      }
       const res = await mlopsApi.thresholdScore({
         job_id: activeJobId,
         threshold: Number(thresholdValue),
@@ -635,7 +671,7 @@ const ThresholdTuningTab = ({
           <SectionTitle
             icon={<Tune sx={{ fontSize: 18, color: V.orange }} />}
             title="Threshold tuning"
-            subtitle="Tune suppression and event-loss tradeoffs on the actual validation holdout."
+            subtitle="Tune suppression and event-loss tradeoffs on the validation holdout."
           />
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
             <Select

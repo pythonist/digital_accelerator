@@ -8,11 +8,11 @@ import { RingGauge, KpiBar, SectionTitle, StatCard, MetricBadge, NarrativeBox, S
 const narrativeCopy = {
   business: {
     title: 'Business Narrative',
-    text: 'We are balancing investigation workload with the risk of missing true positives. This panel highlights the model that best protects against event loss while keeping suppression under control.',
+    text: 'We are balancing investigation workload with event-loss control. This panel highlights the model that keeps suspicious cases visible while keeping suppression under control.',
   },
   technical: {
     title: 'Technical Narrative',
-    text: 'We compare discrimination, calibration, and operational thresholds to recommend a champion model with stable performance and acceptable event loss constraints.',
+    text: 'We compare discrimination, calibration, and operational thresholds to recommend a champion model with stable performance and acceptable event-loss constraints.',
   },
 };
 

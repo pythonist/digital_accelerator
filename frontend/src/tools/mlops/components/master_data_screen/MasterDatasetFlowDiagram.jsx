@@ -552,7 +552,7 @@ const MasterDatasetFlowDiagram = ({
           <div>
             <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>Master dataset creation flow</div>
             <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
-              Expanded training funnel plus a join-by-join explanation of how the master dataset is assembled.
+              Expanded training funnel and a concise explanation of how the master dataset is assembled.
             </div>
           </div>
           <IconButton onClick={() => setExpanded(false)} size="small" sx={{ borderRadius: 0, border: `1px solid ${T.border}` }}>

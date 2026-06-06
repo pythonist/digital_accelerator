@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -148,6 +149,96 @@ const CORE_TECHNIQUES = [
 ];
 
 const TECHNIQUE_MAP = Object.fromEntries(CORE_TECHNIQUES.map((tech) => [tech.id, tech]));
+const FAST_COMPARE_IDS = ['information_value', 'chi_square', 'variance_threshold', 'information_gain'];
+const TECHNIQUE_SPEED_META = {
+  variance_threshold: {
+    tier: 'Instant',
+    estimate: '<1s',
+    rank: 1,
+    bg: T.successBg,
+    color: T.success,
+    note: 'Simple spread check; best for quick walkthroughs.',
+  },
+  information_value: {
+    tier: 'Fast',
+    estimate: '1-3s',
+    rank: 1,
+    bg: T.successBg,
+    color: T.success,
+    note: 'Scorecard-style binning on the sampled master data.',
+  },
+  chi_square: {
+    tier: 'Fast',
+    estimate: '1-3s',
+    rank: 1,
+    bg: T.successBg,
+    color: T.success,
+    note: 'Categorical target association on the sampled master data.',
+  },
+  ks_statistic: {
+    tier: 'Fast',
+    estimate: '2-4s',
+    rank: 2,
+    bg: T.infoBg,
+    color: T.info,
+    note: 'Numeric class-separation scan.',
+  },
+  roc_auc_univariate: {
+    tier: 'Fast',
+    estimate: '2-4s',
+    rank: 2,
+    bg: T.infoBg,
+    color: T.info,
+    note: 'Single-feature ranking scan.',
+  },
+  information_gain: {
+    tier: 'Medium',
+    estimate: '3-6s',
+    rank: 3,
+    bg: T.warnBg,
+    color: T.warn,
+    note: 'Mutual-information scoring; broader but heavier.',
+  },
+  correlation_filter: {
+    tier: 'Medium',
+    estimate: '3-8s',
+    rank: 3,
+    bg: T.warnBg,
+    color: T.warn,
+    note: 'Pairwise numeric redundancy scan.',
+  },
+  vif_multicollinearity: {
+    tier: 'Slowest',
+    estimate: '8s+',
+    rank: 4,
+    bg: T.dangerBg,
+    color: T.danger,
+    note: 'Matrix-heavy redundancy check; keep opt-in for technical review.',
+  },
+};
+
+const techniqueSpeedMeta = (tech) => {
+  const id = String(tech?.id || '');
+  if (TECHNIQUE_SPEED_META[id]) return TECHNIQUE_SPEED_META[id];
+  if (String(tech?.scope || '') === 'filter') {
+    return {
+      tier: 'Fast',
+      estimate: '1-4s',
+      rank: 2,
+      bg: T.infoBg,
+      color: T.info,
+      note: 'Filter-style scan on the sampled master data.',
+    };
+  }
+  return {
+    tier: 'Medium',
+    estimate: '3-6s',
+    rank: 3,
+    bg: T.warnBg,
+    color: T.warn,
+    note: 'Score-based scan on the sampled master data.',
+  };
+};
 const TECHNIQUE_QUESTION_LABELS = {
   information_gain: 'How useful is this for spotting money laundering?',
   vif_multicollinearity: 'Is this column saying the same thing as another column?',
@@ -1103,15 +1194,20 @@ const FeatureGovernanceWorkbench = ({
       setError('');
       return;
     }
+    setRawPayload((current) => (current && typeof current === 'object' ? current : fallbackPayload));
     setLoading(true);
     setError('');
     try {
+      const requestedTechniqueIds = comparisonTechniqueIds.length
+        ? comparisonTechniqueIds
+        : FAST_COMPARE_IDS;
       const response = await mlopsApi.featureSelectionWorkbench({
         dataset_id: datasetId,
         dataset: inlineDataset,
         target_column: targetColumn,
-        sample_rows: 10000,
+        sample_rows: 2500,
         top_n: 20,
+        technique_ids: requestedTechniqueIds,
         var_threshold: 0.01,
         corr_threshold: 0.95,
       });
@@ -1123,7 +1219,7 @@ const FeatureGovernanceWorkbench = ({
     } finally {
       setLoading(false);
     }
-  }, [datasetId, fallbackPayload, masterDataset, targetColumn]);
+  }, [comparisonTechniqueIds, datasetId, fallbackPayload, masterDataset, targetColumn]);
 
   useEffect(() => {
     load();
@@ -1152,6 +1248,7 @@ const FeatureGovernanceWorkbench = ({
       return {
         ...merged,
         businessQuestion: techniqueQuestionLabel(merged),
+        speedHint: techniqueSpeedMeta(merged),
       };
     });
   }, [workbench?.available_techniques]);
@@ -1189,13 +1286,38 @@ const FeatureGovernanceWorkbench = ({
       const defaults = unique([
         validIds.has(recommendedTechniqueId) ? recommendedTechniqueId : null,
         validIds.has('information_value') ? 'information_value' : null,
-        validIds.has('vif_multicollinearity') ? 'vif_multicollinearity' : null,
         validIds.has('chi_square') ? 'chi_square' : null,
+        validIds.has('variance_threshold') ? 'variance_threshold' : null,
         validIds.has('ks_statistic') ? 'ks_statistic' : null,
       ]).slice(0, 4);
       return defaults.length ? defaults : [String(techniqueCatalog[0].id)];
     });
   }, [recommendedTechniqueId, techniqueCatalog]);
+
+  const toggleComparisonTechnique = useCallback((id) => {
+    const key = String(id || '');
+    if (!key) return;
+    setComparisonTechniqueIds((prev) => (
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    ));
+  }, []);
+
+  const fastTechniqueIds = useMemo(() => {
+    const validIds = new Set(techniqueCatalog.map((tech) => String(tech.id)));
+    const preferred = FAST_COMPARE_IDS.filter((id) => validIds.has(id));
+    const fallbacks = techniqueCatalog
+      .filter((tech) => Number(tech?.speedHint?.rank || 9) <= 2)
+      .map((tech) => String(tech.id));
+    const selected = unique([...preferred, ...fallbacks]).slice(0, 4);
+    return selected.length ? selected : techniqueCatalog.slice(0, 3).map((tech) => String(tech.id));
+  }, [techniqueCatalog]);
+
+  const selectedSlowTechniqueLabels = useMemo(() => (
+    comparisonTechniqueIds
+      .map((id) => techniqueCatalog.find((tech) => String(tech.id) === String(id)))
+      .filter((tech) => Number(tech?.speedHint?.rank || 0) >= 4)
+      .map((tech) => tech.label)
+  ), [comparisonTechniqueIds, techniqueCatalog]);
 
   const profiles = workbench?.profiles || [];
 
@@ -1890,7 +2012,7 @@ const FeatureGovernanceWorkbench = ({
                   </Box>
                 )}
                 <ScrollArea height={165} sx={{ px: 0.75, py: 0.4 }}>
-                  {loading ? (
+                  {loading && !activeTechniqueRows.length ? (
                     <Stack alignItems="center" justifyContent="center" sx={{ py: 4 }}>
                       <CircularProgress size={24} sx={{ color: T.orange }} />
                     </Stack>
@@ -1982,73 +2104,145 @@ const FeatureGovernanceWorkbench = ({
                   )}
 
                   <Alert
-                    severity={backendTechniqueAudit.livePayload ? 'info' : 'warning'}
+                    severity="info"
                     icon={<InfoOutlined />}
                     sx={{ mb: 1.1, borderRadius: 1.5, fontSize: 11.5 }}
                   >
-                    Backend audit: {backendTechniqueAudit.livePayload ? 'live' : 'fallback'} payload currently exposes {backendTechniqueAudit.totalCount} real technique{backendTechniqueAudit.totalCount === 1 ? '' : 's'} for this screen ({backendTechniqueAudit.scoreCount} score-based + {backendTechniqueAudit.filterCount} filter-based). The current payload still does not compute {backendTechniqueAudit.missingFamilies.join(', ')}.
+                    Fast mode uses sampled master data and the quick ranking/filter techniques below. Heavy wrapper and explainer families are intentionally skipped here so the Clean & Transform step stays responsive.
                   </Alert>
+                  {!!selectedSlowTechniqueLabels.length && (
+                    <Alert severity="warning" icon={<WarningAmber />} sx={{ mb: 1.1, borderRadius: 1.5, fontSize: 11.5 }}>
+                      Slow technique selected: {selectedSlowTechniqueLabels.join(', ')}. Use Fast set for a quicker walkthrough.
+                    </Alert>
+                  )}
 
-                  <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1} sx={{ mb: 1.1 }}>
-                    <FormControl size="small" sx={{ minWidth: 320 }}>
-                      <InputLabel>Compare techniques</InputLabel>
-                      <Select
-                        multiple
-                        value={comparisonTechniqueIds}
-                        label="Compare techniques"
-                        onChange={(event) => setComparisonTechniqueIds(
-                          Array.isArray(event.target.value)
-                            ? event.target.value.map((value) => String(value))
-                            : []
-                        )}
-                        renderValue={(selected) => (selected || []).map((id) => techniqueLookup[String(id)]?.label || String(id)).join(', ')}
-                        sx={{ fontSize: 12 }}>
-                        {techniqueCatalog.map((tech) => (
-                          <MenuItem key={tech.id} value={String(tech.id)}>
-                            {tech.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <FormControl size="small" sx={{ minWidth: 220 }}>
-                      <InputLabel>Keep if supported by</InputLabel>
-                      <Select
-                        value={String(Math.max(1, comparisonMinSupport))}
-                        label="Keep if supported by"
-                        onChange={(event) => setComparisonMinSupport(Math.max(1, Number(event.target.value) || 1))}
-                        sx={{ fontSize: 12 }}>
-                        {Array.from({ length: Math.max(1, comparisonTechniqueIds.length) }, (_, index) => index + 1).map((count) => (
-                          <MenuItem key={`support-${count}`} value={String(count)}>
-                            At least {count} technique{count === 1 ? '' : 's'}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
-                      <Chip
-                        clickable
-                        onClick={() => setIncludeReviewInConsensus(false)}
-                        label="Approved only"
-                        sx={{
-                          bgcolor: includeReviewInConsensus ? T.surfaceAlt : T.orangeLight,
-                          color: includeReviewInConsensus ? T.text : T.orange,
-                          border: `1px solid ${includeReviewInConsensus ? T.border : T.orange}`,
-                          fontWeight: 700,
-                        }}
-                      />
-                      <Chip
-                        clickable
-                        onClick={() => setIncludeReviewInConsensus(true)}
-                        label="Approved + review"
-                        sx={{
-                          bgcolor: includeReviewInConsensus ? T.orangeLight : T.surfaceAlt,
-                          color: includeReviewInConsensus ? T.orange : T.text,
-                          border: `1px solid ${includeReviewInConsensus ? T.orange : T.border}`,
-                          fontWeight: 700,
-                        }}
-                      />
+                  <Box sx={{ mb: 1.1 }}>
+                    <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1} alignItems={{ lg: 'center' }} justifyContent="space-between" sx={{ mb: 0.8 }}>
+                      <Box>
+                        <Typography sx={{ fontSize: 11, color: T.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+                          Compare techniques
+                        </Typography>
+                        <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                          Pick only the techniques needed for the current run. Slow checks are available but opt-in.
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => setComparisonTechniqueIds(fastTechniqueIds)}
+                          sx={{ textTransform: 'none', borderColor: T.successBorder, color: T.success, fontWeight: 800 }}
+                        >
+                          Fast set
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => setComparisonTechniqueIds([recommendedTechniqueId].filter(Boolean))}
+                          sx={{ textTransform: 'none', borderColor: T.border, color: T.text, fontWeight: 700 }}
+                        >
+                          Recommended only
+                        </Button>
+                      </Stack>
                     </Stack>
-                  </Stack>
+
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: 0.8 }}>
+                      {techniqueCatalog.map((tech) => {
+                        const id = String(tech.id);
+                        const selected = comparisonTechniqueIds.includes(id);
+                        const speed = tech.speedHint || techniqueSpeedMeta(tech);
+                        return (
+                          <Box
+                            key={`compare-tech-${id}`}
+                            onClick={() => toggleComparisonTechnique(id)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                toggleComparisonTechnique(id);
+                              }
+                            }}
+                            sx={{
+                              p: 0.85,
+                              minHeight: 92,
+                              borderRadius: 1.25,
+                              cursor: 'pointer',
+                              border: `1px solid ${selected ? T.orange : T.border}`,
+                              bgcolor: selected ? T.orangeLight : '#fff',
+                              boxShadow: selected ? 'inset 3px 0 0 #D04A02' : 'none',
+                              '&:hover': { borderColor: selected ? T.orange : '#94a3b8', bgcolor: selected ? T.orangeLight : T.surfaceAlt },
+                            }}
+                          >
+                            <Stack direction="row" spacing={0.7} alignItems="flex-start">
+                              <Checkbox
+                                checked={selected}
+                                size="small"
+                                tabIndex={-1}
+                                sx={{ p: 0, color: T.textMuted, '&.Mui-checked': { color: T.orange } }}
+                              />
+                              <Box sx={{ minWidth: 0, flex: 1 }}>
+                                <Stack direction="row" spacing={0.5} alignItems="center" useFlexGap flexWrap="wrap">
+                                  <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text, lineHeight: 1.25 }}>
+                                    {tech.label}
+                                  </Typography>
+                                  <Chip
+                                    label={`${speed.tier} ${speed.estimate}`}
+                                    size="small"
+                                    sx={{ height: 18, fontSize: 9.5, bgcolor: speed.bg, color: speed.color, fontWeight: 800 }}
+                                  />
+                                </Stack>
+                                <Typography sx={{ fontSize: 10.75, color: T.textMuted, mt: 0.45, lineHeight: 1.45 }}>
+                                  {speed.note}
+                                </Typography>
+                              </Box>
+                            </Stack>
+                          </Box>
+                        );
+                      })}
+                    </Box>
+
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems={{ md: 'center' }} sx={{ mt: 1 }}>
+                      <FormControl size="small" sx={{ minWidth: 220 }}>
+                        <InputLabel>Keep if supported by</InputLabel>
+                        <Select
+                          value={String(Math.max(1, comparisonMinSupport))}
+                          label="Keep if supported by"
+                          onChange={(event) => setComparisonMinSupport(Math.max(1, Number(event.target.value) || 1))}
+                          sx={{ fontSize: 12 }}>
+                          {Array.from({ length: Math.max(1, comparisonTechniqueIds.length) }, (_, index) => index + 1).map((count) => (
+                            <MenuItem key={`support-${count}`} value={String(count)}>
+                              At least {count} technique{count === 1 ? '' : 's'}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
+                        <Chip
+                          clickable
+                          onClick={() => setIncludeReviewInConsensus(false)}
+                          label="Approved only"
+                          sx={{
+                            bgcolor: includeReviewInConsensus ? T.surfaceAlt : T.orangeLight,
+                            color: includeReviewInConsensus ? T.text : T.orange,
+                            border: `1px solid ${includeReviewInConsensus ? T.border : T.orange}`,
+                            fontWeight: 700,
+                          }}
+                        />
+                        <Chip
+                          clickable
+                          onClick={() => setIncludeReviewInConsensus(true)}
+                          label="Approved + review"
+                          sx={{
+                            bgcolor: includeReviewInConsensus ? T.orangeLight : T.surfaceAlt,
+                            color: includeReviewInConsensus ? T.orange : T.text,
+                            border: `1px solid ${includeReviewInConsensus ? T.orange : T.border}`,
+                            fontWeight: 700,
+                          }}
+                        />
+                      </Stack>
+                    </Stack>
+                  </Box>
 
                   <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap" sx={{ mb: 1.1 }}>
                     {comparisonTechniqueSummaries.map((summary) => (

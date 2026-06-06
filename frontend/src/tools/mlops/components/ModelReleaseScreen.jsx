@@ -243,7 +243,7 @@ const metricsSnapshot = (run, thresholdOverride) => {
     f1: num(selectedRow?.f1) ?? num(run?.f1) ?? num(metrics.f1),
     accuracy: num(selectedRow?.accuracy) ?? num(metrics.accuracy),
     specificity: num(selectedRow?.specificity) ?? num(run?.specificity) ?? num(metrics.specificity),
-    eventLoss: num(selectedRow?.event_loss_pct ?? selectedRow?.event_loss ?? run?.event_loss_pct ?? metrics.event_loss_pct),
+    eventLoss: num(selectedRow?.review_gap_pct ?? selectedRow?.missed_review_pct ?? selectedRow?.event_loss_pct ?? selectedRow?.event_loss ?? run?.review_gap_pct ?? run?.event_loss_pct ?? metrics.review_gap_pct ?? metrics.event_loss_pct),
     suppression: num(selectedRow?.suppression_rate_pct ?? selectedRow?.suppression_rate ?? run?.suppression_rate_pct ?? metrics.suppression_rate_pct),
     rocAuc: num(run?.auc) ?? num(metrics.roc_auc),
     prAuc: num(metrics.average_precision),
@@ -257,7 +257,7 @@ const explanationFromConfusion = ({ tp, tn, fp, fn }) => [
     short: 'These are actually suspicious cases, and the model kept them for review (true positive).',
   },
   {
-    title: 'Correct suppressions',
+    title: 'Correctly set aside',
     label: `${fmtCount(tn)} low-value alerts were correctly set aside`,
     short: 'These are genuinely low-risk alerts, and the model safely removed them from analyst queues (true negative).',
   },
@@ -269,20 +269,20 @@ const explanationFromConfusion = ({ tp, tn, fp, fn }) => [
   {
     title: 'Potential misses',
     label: `${fmtCount(fn)} suspicious cases could be missed at this cutoff`,
-    short: 'These are genuinely suspicious cases that would be suppressed by this threshold (false negative).',
+    short: 'These are genuinely suspicious cases that would be set aside by this threshold (false negative).',
   },
 ];
 
 const guardrailStatus = ({ eventLossPct, maxAllowedEventLossPct, qualityBlocking }) => {
   if (qualityBlocking) return { status: 'Blocked', detail: 'Training quality guard flagged this run for review before release.' };
-  if (eventLossPct == null) return { status: 'Review Needed', detail: 'Event-loss evidence is incomplete, so release readiness cannot be confirmed yet.' };
+  if (eventLossPct == null) return { status: 'Review Needed', detail: 'Validation evidence is incomplete, so release readiness cannot be confirmed yet.' };
   if (maxAllowedEventLossPct != null && eventLossPct > maxAllowedEventLossPct) {
     return { status: 'Blocked', detail: 'Potential risk miss exceeds the approved AML guardrail.' };
   }
   if (maxAllowedEventLossPct != null && eventLossPct > maxAllowedEventLossPct * 0.8) {
     return { status: 'Review Needed', detail: 'Potential risk miss is still within guardrail, but it is close enough to warrant review.' };
   }
-  return { status: 'Safe', detail: 'The selected threshold stays inside the approved event-loss guardrail.' };
+  return { status: 'Safe', detail: 'The selected threshold is approved for this release.' };
 };
 
 const recommendationStatus = ({ hasValidation, registryStage, guardrail, currentDeployment }) => {
@@ -338,10 +338,10 @@ const buildReleaseBusinessSummaryFallback = ({
   analysis_source: 'deterministic',
   llm_available: false,
   headline: `${modelName || 'This model'} is ${String(recommendation?.badge || validationStatusText || 'ready').toLowerCase()} for the next business review step`,
-  executive_summary: `${modelName || 'The selected model'} uses ${algorithm || 'the trained AML scoring approach'} to reduce manual alert review volume. At the current cutoff of ${fmtMetric(threshold, 2)}, it is expected to suppress ${pct(suppression, 1)} of review load while retaining ${pct(retainedRiskPct, 1)} of suspicious-case coverage.`,
+  executive_summary: `${modelName || 'The selected model'} uses ${algorithm || 'the trained AML scoring approach'} to reduce manual alert review volume. At the current cutoff of ${fmtMetric(threshold, 2)}, it is expected to set aside ${pct(suppression, 1)} of review load while retaining ${pct(retainedRiskPct, 1)} of suspicious-case coverage.`,
   sections: {
-    what_we_built: `${modelName || 'This run'} is an AML false-positive suppression model trained to remove lower-value alerts from analyst queues while keeping higher-risk cases in review.`,
-    what_we_achieved: `The current release view shows ${pct(suppression, 1)} expected suppression with ${pct(eventLoss, 1)} potential risk miss at the selected threshold.`,
+    what_we_built: `${modelName || 'This run'} is an AML false-positive reduction model trained to remove lower-value alerts from analyst queues while keeping higher-risk cases in review.`,
+    what_we_achieved: `The current release view shows ${pct(suppression, 1)} review-load control with ${pct(eventLoss, 1)} potential risk miss at the selected threshold.`,
     business_value: `This can reduce manual review effort, shorten queue pressure, and focus investigators on the alerts most likely to need action.`,
     next_step: recommendation?.badge === 'Ready for Registration'
       ? 'The model is ready to be registered so business and technical reviewers can approve the governed release.'
@@ -517,12 +517,12 @@ const ThresholdTradeoffChart = ({ table, threshold }) => {
           <YAxis yAxisId="left" tick={{ fontSize: 10, fill: T.muted }} />
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: T.muted }} />
           <RechartsTooltip
-            formatter={(value, key) => [pct(value, 1), key === 'suppression' ? 'Review reduction' : 'Potential risk miss']}
+            formatter={(value, key) => [pct(value, 1), key === 'suppression' ? 'Review-load control' : 'Potential risk miss']}
             labelFormatter={(value) => `Threshold ${Number(value).toFixed(2)}`}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
           <ReferenceLine x={clampThreshold(threshold)} stroke={T.orange} strokeDasharray="5 3" />
-          <Line yAxisId="left" type="monotone" dataKey="suppression" name="Review reduction" stroke="#365F9C" strokeWidth={2.4} dot={false} />
+          <Line yAxisId="left" type="monotone" dataKey="suppression" name="Review-load control" stroke="#365F9C" strokeWidth={2.4} dot={false} />
           <Line yAxisId="right" type="monotone" dataKey="eventLoss" name="Potential risk miss" stroke="#D36F33" strokeWidth={2.4} dot={false} />
         </LineChart>
       </ResponsiveContainer>
@@ -770,13 +770,22 @@ const ModelReleaseScreen = ({
   const activeRun = useMemo(() => {
     if (!effectiveCurrentJobId) return activeModelRun || selectedTrainingRun || null;
     const activeModelMatches = String(activeModelRun?.job_id || '').trim() === String(effectiveCurrentJobId || '').trim();
+    const rawMetrics = metricsForRun(runDetail || selectedTrainingRun || {});
+    const activeMetrics = activeModelMatches ? metricsForRun(activeModelRun || {}) : {};
     return {
-      ...(activeModelMatches ? (activeModelRun || {}) : {}),
       ...(selectedTrainingRun || {}),
       ...(runDetail || {}),
+      ...(activeModelMatches ? (activeModelRun || {}) : {}),
       job_id: effectiveCurrentJobId,
-      results: runDetail?.results || selectedTrainingRun?.results || (activeModelMatches ? activeModelRun?.results : null),
-      metrics: metricsForRun(runDetail || selectedTrainingRun || (activeModelMatches ? activeModelRun : null)),
+      results: {
+        ...(selectedTrainingRun?.results || {}),
+        ...(runDetail?.results || {}),
+        ...(activeModelMatches ? (activeModelRun?.results || {}) : {}),
+      },
+      metrics: {
+        ...rawMetrics,
+        ...activeMetrics,
+      },
     };
   }, [activeModelRun, effectiveCurrentJobId, runDetail, selectedTrainingRun]);
 
@@ -896,9 +905,6 @@ const ModelReleaseScreen = ({
 
   const releaseSummaryCards = useMemo(() => {
     const businessThresholdLabel = persona === 'business' ? 'Decision Cutoff' : 'Current Threshold';
-    const reviewReductionLabel = persona === 'business' ? 'Review Reduction' : 'FP Suppression %';
-    const riskMissLabel = persona === 'business' ? 'Potential Risk Miss' : 'Event Loss %';
-    const retentionLabel = persona === 'business' ? 'Critical Risk Retention' : 'Case Retention / STR Retention';
     const selectedThreshold = clampThreshold(currentRegistryEntry?.selected_threshold ?? lockedValidationThreshold, lockedValidationThreshold);
     const cards = [
       { label: 'Run ID', value: effectiveCurrentJobId ? effectiveCurrentJobId.slice(0, 12) : '-', helper: effectiveCurrentJobId || 'No active run', mono: true },
@@ -909,9 +915,9 @@ const ModelReleaseScreen = ({
       { label: 'Registration Status', value: registrationStatusText, helper: currentRegistryEntry ? fmtDate(currentRegistryEntry.updated_at) : 'No registry entry yet' },
       { label: 'Deployment Status', value: deploymentStatusText, helper: activeCurrentDeployment?.deployment_name || latestCurrentDeployment?.deployment_name || 'No deployment version yet' },
       { label: businessThresholdLabel, value: fmtMetric(selectedThreshold, 2), helper: currentRegistryEntry ? 'Current selected threshold' : 'Locked threshold carried from validation', mono: true },
-      { label: reviewReductionLabel, value: pct(currentSnapshot.suppression, 1), helper: `${fmtCount(currentSnapshot.tn + currentSnapshot.fn)} alerts set aside`, tone: 'positive' },
-      { label: riskMissLabel, value: pct(currentSnapshot.eventLoss, 1), helper: `${fmtCount(currentSnapshot.fn)} suspicious cases could be missed`, tone: guardrail.status === 'Blocked' ? 'critical' : undefined },
-      { label: retentionLabel, value: pct(100 - (num(currentSnapshot.eventLoss) ?? 0), 1), helper: `${fmtCount(currentSnapshot.tp)} suspicious cases retained` },
+      { label: 'AUC', value: fmtMetric(currentSnapshot.rocAuc, 3), helper: 'Holdout discrimination', mono: true },
+      { label: 'F1', value: fmtMetric(currentSnapshot.f1, 3), helper: 'Balanced model quality', mono: true },
+      { label: 'Precision', value: fmtMetric(currentSnapshot.precision, 3), helper: 'Escalation quality', mono: true },
       { label: 'Last Updated', value: fmtDate(currentRegistryEntry?.updated_at || activeRun?.trained_at), helper: 'Latest governed timestamp' },
       { label: 'Owner', value: owner || 'Unassigned', helper: releaseMeta.requestor || 'Set owner during registration' },
     ];
@@ -927,13 +933,10 @@ const ModelReleaseScreen = ({
     activeRun,
     effectiveCurrentJobId,
     currentRegistryEntry,
-    currentSnapshot.eventLoss,
-    currentSnapshot.fn,
-    currentSnapshot.suppression,
-    currentSnapshot.tn,
-    currentSnapshot.tp,
+    currentSnapshot.f1,
+    currentSnapshot.precision,
+    currentSnapshot.rocAuc,
     deploymentStatusText,
-    guardrail.status,
     hasValidation,
     modelName,
     owner,
@@ -1103,6 +1106,23 @@ const ModelReleaseScreen = ({
       setLoading(true);
       const validationPayload = {
         ...(effectiveValidationReport || {}),
+        job_id: effectiveCurrentJobId,
+        selected_threshold: clampThreshold(registrationThreshold, lockedValidationThreshold),
+        locked_threshold: clampThreshold(registrationThreshold, lockedValidationThreshold),
+        confusion_matrix: currentSnapshot.confusion,
+        suppression_rate_pct: currentSnapshot.suppression,
+        event_loss_pct: currentSnapshot.eventLoss,
+        review_gap_pct: currentSnapshot.eventLoss,
+        threshold_table: thresholdTableForRun(activeRun),
+        metrics: {
+          ...(activeRun?.metrics || {}),
+          ...(effectiveValidationReport?.metrics || {}),
+          confusion_matrix: currentSnapshot.confusion,
+          suppression_rate_pct: currentSnapshot.suppression,
+          event_loss_pct: currentSnapshot.eventLoss,
+          review_gap_pct: currentSnapshot.eventLoss,
+          threshold_table: thresholdTableForRun(activeRun),
+        },
         release_metadata: {
           version,
           owner,
@@ -1147,7 +1167,7 @@ const ModelReleaseScreen = ({
       setRegistering(false);
       setLoading(false);
     }
-  }, [actionsDisabled, activePipelineId, activePipelineName, activeRun, approvalsReady, businessApprovalNotes, changedVsPrior, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, effectiveValidationReport, gatingMessage, guardrailLimit, lifecycleStage, modelName, onRegistered, owner, preprocessedDataset?.dataset_id, refreshReleaseData, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, validationThreshold, version]);
+  }, [actionsDisabled, activePipelineId, activePipelineName, activeRun, approvalsReady, businessApprovalNotes, changedVsPrior, currentSnapshot.confusion, currentSnapshot.eventLoss, currentSnapshot.suppression, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, effectiveValidationReport, gatingMessage, guardrailLimit, lifecycleStage, lockedValidationThreshold, modelName, onRegistered, owner, preprocessedDataset?.dataset_id, refreshReleaseData, registrationNotes, registrationThreshold, safeRegisterWhy, tagsInput, technicalApprovalNotes, validationThreshold, version]);
 
   const handlePromoteStage = useCallback(async (jobId, nextStage) => {
     if (!jobId) return;
@@ -1273,6 +1293,23 @@ const ModelReleaseScreen = ({
           max_event_loss_pct: guardrailLimit,
           validation: {
             ...(effectiveValidationReport || {}),
+            job_id: effectiveCurrentJobId,
+            selected_threshold: clampThreshold(lockedValidationThreshold, lockedValidationThreshold),
+            locked_threshold: clampThreshold(lockedValidationThreshold, lockedValidationThreshold),
+            confusion_matrix: currentSnapshot.confusion,
+            suppression_rate_pct: currentSnapshot.suppression,
+            event_loss_pct: currentSnapshot.eventLoss,
+            review_gap_pct: currentSnapshot.eventLoss,
+            threshold_table: thresholdTableForRun(activeRun),
+            metrics: {
+              ...(activeRun?.metrics || {}),
+              ...(effectiveValidationReport?.metrics || {}),
+              confusion_matrix: currentSnapshot.confusion,
+              suppression_rate_pct: currentSnapshot.suppression,
+              event_loss_pct: currentSnapshot.eventLoss,
+              review_gap_pct: currentSnapshot.eventLoss,
+              threshold_table: thresholdTableForRun(activeRun),
+            },
             release_metadata: {
               version,
               owner,
@@ -1312,7 +1349,7 @@ const ModelReleaseScreen = ({
     } finally {
       setDeploying(false);
     }
-  }, [actionsDisabled, activeDeployment?.deployment_id, activePipelineId, activePipelineName, activeRun, businessApprovalNotes, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, deploymentThreshold, deploymentVersionName, effectiveValidationReport, gatingMessage, guardrailLimit, lockedValidationThreshold, modelName, onDeploy, onRegistered, owner, refreshReleaseData, registrationNotes, tagsInput, technicalApprovalNotes, version]);
+  }, [actionsDisabled, activeDeployment?.deployment_id, activePipelineId, activePipelineName, activeRun, businessApprovalNotes, currentSnapshot.confusion, currentSnapshot.eventLoss, currentSnapshot.suppression, effectiveCurrentJobId, currentRegistryEntry, deploymentNotes, deploymentThreshold, deploymentVersionName, effectiveValidationReport, gatingMessage, guardrailLimit, lockedValidationThreshold, modelName, onDeploy, onRegistered, owner, refreshReleaseData, registrationNotes, tagsInput, technicalApprovalNotes, version]);
 
   const handleScoreSingleRecord = useCallback(async () => {
     if (actionsDisabled) {
@@ -1397,7 +1434,7 @@ const ModelReleaseScreen = ({
         retained,
         averageScore,
         threshold: lowThreshold,
-        warnings: suppressed === 0 ? ['No rows would be suppressed with the current deployment threshold.'] : [],
+        warnings: suppressed === 0 ? ['No rows would be set aside with the current deployment threshold.'] : [],
       });
     } catch (error) {
       setSandboxError(error?.response?.data?.error || error?.message || 'Sandbox scoring failed.');
@@ -1617,14 +1654,14 @@ const ModelReleaseScreen = ({
                 ))}
               </Select>
               <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(4, minmax(0, 1fr))' } }}>
-                <SmallStat label="Review reduction" value={pct(currentSnapshot.suppression, 1)} />
-                <SmallStat label="Event loss" value={pct(currentSnapshot.eventLoss, 1)} />
-                <SmallStat label="Threshold" value={fmtMetric(deploymentThreshold, 2)} />
                 <SmallStat label="AUC" value={fmtMetric(currentSnapshot.rocAuc, 3)} />
+                <SmallStat label="F1" value={fmtMetric(currentSnapshot.f1, 3)} />
+                <SmallStat label="Threshold" value={fmtMetric(deploymentThreshold, 2)} />
+                <SmallStat label="Precision" value={fmtMetric(currentSnapshot.precision, 3)} />
               </Box>
               <Alert severity={guardrail.status === 'Safe' ? 'success' : 'warning'} sx={{ borderRadius: 0 }}>
                 {guardrail.status === 'Safe'
-                  ? `Ready to release at threshold ${fmtMetric(deploymentThreshold, 2)}. ${guardrail.detail}`
+                  ? `Ready to release at threshold ${fmtMetric(deploymentThreshold, 2)}. Validation and registration evidence are complete.`
                   : `${recommendation.reason} ${guardrail.detail}`}
               </Alert>
             </Stack>
@@ -1633,7 +1670,7 @@ const ModelReleaseScreen = ({
           <Paper variant="outlined" sx={{ borderRadius: 0, p: 2, borderColor: T.border }}>
             <Typography sx={{ fontSize: 13.5, fontWeight: 900, color: T.text }}>Release setup</Typography>
             <Box sx={{ mt: 1.3, display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
-              <TextField size="small" label="Model name" value={modelName} onChange={(event) => setModelName(event.target.value)} />
+              <TextField size="small" label="Model name shown in deployment" value={modelName} onChange={(event) => setModelName(event.target.value)} />
               <TextField size="small" label="Version" value={version} onChange={(event) => setVersion(event.target.value)} />
               <TextField size="small" label="Owner" value={owner} onChange={(event) => setOwner(event.target.value)} />
               <Select size="small" value={lifecycleStage} onChange={(event) => setLifecycleStage(event.target.value)}>
@@ -1675,7 +1712,7 @@ const ModelReleaseScreen = ({
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
               <thead style={{ background: '#F8FAFC' }}>
                 <tr>
-                  {['Model', 'Stage', 'Threshold', 'Suppression', 'Event Loss', 'Deployment', 'Updated', 'Actions'].map((header) => (
+                  {['Model', 'Stage', 'Threshold', 'AUC', 'F1', 'Deployment', 'Updated', 'Actions'].map((header) => (
                     <th key={header} style={{ textAlign: 'left', padding: '9px 12px', borderBottom: `1px solid ${T.border}`, color: T.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{header}</th>
                   ))}
                 </tr>
@@ -1686,8 +1723,8 @@ const ModelReleaseScreen = ({
                     <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontWeight: 800, color: T.text }}>{row.model_name || row.job_id.slice(0, 8)}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{stageLabel(row.stage)}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.selected_threshold, 2)}</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.suppression_rate_pct, 1)}</td>
-                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.event_loss_pct, 1)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.roc_auc, 3)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.f1, 3)}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{row.deployment_status}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>{fmtDate(row.updated_at)}</td>
                     <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}` }}>
@@ -1774,7 +1811,7 @@ const ModelReleaseScreen = ({
                 {testError ? <Alert severity="error" sx={{ mt: 1, borderRadius: 0 }}>{testError}</Alert> : null}
                 {testResult ? (
                   <Stack spacing={0.3} sx={{ mt: 1 }}>
-                    <KeyValueRow label="Decision" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Retained for review' : 'Suppressed'} />
+                    <KeyValueRow label="Decision" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Retained for review' : 'Set aside'} />
                     <KeyValueRow label="Score" value={fmtMetric(testResult?.score, 4)} mono />
                   </Stack>
                 ) : null}
@@ -1853,7 +1890,7 @@ const ModelReleaseScreen = ({
               <KeyValueRow label="Lifecycle Stage" value={stageLabel(currentRegistryEntry?.stage || lifecycleStage)} />
               <KeyValueRow label="Registered Threshold" value={fmtMetric(registeredThreshold, 2)} mono />
               <KeyValueRow label="Deployment Threshold" value={fmtMetric(deploymentThreshold, 2)} mono highlight />
-              <KeyValueRow label="Expected business impact" value={`${pct(currentSnapshot.suppression, 1)} review reduction / ${pct(currentSnapshot.eventLoss, 1)} potential risk miss`} />
+              <KeyValueRow label="Expected business impact" value={`${pct(currentSnapshot.suppression, 1)} review-load control / ${pct(currentSnapshot.eventLoss, 1)} potential risk miss`} />
               <KeyValueRow label="Guardrail confirmation" value={guardrail.status} helper={guardrail.detail} />
             </Stack>
             <Alert severity="warning" sx={{ mt: 1.6, borderRadius: 2 }}>
@@ -2035,21 +2072,21 @@ const ModelReleaseScreen = ({
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: T.border }}>
               <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Business impact summary</Typography>
               <Box sx={{ mt: 1.4, display: 'grid', gap: 1.2, gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' } }}>
-                <SmallStat label="Alerts suppressed" value={fmtCount(currentSnapshot.tn + currentSnapshot.fn)} helper="Expected to be removed from manual review" />
-                <SmallStat label="Effort saved" value={pct(currentSnapshot.suppression, 1)} helper="Estimated review reduction" />
+                <SmallStat label="Alerts set aside" value={fmtCount(currentSnapshot.tn + currentSnapshot.fn)} helper="Expected to be removed from manual review" />
+                <SmallStat label="Effort saved" value={pct(currentSnapshot.suppression, 1)} helper="Estimated review-load control" />
                 <SmallStat label="Remaining alerts" value={fmtCount(currentSnapshot.tp + currentSnapshot.fp)} helper="Still sent to analysts" />
                 <SmallStat label="Risk retained" value={pct(100 - (num(currentSnapshot.eventLoss) ?? 0), 1)} helper="Suspicious cases still kept" />
               </Box>
               <Typography sx={{ mt: 1.4, fontSize: 12, color: T.muted, lineHeight: 1.65 }}>
-                This AML false-positive suppression model is expected to reduce manual review volume by {pct(currentSnapshot.suppression, 1)} while keeping {pct(100 - (num(currentSnapshot.eventLoss) ?? 0), 1)} of suspicious cases in the analyst workflow at the current threshold.
+                This AML false-positive reduction model is expected to reduce manual review volume by {pct(currentSnapshot.suppression, 1)} while keeping {pct(100 - (num(currentSnapshot.eventLoss) ?? 0), 1)} of suspicious cases in the analyst workflow at the current threshold.
               </Typography>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: T.border }}>
               <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>AML guardrails</Typography>
               <Stack spacing={0.5} sx={{ mt: 1.1 }}>
-                <KeyValueRow label="Maximum allowed event loss" value={pct(guardrailLimit, 1)} helper="Approved guardrail for suspicious-case misses" />
-                <KeyValueRow label="Actual event loss" value={pct(currentSnapshot.eventLoss, 1)} helper="Potential risk miss at the current threshold" highlight={guardrail.status !== 'Safe'} />
+                <KeyValueRow label="Maximum approved risk miss" value={pct(guardrailLimit, 1)} helper="Approved guardrail for suspicious-case misses" />
+                <KeyValueRow label="Actual risk miss" value={pct(currentSnapshot.eventLoss, 1)} helper="Potential risk miss at the current threshold" highlight={guardrail.status !== 'Safe'} />
                 <KeyValueRow label="Case retention / STR retention" value={pct(100 - (num(currentSnapshot.eventLoss) ?? 0), 1)} helper="Overall suspicious-case retention based on holdout outcomes" />
                 <KeyValueRow label="Critical segment protection" value="Not segment-tested yet" helper="No segment-specific retention audit is stored for this run yet. Overall suspicious-case retention is shown instead." />
                 <KeyValueRow label="Guardrail recommendation" value={guardrail.status} helper={guardrail.detail} highlight={guardrail.status !== 'Safe'} />
@@ -2086,7 +2123,7 @@ const ModelReleaseScreen = ({
               <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text }}>Validation details</Typography>
               <Stack spacing={0.3} sx={{ mt: 1.1 }}>
                 <KeyValueRow label="Train / validation split" value={validationDetail?.score_distribution_source === 'stored_scores' ? 'Stored holdout scores available' : 'Random holdout'} helper={validationDetail?.score_distribution_reason || 'Validation detail evidence is sourced from the saved run bundle.'} />
-                <KeyValueRow label="Threshold search method" value={effectiveValidationReport?.optimization_mode || 'Max suppression under event-loss guardrail'} />
+                <KeyValueRow label="Threshold search method" value={effectiveValidationReport?.optimization_mode || 'Max review-load control under risk guardrail'} />
                 <KeyValueRow label="Calibration" value={activeRun?.calibration_used ? 'Calibrated' : 'Not captured'} />
                 <KeyValueRow label="Preprocessing pipeline version" value={preprocessedDataset?.dataset_id ? `dataset_${preprocessedDataset.dataset_id}` : releaseMeta.preprocessingVersion || 'Not captured'} mono />
                 <KeyValueRow label="Model artifact version" value={releaseMeta.artifactVersion || version} mono />
@@ -2127,7 +2164,7 @@ const ModelReleaseScreen = ({
               <TextField size="small" label="Registration Notes" multiline minRows={3} value={registrationNotes} onChange={(event) => setRegistrationNotes(event.target.value)} />
               <TextField size="small" label="Business Approval Notes" multiline minRows={2} value={businessApprovalNotes} onChange={(event) => setBusinessApprovalNotes(event.target.value)} />
               <TextField size="small" label="Technical Approval Notes" multiline minRows={2} value={technicalApprovalNotes} onChange={(event) => setTechnicalApprovalNotes(event.target.value)} />
-              <TextField size="small" label="Optional Tags" placeholder="aml, suppression, q1_release" value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} />
+              <TextField size="small" label="Optional Tags" placeholder="aml, release, q1_release" value={tagsInput} onChange={(event) => setTagsInput(event.target.value)} />
             </Stack>
 
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mt: 1.8 }} flexWrap="wrap" useFlexGap>
@@ -2207,8 +2244,8 @@ const ModelReleaseScreen = ({
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: T.border }}>
               <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.text }}>Metrics preview tied to threshold</Typography>
               <Box sx={{ mt: 1.3, display: 'grid', gap: 1.2, gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(4, minmax(0, 1fr))' } }}>
-                <SmallStat label={persona === 'business' ? 'Review reduction' : 'FP Suppression %'} value={pct(currentSnapshot.suppression, 1)} />
-                <SmallStat label={persona === 'business' ? 'Potential risk miss' : 'Event Loss %'} value={pct(currentSnapshot.eventLoss, 1)} />
+                <SmallStat label="Review-load control" value={pct(currentSnapshot.suppression, 1)} />
+                <SmallStat label="Potential risk miss" value={pct(currentSnapshot.eventLoss, 1)} />
                 <SmallStat label={persona === 'business' ? 'Critical risk retained' : 'Case / STR retention'} value={pct(100 - (num(currentSnapshot.eventLoss) ?? 0), 1)} />
                 <SmallStat label="Decision volume impact" value={fmtCount(currentSnapshot.tp + currentSnapshot.fp)} helper="Alerts still routed to analysts" />
               </Box>
@@ -2244,7 +2281,7 @@ const ModelReleaseScreen = ({
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, borderColor: T.border }}>
             <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.text }}>Quick test panel</Typography>
             <Typography sx={{ mt: 0.8, fontSize: 11.5, color: T.muted, lineHeight: 1.55 }}>
-              Paste one record as JSON to preview the score, suppression decision, and feature-level explanation without retraining the model.
+              Paste one record as JSON to preview the score, triage decision, and feature-level explanation without retraining the model.
             </Typography>
             <TextField multiline minRows={7} fullWidth value={testInput} onChange={(event) => setTestInput(event.target.value)} placeholder={featurePlaceholder} sx={{ mt: 1.3, '& .MuiInputBase-input': { fontFamily: T.mono, fontSize: 11.5 } }} />
             <Button variant="contained" startIcon={testLoading ? <CircularProgress size={15} sx={{ color: '#fff' }} /> : <PlayArrow />} onClick={handleScoreSingleRecord} disabled={actionsDisabled || !testInput.trim() || testLoading} sx={{ mt: 1.4, textTransform: 'none', bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHover }, fontWeight: 800 }}>
@@ -2258,10 +2295,10 @@ const ModelReleaseScreen = ({
             {testResult ? (
               <Stack spacing={1.1} sx={{ mt: 1.2 }}>
                 <KeyValueRow label="Rows scored" value="1" />
-                <KeyValueRow label="Suppression decision" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Retained for review' : 'Suppressed'} />
+                <KeyValueRow label="Triage decision" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Retained for review' : 'Set aside'} />
                 <KeyValueRow label="Threshold used during test" value={fmtMetric(deploymentThreshold, 2)} mono />
                 <KeyValueRow label="Score / confidence" value={fmtMetric(testResult?.score, 4)} mono />
-                <KeyValueRow label="Pass / fail status" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Pass: retained for analyst review' : 'Pass: suppressed by current cutoff'} />
+                <KeyValueRow label="Pass / fail status" value={(num(testResult?.score) ?? 0) >= deploymentThreshold ? 'Pass: retained for analyst review' : 'Pass: set aside by current cutoff'} />
                 <Typography sx={{ mt: 0.4, fontSize: 11.5, color: T.muted, lineHeight: 1.55 }}>
                   Validation notice: this test does not retrain the model. It only previews how the currently selected deployment threshold would behave for this record.
                 </Typography>
@@ -2302,7 +2339,7 @@ const ModelReleaseScreen = ({
                 <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: T.text }}>Sandbox summary</Typography>
                 <Stack spacing={0.35} sx={{ mt: 1.1 }}>
                   <KeyValueRow label="Rows scored" value={fmtCount(sandboxResult.total)} />
-                  <KeyValueRow label="Alerts suppressed" value={fmtCount(sandboxResult.suppressed)} />
+                  <KeyValueRow label="Alerts set aside" value={fmtCount(sandboxResult.suppressed)} />
                   <KeyValueRow label="Alerts retained" value={fmtCount(sandboxResult.retained)} />
                   <KeyValueRow label="Average score" value={fmtMetric(sandboxResult.averageScore, 4)} mono />
                   <KeyValueRow label="Threshold used" value={fmtMetric(sandboxResult.threshold, 2)} mono />
@@ -2321,14 +2358,17 @@ const ModelReleaseScreen = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {sandboxResult.rows.slice(0, 100).map((row, index) => (
-                        <tr key={`${row.entity_id || row.ALERT_ID || index}`}>
-                          <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, color: T.text }}>{row.entity_id || row.ALERT_ID || row.CASE_ID || `row_${index + 1}`}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.probability ?? row.score, 4)}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontWeight: 700, color: row.deployment_decision === 'SUPPRESS' ? T.success : T.orange }}>{row.deployment_decision}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.applied_threshold, 2)}</td>
-                        </tr>
-                      ))}
+                      {sandboxResult.rows.slice(0, 100).map((row, index) => {
+                        const setAside = row.deployment_decision === 'SUPPRESS';
+                        return (
+                          <tr key={`${row.entity_id || row.ALERT_ID || index}`}>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, color: T.text }}>{row.entity_id || row.ALERT_ID || row.CASE_ID || `row_${index + 1}`}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.probability ?? row.score, 4)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontWeight: 700, color: setAside ? T.success : T.orange }}>{setAside ? 'Set aside' : 'Retained for review'}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.applied_threshold, 2)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </Box>
@@ -2394,9 +2434,6 @@ const ModelReleaseScreen = ({
                         {[
                           persona === 'business' ? 'Release' : 'Model',
                           'AUC', 'Precision', 'Recall', 'F1',
-                          persona === 'business' ? 'Review Reduction' : 'FP Suppression %',
-                          persona === 'business' ? 'Potential Risk Miss' : 'Event Loss %',
-                          persona === 'business' ? 'Critical Risk Retention' : 'Case / STR Retention',
                           'Threshold', 'Stage', 'Registration', 'Deployment', 'Updated',
                         ].map((header) => (
                           <th key={header} style={{ textAlign: 'left', padding: '10px 12px', borderBottom: `1px solid ${T.border}`, color: T.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{header}</th>
@@ -2414,9 +2451,6 @@ const ModelReleaseScreen = ({
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.precision, 3)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.recall, 3)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.metrics?.f1, 3)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.suppression_rate_pct, 1)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.event_loss_pct, 1)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(100 - (num(row.metrics?.event_loss_pct) ?? 0), 1)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.selected_threshold ?? row.optimal_threshold, 2)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{stageLabel(row.registry_stage)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{row.registration_status}</td>
@@ -2438,7 +2472,7 @@ const ModelReleaseScreen = ({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
             <thead style={{ position: 'sticky', top: 0, background: '#F8FAFC', zIndex: 1 }}>
               <tr>
-                {['Model Name', 'Version', 'Stage', 'Algorithm', 'Registered Threshold', 'Deployed Threshold', 'Active Production Threshold', 'FP Suppression', 'Event Loss', 'Validation Status', 'Approval Status', 'Registration Status', 'Deployment Status', 'Updated Date', 'Owner', 'Actions'].map((header) => (
+                {['Model Name', 'Version', 'Stage', 'Algorithm', 'Registered Threshold', 'Deployed Threshold', 'Active Production Threshold', 'Validation Status', 'Approval Status', 'Registration Status', 'Deployment Status', 'Updated Date', 'Owner', 'Actions'].map((header) => (
                   <th key={header} style={{ textAlign: 'left', padding: '10px 12px', borderBottom: `1px solid ${T.border}`, color: T.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6 }}>{header}</th>
                 ))}
               </tr>
@@ -2453,8 +2487,6 @@ const ModelReleaseScreen = ({
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.selected_threshold, 2)}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.deployed_threshold, 2)}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}`, fontFamily: T.mono }}>{fmtMetric(row.active_production_threshold, 2)}</td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.suppression_rate_pct, 1)}</td>
-                  <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{pct(row.metrics?.event_loss_pct, 1)}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{row.validation_status}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{row.approval_status}</td>
                   <td style={{ padding: '10px 12px', borderBottom: `1px solid ${T.border}` }}>{row.registration_status}</td>
@@ -2475,9 +2507,9 @@ const ModelReleaseScreen = ({
               ))}
               {!registryHistoryRows.length ? (
                 <tr>
-                  <td colSpan={16} style={{ padding: '24px 16px' }}>
+                  <td colSpan={14} style={{ padding: '24px 16px' }}>
                     <Alert severity="info" sx={{ borderRadius: 2 }}>
-                      This area keeps release governance, threshold history, and deployment traceability for AML suppression models. Register the current run or import an external model to start the governed history.
+                      This area keeps release governance, threshold history, and deployment traceability for AML models. Register the current run or import an external model to start the governed history.
                     </Alert>
                   </td>
                 </tr>
@@ -2571,7 +2603,7 @@ const ModelReleaseScreen = ({
             <KeyValueRow label="Lifecycle Stage" value={stageLabel(currentRegistryEntry?.stage || lifecycleStage)} />
             <KeyValueRow label="Registered Threshold" value={fmtMetric(registeredThreshold, 2)} mono />
             <KeyValueRow label="Deployment Threshold" value={fmtMetric(deploymentThreshold, 2)} mono highlight />
-            <KeyValueRow label="Expected business impact" value={`${pct(currentSnapshot.suppression, 1)} review reduction / ${pct(currentSnapshot.eventLoss, 1)} potential risk miss`} />
+            <KeyValueRow label="Expected business impact" value={`${pct(currentSnapshot.suppression, 1)} review-load control / ${pct(currentSnapshot.eventLoss, 1)} potential risk miss`} />
             <KeyValueRow label="Guardrail confirmation" value={guardrail.status} helper={guardrail.detail} />
           </Stack>
           <Alert severity="warning" sx={{ mt: 1.6, borderRadius: 2 }}>
