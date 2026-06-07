@@ -74,7 +74,8 @@ etc."""
                 prompt=user_prompt,
                 model=model,
                 system_prompt=system_prompt,
-                temperature=0.4
+                temperature=0.4,
+                max_tokens=220,
             )
             
             text = response.get('response', '')

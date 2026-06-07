@@ -78,7 +78,8 @@ Do NOT suggest actions or decisions."""
                 prompt=user_prompt,
                 model=model,
                 system_prompt=system_prompt,
-                temperature=0.3
+                temperature=0.3,
+                max_tokens=260,
             )
             
             return response.get('response', 'Failed to generate explanation.')

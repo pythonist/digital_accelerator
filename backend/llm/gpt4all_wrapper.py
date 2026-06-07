@@ -37,7 +37,7 @@ DEFAULT_MODEL_DIR = Path(
 DEFAULT_MODEL = (
     os.getenv("GPT4ALL_DEFAULT_MODEL")
     or os.getenv("LLM_DEFAULT_MODEL")
-    or "Meta-Llama-3-8B-Instruct.Q4_0.gguf"
+    or "qwen2-1_5b-instruct-q4_0.gguf"
 )
 DEFAULT_EMBED_MODEL = (
     os.getenv("GPT4ALL_EMBED_MODEL")
@@ -49,9 +49,22 @@ DEFAULT_ALLOW_DOWNLOAD = _as_bool(
     default=False,
 )
 DEFAULT_THREADS = int(os.getenv("LLM_THREADS") or os.getenv("GPT4ALL_THREADS") or "0") or None
-DEFAULT_CTX = int(os.getenv("LLM_CONTEXT_WINDOW") or os.getenv("GPT4ALL_CONTEXT_WINDOW") or "4096")
+DEFAULT_CTX = int(os.getenv("LLM_CONTEXT_WINDOW") or os.getenv("GPT4ALL_CONTEXT_WINDOW") or "2048")
 DEFAULT_DEVICE = os.getenv("LLM_DEVICE") or os.getenv("GPT4ALL_DEVICE") or "cpu"
 REQUEST_TIMEOUT = int(os.getenv("LLM_TIMEOUT") or "120")
+DEFAULT_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS") or os.getenv("GPT4ALL_MAX_TOKENS") or "320")
+DEFAULT_TOKEN_CAP = int(os.getenv("LLM_TOKEN_CAP") or os.getenv("GPT4ALL_TOKEN_CAP") or str(DEFAULT_MAX_TOKENS))
+
+
+def _bounded_tokens(requested: Optional[int]) -> int:
+    try:
+        value = int(requested if requested is not None else DEFAULT_MAX_TOKENS)
+    except Exception:
+        value = DEFAULT_MAX_TOKENS
+    value = max(32, value)
+    if DEFAULT_TOKEN_CAP > 0:
+        value = min(value, DEFAULT_TOKEN_CAP)
+    return value
 
 
 class GPT4AllWrapper:
@@ -229,6 +242,7 @@ class GPT4AllWrapper:
     ) -> Dict:
         start = time.time()
         try:
+            max_tokens = _bounded_tokens(max_tokens)
             llm, resolved_model = self._ensure_model(model)
             with self._lock:
                 text = None
@@ -269,6 +283,7 @@ class GPT4AllWrapper:
     ) -> Dict:
         start = time.time()
         try:
+            max_tokens = _bounded_tokens(max_tokens)
             llm, resolved_model = self._ensure_model(model)
             history = self.conversation_history if use_history else []
             composed = self._build_manual_prompt(message, system_prompt=system_prompt, history=history)
@@ -327,4 +342,3 @@ class GPT4AllWrapper:
 
     def get_history(self) -> List[Dict]:
         return list(self.conversation_history)
-

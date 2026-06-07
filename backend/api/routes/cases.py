@@ -258,7 +258,7 @@ def _get_case_resolution_llm_candidates():
     return deduped
 
 
-def _generate_case_resolution_llm_response(prompt, model=None, system_prompt=None, temperature=0.1, max_tokens=1200):
+def _generate_case_resolution_llm_response(prompt, model=None, system_prompt=None, temperature=0.1, max_tokens=360):
     errors = []
     for candidate in _get_case_resolution_llm_candidates():
         try:
@@ -1756,7 +1756,7 @@ def generate_case_resolution_investigation_summary(case_id):
                 "All statements must be grounded in the supplied evidence."
             ),
             temperature=0.1,
-            max_tokens=1200,
+            max_tokens=360,
         )
         if result.get("success"):
             parsed = _extract_json_object(result.get("response"))
@@ -1887,7 +1887,7 @@ def generate_case_resolution_sar_draft(case_id):
                 "Use only supplied facts. Never fabricate support."
             ),
             temperature=0.1,
-            max_tokens=1600,
+            max_tokens=520,
         )
         raw_response = str(result.get("response") or "").strip()
         if result.get("success"):

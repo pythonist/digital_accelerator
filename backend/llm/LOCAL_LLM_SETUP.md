@@ -13,14 +13,18 @@ Why `gpt4all`
 
 Suggested model sizes
 - Text generation: an 8B instruct GGUF model is realistic on a 32 GB RAM laptop.
-- Suggested starting point: `Meta-Llama-3-8B-Instruct.Q4_0.gguf`
+- Fast demo starting point: `qwen2-1_5b-instruct-q4_0.gguf`
+- Higher quality, slower CPU option: `Meta-Llama-3-8B-Instruct.Q4_0.gguf`
 - Embeddings for RAG and similarity: `nomic-embed-text-v1.5.f16.gguf`
 
 Environment variables
 ```powershell
 $env:LLM_PROVIDER='gpt4all'
 $env:LLM_MODEL_DIR='E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models'
-$env:GPT4ALL_DEFAULT_MODEL='Meta-Llama-3-8B-Instruct.Q4_0.gguf'
+$env:GPT4ALL_DEFAULT_MODEL='qwen2-1_5b-instruct-q4_0.gguf'
+$env:LLM_CONTEXT_WINDOW='2048'
+$env:LLM_MAX_TOKENS='320'
+$env:LLM_TOKEN_CAP='320'
 $env:GPT4ALL_EMBED_MODEL='nomic-embed-text-v1.5.f16.gguf'
 $env:LLM_ALLOW_DOWNLOAD='false'
 ```
