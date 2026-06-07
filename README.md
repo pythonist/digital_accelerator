@@ -102,3 +102,5 @@ npm run build
 cd backend
 python app.py
 ```
+
+url - https://ai-aml-tool-ih5rjb44sq-uc.a.run.app
