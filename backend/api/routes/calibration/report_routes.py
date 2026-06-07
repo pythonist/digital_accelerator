@@ -195,7 +195,7 @@ def check_ai_status(run_id):
             return jsonify({
                 'available': is_connected,
                 'connected': is_connected,
-                'provider': getattr(llm_service, 'provider_name', 'ollama'),
+                'provider': getattr(llm_service, 'provider_name', 'local_ai'),
                 'models': models,
                 'default_model': llm_service.default_model if is_connected else None
             })

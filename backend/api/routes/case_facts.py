@@ -312,7 +312,7 @@ Provide a clear, professional response based ONLY on these facts. Be concise and
         if not llm_service or not llm_service.check_connection():
             return jsonify({
                 "success": False,
-                "error": "LLM service not available. Configure Ollama or GPT4All first."
+                "error": "LLM service not available. Configure GPT4All or another local provider first."
             }), 500
         
         result = llm_service.generate(

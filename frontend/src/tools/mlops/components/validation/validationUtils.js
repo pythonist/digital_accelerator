@@ -258,16 +258,37 @@ export const buildDisplayEvaluation = (model = {}) => {
     const explicitMetrics = isRecord(explicit.metrics) ? explicit.metrics : {};
     const cm = explicit.confusion_matrix || explicitMetrics.confusion_matrix;
     const explicitThreshold = pickFirst(explicit.threshold, explicit.selected_threshold, explicitMetrics.optimal_threshold, model?.selected_threshold, model?.threshold);
+    const fallback = buildDisplayEvaluation({
+      ...model,
+      display_evaluation: null,
+      results: {
+        ...(isRecord(model?.results) ? model.results : {}),
+        display_evaluation: null,
+      },
+      metrics: {
+        ...(isRecord(model?.metrics) ? model.metrics : {}),
+        ...explicitMetrics,
+      },
+      threshold: explicitThreshold,
+      selected_threshold: explicitThreshold,
+    });
+    const fallbackMetrics = isRecord(fallback?.metrics) ? fallback.metrics : {};
     return {
       ...explicit,
       threshold: Number.isFinite(Number(explicitThreshold)) ? Number(explicitThreshold) : explicit.threshold,
       selected_threshold: Number.isFinite(Number(explicitThreshold)) ? Number(explicitThreshold) : explicit.selected_threshold,
       optimal_threshold: Number.isFinite(Number(explicitThreshold)) ? Number(explicitThreshold) : explicit.optimal_threshold,
-      confusion_matrix: cm || explicit.confusion_matrix,
+      confusion_matrix: cm || fallback?.confusion_matrix || explicit.confusion_matrix,
+      threshold_table: pickFirst(explicit.threshold_table, explicitMetrics.threshold_table, fallback.threshold_table, fallbackMetrics.threshold_table, []),
+      roc_curve: pickFirst(explicit.roc_curve, explicitMetrics.roc_curve, fallback.roc_curve, fallbackMetrics.roc_curve, []),
+      pr_curve: pickFirst(explicit.pr_curve, explicitMetrics.pr_curve, fallback.pr_curve, fallbackMetrics.pr_curve, []),
       metrics: {
+        ...fallbackMetrics,
         ...explicitMetrics,
-        confusion_matrix: cm || explicitMetrics.confusion_matrix,
-        threshold_table: explicitMetrics.threshold_table || explicit.threshold_table || [],
+        confusion_matrix: cm || fallbackMetrics.confusion_matrix || explicitMetrics.confusion_matrix,
+        threshold_table: pickFirst(explicitMetrics.threshold_table, explicit.threshold_table, fallbackMetrics.threshold_table, fallback.threshold_table, []),
+        roc_curve: pickFirst(explicitMetrics.roc_curve, explicit.roc_curve, fallbackMetrics.roc_curve, fallback.roc_curve, []),
+        pr_curve: pickFirst(explicitMetrics.pr_curve, explicit.pr_curve, fallbackMetrics.pr_curve, fallback.pr_curve, []),
         optimal_threshold: Number.isFinite(Number(explicitThreshold)) ? Number(explicitThreshold) : explicitMetrics.optimal_threshold,
         selected_threshold: Number.isFinite(Number(explicitThreshold)) ? Number(explicitThreshold) : explicitMetrics.selected_threshold,
       },

@@ -25,6 +25,7 @@ import { Tune } from '@mui/icons-material';
 import mlopsApi from '../../services/mlopsApi';
 import { V } from './validationTheme';
 import {
+  buildDisplayEvaluation,
   fmt,
   formatSplitLabel,
   getValidationContext,
@@ -263,6 +264,25 @@ const ThresholdTuningTab = ({
         ?? 0.5,
     );
     const safeThreshold = Number.isFinite(thresholdHint) ? thresholdHint : 0.5;
+    const displayEval = buildDisplayEvaluation({
+      ...(activeRun || {}),
+      ...(detail || {}),
+      job_id: normalizedJobId,
+      threshold: safeThreshold,
+      selected_threshold: safeThreshold,
+      locked_threshold: safeThreshold,
+      metrics: {
+        ...(activeRun?.metrics || {}),
+        ...(detail?.metrics || {}),
+      },
+    });
+    const thresholdTable = normalizeThresholdRows(
+      displayEval?.threshold_table
+        || displayEval?.metrics?.threshold_table
+        || [],
+    );
+    const selectedRow = closestThresholdRow(thresholdTable, safeThreshold);
+    const activeScore = selectedRow ? buildScoreFromRow(selectedRow, safeThreshold) : null;
     return {
       job_id: normalizedJobId,
       optimal_threshold: safeThreshold,
@@ -270,29 +290,31 @@ const ThresholdTuningTab = ({
       locked_threshold: safeThreshold,
       configured_threshold: safeThreshold,
       max_event_loss_pct: Number(maxEventLoss) || 5,
-      threshold_table: [],
-      suppression_rate_pct: detail?.suppression_rate_pct ?? activeRun?.metrics?.suppression_rate_pct ?? 0,
-      event_loss_pct: detail?.event_loss_pct ?? activeRun?.metrics?.event_loss_pct ?? 0,
-      precision: detail?.precision ?? activeRun?.metrics?.precision ?? null,
-      recall: detail?.recall ?? activeRun?.metrics?.recall ?? null,
-      f1: detail?.f1 ?? activeRun?.metrics?.f1 ?? null,
-      specificity: detail?.specificity ?? activeRun?.metrics?.specificity ?? null,
-      accuracy: detail?.accuracy ?? activeRun?.metrics?.accuracy ?? null,
-      balanced_accuracy: detail?.balanced_accuracy ?? activeRun?.metrics?.balanced_accuracy ?? null,
-      confusion_matrix: detail?.confusion_matrix || activeRun?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
+      threshold_table: thresholdTable,
+      suppression_rate_pct: activeScore?.suppression_rate_pct ?? displayEval?.suppression_rate_pct ?? detail?.suppression_rate_pct ?? activeRun?.metrics?.suppression_rate_pct ?? 0,
+      event_loss_pct: activeScore?.event_loss_pct ?? displayEval?.event_loss_pct ?? detail?.event_loss_pct ?? activeRun?.metrics?.event_loss_pct ?? 0,
+      precision: activeScore?.precision ?? displayEval?.metrics?.precision ?? detail?.precision ?? activeRun?.metrics?.precision ?? null,
+      recall: activeScore?.recall ?? displayEval?.metrics?.recall ?? detail?.recall ?? activeRun?.metrics?.recall ?? null,
+      f1: activeScore?.f1 ?? displayEval?.metrics?.f1 ?? detail?.f1 ?? activeRun?.metrics?.f1 ?? null,
+      specificity: activeScore?.specificity ?? displayEval?.metrics?.specificity ?? detail?.specificity ?? activeRun?.metrics?.specificity ?? null,
+      accuracy: activeScore?.accuracy ?? displayEval?.metrics?.accuracy ?? detail?.accuracy ?? activeRun?.metrics?.accuracy ?? null,
+      balanced_accuracy: activeScore?.balanced_accuracy ?? displayEval?.metrics?.balanced_accuracy ?? detail?.balanced_accuracy ?? activeRun?.metrics?.balanced_accuracy ?? null,
+      confusion_matrix: activeScore?.confusion_matrix || displayEval?.confusion_matrix || detail?.confusion_matrix || activeRun?.metrics?.confusion_matrix || [[0, 0], [0, 0]],
       constraint_satisfied: true,
       restored_without_scores: true,
       selection_note: detail?.score_distribution_reason
-        || 'Restored the saved model context for this run. Detailed threshold curves are unavailable because holdout score vectors were not persisted.',
+        || 'Using the governed display threshold table for this run.',
       metrics: {
-        roc_auc: detail?.roc_auc ?? activeRun?.metrics?.roc_auc ?? null,
-        pr_auc: detail?.pr_auc ?? activeRun?.metrics?.pr_auc ?? null,
-        precision: detail?.precision ?? activeRun?.metrics?.precision ?? null,
-        recall: detail?.recall ?? activeRun?.metrics?.recall ?? null,
-        f1: detail?.f1 ?? activeRun?.metrics?.f1 ?? null,
-        accuracy: detail?.accuracy ?? activeRun?.metrics?.accuracy ?? null,
-        balanced_accuracy: detail?.balanced_accuracy ?? activeRun?.metrics?.balanced_accuracy ?? null,
-        specificity: detail?.specificity ?? activeRun?.metrics?.specificity ?? null,
+        ...(displayEval?.metrics || {}),
+        roc_auc: displayEval?.metrics?.roc_auc ?? detail?.roc_auc ?? activeRun?.metrics?.roc_auc ?? null,
+        pr_auc: displayEval?.metrics?.pr_auc ?? detail?.pr_auc ?? activeRun?.metrics?.pr_auc ?? null,
+        precision: activeScore?.precision ?? displayEval?.metrics?.precision ?? detail?.precision ?? activeRun?.metrics?.precision ?? null,
+        recall: activeScore?.recall ?? displayEval?.metrics?.recall ?? detail?.recall ?? activeRun?.metrics?.recall ?? null,
+        f1: activeScore?.f1 ?? displayEval?.metrics?.f1 ?? detail?.f1 ?? activeRun?.metrics?.f1 ?? null,
+        accuracy: activeScore?.accuracy ?? displayEval?.metrics?.accuracy ?? detail?.accuracy ?? activeRun?.metrics?.accuracy ?? null,
+        balanced_accuracy: activeScore?.balanced_accuracy ?? displayEval?.metrics?.balanced_accuracy ?? detail?.balanced_accuracy ?? activeRun?.metrics?.balanced_accuracy ?? null,
+        specificity: activeScore?.specificity ?? displayEval?.metrics?.specificity ?? detail?.specificity ?? activeRun?.metrics?.specificity ?? null,
+        threshold_table: thresholdTable,
       },
     };
   }, [activeJobId, activeRun, maxEventLoss]);

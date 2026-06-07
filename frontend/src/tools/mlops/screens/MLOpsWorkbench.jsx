@@ -3292,6 +3292,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     if (localPipelineComplete) return requested;
     const requestedPipelineId = String(validActivePipelineId || activePipelineId || normalizedRouteRunId || '').trim();
     if (requestedPipelineId && isPipelineComplete({ ...currentLocalPipelineScope, pipeline_id: requestedPipelineId })) return requested;
+    if (['model', 'validation', 'registry', 'dashboard', 'reports'].includes(requested)) return requested;
     if (!requested || requested === 'pipelines' || !firstStaleStep) return requested;
     const requestedIndex = progressStepIndexMap[requested];
     if (requestedIndex == null || requestedIndex < firstStaleStepIndex) return requested;
@@ -6246,7 +6247,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       onDeploy={handleDeploy}
                       onViewReport={handleOpenReport}
                       onBack={() => openWorkbenchStep('validation', { skipGuardRedirect: true })}
-                      actionsDisabled={staleStepSet.has('registry')}
+                      actionsDisabled={false}
                       actionsMessage={staleMessageForStep('registry')}
                     />
                   )}
@@ -6265,9 +6266,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       savedDashboardState={savedDashboardState}
                       savedDashboardMetadata={savedLocalPipelineRun?.steps?.live_dashboard?.metadata || localDashboardMetadata}
                       validationReport={effectiveValidationReport || validationReport} registryEntry={effectiveRegistryEntry || registryEntry} onBack={() => openWorkbenchStep('registry', { skipGuardRedirect: true })}
-                      actionsDisabled={staleStepSet.has('dashboard') && !Boolean(
-                        nestedDeploymentId(effectiveRegistryEntry || registryEntry) || nestedDeploymentId(savedDashboardState),
-                      )}
+                      actionsDisabled={false}
                       actionsMessage={staleMessageForStep('dashboard')}
                     />
                   )}

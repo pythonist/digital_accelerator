@@ -174,7 +174,7 @@ class ServiceContainer:
             self._register_lazy_modules()
 
             # Proxies (do not load yet)
-            self.llm_provider = ModuleProxy(REGISTRY, "ollama")
+            self.llm_provider = ModuleProxy(REGISTRY, "llm_provider")
             self.ollama_wrapper = self.llm_provider
             self.doc_rag_system = ModuleProxy(REGISTRY, "docs_rag")
             self.rag_system = ModuleProxy(REGISTRY, "rag")
@@ -191,15 +191,15 @@ class ServiceContainer:
 
     def _register_lazy_modules(self):
         """Declare all heavy modules as lazy loaders."""
-        # LLM provider (Ollama or local GPT4All)
-        def _load_ollama():
+        # LLM provider (local GPT4All by default; Ollama only when explicitly enabled)
+        def _load_llm_provider():
             from modules.ai import load_ollama
             return load_ollama()
-        REGISTRY.register("ollama", _load_ollama, feature_flag_env="ENABLE_AI")
+        REGISTRY.register("llm_provider", _load_llm_provider, feature_flag_env="ENABLE_AI")
 
         # Documentation RAG (depends on the active LLM provider, optional FAISS)
         def _load_docs_rag():
-            ollama = REGISTRY.get("ollama")
+            ollama = REGISTRY.get("llm_provider")
             from modules.rag import load_docs_rag
             return load_docs_rag(ollama)
         REGISTRY.register("docs_rag", _load_docs_rag, feature_flag_env="ENABLE_RAG")
@@ -222,7 +222,7 @@ class ServiceContainer:
                 pass
             llm_provider = None
             try:
-                llm_provider = REGISTRY.get("ollama")
+                llm_provider = REGISTRY.get("llm_provider")
             except Exception:
                 llm_provider = None
             from modules.rag import load_vector_rag

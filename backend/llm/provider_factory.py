@@ -32,10 +32,14 @@ def _instantiate_provider(provider: str):
 
 def load_llm_provider():
     requested_provider = str(os.getenv("LLM_PROVIDER") or "gpt4all").strip().lower() or "gpt4all"
+    ollama_enabled = _as_bool(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK"), default=False)
+    if requested_provider == "ollama" and not ollama_enabled:
+        print("Ollama provider is disabled for this environment; using GPT4All.")
+        requested_provider = "gpt4all"
     fallback_chain = [requested_provider]
     if requested_provider == "ollama":
         fallback_chain.append("gpt4all")
-    elif requested_provider == "gpt4all" and _as_bool(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK"), default=False):
+    elif requested_provider == "gpt4all" and ollama_enabled:
         fallback_chain.append("ollama")
 
     errors = []

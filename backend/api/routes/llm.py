@@ -289,7 +289,7 @@ def list_models():
         return jsonify({
             'success': available,
             'available': available,
-            'provider': getattr(llm_service, 'provider_name', 'ollama'),
+            'provider': getattr(llm_service, 'provider_name', 'local_ai'),
             'default_model': getattr(llm_service, 'default_model', None),
             'models': llm_service.list_models(),
             'error': None if available else 'AI provider unavailable',
@@ -313,7 +313,7 @@ def chat():
     if not llm_service or not llm_service.check_connection():
         return jsonify({
             'success': False,
-            'error': 'AI provider unavailable. Configure Ollama or GPT4All first.'
+            'error': 'AI provider unavailable. Configure GPT4All or another local provider first.'
         }), 503
     
     # --- STEP 1: IDENTIFY ACTIVE CONTEXT ---
@@ -783,7 +783,7 @@ def rag_health_check():
                 'index_loaded': services.rag_system.index is not None,
                 'vector_count': services.rag_system.index.ntotal if services.rag_system.index else 0,
                 'embedding_model': services.rag_system.embedding_model,
-                'provider': getattr(llm_service, 'provider_name', 'ollama'),
+                'provider': getattr(llm_service, 'provider_name', 'local_ai'),
             }
         else:
             health['rag_system'] = {'initialized': False}
@@ -791,7 +791,7 @@ def rag_health_check():
         
         if llm_service:
             health['llm_provider'] = {
-                'provider': getattr(llm_service, 'provider_name', 'ollama'),
+                'provider': getattr(llm_service, 'provider_name', 'local_ai'),
                 'available': llm_service.check_connection(),
                 'base_url': getattr(llm_service, 'base_url', 'unknown'),
             }
@@ -893,7 +893,7 @@ def rag_statistics():
             },
             'system_config': {
                 'embedding_model': services.rag_system.embedding_model,
-                'provider': getattr(_get_llm_service(), 'provider_name', 'ollama'),
+                'provider': getattr(_get_llm_service(), 'provider_name', 'local_ai'),
                 'vector_store_path': services.rag_system.base_path
             }
         }

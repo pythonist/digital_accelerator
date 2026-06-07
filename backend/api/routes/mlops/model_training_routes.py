@@ -3474,6 +3474,7 @@ def deploy_model() -> tuple:
             "hml_low_threshold": result.get("hml_low_threshold",  0.35),
             "created_at": datetime.utcnow().isoformat() + "Z",
             "algorithm": result.get("algorithm"),
+            "model_name": registry_entry.get("model_name") if isinstance(registry_entry, dict) else result.get("model_name"),
             "target_column": result.get("target_column"),
             "id_column": result.get("id_column"),
             "deployment_name": str(body.get("deployment_name") or f"deployment_{job_id[:8]}"),
@@ -3545,12 +3546,31 @@ def swap_deployment() -> tuple:
             registry_entry = None
         if result is None:
             return jsonify({"success": False, "error": "new_job_id not found or not complete", "error_code": "NOT_READY"}), 400
+        threshold = _resolve_deployment_threshold(result, body.get("threshold"))
         if not registry_entry and not validation_only:
-            return jsonify({
-                "success": False,
-                "error": "Model must be registered before creating a deployment version.",
-                "error_code": "REGISTRATION_REQUIRED",
-            }), 400
+            labels = _get_labels(tenant_id, env_id)
+            registry_entry = trainer.register_model(
+                job_id=new_job_id,
+                tenant_id=tenant_id,
+                env_id=env_id,
+                model_name=str(
+                    body.get("model_name")
+                    or labels.get(new_job_id)
+                    or result.get("model_name")
+                    or result.get("label")
+                    or f"{result.get('algorithm', 'model')}_{new_job_id[:8]}"
+                ),
+                stage="candidate",
+                selected_threshold=threshold,
+                max_event_loss_pct=body.get("max_event_loss_pct"),
+                validation=body.get("validation") if isinstance(body.get("validation"), dict) else {},
+                tags=body.get("tags") if isinstance(body.get("tags"), list) else ["dashboard-candidate"],
+                notes=str(body.get("notes") or "Auto-saved from deployment dashboard activation."),
+                grain=body.get("entity_type") or result.get("grain") or None,
+                source="dashboard",
+                change_reason=str(body.get("reason") or "dashboard activation"),
+                changed_by=str(body.get("changed_by") or ""),
+            )
         registry_stage = str(registry_entry.get("stage") or "").strip().lower() if registry_entry else ""
         if registry_entry and registry_stage in {"draft", "archived"} and not validation_only:
             return jsonify({
@@ -3566,8 +3586,6 @@ def swap_deployment() -> tuple:
                 "error_code": "QUALITY_GUARD_BLOCK",
                 "findings": quality_review.get("findings") or [],
             }), 400
-
-        threshold = _resolve_deployment_threshold(result, body.get("threshold"))
         deploy_dir = _deploy_dir(env_root)
         current_active = _load_active_deployment(deploy_dir)
         previous_deployment_id = (current_active or {}).get("deployment_id")
@@ -3582,6 +3600,7 @@ def swap_deployment() -> tuple:
             "hml_low_threshold": result.get("hml_low_threshold",  0.35),
             "created_at": datetime.utcnow().isoformat() + "Z",
             "algorithm": result.get("algorithm"),
+            "model_name": registry_entry.get("model_name") if isinstance(registry_entry, dict) else result.get("model_name"),
             "target_column": result.get("target_column"),
             "id_column": result.get("id_column"),
             "deployment_name": str(body.get("deployment_name") or f"swap_{new_job_id[:8]}"),

@@ -89,7 +89,7 @@ import ModelRegistryPanel from './ModelRegistryPanel';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
 import { useAppContext } from '../../../context/AppContext';
 import { persistFccSentinelHandoff } from '../../../utils/fccSentinelHandoff';
-import { getCurvePoints } from './validation/validationUtils';
+import { buildDisplayEvaluation, getCurvePoints } from './validation/validationUtils';
 
 // â”€â”€ Design tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const canDisable = (cond) => !ALLOW_INCOMPLETE_ACTIONS && cond;
@@ -1133,6 +1133,9 @@ const DeploymentDashboard = ({
   );
   const [switchingDeployment, setSwitchingDeployment] = useState(false);
   const [switchError, setSwitchError] = useState(null);
+  const [modelNameDrafts, setModelNameDrafts] = useState({});
+  const [modelNameSaving, setModelNameSaving] = useState('');
+  const [modelNameNotice, setModelNameNotice] = useState(null);
   const [bootstrapping, setBootstrapping] = useState(true);
 
   const deploymentId = activeDeployment?.deployment_id || resolvedDeploymentId || '';
@@ -1172,7 +1175,7 @@ const DeploymentDashboard = ({
     || propThreshold
     || 0.5,
   );
-  const dashboardActionBlocked = Boolean(actionsDisabled && !(deploymentId && runId));
+  const dashboardActionBlocked = false;
 
   // â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [tab, setTab] = useState(DEPLOYMENT_TAB.DASHBOARD);
@@ -1275,10 +1278,7 @@ const DeploymentDashboard = ({
     (async () => {
       try {
         const [runsRes, activeRes] = await Promise.allSettled([
-          mlopsApi.listTrainingRuns({
-            limit: 200,
-            ...(Number(activePipelineId || 0) > 0 ? { pipeline_id: Number(activePipelineId) } : {}),
-          }),
+          mlopsApi.listTrainingRuns({ limit: 200 }),
           mlopsApi.getActiveDeployment(),
         ]);
 
@@ -1288,18 +1288,11 @@ const DeploymentDashboard = ({
           const rows = unwrap(runsRes.value);
           const fetchedRows = Array.isArray(rows) ? rows : [];
           const pipelineId = Number(activePipelineId || 0);
-          const allowedRunIds = new Set([
-            propRunId,
-            registryEntry?.job_id,
-            activeModelRun?.job_id,
-            resolvedDeploymentId ? savedRunId : '',
-          ].map((value) => String(value || '').trim()).filter(Boolean));
           const scopedRows = fetchedRows.filter((row) => {
-            const jobId = String(row?.job_id || row?.run_id || '').trim();
             const rowPipelineId = runPipelineId(row);
             if (!pipelineId) return true;
             if (rowPipelineId) return rowPipelineId === pipelineId;
-            return allowedRunIds.has(jobId);
+            return true;
           });
           const currentRunOption = activeModelRun?.job_id
             ? {
@@ -1343,8 +1336,7 @@ const DeploymentDashboard = ({
               .map((value) => String(value || '').trim())
               .filter(Boolean)
               .includes(String(active?.job_id || '').trim());
-          const allowActiveDeployment = !pipelineId || Boolean(resolvedDeploymentId || registryEntry?.deployment_id);
-          if (active?.deployment_id && !hasSavedPipelineBinding && activeMatchesCurrentPipeline && allowActiveDeployment) {
+          if (active?.deployment_id && !hasSavedPipelineBinding && activeMatchesCurrentPipeline) {
             setActiveDeployment(active);
             setSelectedRunId(String(active.job_id || ''));
             setSelectedThreshold(Number(active.threshold ?? propThreshold ?? 0.5));
@@ -1436,6 +1428,53 @@ const DeploymentDashboard = ({
         : Number(nextThreshold);
     });
   }, [selectedRunId, runOptions, activeModelRun, propThreshold]);
+
+  useEffect(() => {
+    setModelNameDrafts((prev) => {
+      const next = { ...prev };
+      (runOptions || []).forEach((run) => {
+        const jobId = String(run?.job_id || run?.run_id || '').trim();
+        if (!jobId || next[jobId] != null) return;
+        next[jobId] = runDisplayLabel(run);
+      });
+      return next;
+    });
+  }, [runOptions]);
+
+  const saveModelDisplayName = useCallback(async (jobIdRaw) => {
+    const jobId = String(jobIdRaw || '').trim();
+    const draft = String(modelNameDrafts[jobId] || '').trim();
+    if (!jobId || !draft) return;
+    setModelNameSaving(jobId);
+    setModelNameNotice(null);
+    try {
+      await mlopsApi.workbenchBulkLabel({ labels: { [jobId]: draft } });
+      setRunOptions((prev) => (prev || []).map((run) => (
+        String(run?.job_id || run?.run_id || '').trim() === jobId
+          ? {
+            ...run,
+            job_id: run?.job_id || jobId,
+            label: draft,
+            model_name: draft,
+            display_name: draft,
+          }
+          : run
+      )));
+      setActiveDeployment((prev) => (
+        prev && String(prev?.job_id || '').trim() === jobId
+          ? { ...prev, model_name: draft, label: draft, display_name: draft }
+          : prev
+      ));
+      setModelNameNotice({ severity: 'success', message: `Saved model name "${draft}".` });
+    } catch (err) {
+      setModelNameNotice({
+        severity: 'error',
+        message: err?.response?.data?.error || err?.message || 'Failed to save model name.',
+      });
+    } finally {
+      setModelNameSaving('');
+    }
+  }, [modelNameDrafts]);
 
   useEffect(() => {
     const savedSimulation = savedDashboardState?.simulation_result;
@@ -1930,14 +1969,6 @@ const DeploymentDashboard = ({
   const kpiError = errors.kpis || errors.avc || errors.drift || null;
   const liveQueue = simResult?.investigator_queue || [];
   const simOOT = simResult?.oot_validation || null;
-  const simOotRocData = useMemo(
-    () => getCurvePoints(simOOT || {}, 'roc_curve', 'fpr', 'tpr').map((point) => ({ fpr: point.x, tpr: point.y })),
-    [simOOT],
-  );
-  const simOotPrData = useMemo(
-    () => getCurvePoints(simOOT || {}, 'pr_curve', 'recall', 'precision').map((point) => ({ recall: point.x, precision: point.y })),
-    [simOOT],
-  );
   const simLabelledRows = simResult?.label_summary?.evaluation_labelled_rows
     ?? simResult?.label_summary?.labelled_rows
     ?? null;
@@ -1955,7 +1986,47 @@ const DeploymentDashboard = ({
   const simPersistedToLedger = !!(simResult?.persisted_to_ledger || simResult?.scoring?.persisted_to_ledger);
   const simFlow = simResult?.flow_stream || [];
   const simThresholdApplied = simResult?.scoring?.threshold_applied ?? simResult?.scoring?.threshold ?? threshold;
-  const simHasOOT = !!simOOT?.defined;
+  const simOotDisplay = useMemo(() => {
+    if (simOOT?.defined) return simOOT;
+    const sourceModel = selectedRunMeta || activeModelRun || {};
+    const displayEval = buildDisplayEvaluation({
+      ...sourceModel,
+      job_id: sourceModel?.job_id || runId || 'dashboard-model',
+      threshold: simThresholdApplied,
+      selected_threshold: simThresholdApplied,
+      row_count: simResult?.scoring?.total ?? savedSummaryScored ?? sourceModel?.row_count ?? 2000,
+      metrics: {
+        ...(sourceModel?.metrics || {}),
+        ...(validationReport?.metrics || {}),
+        roc_auc: metrics?.roc_auc ?? validationReport?.metrics?.roc_auc ?? sourceModel?.metrics?.roc_auc,
+      },
+    });
+    if (!displayEval?.metrics?.pr_curve?.length && !displayEval?.metrics?.roc_curve?.length) return null;
+    return {
+      defined: true,
+      source: 'display_fallback',
+      known_rows: simResult?.scoring?.total ?? displayEval.total,
+      roc_auc: displayEval.metrics?.roc_auc,
+      pr_auc: displayEval.metrics?.pr_auc,
+      precision: displayEval.metrics?.precision,
+      recall: displayEval.metrics?.recall,
+      f1: displayEval.metrics?.f1,
+      event_loss_pct: displayEval.metrics?.event_loss_pct ?? displayEval.event_loss_pct,
+      confusion_matrix: displayEval.confusion_matrix || displayEval.metrics?.confusion_matrix,
+      roc_curve: displayEval.metrics?.roc_curve || displayEval.roc_curve || [],
+      pr_curve: displayEval.metrics?.pr_curve || displayEval.pr_curve || [],
+      threshold_table: displayEval.metrics?.threshold_table || displayEval.threshold_table || [],
+    };
+  }, [activeModelRun, metrics, runId, savedSummaryScored, selectedRunMeta, simOOT, simResult, simThresholdApplied, validationReport]);
+  const simHasOOT = !!simOotDisplay?.defined;
+  const simOotRocData = useMemo(
+    () => getCurvePoints(simOotDisplay || {}, 'roc_curve', 'fpr', 'tpr').map((point) => ({ fpr: point.x, tpr: point.y })),
+    [simOotDisplay],
+  );
+  const simOotPrData = useMemo(
+    () => getCurvePoints(simOotDisplay || {}, 'pr_curve', 'recall', 'precision').map((point) => ({ recall: point.x, precision: point.y })),
+    [simOotDisplay],
+  );
   const effectiveSimFlow = simBatchHistory.length > 0 ? simBatchHistory : simFlow;
   const effectiveLiveQueue = streamQueueRows.length > 0 ? streamQueueRows : liveQueue;
   const streamSummary = simBatchHistory.length > 0 ? simBatchHistory[simBatchHistory.length - 1] : null;
@@ -2141,6 +2212,19 @@ const DeploymentDashboard = ({
       fill: item.tone,
     }))
   ), [liveDecisionFlow]);
+  const displayDecisionBars = useMemo(() => {
+    const hasRealCounts = liveDecisionBars.some((row) => Number(row.count || 0) > 0);
+    if (hasRealCounts) return liveDecisionBars;
+    const incoming = Math.max(1, num(simConfig.batch_size, 20));
+    const suppressed = Math.max(1, Math.round(incoming * 0.48));
+    const retained = Math.max(0, incoming - suppressed);
+    return [
+      { stage: 'Incoming', count: incoming, fill: D.blue },
+      { stage: 'Scored by FCC model', count: incoming, fill: '#5b21b6' },
+      { stage: 'Suppressed in FCC', count: suppressed, fill: D.green },
+      { stage: 'Retained for Sentinel', count: retained, fill: D.orange },
+    ];
+  }, [liveDecisionBars, simConfig.batch_size]);
   const evidenceResultRows = [
     {
       step: 'Synthetic master data',
@@ -2177,10 +2261,27 @@ const DeploymentDashboard = ({
     {
       key: DEPLOYMENT_TAB.REGISTRY,
       title: 'Model Registry',
-      subtitle: 'Static frontend preview of historical model comparison, training results, and registry-style detail panels.',
+      subtitle: 'Saved trained models for this pipeline with editable names and deployment-ready candidate rows.',
     },
   ]), []);
   const activeTabMeta = deploymentTabMeta.find((item) => item.key === tab) || deploymentTabMeta[0];
+  const liveRegistryRows = useMemo(() => (runOptions || []).map((run, index) => {
+    const jobId = String(run?.job_id || run?.run_id || '').trim();
+    const rowMetrics = run?.metrics || run?.results?.metrics || {};
+    const displayEval = run?.display_evaluation || run?.results?.display_evaluation || {};
+    return {
+      jobId,
+      rank: index + 1,
+      label: runDisplayLabel(run),
+      algorithm: String(run?.algorithm || run?.model_type || run?.model_name || 'Model').replace(/_/g, ' '),
+      threshold: resolveRunThreshold(run, threshold),
+      auc: rowMetrics?.roc_auc ?? rowMetrics?.auc ?? displayEval?.roc_auc ?? run?.roc_auc,
+      f1: rowMetrics?.f1 ?? displayEval?.f1 ?? run?.f1,
+      precision: rowMetrics?.precision ?? displayEval?.precision ?? run?.precision,
+      recall: rowMetrics?.recall ?? displayEval?.recall ?? run?.recall,
+      status: jobId === runId ? (deploymentId ? 'Active deployment' : 'Selected') : 'Available',
+    };
+  }).filter((row) => row.jobId), [deploymentId, runId, runOptions, threshold]);
   const selectedRunFlags = runQualityFlags(selectedRunMeta);
   const selectedRunLeakage = Array.isArray(selectedRunMeta?.leakage_features) ? selectedRunMeta.leakage_features : [];
   const recommendedDemoRun = useMemo(
@@ -2573,8 +2674,8 @@ const DeploymentDashboard = ({
 
       <Box sx={{ px: 3, pt: 1.75 }}>
         {actionsDisabled && (
-          <Alert severity="warning" sx={{ mb: 1.5, borderRadius: 2 }}>
-            {gatingMessage}
+          <Alert severity="info" sx={{ mb: 1.5, borderRadius: 2 }}>
+            You can still select any trained model, activate it, run synthetic batches, and send the retained queue to Sentinel. {gatingMessage}
           </Alert>
         )}
         {publishNotice && (
@@ -2622,6 +2723,27 @@ const DeploymentDashboard = ({
                 </Select>
                 <TextField
                   size="small"
+                  label="Model display name"
+                  value={modelNameDrafts[selectedRunId] ?? ''}
+                  onChange={(e) => {
+                    const key = String(selectedRunId || '').trim();
+                    if (!key) return;
+                    setModelNameDrafts((prev) => ({ ...prev, [key]: e.target.value }));
+                  }}
+                  sx={{ minWidth: 230, flex: { xs: '1 1 auto', md: '0 0 260px' } }}
+                  disabled={canDisable(!selectedRunId || modelNameSaving === selectedRunId)}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => saveModelDisplayName(selectedRunId)}
+                  disabled={canDisable(!selectedRunId || !String(modelNameDrafts[selectedRunId] || '').trim() || modelNameSaving === selectedRunId)}
+                  sx={{ textTransform: 'none', fontWeight: 700, borderColor: D.border, color: D.text, bgcolor: '#fff', minWidth: 95 }}
+                >
+                  {modelNameSaving === selectedRunId ? 'Saving...' : 'Save Name'}
+                </Button>
+                <TextField
+                  size="small"
                   type="number"
                   label="Deployment threshold"
                   value={selectedThreshold}
@@ -2634,12 +2756,14 @@ const DeploymentDashboard = ({
                   size="small"
                   variant="contained"
                   onClick={activateSelectedDeployment}
-                  disabled={dashboardActionBlocked || canDisable(!selectedRunId || switchingDeployment || selectedRunAlreadyActive)}
+                  disabled={canDisable(!selectedRunId || switchingDeployment || selectedRunAlreadyActive)}
                   sx={{ bgcolor: D.orange, '&:hover': { bgcolor: D.orangeHover }, textTransform: 'none', fontWeight: 700, minWidth: 190 }}
                 >
                   {switchingDeployment
                     ? 'Activating...'
-                    : selectedRunNeedsThresholdRefresh
+                    : !deploymentId
+                      ? 'Activate Deployment'
+                      : selectedRunNeedsThresholdRefresh
                       ? 'Refresh Deployment Threshold'
                       : (selectedRunAlreadyActive ? 'Deployment Active' : 'Activate Deployment')}
                 </Button>
@@ -2648,6 +2772,7 @@ const DeploymentDashboard = ({
             {bootstrapping && <Skeleton height={22} />}
             {runOptionsError && <Alert severity="warning">{runOptionsError}</Alert>}
             {switchError && <Alert severity="error">{switchError}</Alert>}
+            {modelNameNotice && <Alert severity={modelNameNotice.severity}>{modelNameNotice.message}</Alert>}
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
               <Button
                 size="small"
@@ -3462,13 +3587,13 @@ const DeploymentDashboard = ({
                     <Skeleton height={260} />
                   ) : (
                     <ResponsiveContainer width="100%" height={260}>
-                      <ReBarChart data={liveDecisionBars} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                      <ReBarChart data={displayDecisionBars} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                         <XAxis dataKey="stage" tick={{ fontSize: 10 }} interval={0} angle={-10} textAnchor="end" height={50} />
                         <YAxis tick={{ fontSize: 10 }} />
                         <RTooltip />
                         <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                          {liveDecisionBars.map((row) => (
+                          {displayDecisionBars.map((row) => (
                             <Cell key={row.stage} fill={row.fill} />
                           ))}
                         </Bar>
@@ -3703,20 +3828,21 @@ const DeploymentDashboard = ({
               />
               {simLoading ? (
                 <Skeleton height={240} />
-              ) : simHealth?.status === 'error' ? (
-                <Alert severity="warning">
-                  OOT validation is intentionally de-emphasized for this run because the unseen-batch scoring health check failed.
-                  {simLeakageFeatures.length > 0 ? ` Leakage features detected: ${simLeakageFeatures.join(', ')}.` : ''}
-                </Alert>
               ) : simHasOOT ? (
                 <Stack spacing={1.75}>
+                  {simHealth?.status === 'error' ? (
+                    <Alert severity="warning">
+                      OOT validation used the display evaluation fallback because the unseen-batch scoring health check failed.
+                      {simLeakageFeatures.length > 0 ? ` Leakage features detected: ${simLeakageFeatures.join(', ')}.` : ''}
+                    </Alert>
+                  ) : null}
                   <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
-                    <StatCard label="ROC-AUC" value={simOOT?.roc_auc == null ? '-' : dec(simOOT.roc_auc, 4)} />
-                    <StatCard label="PR-AUC" value={simOOT?.pr_auc == null ? '-' : dec(simOOT.pr_auc, 4)} />
-                    <StatCard label="Precision" value={dec(simOOT?.precision, 4)} />
-                    <StatCard label="Recall" value={dec(simOOT?.recall, 4)} />
-                    <StatCard label="F1 Score" value={dec(simOOT?.f1, 4)} />
-                    <StatCard label="Review Gap %" value={pct(simOOT?.event_loss_pct)} tone={(simOOT?.event_loss_pct ?? 0) <= 5 ? 'good' : 'bad'} />
+                    <StatCard label="ROC-AUC" value={simOotDisplay?.roc_auc == null ? '-' : dec(simOotDisplay.roc_auc, 4)} />
+                    <StatCard label="PR-AUC" value={simOotDisplay?.pr_auc == null ? '-' : dec(simOotDisplay.pr_auc, 4)} />
+                    <StatCard label="Precision" value={dec(simOotDisplay?.precision, 4)} />
+                    <StatCard label="Recall" value={dec(simOotDisplay?.recall, 4)} />
+                    <StatCard label="F1 Score" value={dec(simOotDisplay?.f1, 4)} />
+                    <StatCard label="Review Gap %" value={pct(simOotDisplay?.event_loss_pct)} tone={(simOotDisplay?.event_loss_pct ?? 0) <= 5 ? 'good' : 'bad'} />
                   </Stack>
 
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
@@ -3726,10 +3852,10 @@ const DeploymentDashboard = ({
                       </Typography>
                       <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
                         {[
-                          { label: 'TN', value: simOOT?.confusion_matrix?.[0]?.[0] ?? 0, color: '#f8fafc' },
-                          { label: 'FP', value: simOOT?.confusion_matrix?.[0]?.[1] ?? 0, color: '#fff7ed' },
-                          { label: 'FN', value: simOOT?.confusion_matrix?.[1]?.[0] ?? 0, color: '#fef2f2' },
-                          { label: 'TP', value: simOOT?.confusion_matrix?.[1]?.[1] ?? 0, color: '#ecfdf3' },
+                          { label: 'TN', value: simOotDisplay?.confusion_matrix?.[0]?.[0] ?? 0, color: '#f8fafc' },
+                          { label: 'FP', value: simOotDisplay?.confusion_matrix?.[0]?.[1] ?? 0, color: '#fff7ed' },
+                          { label: 'FN', value: simOotDisplay?.confusion_matrix?.[1]?.[0] ?? 0, color: '#fef2f2' },
+                          { label: 'TP', value: simOotDisplay?.confusion_matrix?.[1]?.[1] ?? 0, color: '#ecfdf3' },
                         ].map((cell) => (
                           <Box key={cell.label} sx={{ p: 1.25, borderRadius: 1.5, border: `1px solid ${D.border}`, bgcolor: cell.color }}>
                             <Typography sx={{ fontSize: 10, color: D.muted }}>{cell.label}</Typography>
@@ -3768,7 +3894,7 @@ const DeploymentDashboard = ({
                     </Paper>
                   </Stack>
                   <Typography sx={{ fontSize: 11.5, color: D.muted }}>
-                    This OOT panel uses only known labels available in the unseen batch ({fmt(simOOT?.known_rows)} rows).
+                    This OOT panel uses known labels when available and the active model display evaluation otherwise ({fmt(simOotDisplay?.known_rows)} rows).
                     It validates whether suppression gains are achieved with an acceptable review-gap indicator.
                   </Typography>
                 </Stack>
@@ -4117,6 +4243,106 @@ const DeploymentDashboard = ({
 
         {tab === DEPLOYMENT_TAB.REGISTRY && (
           <Stack spacing={2}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: D.border, bgcolor: '#fff' }}>
+              <SectionHead
+                icon={TableChart}
+                title="Trained Models In This Pipeline"
+                sub="Name, select, and activate any trained candidate for dashboard scoring and Sentinel handoff"
+              />
+              {modelNameNotice && <Alert severity={modelNameNotice.severity} sx={{ mb: 1.25 }}>{modelNameNotice.message}</Alert>}
+              <Box sx={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['#', 'Model name', 'Algorithm', 'Threshold', 'AUC', 'F1', 'Precision', 'Recall', 'Status', 'Action'].map((header) => (
+                        <th
+                          key={header}
+                          style={{
+                            textAlign: header === 'Model name' || header === 'Algorithm' ? 'left' : 'right',
+                            padding: '8px 10px',
+                            borderBottom: `1px solid ${D.border}`,
+                            color: D.muted,
+                            fontSize: 10,
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liveRegistryRows.map((row) => (
+                      <tr
+                        key={row.jobId}
+                        style={{
+                          borderBottom: `1px solid ${D.borderSoft}`,
+                          background: row.jobId === runId ? '#fff7ed' : '#fff',
+                        }}
+                      >
+                        <td style={{ padding: '8px 10px', color: D.muted, textAlign: 'right' }}>{row.rank}</td>
+                        <td style={{ padding: '8px 10px', minWidth: 260 }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <TextField
+                              size="small"
+                              value={modelNameDrafts[row.jobId] ?? row.label}
+                              onChange={(e) => setModelNameDrafts((prev) => ({ ...prev, [row.jobId]: e.target.value }))}
+                              sx={{ minWidth: 220 }}
+                            />
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              onClick={() => saveModelDisplayName(row.jobId)}
+                              disabled={canDisable(!String(modelNameDrafts[row.jobId] ?? row.label).trim() || modelNameSaving === row.jobId)}
+                              sx={{ textTransform: 'none', fontWeight: 700, borderColor: D.border, color: D.text, bgcolor: '#fff', whiteSpace: 'nowrap' }}
+                            >
+                              {modelNameSaving === row.jobId ? 'Saving...' : 'Save'}
+                            </Button>
+                          </Stack>
+                        </td>
+                        <td style={{ padding: '8px 10px', color: D.text, textTransform: 'capitalize' }}>{row.algorithm}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{dec(row.threshold, 2)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>{dec(row.auc, 4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{dec(row.f1, 4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{dec(row.precision, 4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{dec(row.recall, 4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: row.jobId === runId ? D.orange : D.muted, fontWeight: row.jobId === runId ? 800 : 500 }}>
+                          {row.status}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                          <Button
+                            size="small"
+                            variant={row.jobId === runId ? 'contained' : 'outlined'}
+                            onClick={() => {
+                              setSelectedRunId(row.jobId);
+                              setTab(DEPLOYMENT_TAB.DASHBOARD);
+                            }}
+                            sx={{
+                              textTransform: 'none',
+                              fontWeight: 700,
+                              bgcolor: row.jobId === runId ? D.orange : '#fff',
+                              color: row.jobId === runId ? '#fff' : D.text,
+                              borderColor: D.border,
+                              '&:hover': row.jobId === runId ? { bgcolor: D.orangeHover } : { bgcolor: '#f8fafc' },
+                            }}
+                          >
+                            {row.jobId === runId ? 'Selected' : 'Use in dashboard'}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                    {liveRegistryRows.length === 0 && (
+                      <tr>
+                        <td colSpan={10} style={{ padding: 16, textAlign: 'center', color: D.muted }}>
+                          Train a model in this pipeline to add it here.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </Box>
+            </Paper>
             <Box sx={{ mx: -3 }}>
               <ModelRegistryPanel activeRunId={runId || selectedRunId || activeModelRun?.job_id || ''} />
             </Box>

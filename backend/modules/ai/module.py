@@ -7,7 +7,7 @@ def load_ollama():
 
         return load_llm_provider()
     except Exception as e:
-        print(f"⚠️ AI module unavailable: {e}")
+        print(f"AI provider module unavailable: {e}")
         traceback.print_exc()
         return None
 
