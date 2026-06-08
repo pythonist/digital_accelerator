@@ -103,4 +103,4 @@ cd backend
 python app.py
 ```
 
-url - https://ai-aml-tool-ih5rjb44sq-uc.a.run.app
+url - https://fcc-aml-workbench-ih5rjb44sq-uc.a.run.app
