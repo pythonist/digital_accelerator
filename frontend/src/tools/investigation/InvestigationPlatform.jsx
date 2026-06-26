@@ -19,7 +19,7 @@ import apiClient from '@services/api';
 import mlopsApi from '../mlops/services/mlopsApi';
 
 // Layout
-import MainLayout from './layout/MainLayout';
+import MainLayout from './layout/Mainlayout';
 
 // Data Screens
 import DataLoadScreen from './screens/data/DataLoadScreen';

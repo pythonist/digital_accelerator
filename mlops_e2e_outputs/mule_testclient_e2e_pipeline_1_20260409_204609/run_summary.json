@@ -1,0 +1,393 @@
+{
+  "env_id": "fcc_e2e_codex3",
+  "pipeline_id": 1,
+  "uploaded_sources": 11,
+  "feature_store_error": "POST /api/mule/feature-store/generate failed (400): Length of values (1) does not match length of index (600000)",
+  "master_build": {
+    "output_table_name": "mule_abt_e2e_1",
+    "row_count": 10000,
+    "column_count": 37
+  },
+  "preprocess_run": {
+    "run_id": 1,
+    "dataset": null
+  },
+  "model_train": {
+    "run_id": 1,
+    "metrics": {
+      "anomaly": {
+        "algorithm": "isolation_forest",
+        "enabled": true,
+        "flagged_accounts": 812,
+        "mean_score": 0.15080432742215996
+      },
+      "graph": {
+        "accounts_with_shared_devices": 138,
+        "enabled": true,
+        "graph_edge_count": 21798,
+        "graph_node_count": 29807,
+        "highest_graph_risk_score": 0.556638821260106,
+        "max_cluster_size": 341,
+        "rings_detected": 1902,
+        "top_clusters": [
+          {
+            "account_count": 341,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0001",
+            "node_count": 1651,
+            "pattern_tags": [
+              "transacts_with",
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00000039",
+              "ACC00000040",
+              "ACC00000041",
+              "ACC00000056",
+              "ACC00000099",
+              "ACC00000104"
+            ],
+            "shared_device_accounts": 10,
+            "suspicious_edges": 1804,
+            "suspicious_nodes": 906
+          },
+          {
+            "account_count": 2,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0002",
+            "node_count": 11,
+            "pattern_tags": [
+              "linked_to_complaint",
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00005752",
+              "ACC00008514"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 8,
+            "suspicious_nodes": 7
+          },
+          {
+            "account_count": 2,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0003",
+            "node_count": 10,
+            "pattern_tags": [
+              "logs_in_from",
+              "linked_to_complaint",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00005515",
+              "ACC00008287"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 7,
+            "suspicious_nodes": 7
+          },
+          {
+            "account_count": 2,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0004",
+            "node_count": 8,
+            "pattern_tags": [
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00001072",
+              "ACC00009704"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 5,
+            "suspicious_nodes": 7
+          }
+        ]
+      },
+      "risk_bands": {
+        "high": 0.75,
+        "medium": 0.45
+      },
+      "supervised": {
+        "business_view": "Out of the top 200 flagged accounts, approximately 70 are expected to be true mules.",
+        "decision_threshold": 0.5,
+        "f1": 1.0,
+        "lift_top_decile": 9.999999999999998,
+        "pr_auc": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "top_n_capture": 0.35
+      },
+      "typology": {
+        "classes": [
+          "layering_mule"
+        ],
+        "enabled": true,
+        "model": "gradient_boosting"
+      }
+    },
+    "typology_enabled": true
+  },
+  "validation_summary": {
+    "average_score": 0.03498944444444445,
+    "confusion_matrix": {
+      "fn": 0,
+      "fp": 0,
+      "tn": 9650,
+      "tp": 350
+    },
+    "event_loss_rate": 0.0,
+    "f1": 1.0,
+    "graph_enabled": true,
+    "graph_summary": {
+      "accounts_with_shared_devices": 138,
+      "enabled": true,
+      "graph_edge_count": 21798,
+      "graph_node_count": 29807,
+      "highest_graph_risk_score": 0.556638821260106,
+      "max_cluster_size": 341,
+      "rings_detected": 1902,
+      "top_clusters": [
+        {
+          "account_count": 2,
+          "avg_model_score": 1.0,
+          "cluster_id": "RING-0001",
+          "node_count": 10,
+          "pattern_tags": [
+            "logs_in_from",
+            "owns",
+            "shares_device"
+          ],
+          "sample_accounts": [
+            "ACC00004444",
+            "ACC00006916"
+          ],
+          "shared_device_accounts": 2,
+          "suspicious_edges": 10,
+          "suspicious_nodes": 5
+        },
+        {
+          "account_count": 1,
+          "avg_model_score": 1.0,
+          "cluster_id": "RING-0002",
+          "node_count": 9,
+          "pattern_tags": [
+            "linked_to_complaint",
+            "logs_in_from",
+            "owns"
+          ],
+          "sample_accounts": [
+            "ACC00003147"
+          ],
+          "shared_device_accounts": 0,
+          "suspicious_edges": 8,
+          "suspicious_nodes": 5
+        },
+        {
+          "account_count": 1,
+          "avg_model_score": 1.0,
+          "cluster_id": "RING-0003",
+          "node_count": 9,
+          "pattern_tags": [
+            "logs_in_from",
+            "linked_to_complaint",
+            "owns"
+          ],
+          "sample_accounts": [
+            "ACC00007814"
+          ],
+          "shared_device_accounts": 0,
+          "suspicious_edges": 8,
+          "suspicious_nodes": 5
+        },
+        {
+          "account_count": 1,
+          "avg_model_score": 1.0,
+          "cluster_id": "RING-0004",
+          "node_count": 8,
+          "pattern_tags": [
+            "logs_in_from",
+            "linked_to_complaint",
+            "owns"
+          ],
+          "sample_accounts": [
+            "ACC00006635"
+          ],
+          "shared_device_accounts": 0,
+          "suspicious_edges": 7,
+          "suspicious_nodes": 5
+        }
+      ]
+    },
+    "high_risk_count": 350,
+    "low_risk_count": 9650,
+    "medium_risk_count": 0,
+    "positive_class_rate": 0.035,
+    "pr_auc": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "thresholds": {
+      "high": 0.75,
+      "medium": 0.45
+    },
+    "top_accounts": [
+      {
+        "account_id": "ACC00000326",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.5165699965923876,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00003919",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.4889870986646805,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00000328",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.4827199712694353,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00003126",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.3814367355459281,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00001584",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.5504283665994214,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00001202",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.550498990262944,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00002770",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.516696070196055,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00001704",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.5503074869031966,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00002599",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.4826950355256035,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00002771",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.5503448052798511,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00002850",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.3814173785131275,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      },
+      {
+        "account_id": "ACC00000492",
+        "graph_cluster_id": "RING-0001",
+        "graph_risk_score": 0.5503668716036855,
+        "mule_risk_score": 1.0,
+        "predicted_mule_flag": 1,
+        "predicted_mule_typology": "layering_mule",
+        "risk_band": "High Risk",
+        "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+        "top_drivers": "txn count 30d, typology available flag"
+      }
+    ],
+    "top_n_capture": 0.2857142857142857,
+    "total_accounts_scored": 10000,
+    "typology_classes_detected": [
+      "layering_mule",
+      "missing"
+    ],
+    "typology_prediction_coverage": 1.0,
+    "validation_status": "ready",
+    "warnings": []
+  },
+  "copied_artifacts": {
+    "master_dataset": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\artifacts\\mule_abt_e2e_1.csv",
+    "feature_store_selected": null,
+    "feature_store_full": null,
+    "feature_catalog": null,
+    "preprocess_dataset": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\artifacts\\mule_feature_studio_1.csv",
+    "model_bundle": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\artifacts\\mule_model_bundle_1.joblib",
+    "model_output": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\artifacts\\mule_model_output_1.csv",
+    "validation_graph": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\artifacts\\mule_validation_graph_1_1.json"
+  },
+  "inference_preview_csv": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\mule_inference_preview.csv",
+  "high_risk_csv": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609\\mule_high_risk_top100.csv",
+  "output_dir": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_testclient_e2e_pipeline_1_20260409_204609"
+}

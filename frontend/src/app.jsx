@@ -1,23 +1,24 @@
 // frontend/src/App.jsx
-import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from "@context/AppContext";
 import { ScaleLoader } from 'react-spinners';
 import { PageTransition } from "./components/LoadingAnimations";
 import { persistLastRoute, readLastRoute } from './utils/navigationPersistence';
+import { lazyWithReload } from './utils/lazyWithReload';
 
-const LoginScreen = lazy(() => import("@screens/auth/LoginScreen"));
-const RegisterScreen = lazy(() => import("@screens/auth/RegisterScreen"));
-const AdminDashboard = lazy(() => import("@screens/admin/AdminDashboard"));
-const EnvironmentSelectScreen = lazy(() => import("@screens/admin/EnvironmentSelectScreen"));
-const EnvironmentModuleTransitionScreen = lazy(() => import("@screens/admin/EnvironmentModuleTransitionScreen"));
-const ToolSelectScreen = lazy(() => import("@screens/admin/ToolSelectScreen"));
+const LoginScreen = lazyWithReload(() => import("@screens/auth/LoginScreen"), 'login');
+const RegisterScreen = lazyWithReload(() => import("@screens/auth/RegisterScreen"), 'register');
+const AdminDashboard = lazyWithReload(() => import("@screens/admin/AdminDashboard"), 'admin');
+const EnvironmentSelectScreen = lazyWithReload(() => import("@screens/admin/EnvironmentSelectScreen"), 'environments');
+const EnvironmentModuleTransitionScreen = lazyWithReload(() => import("@screens/admin/EnvironmentModuleTransitionScreen"), 'tools-transition');
+const ToolSelectScreen = lazyWithReload(() => import("@screens/admin/ToolSelectScreen"), 'tools');
 
-const InvestigationPlatform = lazy(() => import("@tools/investigation/InvestigationPlatform"));
-const CalibrationPlatform = lazy(() => import("@tools/calibration/CalibrationPlatform"));
-const MulePlatform = lazy(() => import("@tools/mule_detection/MulePlatform"));
-const BTSYPlatform = lazy(() => import("@tools/btsy/BTSYPlatform"));
-const MLOpsPlatform = lazy(() => import("@tools/mlops/MLOpsPlatform"));
+const InvestigationPlatform = lazyWithReload(() => import("@tools/investigation/InvestigationPlatform"), 'investigation');
+const CalibrationPlatform = lazyWithReload(() => import("@tools/calibration/CalibrationPlatform"), 'calibration');
+const MulePlatform = lazyWithReload(() => import("@tools/mule_detection/MulePlatform"), 'mule');
+const BTSYPlatform = lazyWithReload(() => import("@tools/btsy/BTSYPlatform"), 'btsy');
+const MLOpsPlatform = lazyWithReload(() => import("@tools/mlops/MLOpsPlatform"), 'mlops');
 
 const RESTORE_ENTRY_PATHS = new Set(['/', '/environments']);
 const TOOL_ROUTE_PREFIXES = [
@@ -58,8 +59,38 @@ const RouteLoader = () => (
   </div>
 );
 
+class RouteErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100">
+        <div className="border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="mb-3 text-sm font-semibold text-slate-900">This screen needs a refresh.</p>
+          <button
+            className="border border-orange-700 bg-orange-700 px-4 py-2 text-sm font-semibold text-white"
+            onClick={() => window.location.reload()}
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 const RouteSuspense = ({ children }) => (
-  <Suspense fallback={<RouteLoader />}>{children}</Suspense>
+  <RouteErrorBoundary>
+    <Suspense fallback={<RouteLoader />}>{children}</Suspense>
+  </RouteErrorBoundary>
 );
 
 const NavigationStateManager = () => {

@@ -12,9 +12,9 @@ def _int_env(name, default):
 cpu_count = max(1, multiprocessing.cpu_count())
 
 bind = f"0.0.0.0:{os.getenv('APP_PORT', os.getenv('PORT', '5000'))}"
-workers = _int_env("WEB_CONCURRENCY", max(2, min((cpu_count * 2) + 1, 8)))
+workers = _int_env("WEB_CONCURRENCY", 1)
 worker_class = os.getenv("GUNICORN_WORKER_CLASS", "gthread")
-threads = _int_env("GUNICORN_THREADS", max(4, min(cpu_count * 2, 16)))
+threads = _int_env("GUNICORN_THREADS", 8)
 timeout = _int_env("GUNICORN_TIMEOUT", 600)
 graceful_timeout = _int_env("GUNICORN_GRACEFUL_TIMEOUT", 60)
 keepalive = _int_env("GUNICORN_KEEPALIVE", 30)

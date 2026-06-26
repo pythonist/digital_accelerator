@@ -39,6 +39,7 @@ from config import CALIBRATION_DB_PATH
 from core.module_registry import REGISTRY
 from core.compat import log_startup_compat
 from config_btsy import configure_btsy_app
+from services.cloud_state_sync import restore_cloud_state, schedule_cloud_state_sync
 
 from api.middleware.tenant_context import tenant_context_middleware
 from security.app_secrets import get_app_secret_key
@@ -356,6 +357,8 @@ def _register_blueprints(app: Flask, backend_profile: str):
 def create_app() -> Flask:
     backend_profile = _normalize_backend_profile(os.getenv("AML_BACKEND_PROFILE", "full"))
 
+    restore_cloud_state()
+
     app = Flask(__name__, static_folder=DIST_DIR)
     app.secret_key = get_app_secret_key()
     app.config["AML_BACKEND_PROFILE"] = backend_profile
@@ -396,6 +399,12 @@ def create_app() -> Flask:
     @app.after_request
     def _trace_api_request_complete(response):
         path = str(request.path or "")
+        if (
+            path.startswith("/api")
+            and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and response.status_code < 400
+        ):
+            schedule_cloud_state_sync(f"{request.method} {path}")
         if not any(path.startswith(prefix) for prefix in REQUEST_TRACE_PREFIXES):
             return response
         started_at = getattr(g, "_request_trace_started_at", None)
@@ -414,7 +423,12 @@ def create_app() -> Flask:
         file_path = os.path.join(app.static_folder, path)
         if path and os.path.exists(file_path):
             return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, "index.html")
+        if path and (path.startswith("assets/") or os.path.splitext(path)[1]):
+            return jsonify({"error": "Static asset not found"}), 404
+        response = send_from_directory(app.static_folder, "index.html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
     @app.route("/health")
     def health():

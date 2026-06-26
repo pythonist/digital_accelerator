@@ -75,7 +75,6 @@ import {
   Bar,
   BarChart as ReBarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
@@ -375,6 +374,95 @@ const buildLiveBatchRecord = (data, previous = null) => {
       ? Number(((100 * cumulativeMissed) / cumulativeKnownPositive).toFixed(2))
       : null,
   };
+};
+
+const DecisionBarShapeChart = ({ data = [] }) => {
+  const rows = (data || []).map((row, index) => ({
+    stage: String(row?.stage || `Step ${index + 1}`),
+    count: num(row?.count, 0),
+    fill: row?.fill || [D.blue, '#5b21b6', D.green, D.orange][index % 4],
+  }));
+  const maxCount = Math.max(1, ...rows.map((row) => row.count));
+  const ticks = [maxCount, Math.round(maxCount / 2), 0];
+
+  return (
+    <Box sx={{ height: 260, display: 'grid', gridTemplateRows: '1fr auto', gap: 1 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: '42px 1fr', minHeight: 0 }}>
+        <Box sx={{ position: 'relative', borderRight: `1px solid ${D.border}` }}>
+          {ticks.map((tick, index) => (
+            <Typography
+              key={`tick-${index}`}
+              sx={{
+                position: 'absolute',
+                right: 6,
+                top: `${index * 50}%`,
+                transform: 'translateY(-50%)',
+                fontSize: 10,
+                color: D.muted,
+                lineHeight: 1,
+              }}
+            >
+              {fmt(tick)}
+            </Typography>
+          ))}
+        </Box>
+        <Box sx={{ position: 'relative', pl: 2, pr: 1, pb: 0.5 }}>
+          {[0, 50, 100].map((top) => (
+            <Box
+              key={`grid-${top}`}
+              sx={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: `${top}%`,
+                borderTop: `1px dashed ${top === 100 ? D.border : '#edf2f7'}`,
+              }}
+            />
+          ))}
+          <Box sx={{ position: 'relative', zIndex: 1, height: '100%', display: 'grid', gridTemplateColumns: `repeat(${Math.max(rows.length, 1)}, minmax(48px, 1fr))`, gap: 2, alignItems: 'end' }}>
+            {rows.map((row) => {
+              const pctHeight = Math.max(4, Math.round((row.count / maxCount) * 100));
+              return (
+                <Box key={row.stage} title={`${row.stage}: ${fmt(row.count)}`} sx={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', minWidth: 0 }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 800, color: D.text, mb: 0.6 }}>
+                    {fmt(row.count)}
+                  </Typography>
+                  <Box
+                    sx={{
+                      width: 'min(64px, 78%)',
+                      height: `${pctHeight}%`,
+                      minHeight: 8,
+                      bgcolor: row.fill,
+                      border: `1px solid ${row.fill}`,
+                      boxShadow: '0 8px 18px rgba(15, 23, 42, 0.12)',
+                    }}
+                  />
+                </Box>
+              );
+            })}
+          </Box>
+        </Box>
+      </Box>
+      <Box sx={{ display: 'grid', gridTemplateColumns: `42px repeat(${Math.max(rows.length, 1)}, minmax(48px, 1fr))`, columnGap: 2, pl: 0, pr: 1 }}>
+        <Box />
+        {rows.map((row) => (
+          <Typography
+            key={`label-${row.stage}`}
+            sx={{
+              fontSize: 10,
+              color: D.text,
+              textAlign: 'center',
+              lineHeight: 1.25,
+              minWidth: 0,
+              overflowWrap: 'anywhere',
+            }}
+          >
+            {row.stage}
+          </Typography>
+        ))}
+      </Box>
+    </Box>
+  );
 };
 
 // â”€â”€ Stat Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3586,19 +3674,7 @@ const DeploymentDashboard = ({
                   {simLoading ? (
                     <Skeleton height={260} />
                   ) : (
-                    <ResponsiveContainer width="100%" height={260}>
-                      <ReBarChart data={displayDecisionBars} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="stage" tick={{ fontSize: 10 }} interval={0} angle={-10} textAnchor="end" height={50} />
-                        <YAxis tick={{ fontSize: 10 }} />
-                        <RTooltip />
-                        <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                          {displayDecisionBars.map((row) => (
-                            <Cell key={row.stage} fill={row.fill} />
-                          ))}
-                        </Bar>
-                      </ReBarChart>
-                    </ResponsiveContainer>
+                    <DecisionBarShapeChart data={displayDecisionBars} />
                   )}
                 </Paper>
               </Box>

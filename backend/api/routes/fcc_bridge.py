@@ -154,6 +154,7 @@ def import_published_run():
             rerank_after_import=_bool_value(body.get("rerank_after_import"), default=False),
             prepare_investigation_context=_bool_value(body.get("prepare_investigation_context"), default=False),
             context_profile=str(body.get("context_profile") or "balanced").strip() or "balanced",
+            generation_mode=str(body.get("generation_mode") or "advanced").strip() or "advanced",
         )
         return jsonify({"success": True, "import": result})
     except FileNotFoundError as exc:

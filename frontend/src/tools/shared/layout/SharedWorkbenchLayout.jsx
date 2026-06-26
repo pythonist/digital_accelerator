@@ -36,7 +36,7 @@ import {
   Person,
   Settings,
 } from '@mui/icons-material';
-import SentinelLogo from '@assets/PwC_2025_Logo.svg';
+import SentinelLogo from '@assets/PwC_2025_logo.svg';
 
 const HEADER_HEIGHT = 36;
 const DRAWER_WIDTH = 280;
@@ -103,7 +103,19 @@ const SharedWorkbenchLayout = ({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sharedWorkbench.isCollapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sharedWorkbench.isCollapsed', isCollapsed);
+    } catch {}
+  }, [isCollapsed]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorElUser, setAnchorElUser] = useState(null);
   const isSharp = navShape === 'sharp';

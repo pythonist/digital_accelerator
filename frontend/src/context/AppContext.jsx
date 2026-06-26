@@ -101,9 +101,20 @@ export const AppProvider = ({ children }) => {
   const loadAvailableEnvironments = useCallback(async () => {
     try {
       const res = await apiClient.get('/api/v2/env/list');
-      setAvailableEnvironments(res.cases || []);
+      const cases = Array.isArray(res.cases) ? res.cases : [];
+      setAvailableEnvironments(cases);
+      if (activeEnv && !cases.includes(activeEnv)) {
+        apiClient.setActiveEnv(null);
+        setActiveEnvState(null);
+        setActiveBankName('Default');
+        setEnvReadyState(ENV_STATE.NOT_SELECTED);
+        setDatasetLoaded(false);
+        setMasterDataBuilt(false);
+        resetCaseScope();
+        resetPriorityBuckets();
+      }
     } catch (err) { setAvailableEnvironments([]); }
-  }, []);
+  }, [activeEnv]);
 
   const fetchModels = useCallback(async () => {
     try {
@@ -112,8 +123,9 @@ export const AppProvider = ({ children }) => {
     } catch (err) {}
   }, []);
 
-  const checkEnvironmentReadiness = useCallback(async () => {
-    if (!activeEnv) {
+  const checkEnvironmentReadiness = useCallback(async (envOverride = null) => {
+    const envToCheck = String(envOverride || activeEnv || '').trim();
+    if (!envToCheck) {
       setEnvReadyState(ENV_STATE.NOT_SELECTED);
       setDatasetLoaded(false);
       setMasterDataBuilt(false);
@@ -121,7 +133,7 @@ export const AppProvider = ({ children }) => {
     }
 
     try {
-      const validateRes = await apiClient.get(`/api/v2/env/${activeEnv}/validate`);
+      const validateRes = await apiClient.get(`/api/v2/env/${encodeURIComponent(envToCheck)}/validate`, { env_id: envToCheck });
       
       if (validateRes.has_cases_table) {
         setEnvReadyState(ENV_STATE.DATA_LOADED);
@@ -212,9 +224,10 @@ export const AppProvider = ({ children }) => {
     try {
       const envRes = await apiClient.get('/api/v2/env/status');
       if (envRes.active) {
-        setActiveEnv(envRes.name);
-        setActiveBankName(envRes.name);
-        await checkEnvironmentReadiness();
+        const nextEnv = String(envRes.name || '').trim();
+        setActiveEnv(nextEnv);
+        setActiveBankName(nextEnv);
+        await checkEnvironmentReadiness(nextEnv);
       } 
     } catch (err) {} 
     finally { setIsSystemLoading(false); }

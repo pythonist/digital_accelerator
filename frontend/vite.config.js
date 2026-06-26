@@ -8,20 +8,9 @@ export default defineConfig({
   build: {
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return null;
-          if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) return 'vendor-react';
-          if (id.includes('@mui') || id.includes('@emotion')) return 'vendor-mui';
-          if (id.includes('recharts') || id.includes('d3') || id.includes('react-force-graph')) return 'vendor-charts';
-          if (id.includes('axios') || id.includes('lodash') || id.includes('zustand')) return 'vendor-utils';
-          return 'vendor';
-        },
-      },
-    },
   },
   resolve: {
+    preserveSymlinks: true,
     alias: {
       '@context': path.resolve(__dirname, './src/context'),
       '@services': path.resolve(__dirname, './src/services'),

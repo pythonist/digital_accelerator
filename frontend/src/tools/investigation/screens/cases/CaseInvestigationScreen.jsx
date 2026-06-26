@@ -574,6 +574,29 @@ const CaseInvestigationScreen = () => {
               </Box>
             )}
 
+            {!loading && selectedCaseId && !facts && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, p: 6 }}>
+                <Box sx={{ width: 80, height: 80, bgcolor: '#fff3e0', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #ffe0b2', mb: 3 }}>
+                  <WarningIcon sx={{ fontSize: 40, color: '#f57c00' }} />
+                </Box>
+                <Typography variant="h6" fontWeight="600" color="text.primary" gutterBottom>Failed to Load Case Facts</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420, textAlign: 'center', lineHeight: 1.6, mb: 1 }}>
+                  We couldn't retrieve facts for case <strong>{selectedCaseId}</strong>.
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 400, textAlign: 'center', mb: 3 }}>
+                  Ensure master data generation has run and the case data exists in the database.
+                </Typography>
+                <Button 
+                  onClick={() => handleCaseSelect(selectedCaseId)} 
+                  startIcon={<RefreshIcon />} 
+                  variant="contained"
+                  disableElevation
+                >
+                  Retry Loading Case
+                </Button>
+              </Box>
+            )}
+
             {!loading && selectedCaseId && facts && (
               <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
                 

@@ -6,10 +6,10 @@ class ReviewQuestionsGenerator:
     STRICT RULES: Questions only, no answers or evaluations.
     """
     
-    def __init__(self, ollama_wrapper):
-        self.ollama = ollama_wrapper
+    def __init__(self, llm_provider):
+        self.ollama = llm_provider
     
-    def generate_review_questions(self, case_summary, model="llama3.2:1b"):
+    def generate_review_questions(self, case_summary, model="gpt-4o-mini"):
         """
         Generate 5-7 critical review questions.
         

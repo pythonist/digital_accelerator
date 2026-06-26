@@ -1,7 +1,7 @@
 // frontend/src/tools/mule_detection/layout/Sidebar_Final.jsx
 // Complete sidebar with all ML Intelligence screens
 import React, { useState } from 'react';
-import SentinelLogo from '@assets/PwC_2025_Logo.svg';
+import SentinelLogo from '@assets/PwC_2025_logo.svg';
 import {
   Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
   Box, Typography, IconButton, Tooltip, alpha, Chip, Divider, Collapse

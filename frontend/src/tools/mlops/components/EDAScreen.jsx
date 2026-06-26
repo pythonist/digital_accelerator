@@ -414,9 +414,10 @@ const ErrBox = ({ msg, onRetry }) => (
 
 const Card = ({ children, sx={}, highlight, danger: isDanger }) => (
   <Paper variant="outlined" sx={{
-    p:{ xs:1.5, md:1.75 }, borderRadius:1.25, bgcolor: D.cardBg,
-    borderColor: highlight ? '#f3c6af' : isDanger ? '#fca5a5' : D.border,
-    boxShadow:'none',
+    p:{ xs:1.5, md:2 }, borderRadius:2, bgcolor: D.cardBg,
+    border: highlight ? '1px solid #f3c6af' : isDanger ? '1px solid #fca5a5' : 'none',
+    boxShadow: highlight || isDanger ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+    minWidth: 0,
     ...sx,
   }}>
     {children}
@@ -424,11 +425,11 @@ const Card = ({ children, sx={}, highlight, danger: isDanger }) => (
 );
 
 const SectionLabel = ({ children, icon: Icon }) => (
-  <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb:1 }}>
-    {Icon && <Icon sx={{ fontSize:13, color:D.textSec }} />}
+  <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb:0.75 }}>
+    {Icon && <Icon sx={{ fontSize:13, color:D.textMute }} />}
     <Typography variant="caption" sx={{
-      fontWeight:700, textTransform:'uppercase', letterSpacing:0.9,
-      fontSize:10, color:D.textSec,
+      fontWeight:700, textTransform:'uppercase', letterSpacing:1,
+      fontSize:10, color:D.textMute,
     }}>
       {children}
     </Typography>
@@ -437,9 +438,9 @@ const SectionLabel = ({ children, icon: Icon }) => (
 
 const StatCell = ({ label, value, sub, warn, ok, danger: isDanger }) => (
   <Box sx={{
-    p:1.5, borderRadius:1.5,
+    p:1.25, borderRadius:1.5,
     bgcolor: isDanger ? D.dangerLight : ok ? D.okLight : warn ? D.warnLight : '#f8fafc',
-    border:`1px solid ${isDanger ? '#fecdd3' : ok ? D.okBorder : warn ? '#fde68a' : D.border}`,
+    border: 'none',
     minWidth:90,
   }}>
     <Typography variant="caption" color="text.secondary" sx={{ fontSize:10, display:'block' }}>{label}</Typography>
@@ -454,21 +455,21 @@ const StatCell = ({ label, value, sub, warn, ok, danger: isDanger }) => (
 // Business insight panel - shown per chart in business mode
 const InsightPanel = ({ what, why, action, severity='info' }) => {
   const colors = {
-    info:    { border: '#bfdbfe', icon: D.info,   Icon: Lightbulb },
-    warning: { border: '#fde68a', icon: D.warn,   Icon: Warning },
-    success: { border: D.okBorder,icon: D.ok,     Icon: CheckCircle },
-    danger:  { border: '#fecdd3', icon: D.danger, Icon: GppBad },
+    info:    { bg: '#f8fafc', icon: D.info,   Icon: Lightbulb },
+    warning: { bg: '#fffbeb', icon: D.warn,   Icon: Warning },
+    success: { bg: '#f0fdf4', icon: D.ok,     Icon: CheckCircle },
+    danger:  { bg: '#fff1f2', icon: D.danger, Icon: GppBad },
   };
   const c = colors[severity] || colors.info;
   return (
-    <Box sx={{ mt:1.15, pt:1.1, borderTop:`1px solid ${D.borderLight}` }}>
-      <Stack direction="row" spacing={1} alignItems="flex-start">
-        <c.Icon sx={{ fontSize:15, color:c.icon, mt:0.1, flexShrink:0 }} />
-        <Box sx={{ borderLeft:`2px solid ${c.border}`, pl:1 }}>
-          {what && <Typography sx={{ fontSize:11, fontWeight:700, color:D.textPri, mb:0.25 }}>{what}</Typography>}
-          {why  && <Typography sx={{ fontSize:11, color:D.textSec, lineHeight:1.5 }}>{why}</Typography>}
+    <Box sx={{ mt:1, pt:0.75 }}>
+      <Stack direction="row" spacing={0.75} alignItems="flex-start" sx={{ p:1, borderRadius:1.5, bgcolor:c.bg }}>
+        <c.Icon sx={{ fontSize:14, color:c.icon, mt:0.15, flexShrink:0 }} />
+        <Box>
+          {what && <Typography sx={{ fontSize:11, fontWeight:700, color:D.textPri, mb:0.15 }}>{what}</Typography>}
+          {why  && <Typography sx={{ fontSize:11, color:D.textSec, lineHeight:1.45 }}>{why}</Typography>}
           {action && (
-            <Typography sx={{ fontSize:11, color:c.icon, fontWeight:600, mt:0.5 }}>
+            <Typography sx={{ fontSize:11, color:c.icon, fontWeight:600, mt:0.35 }}>
               Action: {action}
             </Typography>
           )}
@@ -1604,7 +1605,11 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
   };
 
   return (
-    <Stack spacing={2.5}>
+    <Stack spacing={2} sx={{
+      /* Global fix: Recharts ResponsiveContainer needs explicit width in CSS Grid cells */
+      '& [style*="display: grid"] > *, & [style*="display:grid"] > *': { minWidth: 0 },
+      '& .MuiBox-root': { minWidth: 0 },
+    }}>
 
       {/* Top stat row */}
       <Box sx={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))', gap:1.5 }}>
@@ -1655,7 +1660,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
 
       {/* AML Dashboard Grid - 2x3 matching notebook output */}
       {targetColumn&&(
-        <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', lg:'repeat(2,minmax(0,1fr))', xl:'repeat(3,minmax(0,1fr))' }, gap:1.75 }}>
+        <Box sx={{ display:'grid', gridTemplateColumns:{ xs:'1fr', lg:'repeat(2,minmax(0,1fr))', xl:'repeat(3,minmax(0,1fr))' }, gap:1.25, '& > *': { minWidth: 0 } }}>
 
           {/* P1 - Target class distribution */}
           <Card>
@@ -1680,7 +1685,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                         <YAxis tick={{ fontSize:10 }} tickFormatter={fmt} />
                         <RTooltip formatter={v=>[fmt(v),'Count']}
                           labelFormatter={(_,p)=>p?.[0]?`${p[0].payload.label} - ${fmtPct(p[0].payload.pct*100)}`:''}/>
-                        <Bar dataKey="count" radius={[4,4,0,0]}
+                        <Bar isAnimationActive={false} dataKey="count" radius={[4,4,0,0]}
                           label={{ position:'top', fontSize:9, formatter:v=>fmt(v) }}>
                           {classData.map((d,i)=><Cell key={i} fill={d.bucket==='negative' ? D.chartFP : d.bucket==='positive' ? D.chartTP : D.chart[i%D.chart.length]}/>)}
                         </Bar>
@@ -1737,8 +1742,8 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                       <RTooltip formatter={(v,n)=>[fmt(v),classNameFromSeries(n, lexicon)]} />
                       <Legend iconSize={9} wrapperStyle={{ fontSize:10 }}
                         formatter={v=>classNameFromSeries(v, lexicon)} />
-                      <Bar dataKey="fp_count" fill={D.chartFP} opacity={0.65} radius={[2,2,0,0]} />
-                      <Bar dataKey="tp_count" fill={D.chartTP} opacity={0.65} radius={[2,2,0,0]} />
+                      <Bar isAnimationActive={false} dataKey="fp_count" fill={D.chartFP} opacity={0.65} radius={[2,2,0,0]} />
+                      <Bar isAnimationActive={false} dataKey="tp_count" fill={D.chartTP} opacity={0.65} radius={[2,2,0,0]} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
@@ -1779,7 +1784,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                       <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={fmt} />
                       <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={75} />
                       <RTooltip formatter={v=>[fmt(v),'Alerts']} />
-                      <Bar dataKey="count" fill={D.orange} radius={[0,3,3,0]}>
+                      <Bar isAnimationActive={false} dataKey="count" fill={D.orange} radius={[0,3,3,0]}>
                         {ruleData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
                       </Bar>
                     </BarChart>
@@ -1822,7 +1827,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                       <XAxis dataKey="label" tick={{ fontSize:10 }} label={{ value:'Risk Rating (1=Low, 10=High)', position:'insideBottom', offset:-12, fontSize:9 }} />
                       <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                       <RTooltip formatter={v=>[`${fmtF(v)}%`,`${lexicon.positiveShort} rate`]} />
-                      <Bar dataKey="tp_rate" radius={[3,3,0,0]}>
+                      <Bar isAnimationActive={false} dataKey="tp_rate" radius={[3,3,0,0]}>
                         {ratingData.map((d,i)=><Cell key={i} fill={ratingGradient(d.label)}/>)}
                       </Bar>
                     </BarChart>
@@ -1863,7 +1868,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                       <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={v=>`${v}%`} domain={[0,100]} />
                       <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={65} />
                       <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}% (n=${fmt(p.payload.count)})`,`${lexicon.positiveShort} rate`]} />
-                      <Bar dataKey="tp_rate" radius={[0,3,3,0]} fill={D.chartFP} />
+                      <Bar isAnimationActive={false} dataKey="tp_rate" radius={[0,3,3,0]} fill={D.chartFP} />
                     </BarChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
@@ -1909,7 +1914,7 @@ const DashboardTab = ({ ds, persona, targetColumn, colTypes, detectedCols }) => 
                         <RTooltip formatter={v=>[`${v!=null?v.toFixed(1):'-'}%`,`${lexicon.positiveShort} rate`]} />
                         <Legend iconSize={9} wrapperStyle={{ fontSize:10 }} />
                         {flagData.flagNames.map((name,i)=>(
-                          <Bar key={name} dataKey={name} fill={D.chart[i%D.chart.length]} radius={[3,3,0,0]} />
+                          <Bar isAnimationActive={false} key={name} dataKey={name} fill={D.chart[i%D.chart.length]} radius={[3,3,0,0]} />
                         ))}
                       </BarChart>
                     </ResponsiveContainer>
@@ -2080,7 +2085,7 @@ const AlertImbalanceTab = ({ ds, persona, targetColumn, detectedCols }) => {
                     <XAxis dataKey="label" tick={{ fontSize:10 }} />
                     <YAxis tick={{ fontSize:10 }} tickFormatter={fmt} />
                     <RTooltip formatter={v=>[fmt(v),'Count']} />
-                    <Bar dataKey="count" radius={[4,4,0,0]}
+                    <Bar isAnimationActive={false} dataKey="count" radius={[4,4,0,0]}
                       label={{ position:'top', fontSize:11, formatter:v=>`${fmt(v)}` }}>
                       <Cell fill={D.chartFP} /><Cell fill={D.chartTP} />
                     </Bar>
@@ -2104,7 +2109,7 @@ const AlertImbalanceTab = ({ ds, persona, targetColumn, detectedCols }) => {
               >
                 <ResponsiveContainer width="100%" height={220}>
                   <PieChart>
-                    <Pie data={[{ name:lexicon.negativeShort, value:fp },{ name:lexicon.positiveShort, value:tp }]}
+                    <Pie isAnimationActive={false} data={[{ name:lexicon.negativeShort, value:fp },{ name:lexicon.positiveShort, value:tp }]}
                       cx="50%" cy="50%" innerRadius={55} outerRadius={85}
                       paddingAngle={3} dataKey="value">
                       <Cell fill={D.chartFP}/><Cell fill={D.chartTP}/>
@@ -2141,8 +2146,8 @@ const AlertImbalanceTab = ({ ds, persona, targetColumn, detectedCols }) => {
                       <YAxis yAxisId="right" orientation="right" tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                       <RTooltip />
                       <Legend iconSize={9} wrapperStyle={{ fontSize:10 }} />
-                      <Bar yAxisId="left" dataKey="count" name="Alert Volume" fill={D.chartFP} opacity={0.5} radius={[2,2,0,0]} />
-                      <Line yAxisId="right" dataKey="tp_rate" name={`${lexicon.positiveShort} Rate %`} type="monotone" stroke={D.chartTP} strokeWidth={2} dot={false} />
+                      <Bar isAnimationActive={false} yAxisId="left" dataKey="count" name="Alert Volume" fill={D.chartFP} opacity={0.5} radius={[2,2,0,0]} />
+                      <Line isAnimationActive={false} yAxisId="right" dataKey="tp_rate" name={`${lexicon.positiveShort} Rate %`} type="monotone" stroke={D.chartTP} strokeWidth={2} dot={false} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
@@ -2302,8 +2307,8 @@ const RiskScoreTab = ({ ds, persona, targetColumn, detectedCols }) => {
                       <RTooltip formatter={(v,n)=>[fmt(v),classNameFromSeries(n, lexicon)]} />
                       <Legend iconSize={9} wrapperStyle={{ fontSize:10 }}
                         formatter={v=>classNameFromSeries(v, lexicon)} />
-                      <Bar dataKey="fp_count" fill={D.chartFP} opacity={0.6} radius={[2,2,0,0]} />
-                      <Bar dataKey="tp_count" fill={D.chartTP} opacity={0.7} radius={[2,2,0,0]} />
+                      <Bar isAnimationActive={false} dataKey="fp_count" fill={D.chartFP} opacity={0.6} radius={[2,2,0,0]} />
+                      <Bar isAnimationActive={false} dataKey="tp_count" fill={D.chartTP} opacity={0.7} radius={[2,2,0,0]} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
@@ -2327,9 +2332,9 @@ const RiskScoreTab = ({ ds, persona, targetColumn, detectedCols }) => {
                         <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                         <RTooltip formatter={(v,n)=>[`${v}%`,n==='cumFP'?`Cum. ${lexicon.negativeShort}`:n==='cumTP'?`Cum. ${lexicon.positiveShort}`:'KS Gap']} />
                         <Legend iconSize={9} wrapperStyle={{ fontSize:10 }} />
-                        <Line dataKey="cumFP" name={`Cum. ${lexicon.negativeShort}`} stroke={D.chartFP} strokeWidth={2} dot={false} />
-                        <Line dataKey="cumTP" name={`Cum. ${lexicon.positiveShort}`} stroke={D.chartTP} strokeWidth={2} dot={false} />
-                        <Line dataKey="ks"    name="KS Gap"  stroke="#7C3AED"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+                        <Line isAnimationActive={false} dataKey="cumFP" name={`Cum. ${lexicon.negativeShort}`} stroke={D.chartFP} strokeWidth={2} dot={false} />
+                        <Line isAnimationActive={false} dataKey="cumTP" name={`Cum. ${lexicon.positiveShort}`} stroke={D.chartTP} strokeWidth={2} dot={false} />
+                        <Line isAnimationActive={false} dataKey="ks"    name="KS Gap"  stroke="#7C3AED"   strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
                       </LineChart>
                     </ResponsiveContainer>
                   </DrilldownFrame>
@@ -2376,7 +2381,7 @@ const RiskScoreTab = ({ ds, persona, targetColumn, detectedCols }) => {
                         <XAxis dataKey="label" tick={{ fontSize:10 }} />
                         <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                         <RTooltip formatter={v=>[`${v}%`,`${lexicon.positiveShort} rate in band`]} />
-                        <Bar dataKey="tpRate" name={`${lexicon.positiveShort} Rate %`} radius={[4,4,0,0]}>
+                        <Bar isAnimationActive={false} dataKey="tpRate" name={`${lexicon.positiveShort} Rate %`} radius={[4,4,0,0]}>
                           {bands.map((_,i)=><Cell key={i} fill={[D.chartFP,'#0891B2',D.warn,D.chartTP][i]}/>)}
                         </Bar>
                       </BarChart>
@@ -2468,7 +2473,7 @@ const RuleIntelligenceTab = ({ ds, persona, targetColumn, detectedCols }) => {
                   <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={fmt} />
                   <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={115} />
                   <RTooltip formatter={v=>[fmt(v),'Alerts']} />
-                  <Bar dataKey="count" radius={[0,3,3,0]}
+                  <Bar isAnimationActive={false} dataKey="count" radius={[0,3,3,0]}
                     label={{ position:'right', fontSize:9, formatter:v=>fmt(v) }}>
                     {ruleData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
                   </Bar>
@@ -2491,7 +2496,7 @@ const RuleIntelligenceTab = ({ ds, persona, targetColumn, detectedCols }) => {
                   <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={v=>`${v}%`} domain={[0,100]} />
                   <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={115} />
                   <RTooltip formatter={v=>[`${fmtF(v)}%`,'STR Rate']} />
-                  <Bar dataKey="tp_rate" radius={[0,3,3,0]}
+                  <Bar isAnimationActive={false} dataKey="tp_rate" radius={[0,3,3,0]}
                     label={{ position:'right', fontSize:9, formatter:v=>`${v}%` }}>
                     {[...ruleData].sort((a,b)=>b.tp_rate-a.tp_rate).map((r,i)=>(
                       <Cell key={i} fill={r.tp_rate<15?D.danger:r.tp_rate<40?D.warn:D.ok}/>
@@ -2618,7 +2623,7 @@ const EntityRiskTab = ({ ds, persona, targetColumn, detectedCols }) => {
                 <XAxis dataKey="label" tick={{ fontSize:10 }} label={{ value:'Risk Rating',position:'insideBottom',offset:-12,fontSize:9 }} />
                 <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                 <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}% (n=${fmt(p.payload.count)})`,'STR Rate']} />
-                <Bar dataKey="tp_rate" radius={[3,3,0,0]}>
+                <Bar isAnimationActive={false} dataKey="tp_rate" radius={[3,3,0,0]}>
                   {ratingData.map((d,i)=>{
                     const n=Number(d.label); const t=(n-1)/9;
                     const r=Math.round(34+t*221); const g=Math.round(197-t*175);
@@ -2642,7 +2647,7 @@ const EntityRiskTab = ({ ds, persona, targetColumn, detectedCols }) => {
                 <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={v=>`${v}%`} domain={[0,100]} />
                 <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={70} />
                 <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}%`,'STR Rate']} />
-                <Bar dataKey="tp_rate" radius={[0,3,3,0]} fill={D.chartFP}
+                <Bar isAnimationActive={false} dataKey="tp_rate" radius={[0,3,3,0]} fill={D.chartFP}
                   label={{ position:'right', fontSize:9, formatter:v=>`${v}%` }} />
               </BarChart>
             </ResponsiveContainer>
@@ -2661,7 +2666,7 @@ const EntityRiskTab = ({ ds, persona, targetColumn, detectedCols }) => {
                 <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={v=>`${v}%`} domain={[0,100]} />
                 <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={40} />
                 <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}% (n=${fmt(p.payload.count)})`,'STR Rate']} />
-                <Bar dataKey="tp_rate" radius={[0,3,3,0]}>
+                <Bar isAnimationActive={false} dataKey="tp_rate" radius={[0,3,3,0]}>
                   {natData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
                 </Bar>
               </BarChart>
@@ -2689,7 +2694,7 @@ const EntityRiskTab = ({ ds, persona, targetColumn, detectedCols }) => {
                 <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={v=>`${v}%`} domain={[0,100]} />
                 <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={80} />
                 <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}%`,'STR Rate']} />
-                <Bar dataKey="tp_rate" radius={[0,3,3,0]} fill={D.orange} />
+                <Bar isAnimationActive={false} dataKey="tp_rate" radius={[0,3,3,0]} fill={D.orange} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -2707,7 +2712,7 @@ const EntityRiskTab = ({ ds, persona, targetColumn, detectedCols }) => {
                 <XAxis dataKey="label" tick={{ fontSize:10 }} />
                 <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                 <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}% (n=${fmt(p.payload.count)})`,'STR Rate']} />
-                <Bar dataKey="tp_rate" radius={[3,3,0,0]}>
+                <Bar isAnimationActive={false} dataKey="tp_rate" radius={[3,3,0,0]}>
                   {acctStatusData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
                 </Bar>
               </BarChart>
@@ -2735,7 +2740,7 @@ const EntityRiskTab = ({ ds, persona, targetColumn, detectedCols }) => {
                 <XAxis dataKey="label" tick={{ fontSize:10 }} />
                 <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} />
                 <RTooltip formatter={(v,_,p)=>[`${fmtF(v)}%`,'STR Rate']} />
-                <Bar dataKey="tp_rate" radius={[3,3,0,0]} fill={D.chartFP} />
+                <Bar isAnimationActive={false} dataKey="tp_rate" radius={[3,3,0,0]} fill={D.chartFP} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -3084,10 +3089,10 @@ const BehaviouralPatternsTab = ({ ds, persona, targetColumn, detectedCols, colTy
                       wrapperStyle={{ fontSize:10 }}
                       formatter={(v)=>classNameFromSeries(v, lexicon)}
                     />
-                    <Bar yAxisId="count" dataKey="fp_count" fill={D.chartFP} opacity={0.5} radius={[2,2,0,0]} />
-                    <Bar yAxisId="count" dataKey="tp_count" fill={D.chartTP} opacity={0.65} radius={[2,2,0,0]} />
-                    <Line yAxisId="share" type="monotone" dataKey="fp_share_pct" stroke={D.chartFP} strokeWidth={2} dot={false} />
-                    <Line yAxisId="share" type="monotone" dataKey="tp_share_pct" stroke={D.chartTP} strokeWidth={2.2} dot={false} />
+                    <Bar isAnimationActive={false} yAxisId="count" dataKey="fp_count" fill={D.chartFP} opacity={0.5} radius={[2,2,0,0]} />
+                    <Bar isAnimationActive={false} yAxisId="count" dataKey="tp_count" fill={D.chartTP} opacity={0.65} radius={[2,2,0,0]} />
+                    <Line isAnimationActive={false} yAxisId="share" type="monotone" dataKey="fp_share_pct" stroke={D.chartFP} strokeWidth={2} dot={false} />
+                    <Line isAnimationActive={false} yAxisId="share" type="monotone" dataKey="tp_share_pct" stroke={D.chartTP} strokeWidth={2.2} dot={false} />
                     <Brush dataKey="bin_start" height={18} travellerWidth={10} />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -3178,8 +3183,8 @@ const ComplianceEnrichmentTab = ({ ds, persona, targetColumn, detectedCols }) =>
                 <YAxis tick={{ fontSize:10 }} tickFormatter={v=>`${v}%`} domain={[0,100]} />
                 <RTooltip formatter={v=>[`${fmtF(v)}%`,'STR Rate']} />
                 <Legend iconSize={9} wrapperStyle={{ fontSize:10 }} />
-                <Bar dataKey="unflagged" name="Not Flagged" fill={D.chartFP} radius={[3,3,0,0]} />
-                <Bar dataKey="flagged"   name="Flagged"     fill={D.chartTP} radius={[3,3,0,0]} />
+                <Bar isAnimationActive={false} dataKey="unflagged" name="Not Flagged" fill={D.chartFP} radius={[3,3,0,0]} />
+                <Bar isAnimationActive={false} dataKey="flagged"   name="Flagged"     fill={D.chartTP} radius={[3,3,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -3239,8 +3244,8 @@ const ComplianceEnrichmentTab = ({ ds, persona, targetColumn, detectedCols }) =>
               <RTooltip />
               <Legend iconSize={9} wrapperStyle={{ fontSize:10 }}
                 formatter={v=>v==='fp_count'?'Class 0':'Class 1'} />
-              <Bar dataKey="fp_count" fill={D.chartFP} opacity={0.6} radius={[2,2,0,0]} />
-              <Bar dataKey="tp_count" fill={D.chartTP} opacity={0.7} radius={[2,2,0,0]} />
+              <Bar isAnimationActive={false} dataKey="fp_count" fill={D.chartFP} opacity={0.6} radius={[2,2,0,0]} />
+              <Bar isAnimationActive={false} dataKey="tp_count" fill={D.chartTP} opacity={0.7} radius={[2,2,0,0]} />
             </ComposedChart>
           </ResponsiveContainer>
           {persona==='business'&&(
@@ -3855,8 +3860,8 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                           }}
                         />
                         <Legend iconSize={9} wrapperStyle={{ fontSize:10 }} />
-                        <Bar yAxisId="count" dataKey="count" fill="#cbd5e1" radius={[3, 3, 0, 0]} name="Rows" />
-                        <Line yAxisId="rate" type="monotone" dataKey="tp_rate_pct" stroke={D.orange} strokeWidth={2.5} dot={{ r:3 }} name="Event rate" />
+                        <Bar isAnimationActive={false} yAxisId="count" dataKey="count" fill="#cbd5e1" radius={[3, 3, 0, 0]} name="Rows" />
+                        <Line isAnimationActive={false} yAxisId="rate" type="monotone" dataKey="tp_rate_pct" stroke={D.orange} strokeWidth={2.5} dot={{ r:3 }} name="Event rate" />
                       </ComposedChart>
                     </ResponsiveContainer>
                     <Typography sx={{ mt:1, fontSize:10.5, color:D.textMute }}>
@@ -3871,7 +3876,7 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                         <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={(v) => `${fmtF(v, 0)}%`} />
                         <YAxis type="category" dataKey="label" tick={{ fontSize:9 }} width={105} />
                         <RTooltip formatter={(value, name, item) => name === 'count' ? [fmt(value), 'Rows'] : [`${fmtF(value, 2)}%`, `Event rate (${fmt(item?.payload?.count)} rows)`]} />
-                        <Bar dataKey="tp_rate_pct" fill={D.orange} radius={[0, 3, 3, 0]} name="Event rate" />
+                        <Bar isAnimationActive={false} dataKey="tp_rate_pct" fill={D.orange} radius={[0, 3, 3, 0]} name="Event rate" />
                       </BarChart>
                     </ResponsiveContainer>
                     <Typography sx={{ mt:1, fontSize:10.5, color:D.textMute }}>
@@ -3944,7 +3949,7 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                       <XAxis dataKey="label" tick={{ fontSize:9 }} angle={-30} textAnchor="end" interval={Math.ceil(histData.length/12)} />
                       <YAxis tick={{ fontSize:10 }} />
                       <RTooltip formatter={v=>[fmt(v),'Count']} />
-                      <Bar dataKey="count" fill={D.orange} radius={[2,2,0,0]} opacity={0.85} />
+                      <Bar isAnimationActive={false} dataKey="count" fill={D.orange} radius={[2,2,0,0]} opacity={0.85} />
                     </BarChart>
                   </ResponsiveContainer>
                 </DrilldownFrame>
@@ -3973,7 +3978,7 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                       <XAxis dataKey="x" tick={{ fontSize:9 }} tickFormatter={v=>fmtF(v,1)} />
                       <YAxis tick={{ fontSize:10 }} />
                       <RTooltip formatter={v=>[v.toFixed(4),'Density']} />
-                      <Area dataKey="density" stroke={D.orange} strokeWidth={2} fill="url(#densGrad)" />
+                      <Area isAnimationActive={false} dataKey="density" stroke={D.orange} strokeWidth={2} fill="url(#densGrad)" />
                       {prof.mean!=null&&<ReferenceLine x={prof.mean} stroke="#374151" strokeDasharray="4 2" label={{ value:'mean',fontSize:9,fill:'#374151' }} />}
                       {prof.median!=null&&<ReferenceLine x={prof.median} stroke={D.info} strokeDasharray="4 2" label={{ value:'median',fontSize:9,fill:D.info }} />}
                     </AreaChart>
@@ -4033,7 +4038,7 @@ const ColumnExplorerTab = ({ ds, persona, targetColumn, colTypes, colNames }) =>
                         if (name === 'pct') return [`${fmtF(value, 2)}%`, 'Share'];
                         return [fmt(value), `Count (${fmtF(item?.payload?.pct, 2)}%)`];
                       }} />
-                      <Bar dataKey="count" fill={D.orange} radius={[0,3,3,0]}
+                      <Bar isAnimationActive={false} dataKey="count" fill={D.orange} radius={[0,3,3,0]}
                         label={{ position:'right', fontSize:9, formatter:v=>fmt(v) }}>
                         {catData.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
                       </Bar>
@@ -4303,7 +4308,7 @@ const QualityTab = ({ ds, persona, targetColumn }) => {
                 <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={(v) => `${fmtF(v, 0)}%`} domain={[0, 100]} />
                 <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={150} />
                 <RTooltip formatter={(value, name, item) => [`${fmtF(value, 1)}%`, `${item?.payload?.full_column || 'Column'} missing`]} />
-                <Bar dataKey="pct_missing" radius={[0, 3, 3, 0]}>
+                <Bar isAnimationActive={false} dataKey="pct_missing" radius={[0, 3, 3, 0]}>
                   {missingChartData.map((row, index) => (
                     <Cell
                       key={`${row.full_column}-${index}`}
@@ -4344,7 +4349,7 @@ const QualityTab = ({ ds, persona, targetColumn }) => {
                 <XAxis type="number" tick={{ fontSize:9 }} tickFormatter={(v) => `${fmtF(v, 0)}%`} />
                 <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={140} />
                 <RTooltip formatter={(value, name, item) => [`${fmtF(value, 1)}%`, `${item?.payload?.full_column || 'Column'} outlier rate`]} />
-                <Bar dataKey="outlier_pct" fill={D.warn} radius={[0, 3, 3, 0]} />
+                <Bar isAnimationActive={false} dataKey="outlier_pct" fill={D.warn} radius={[0, 3, 3, 0]} />
                 <Brush dataKey="column" height={18} travellerWidth={10} />
               </BarChart>
             </ResponsiveContainer>
@@ -4512,7 +4517,7 @@ const CorrelationTab = ({ ds, persona, targetColumn, colNames }) => {
                 <XAxis type="number" tick={{ fontSize:9 }} domain={[-1, 1]} />
                 <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={180} />
                 <RTooltip formatter={(value) => [fmtF(value, 3), `${method} correlation`]} />
-                <Bar dataKey="score" radius={[0, 3, 3, 0]}>
+                <Bar isAnimationActive={false} dataKey="score" radius={[0, 3, 3, 0]}>
                   {targetPairChartData.map((row, index) => (
                     <Cell key={`${row.column}-${index}`} fill={row.score >= 0 ? D.chartTP : D.chartFP} />
                   ))}
@@ -4747,7 +4752,7 @@ const DriversTab = ({ ds, persona, targetColumn, colTypes, colNames, onTargetCha
                   <XAxis type="number" tick={{ fontSize:9 }} />
                   <YAxis type="category" dataKey="column" tick={{ fontSize:9 }} width={155} />
                   <RTooltip formatter={(v,_,p)=>[fmtF(v,4),p.payload.metric_label||'Importance']} />
-                  <Bar dataKey="score" radius={[0,3,3,0]}
+                  <Bar isAnimationActive={false} dataKey="score" radius={[0,3,3,0]}
                     label={{ position:'right', fontSize:9, formatter:v=>fmtF(v,3) }}>
                     {features.map((_,i)=><Cell key={i} fill={D.chart[i%D.chart.length]}/>)}
                   </Bar>
@@ -5419,7 +5424,7 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
                   <XAxis dataKey="x" name={xCol} tick={{ fontSize:9 }} />
                   <YAxis dataKey="y" name={yCol} tick={{ fontSize:9 }} />
                   <RTooltip cursor={{ strokeDasharray:'3 3' }} />
-                  <Scatter data={bivData.points||[]} fill={D.orange} opacity={0.55} r={3} />
+                  <Scatter isAnimationActive={false} data={bivData.points||[]} fill={D.orange} opacity={0.55} r={3} />
                 </ScatterChart>
               </ResponsiveContainer>
             </DrilldownFrame>
@@ -5562,7 +5567,7 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
                   {pair.type==='hist' ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={pair.bins} margin={{ top:2,right:2,bottom:2,left:-20 }}>
-                        <Bar dataKey="count" fill={D.orange} radius={[1,1,0,0]} />
+                        <Bar isAnimationActive={false} dataKey="count" fill={D.orange} radius={[1,1,0,0]} />
                         <XAxis dataKey="bin_start" tick={{ fontSize:7 }} tickFormatter={v=>fmtF(v,0)} />
                       </BarChart>
                     </ResponsiveContainer>
@@ -5573,7 +5578,7 @@ const ExplorerTab = ({ ds, persona, targetColumn, colNames, colTypes }) => {
                         <XAxis dataKey={pair.x} tick={{ fontSize:7 }} />
                         <YAxis dataKey={pair.y} tick={{ fontSize:7 }} />
                         <RTooltip cursor={{ strokeDasharray:'3 3' }} />
-                        <Scatter data={pair.points||[]} fill={D.orange} opacity={0.45} r={2} />
+                        <Scatter isAnimationActive={false} data={pair.points||[]} fill={D.orange} opacity={0.45} r={2} />
                       </ScatterChart>
                     </ResponsiveContainer>
                   )}

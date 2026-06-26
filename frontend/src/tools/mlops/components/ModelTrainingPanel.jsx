@@ -1028,31 +1028,19 @@ const GrainSelector = ({ grain, setGrain, persona, targetColumn, grainOptions = 
         <Info sx={{ fontSize: 13, color: T.textDim, cursor: 'help' }} />
       </Tooltip>
     </Stack>
-    <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+    <Stack direction="row" spacing={1.5}>
       {(Array.isArray(grainOptions) && grainOptions.length ? grainOptions : GRAIN_OPTIONS).map((g) => {
         const isSelected = grain === g.id;
         return (
-          <Paper key={g.id} variant="outlined" onClick={() => setGrain(g.id)}
-            sx={{ flex: 1, p: 1.75, cursor: 'pointer', borderRadius: 2, border: `1.5px solid ${isSelected ? T.textPrimary : T.border}`, bgcolor: isSelected ? T.orangeLight : T.paper, transition: 'all 0.12s ease', '&:hover': { borderColor: T.textPrimary, bgcolor: T.orangeLight } }}>
-            <Stack direction="row" alignItems="flex-start" spacing={1.25}>
-              <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textDim, lineHeight: 1.2, width: 28, height: 28, borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f1f5f9' }}>
+          <Box key={g.id} onClick={() => setGrain(g.id)}
+            sx={{ flex: 1, p: 1.5, cursor: 'pointer', borderRadius: 1.5, border: `1px solid ${isSelected ? T.orange : T.border}`, bgcolor: isSelected ? T.orangeLight : 'transparent', transition: 'all 0.12s ease', '&:hover': { bgcolor: T.orangeLight } }}>
+            <Stack direction="row" alignItems="center" spacing={1.25}>
+              <Typography sx={{ fontSize: 14, fontWeight: 700, color: T.textDim, lineHeight: 1.2, width: 32, height: 32, borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#fff' }}>
                 {g.icon}
               </Typography>
-              <Box flex={1}>
-                <Stack direction="row" alignItems="center" spacing={1} mb={0.25}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>{g.label}</Typography>
-                  <Chip label={g.badge} size="small" sx={{ height: 16, fontSize: 9.5, fontWeight: 700, bgcolor: '#f1f5f9', color: T.textMuted, border: `1px solid ${T.border}` }} />
-                  {isSelected && <CheckCircle sx={{ fontSize: 14, color: T.textMuted }} />}
-                </Stack>
-                <Typography sx={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.5, mb: 0.5 }}>
-                  {persona === 'business'
-                    ? g.description
-                    : `Target: ${targetColumn || g.target} | ID col (excluded from features): ${g.idColumn}`}
-                </Typography>
-                <Typography sx={{ fontSize: 10.5, color: T.textDim, fontStyle: 'italic' }}>{g.examples}</Typography>
-              </Box>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>{g.label}</Typography>
             </Stack>
-          </Paper>
+          </Box>
         );
       })}
     </Stack>
@@ -2318,19 +2306,17 @@ const AlgorithmChoiceTile = ({ algo, selected, onSelect }) => {
   const { accent, tag } = ALGO_COLOURS[algo.id] || { accent: T.orange, tag: 'Model' };
 
   return (
-    <Paper
-      variant="outlined"
+    <Box
       onClick={onSelect}
       sx={{
         p: 1.25,
         cursor: 'pointer',
-        borderRadius: 2,
-        borderColor: selected ? accent : T.border,
-        bgcolor: selected ? '#fff7f2' : '#fff',
+        borderRadius: 1,
+        borderBottom: `1px solid ${selected ? accent : T.border}`,
+        bgcolor: selected ? `${accent}08` : 'transparent',
         transition: 'all 0.12s ease',
         '&:hover': {
-          borderColor: accent,
-          boxShadow: `0 0 0 2px ${accent}14`,
+          bgcolor: `${accent}08`,
         },
       }}
     >
@@ -2365,7 +2351,7 @@ const AlgorithmChoiceTile = ({ algo, selected, onSelect }) => {
           </Typography>
         </Box>
       </Stack>
-    </Paper>
+    </Box>
   );
 };
 
@@ -4013,7 +3999,7 @@ const ModelTrainingPanel = ({
                         size="small"
                         variant="outlined"
                         onClick={() => setShowAlgorithmChooser((prev) => ({ ...prev, [trainingMode]: !prev?.[trainingMode] }))}
-                        sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+                        sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}
                       >
                         {showAlgorithmChooser?.[trainingMode]
                           ? 'Hide model choices'
@@ -4023,7 +4009,7 @@ const ModelTrainingPanel = ({
                         size="small"
                         variant="outlined"
                         onClick={() => setShowTechnicalControls((prev) => !prev)}
-                        sx={{ textTransform: 'none', borderRadius: 0, borderColor: T.border, color: T.textMuted }}
+                        sx={{ textTransform: 'none', borderRadius: 1.5, borderColor: T.border, color: T.textMuted }}
                       >
                         {showTechnicalControls ? 'Hide modeling studio' : 'Open modeling studio'}
                       </Button>
@@ -4035,23 +4021,25 @@ const ModelTrainingPanel = ({
                     <Chip label={selectedTrainingPalette.tag || 'Model'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
                     <Chip label={ALGO_VIZ[selectedTrainingAlgorithm]?.vizLabel || 'Model visual'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
                   </Stack>
-                  <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                  <Stack direction="row" flexWrap="wrap" rowGap={1} columnGap={3} sx={{ py: 1.5 }}>
                     {modelLabFacts.map((fact) => (
-                      <Box key={fact.label} sx={{ p: 1.1, borderRadius: 0, bgcolor: '#fff', border: `1px solid ${T.border}` }}>
-                        <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.45 }}>
+                      <Box key={fact.label}>
+                        <Typography sx={{ fontSize: 9.5, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.45 }}>
                           {fact.label}
                         </Typography>
-                        <Typography sx={{ fontSize: 12.25, fontWeight: 700, color: T.textPrimary, mt: 0.35, lineHeight: 1.45 }}>
-                          {fact.value}
-                        </Typography>
-                        <Typography sx={{ fontSize: 10.75, color: T.textMuted, mt: 0.3, lineHeight: 1.5 }}>
-                          {fact.detail}
-                        </Typography>
+                        <Stack direction="row" alignItems="baseline" spacing={0.75} mt={0.25}>
+                          <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>
+                            {fact.value}
+                          </Typography>
+                          <Typography sx={{ fontSize: 10.5, color: T.textMuted }}>
+                            {fact.detail}
+                          </Typography>
+                        </Stack>
                       </Box>
                     ))}
-                  </Box>
+                  </Stack>
                   <Collapse in={showAlgorithmChooser?.[trainingMode]} timeout={180}>
-                    <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 0, bgcolor: '#fff', borderColor: '#e8edf3' }}>
+                    <Box sx={{ py: 1.5, my: 1, borderTop: `1px dashed ${T.border}`, borderBottom: `1px dashed ${T.border}` }}>
                       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }} justifyContent="space-between" mb={1.1}>
                         <Box>
                           <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.textPrimary }}>
@@ -4070,7 +4058,7 @@ const ModelTrainingPanel = ({
                           {showFullAlgorithmLibrary?.[trainingMode] ? 'Show shortlist' : 'Show full library'}
                         </Button>
                       </Stack>
-                      <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
+                      <Stack spacing={1}>
                         {visibleAlgorithmOptions.map((algo) => (
                           <AlgorithmChoiceTile
                             key={algo.id}
@@ -4079,8 +4067,8 @@ const ModelTrainingPanel = ({
                             onSelect={() => handleSelectTrainingAlgorithm(algo.id)}
                           />
                         ))}
-                      </Box>
-                    </Paper>
+                      </Stack>
+                    </Box>
                   </Collapse>
                   <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 0, bgcolor: '#fff', borderColor: T.border }}>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>

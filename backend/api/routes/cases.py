@@ -212,18 +212,39 @@ def _now_iso():
 
 
 def _get_llm_service():
-    return getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
+    requested_provider = str(os.getenv("LLM_PROVIDER") or "").strip().lower()
+    ollama_enabled = str(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK") or "").strip().lower() in {"1", "true", "yes", "on"}
+    candidates = [
+        getattr(services, 'llm_provider', None),
+        getattr(services, '_gpt4all_wrapper', None),
+    ]
+    if requested_provider == "ollama" or ollama_enabled:
+        candidates.append(getattr(services, 'ollama_wrapper', None))
+    if os.getenv("OPENAI_API_KEY") and not any(getattr(candidate, "provider_name", "") == "openai" for candidate in candidates if candidate):
+        try:
+            from llm.openai_wrapper import OpenAIWrapper
+            candidates.insert(0, OpenAIWrapper())
+        except Exception:
+            pass
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            checker = getattr(candidate, 'check_connection', None)
+            if callable(checker) and not checker():
+                continue
+            return candidate
+        except Exception:
+            continue
+    return None
 
 
 def _get_case_resolution_llm_candidates():
     candidates = []
 
-    for candidate in (
-        getattr(services, 'llm_provider', None),
-        getattr(services, 'ollama_wrapper', None),
-    ):
-        if candidate:
-            candidates.append(candidate)
+    llm_provider = getattr(services, 'llm_provider', None)
+    if llm_provider:
+        candidates.append(llm_provider)
 
     gpt4all_wrapper = getattr(services, '_gpt4all_wrapper', None)
     if not gpt4all_wrapper:
@@ -236,7 +257,18 @@ def _get_case_resolution_llm_candidates():
     if gpt4all_wrapper:
         candidates.append(gpt4all_wrapper)
 
+    if os.getenv("OPENAI_API_KEY"):
+        if not any(getattr(candidate, 'provider_name', '') == 'openai' for candidate in candidates):
+            try:
+                from llm.openai_wrapper import OpenAIWrapper
+                candidates.append(OpenAIWrapper())
+            except Exception:
+                pass
+
     if str(os.getenv("LLM_PROVIDER") or "").strip().lower() == "ollama" or str(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        ollama_service = getattr(services, 'ollama_wrapper', None)
+        if ollama_service and getattr(ollama_service, 'provider_name', '') == 'ollama':
+            candidates.append(ollama_service)
         if not any(getattr(candidate, 'provider_name', '') == 'ollama' for candidate in candidates):
             try:
                 from llm.ollama_wrapper import OllamaWrapper
@@ -1583,9 +1615,11 @@ def list_cases():
 def generate_narrative():
     try:
         prompt = request.json.get('prompt', '')
-        if services.ollama_wrapper:
-            res = services.ollama_wrapper.generate(prompt)
-            if res.get('success'): return jsonify(res)
+        llm_service = _get_llm_service()
+        if llm_service:
+            res = llm_service.generate(prompt)
+            if res.get('success'):
+                return jsonify(res)
         return jsonify({'success': True, 'response': "**Narrative Template**\nPending AI generation."})
     except Exception as e: return jsonify({'success': False, 'error': str(e)})
 

@@ -14,7 +14,7 @@ case_facts_bp = Blueprint('case_facts', __name__)
 
 def resolve_db(req_obj):
     """
-    ✅ ENHANCED: Explicit environment resolution with better error messages
+    [SUCCESS] ENHANCED: Explicit environment resolution with better error messages
     Priority: Query Param → Header → Global Fallback (with warning)
     """
     tenant_id = req_obj.tenant_id
@@ -33,7 +33,7 @@ def resolve_db(req_obj):
         env_id = services.metadata_manager.active_env
         source = "global_fallback"
         if env_id:
-            print(f"⚠️  WARNING: Using global environment state ({env_id}). Frontend should pass env_id explicitly.")
+            print(f"[WARN]  WARNING: Using global environment state ({env_id}). Frontend should pass env_id explicitly.")
     
     if not env_id:
         raise ValueError(
@@ -41,14 +41,14 @@ def resolve_db(req_obj):
             "or header (X-Environment-ID). Check that AppContext.activeEnv is set."
         )
 
-    print(f"🔍 Environment Resolution: env_id={env_id}, tenant={tenant_id}, source={source}")
+    print(f"[ENV] Environment Resolution: env_id={env_id}, tenant={tenant_id}, source={source}")
 
     # 2. Get DB Manager (stateless factory)
     try:
         db_manager = services.get_investigation_db(env_id, tenant_id)
         return db_manager, env_id
     except Exception as e:
-        print(f"❌ DB Resolution Failed: {e}")
+        print(f"[ERROR] DB Resolution Failed: {e}")
         raise ValueError(f"Failed to access environment '{env_id}': {str(e)}")
 
 
@@ -58,7 +58,7 @@ def resolve_db(req_obj):
 @handle_errors
 def get_ranked_cases():
     """
-    ✅ FIXED: Get list of cases ranked by risk score with explicit env resolution
+    [SUCCESS] FIXED: Get list of cases ranked by risk score with explicit env resolution
     """
     try:
         db_manager, env_id = resolve_db(request)
@@ -102,7 +102,7 @@ def get_ranked_cases():
         try:
             cursor.execute(query)
         except Exception as e:
-            print(f"⚠️  Query failed, trying fallback: {e}")
+            print(f"[WARN]  Query failed, trying fallback: {e}")
             # Fallback for minimal schema
             cursor.execute("""
                 SELECT 
@@ -156,7 +156,7 @@ def get_ranked_cases():
             
         db_manager.close_connection(conn)
         
-        print(f"✅ Ranked {len(ranked_cases)} cases for env={env_id}")
+        print(f"[SUCCESS] Ranked {len(ranked_cases)} cases for env={env_id}")
         
         return jsonify({
             'success': True,
@@ -356,7 +356,7 @@ Provide a clear, professional response based ONLY on these facts. Be concise and
 @handle_errors
 def validate_environment(env_id):
     """
-    ✅ NEW: Validate that an environment database exists and has master data
+    [SUCCESS] NEW: Validate that an environment database exists and has master data
     Used by frontend to check readiness before showing Priority Inbox
     """
     try:

@@ -7,10 +7,10 @@ class CaseExplainer:
     STRICT RULES: Uses only provided data, no decisions.
     """
     
-    def __init__(self, ollama_wrapper):
-        self.ollama = ollama_wrapper
+    def __init__(self, llm_provider):
+        self.ollama = llm_provider
     
-    def explain_case(self, case_summary, model="llama3.2:1b"):
+    def explain_case(self, case_summary, model="gpt-4o-mini"):
         """
         Generate analyst-style explanation from case summary.
         

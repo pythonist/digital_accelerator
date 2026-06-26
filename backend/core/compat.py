@@ -48,7 +48,7 @@ def get_supported_features(registry=None, pdf_service_available: bool = False):
         return bool(info.get("enabled")) and info.get("status") != "failed"
 
     features = {
-        "ai": _is_available("ollama"),
+        "ai": _is_available("llm_provider"),
         "docs_rag": _is_available("docs_rag"),
         "vector_search": _is_available("rag"),
         "graph": _is_available("graph"),

@@ -2178,6 +2178,40 @@ class MLOpsWorkbenchService:
             return f"read_csv_auto('{p}', sample_size={int(sample_size)})"
         return f"read_csv_auto('{p}')"
 
+    def _fallback_file_metadata(self, file_path: Path) -> Tuple[int, List[str], Dict[str, str]]:
+        resolved_path = self._resolve_file_path(file_path)
+        ext = resolved_path.suffix.lower()
+        if ext in (".parquet", ".pq"):
+            df = pd.read_parquet(resolved_path)
+        else:
+            candidates = [
+                {"sep": ",", "engine": "python"},
+                {"sep": None, "engine": "python"},
+                {"sep": ";", "engine": "python"},
+                {"sep": "|", "engine": "python"},
+                {"sep": "\t", "engine": "python"},
+            ]
+            last_exc: Optional[Exception] = None
+            df = None
+            for opts in candidates:
+                try:
+                    df = pd.read_csv(
+                        resolved_path,
+                        on_bad_lines="skip",
+                        encoding="utf-8-sig",
+                        **opts,
+                    )
+                    if len(df.columns):
+                        break
+                except Exception as exc:
+                    last_exc = exc
+                    df = None
+            if df is None:
+                raise last_exc or ValueError(f"Could not read uploaded file {resolved_path}")
+        column_names = [str(c) for c in df.columns]
+        column_types = {str(c): str(t) for c, t in df.dtypes.items()}
+        return int(len(df.index)), column_names, column_types
+
     def _resolve_file_path(self, file_path: Path) -> Path:
         env_root = Path(self.db_path).resolve().parents[2]
         return resolve_data_file_path(file_path, env_root=env_root)
@@ -2837,13 +2871,16 @@ class MLOpsWorkbenchService:
             for col in column_names:
                 column_types.setdefault(col, "UNKNOWN")
         else:
-            rel = self._relation_expr(file_path, sample_size=20000)
-            with duckdb.connect() as meta_conn:
-                row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
-                columns = meta_conn.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()
+            try:
+                rel = self._relation_expr(file_path, sample_size=20000)
+                with duckdb.connect() as meta_conn:
+                    row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
+                    columns = meta_conn.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()
 
-            column_names = [c[0] for c in columns]
-            column_types = {c[0]: c[1] for c in columns}
+                column_names = [c[0] for c in columns]
+                column_types = {c[0]: c[1] for c in columns}
+            except Exception:
+                row_count, column_names, column_types = self._fallback_file_metadata(file_path)
         columns_json = json.dumps(column_names, default=str)
         column_types_json = json.dumps(column_types, default=str)
 
@@ -3130,6 +3167,7 @@ class MLOpsWorkbenchService:
         data_dir: Path,
         force: bool = False,
         pipeline_type: str = "fcc",
+        pipeline_id: Optional[int] = None,
     ) -> List[Dict]:
         """
         Register CSV/Parquet files discovered in an env data folder.
@@ -3142,36 +3180,75 @@ class MLOpsWorkbenchService:
         if not data_dir.exists():
             return datasets
 
+        def _scope_from_path(path: Path) -> Tuple[Optional[int], str]:
+            parent = str(path.parent.name or "").strip().lower()
+            if parent.startswith("pipeline_"):
+                try:
+                    return int(parent.split("_", 1)[1]), _normalize_pipeline_type(pipeline_type)
+                except Exception:
+                    return None, _normalize_pipeline_type(pipeline_type)
+            if parent.startswith("shared_"):
+                return None, _normalize_pipeline_type(parent.split("_", 1)[1] or pipeline_type)
+            return None, _normalize_pipeline_type(pipeline_type)
+
         existing = {
-            str(d.get("dataset_type") or "").strip().lower(): d
+            (
+                int(d.get("pipeline_id") or 0) if d.get("pipeline_id") not in (None, "", 0) else None,
+                _normalize_pipeline_type(d.get("pipeline_type")),
+                str(d.get("dataset_type") or "").strip().lower(),
+            ): d
             for d in self.list_datasets(tenant_id, env_id)
-            if d.get("dataset_type") and _normalize_pipeline_type(d.get("pipeline_type")) == _normalize_pipeline_type(pipeline_type)
+            if d.get("dataset_type")
         }
 
         files: List[Path] = []
-        files.extend(sorted(data_dir.glob("*.csv")))
-        files.extend(sorted(data_dir.glob("*.parquet")))
+        files.extend(sorted(data_dir.rglob("*.csv")))
+        files.extend(sorted(data_dir.rglob("*.parquet")))
 
         for file_path in files:
             dataset_type = str(file_path.stem or "").strip().lower()
             if not dataset_type:
                 continue
+            scoped_pipeline_id, scoped_pipeline_type = _scope_from_path(file_path)
+            if pipeline_id not in (None, "", [], {}) and scoped_pipeline_id not in (None, int(pipeline_id)):
+                continue
 
-            cached = existing.get(dataset_type)
+            cache_key = (scoped_pipeline_id, scoped_pipeline_type, dataset_type)
+            cached = existing.get(cache_key)
             if cached and not force:
                 datasets.append(cached)
                 continue
 
-            dataset = self.register_dataset(
-                tenant_id=tenant_id,
-                env_id=env_id,
-                pipeline_type=pipeline_type,
-                dataset_type=dataset_type,
-                filename=file_path.name,
-                file_path=file_path,
-            )
+            try:
+                dataset = self.register_dataset(
+                    tenant_id=tenant_id,
+                    env_id=env_id,
+                    pipeline_type=scoped_pipeline_type,
+                    pipeline_id=scoped_pipeline_id,
+                    dataset_type=dataset_type,
+                    filename=file_path.name,
+                    file_path=file_path,
+                )
+            except Exception as exc:
+                print(f"[MLOpsSync] Skipping unreadable dataset file {file_path}: {exc}", flush=True)
+                continue
             datasets.append(dataset)
-            existing[dataset_type] = dataset
+            existing[cache_key] = dataset
+            if scoped_pipeline_id:
+                try:
+                    self.attach_pipeline_asset(
+                        tenant_id,
+                        env_id,
+                        int(scoped_pipeline_id),
+                        asset_kind="dataset",
+                        asset_id=dataset.get("dataset_id"),
+                        stage="data_upload",
+                        relation="synced_source",
+                        metadata={"dataset_type": dataset.get("dataset_type")},
+                        numeric=True,
+                    )
+                except Exception:
+                    pass
 
         return datasets
 
@@ -5766,7 +5843,7 @@ class MLOpsWorkbenchService:
         with get_connection(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT pipeline_id
+                SELECT pipeline_id, dataset_ids_json, dataset_id
                 FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -5786,6 +5863,37 @@ class MLOpsWorkbenchService:
                 metadata=metadata or {},
                 numeric=numeric,
             )
+            if (
+                _normalize_text(asset_kind).lower() == "dataset"
+                and _normalize_text(stage).lower() == "data_upload"
+            ):
+                dataset_id_text = self._normalize_pipeline_asset_id(asset_id, numeric=True)
+                if dataset_id_text:
+                    try:
+                        existing_ids = _safe_json_loads(row[1], []) if row and row[1] else []
+                        merged_ids = sorted({
+                            int(value)
+                            for value in [*existing_ids, int(dataset_id_text)]
+                            if _coerce_int(value) is not None and int(value) > 0
+                        })
+                        primary_dataset_id = int(row[2]) if row and row[2] is not None else (merged_ids[0] if merged_ids else None)
+                        conn.execute(
+                            """
+                            UPDATE mlops_pipelines
+                            SET dataset_ids_json = ?, dataset_id = COALESCE(?, dataset_id),
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                            """,
+                            [
+                                json.dumps(merged_ids, default=str),
+                                primary_dataset_id,
+                                int(pipeline_id),
+                                tenant_id,
+                                env_id,
+                            ],
+                        )
+                    except Exception:
+                        pass
 
     def list_pipeline_versions(self, tenant_id: str, env_id: str, pipeline_id: int) -> List[Dict]:
         """Return all saved version snapshots for one pipeline."""
@@ -7028,7 +7136,7 @@ class MLOpsWorkbenchService:
         if delete_files:
             data_dir = self._data_dir()
             if data_dir.exists():
-                for file_path in data_dir.glob("*"):
+                for file_path in data_dir.rglob("*"):
                     if not file_path.is_file():
                         continue
                     if file_path.suffix.lower() not in {".csv", ".parquet", ".pq"}:
@@ -7036,6 +7144,15 @@ class MLOpsWorkbenchService:
                     try:
                         file_path.unlink()
                         deleted_files.append(str(file_path))
+                    except Exception:
+                        continue
+                for child_dir in sorted(
+                    [p for p in data_dir.rglob("*") if p.is_dir()],
+                    key=lambda p: len(p.parts),
+                    reverse=True,
+                ):
+                    try:
+                        child_dir.rmdir()
                     except Exception:
                         continue
 

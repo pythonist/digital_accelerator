@@ -1,0 +1,211 @@
+feature_name,feature_group,business_definition,mule_types,is_leakage_feature,is_default_selected,is_graph_feature
+customer_account_age_days,base,Customer/account age in days,M1-M5,0,1,0
+customer_kyc_age_days,base,Days since last KYC refresh,M2,0,1,0
+customer_age_years,base,Customer age in years,M2,0,1,0
+customer_address_change_count_12m,identity,Address changes in last 12 months,M4,0,1,0
+customer_phone_change_count_12m,identity,Phone changes in last 12 months,M4,0,1,0
+account_txn_velocity_1h,account,Transaction count last 1 hour,M1,0,1,0
+account_txn_velocity_24h,account,Transaction count last 24 hours,M1,0,1,0
+account_pass_through_ratio_1d,account,Debit over credit amount 1d,M3,0,1,0
+account_pass_through_ratio_7d,account,Debit over credit amount 7d,M3,0,1,0
+account_pass_through_ratio_30d,account,Debit over credit amount 30d,M3,0,1,0
+account_incoming_txn_spike_score,account,Today inbound count vs historical average,M1,0,1,0
+account_outgoing_txn_spike_score,account,Today outbound count vs historical average,M1,0,1,0
+account_dormancy_days,account,Days since last transaction,M2,0,1,0
+account_dormant_reactivation_flag,account,Account inactive >90 days then active,M2,0,1,0
+account_unique_beneficiary_count_7d,account,Distinct beneficiaries in 7d,M4,0,1,0
+account_unique_beneficiary_count_30d,account,Distinct beneficiaries in 30d,M4,0,1,0
+upi_transaction_velocity_score,upi,UPI transaction frequency score,M1-M3,0,1,0
+upi_transaction_entropy_score,upi,Entropy of UPI counterparties,M1-M3,0,1,0
+upi_failed_transaction_ratio,upi,Failed UPI txns / total,M1,0,1,0
+upi_reversal_count_7d,upi,Reversal count in last 7 days,M1,0,1,0
+upi_first_transaction_delay_minutes,upi,Minutes between account open and first UPI txn,M1,0,1,0
+upi_new_account_high_velocity_flag,upi,High velocity near account opening,M1,0,1,0
+upi_round_amount_transaction_ratio,upi,Rounded UPI amount ratio,M1-M3,0,1,0
+upi_unique_counterparty_count_7d,upi,Distinct counterparties 7d,M1-M3,0,1,0
+upi_new_counterparty_ratio,upi,Recent counterparties / total counterparties,M1-M3,0,1,0
+upi_counterparty_growth_rate,upi,Counterparty growth in recent period,M1-M3,0,1,0
+upi_night_transaction_ratio,upi,Night UPI txns / total,M1-M3,0,1,0
+upi_ip_change_count_30d,upi,Distinct IPs in last 30d,M4,0,1,0
+upi_geo_location_variance,upi,Distinct UPI locations,M4,0,1,0
+upi_device_change_count_30d,upi,Distinct devices in last 30d,M4,0,1,0
+upi_pass_through_ratio_24h,upi,Outgoing/incoming UPI amount 24h,M1-M3,0,1,0
+upi_pass_through_ratio_7d,upi,Outgoing/incoming UPI amount 7d,M1-M3,0,1,0
+upi_burst_transaction_flag,upi,High count in short window,M1-M3,0,1,0
+upi_new_device_transfer_flag,upi,Recent UPI transfer from new device,M4,0,1,0
+atm_cash_withdrawal_count_24h,atm,Withdrawals last 24h,M1-M3,0,1,0
+atm_cash_withdrawal_count_7d,atm,Withdrawals last 7d,M1-M3,0,1,0
+atm_cash_withdrawal_amount_24h,atm,Withdrawal amount last 24h,M1-M3,0,1,0
+atm_cash_withdrawal_amount_7d,atm,Withdrawal amount last 7d,M1-M3,0,1,0
+atm_cash_deposit_count_24h,atm,Cash deposits last 24h,M1-M3,0,1,0
+atm_cash_deposit_count_7d,atm,Cash deposits last 7d,M1-M3,0,1,0
+atm_cash_deposit_amount_24h,atm,Cash deposit amount last 24h,M1-M3,0,1,0
+atm_cash_deposit_amount_7d,atm,Cash deposit amount last 7d,M1-M3,0,1,0
+atm_round_amount_deposit_ratio,atm,Rounded deposit ratio,M1-M3,0,1,0
+atm_deposit_to_withdrawal_ratio,atm,Withdrawal amount / deposit amount,M1-M3,0,1,0
+atm_night_withdrawal_ratio,atm,Night withdrawals / total,M1-M3,0,1,0
+atm_pin_retry_count_24h,atm,ATM PIN retries 24h,M1,0,1,0
+atm_failed_transaction_count_7d,atm,ATM failed txns 7d,M1,0,1,0
+atm_terminal_usage_count_24h,atm,Distinct terminals 24h,M4,0,1,0
+atm_terminal_usage_count_7d,atm,Distinct terminals 7d,M4,0,1,0
+atm_geo_distance_variance,atm,Variance of ATM locations,M4,0,1,0
+atm_multi_city_withdrawal_flag,atm,Withdrawals across cities,M4,0,1,0
+atm_withdrawal_velocity_score,atm,High frequency withdrawal score,M1-M3,0,1,0
+atm_rapid_withdrawal_flag,atm,Multiple withdrawals in short time,M1,0,1,0
+atm_new_account_cash_activity_flag,atm,Cash activity within first 7 days,M1,0,1,0
+branch_cash_deposit_count_7d,branch,Cash deposits last 7d,M1-M3,0,1,0
+branch_cash_deposit_count_30d,branch,Cash deposits last 30d,M1-M3,0,1,0
+branch_cash_deposit_amount_7d,branch,Cash deposit amount last 7d,M1-M3,0,1,0
+branch_cash_deposit_amount_30d,branch,Cash deposit amount last 30d,M1-M3,0,1,0
+branch_structured_cash_deposit_flag,branch,Structured cash deposit behaviour,M1-M3,0,1,0
+branch_multiple_same_day_deposits_flag,branch,Multiple same day deposits,M1-M3,0,1,0
+branch_deposit_round_amount_ratio,branch,Rounded deposit ratio,M1-M3,0,1,0
+branch_cash_deposit_frequency_score,branch,Deposit frequency anomaly score,M1-M3,0,1,0
+branch_deposit_spike_flag,branch,Sudden deposit spike,M1-M3,0,1,0
+branch_deposit_to_transfer_delay_minutes,branch,Delay from deposit to transfer,M1-M3,0,1,0
+branch_deposit_to_upi_transfer_ratio,branch,Deposit vs UPI outgoing,M1-M3,0,1,0
+branch_deposit_to_imps_transfer_ratio,branch,Deposit vs IMPS outgoing,M1-M3,0,1,0
+branch_deposit_to_neft_transfer_ratio,branch,Deposit vs NEFT outgoing,M1-M3,0,1,0
+branch_deposit_to_rtgs_transfer_ratio,branch,Deposit vs RTGS outgoing,M1-M3,0,1,0
+branch_cash_pass_through_ratio,branch,Outgoing after deposit / cash deposit,M1-M3,0,1,0
+branch_deposit_count_new_account_7d,branch,Deposits in first 7 days,M1,0,1,0
+branch_deposit_amount_new_account_7d,branch,Deposit amount in first 7 days,M1,0,1,0
+merchant_transaction_count_24h,merchant,Merchant transactions in last 24h,M5,0,1,0
+merchant_transaction_count_7d,merchant,Merchant transactions in last 7d,M5,0,1,0
+merchant_transaction_amount_24h,merchant,Merchant transaction amount in last 24h,M5,0,1,0
+merchant_transaction_amount_7d,merchant,Merchant transaction amount in last 7d,M5,0,1,0
+merchant_avg_transaction_amount,merchant,Average merchant transaction amount,M5,0,1,0
+merchant_round_amount_ratio,merchant,Rounded merchant amounts / total,M5,0,1,0
+merchant_high_value_transaction_ratio,merchant,High-value merchant transactions / total,M5,0,1,0
+merchant_unique_customer_count_7d,merchant,Distinct customers served in 7d,M5,0,1,0
+merchant_new_customer_ratio,merchant,New customers / total customers,M5,0,1,0
+merchant_repeat_customer_ratio,merchant,Repeat customers / total customers,M5,0,1,0
+merchant_refund_transaction_count,merchant,Refund transaction count,M5,0,1,0
+merchant_refund_ratio,merchant,Refunds / total merchant transactions,M5,0,1,0
+merchant_chargeback_ratio,merchant,Chargebacks / total merchant transactions,M5,0,1,0
+merchant_transaction_velocity_score,merchant,Merchant transaction frequency score,M5,0,1,0
+merchant_transaction_entropy_score,merchant,Entropy of merchant customer distribution,M5,0,1,0
+merchant_night_transaction_ratio,merchant,Night merchant transactions / total,M5,0,1,0
+merchant_cross_border_transaction_ratio,merchant,Cross-border merchant transactions / total,M5,0,1,0
+merchant_terminal_switch_count,merchant,Distinct merchant terminals used,M5,0,1,0
+merchant_terminal_geo_variance,merchant,Distinct terminal locations used,M5,0,1,0
+merchant_gateway_transaction_ratio,merchant,Gateway transactions / total transactions,M5,0,1,0
+merchant_gateway_refund_ratio,merchant,Gateway refunds / gateway transactions,M5,0,1,0
+merchant_gateway_chargeback_ratio,merchant,Gateway chargebacks / gateway transactions,M5,0,1,0
+merchant_gateway_customer_entropy,merchant,Entropy of gateway customer distribution,M5,0,1,0
+merchant_settlement_amount_24h,merchant,Settlement amount last 24h,M5,0,1,0
+merchant_settlement_velocity_score,merchant,Settlement anomaly / velocity score,M5,0,1,0
+device_session_duration_seconds,device,Average device session duration,M4,0,1,0
+device_failed_login_count_24h,device,Failed logins in last 24h,M1,0,1,0
+device_failed_login_count_7d,device,Failed logins in last 7d,M1,0,1,0
+device_login_velocity_score,device,Login frequency score,M1,0,1,0
+device_new_device_flag,device,Recent new device usage,M4,0,1,0
+device_device_change_count_30d,device,Distinct devices in last 30d,M4,0,1,0
+device_ip_change_count_7d,device,Distinct IPs in last 7d,M4,0,1,0
+device_geo_variance_score,device,Variance of device login locations,M4,0,1,0
+device_cross_country_login_flag,device,Logins from multiple countries,M4,0,1,0
+device_impossible_travel_flag,device,Two distant-country logins in short time,M4,0,1,0
+device_scripted_interaction_score,device,Automation / scripted usage score,M4,0,1,0
+device_touch_pattern_entropy,device,Entropy of touch event patterns,M4,0,1,0
+device_typing_speed_score,device,Mean typing speed score,M4,0,1,0
+device_session_entropy_score,device,Entropy of sessions,M4,0,1,0
+customer_device_count,device,Distinct devices used by customer,M4,0,1,0
+customer_ip_count,device,Distinct IP addresses used by customer,M4,0,1,0
+customer_login_count_7d,device,Customer logins in last 7d,M1,0,1,0
+customer_login_count_30d,device,Customer logins in last 30d,M1,0,1,0
+customer_login_geo_variance,device,Variance of customer login geolocations,M4,0,1,0
+sim_age_days,identity,Days since SIM activation,M2,0,1,0
+sim_swap_count_30d,identity,SIM swaps / activations in last 30d,M2,0,1,0
+foreign_sim_usage_flag,identity,SIM registered in foreign network,M4,0,1,0
+customer_address_reuse_count,identity,Accounts sharing same address,M4,0,1,0
+customer_phone_reuse_count,identity,Accounts sharing same phone,M4,0,1,0
+customer_email_reuse_count,identity,Accounts sharing same email,M4,0,1,0
+customer_identity_document_reuse_count,identity,Accounts sharing same document,M4,0,1,0
+customer_device_link_count,identity,Device links to account / identity,M4,0,1,0
+sim_multi_account_usage_flag,identity,Same SIM used by multiple accounts,M4,0,1,0
+customer_identity_risk_score,identity,Composite identity-linkage risk score,M4,0,1,0
+customer_shared_mobile_count,identity,Distinct shared mobile link count,M2,0,1,0
+customer_shared_email_count,identity,Distinct shared email link count,M2,0,1,0
+total_fin_in_last_24h,counterparty,Incoming funds in last 24h,M1,0,1,0
+total_fin_in_last_7d,counterparty,Incoming funds in last 7d,M1,0,1,0
+total_fin_in_last_30d,counterparty,Incoming funds in last 30d,M1,0,1,0
+fin_in_txn_count_24h,counterparty,Incoming transaction count in 24h,M1,0,1,0
+unique_senders_24h,counterparty,Distinct senders in last 24h,M1,0,1,0
+avg_fin_in_amount,counterparty,Average incoming transfer amount,M1,0,1,0
+max_fin_in_amount,counterparty,Largest incoming transfer,M1,0,1,0
+total_fin_out_last_24h,counterparty,Outgoing funds in last 24h,M1,0,1,0
+total_fin_out_last_7d,counterparty,Outgoing funds in last 7d,M1,0,1,0
+total_fin_out_last_30d,counterparty,Outgoing funds in last 30d,M1,0,1,0
+fin_out_txn_count_24h,counterparty,Outgoing transaction count in 24h,M1,0,1,0
+unique_receivers_24h,counterparty,Distinct receivers in last 24h,M1,0,1,0
+avg_fin_out_amount,counterparty,Average outgoing transfer amount,M1,0,1,0
+fin_in_fin_out_ratio,counterparty,Incoming / outgoing funds ratio,M1,0,1,0
+counterparty_is_new_beneficiary,counterparty,New beneficiary added recently,M1,0,1,0
+inbound_outbound_time_gap,counterparty,Avg minutes between incoming and outgoing,M1,0,1,0
+fin_out_immediate_after_in,counterparty,Transfer within minutes of receiving funds,M1,0,1,0
+fin_in_round_amount_ratio,counterparty,Incoming round-value transaction ratio,M3,0,1,0
+fin_in_small_value_burst,counterparty,Many small incoming deposits in short period,M1,0,1,0
+fin_out_wallet_transfer_ratio,counterparty,Transfers via digital rails / total,M4,0,1,0
+counterparty_shared_mobile_flag,counterparty,Counterparty shares mobile across accounts,M4,0,1,0
+counterparty_shared_device_flag,counterparty,Counterparty shares device across accounts,M4,0,1,0
+cross_border_transaction_count,cross_border,International transfer count,M3,0,1,0
+cross_border_fin_in_ratio,cross_border,Incoming funds from foreign banks / total incoming,M3,0,1,0
+cross_border_fin_out_ratio,cross_border,Outgoing funds to foreign banks / total outgoing,M3,0,1,0
+high_risk_country_transfer_ratio,cross_border,Transfers involving high-risk countries / total,M3,0,1,0
+foreign_ip_transaction_ratio,cross_border,Transactions from foreign IP addresses / total,M4,0,1,0
+graph_node_degree,graph,Number of graph edges connected to node,M4,0,1,1
+graph_in_degree,graph,Incoming edges to node,M4,0,1,1
+graph_out_degree,graph,Outgoing edges from node,M4,0,1,1
+graph_degree_centrality,graph,Normalized node degree,M4,0,1,1
+graph_betweenness_centrality,graph,Fraction of shortest paths through node,M4,0,1,1
+graph_closeness_centrality,graph,Inverse average distance to nodes,M4,0,1,1
+graph_eigenvector_centrality,graph,Importance based on connected nodes,M4,0,1,1
+graph_pagerank_score,graph,Pagerank probability score,M4,0,1,1
+graph_clustering_coefficient,graph,Density of neighbor connections,M4,0,1,1
+graph_triangle_count,graph,Triangle count in network,M4,0,1,1
+graph_kcore_score,graph,k-core decomposition score,M4,0,1,1
+graph_community_size,graph,Nodes in connected community,M4,0,1,1
+graph_cross_border_edge_ratio,graph,Cross-border edges / total edges,M3,0,1,1
+graph_money_flow_depth,graph,Layers in money-flow chain,M3,0,1,1
+graph_transaction_path_length,graph,Length of transaction path,M3,0,1,1
+graph_cycle_detection_flag,graph,Cycle detected in transaction graph,M4,0,1,1
+graph_layering_pattern_score,graph,Layering behaviour score,M3,0,1,1
+graph_structuring_pattern_score,graph,Structured amount / graph pattern score,M3,0,1,1
+graph_ring_network_score,graph,Ring-detection network score,M4,0,1,1
+graph_account_device_link_count,graph,Devices linked to account,M4,0,1,1
+graph_account_ip_link_count,graph,IPs linked to account,M4,0,1,1
+graph_account_phone_link_count,graph,Phones linked to account,M4,0,1,1
+graph_account_email_link_count,graph,Emails linked to account,M4,0,1,1
+graph_multi_identity_cluster_size,graph,Accounts sharing multiple identity elements,M4,0,1,1
+graph_channel_diversity_score,graph,Entropy / diversity of channels used,M4,0,1,1
+graph_channel_transition_score,graph,Channel switching behaviour score,M4,0,1,1
+graph_channel_behavior_entropy,graph,Entropy of graph channel usage patterns,M4,0,1,1
+network_neighbor_mule_ratio,network,Suspicious neighbor accounts / total neighbors,M4,0,1,1
+network_two_hop_mule_exposure,network,Accounts reachable within two hops,M4,0,1,1
+network_three_hop_mule_exposure,network,Accounts reachable within three hops,M4,0,1,1
+network_suspicious_cluster_score,network,Suspicious entities in connected cluster,M4,0,1,1
+network_propagation_risk_score,network,Risk propagated from connected nodes,M4,0,1,1
+network_behavior_anomaly_score,network,Maximum connected risk score,M4,0,1,1
+network_transaction_entropy,network,Entropy of network transactions,M4,0,1,1
+network_money_flow_concentration,network,Money-flow concentration score,M3,0,1,1
+network_cluster_risk_score,network,Aggregated cluster risk score,M4,0,1,1
+network_high_risk_neighbor_count,network,Connected accounts with high risk,M4,0,1,1
+cross_channel_login_count_24h,cross_channel,Distinct cross-channel logins in last 24h,M4,0,1,0
+cross_channel_device_usage_count,cross_channel,Devices used across channels,M4,0,1,0
+cross_channel_geo_variance,cross_channel,Variance of usage locations across channels,M4,0,1,0
+cross_channel_behavior_entropy,cross_channel,Entropy of channel usage patterns,M1-M4,0,1,0
+cross_channel_counterparty_overlap,cross_channel,Counterparties shared across channels,M4,0,1,0
+cross_channel_session_overlap_flag,cross_channel,Sessions overlap across channels,M4,0,1,0
+cross_channel_transaction_count_24h,cross_channel,Transactions across channels in last 24h,M1-M3,0,1,0
+cross_channel_transaction_amount_24h,cross_channel,Transaction amount across channels in last 24h,M1-M3,0,1,0
+cross_channel_channel_diversity,cross_channel,Distinct channels used,M4,0,1,0
+cross_channel_pass_through_ratio,cross_channel,Concentration of amount through dominant channel,M1-M3,0,1,0
+cross_channel_velocity_score,cross_channel,Cross-channel transaction velocity score,M1-M3,0,1,0
+mule_ring_cluster_size,mule_ring,Number of accounts in mule ring cluster,M4,0,1,1
+mule_ring_shared_beneficiary_ratio,mule_ring,Accounts sharing beneficiary in ring,M4,0,1,1
+mule_ring_shared_sender_ratio,mule_ring,Accounts sharing sender in ring,M4,0,1,1
+mule_ring_shared_device_count,mule_ring,Accounts using shared device in ring,M4,0,1,1
+mule_ring_shared_ip_count,mule_ring,Accounts sharing IP in ring,M4,0,1,1
+mule_cartel_device_network_size,mule_ring,Devices controlling multiple mule accounts,M4,0,1,1
+mule_cartel_layer_depth,mule_ring,Layers in laundering chain,M4,0,1,1
+mule_network_risk_score,mule_ring,Overall mule network risk score,M4,0,1,1

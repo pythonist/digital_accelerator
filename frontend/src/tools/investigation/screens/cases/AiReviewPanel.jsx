@@ -18,7 +18,7 @@ const AiReviewPanel = ({ caseId }) => {
     try {
       const res = await apiClient.post('/api/v2/llm/review-questions', {
         case_id: caseId,
-        model: 'llama3.2:1b'
+        model: 'gpt-4o-mini'
       });
       
       if (res.success) {

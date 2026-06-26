@@ -15,6 +15,32 @@ from services.network_report_adapter_service import NetworkReportAdapterService
 
 analysis_bp = Blueprint('analysis', __name__)
 
+
+def _get_llm_service():
+    try:
+        from llm.provider_factory import load_llm_provider
+
+        provider = load_llm_provider()
+        if provider is not None:
+            return provider
+    except Exception:
+        pass
+    for candidate in (
+        getattr(services, 'llm_provider', None),
+        getattr(services, '_gpt4all_wrapper', None),
+    ):
+        if not candidate:
+            continue
+        try:
+            checker = getattr(candidate, 'check_connection', None)
+            if callable(checker) and not checker():
+                continue
+            return candidate
+        except Exception:
+            continue
+    return None
+
+
 def _get_env_db():
     env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or services.metadata_manager.active_env
     tenant_id = getattr(request, 'tenant_id', None)
@@ -974,7 +1000,8 @@ def compare_ai_analysis():
     data = request.json
     c1 = data.get('case_id_1')
     c2 = data.get('case_id_2')
-    model = data.get('model', 'llama3.2')
+    llm_service = _get_llm_service()
+    model = data.get('model') or getattr(llm_service, 'default_model', None)
     
     p1 = services.case_pack_generator.generate_case_pack(c1)
     p2 = services.case_pack_generator.generate_case_pack(c2)
@@ -984,7 +1011,15 @@ You are an expert AML Investigator with 20+ years of experience.
 Compare Case {c1} vs Case {c2}.
 Provide a risk assessment based on alerts, volume, and typologies.
 """
-    res = services.ollama_wrapper.generate(prompt, model=model)
+    try:
+        llm_ready = bool(llm_service and llm_service.check_connection())
+    except Exception:
+        llm_ready = False
+    if not llm_ready:
+        return jsonify({
+            'analysis': 'AI analysis is unavailable because no configured provider is ready.'
+        })
+    res = llm_service.generate(prompt, model=model)
     return jsonify({
         'analysis': res.get('response', 'AI analysis unavailable')
     })

@@ -20,23 +20,44 @@ import {
   DeleteOutline as DeleteIcon
 } from '@mui/icons-material';
 
+const DEFAULT_AI_MODEL = 'gpt-4o-mini';
+const normalizeModelName = (value) => {
+  const text = String(value || '').trim();
+  return text && !text.toLowerCase().startsWith('llama') ? text : DEFAULT_AI_MODEL;
+};
+
 const ChatAssistantScreen = () => {
   const { ollamaModels: contextModels } = useAppContext(); 
   const [localModels, setLocalModels] = useState([]);
   const [chatMessages, setChatMessages] = usePersistentState('chat_history', []);
-  const [selectedModel, setSelectedModel] = usePersistentState('chat_model', readInvestigationSettings()?.assistant?.preferred_model || readInvestigationSettings()?.global?.default_model || 'llama3.2:1b');
+  const [selectedModel, setSelectedModel] = usePersistentState('chat_model', normalizeModelName(readInvestigationSettings()?.assistant?.preferred_model || readInvestigationSettings()?.global?.default_model));
   const [currentMessage, setCurrentMessage] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
-  const availableModels = contextModels.length > 0 ? contextModels : localModels;
+  const availableModels = Array.from(new Set(
+    (contextModels.length > 0 ? contextModels : localModels)
+      .map((model) => normalizeModelName(typeof model === 'string' ? model : model?.name))
+      .filter(Boolean),
+  ));
+  const normalizedSelectedModel = normalizeModelName(selectedModel);
+  const activeModel = availableModels.includes(normalizedSelectedModel)
+    ? normalizedSelectedModel
+    : (availableModels[0] || normalizedSelectedModel);
+
+  useEffect(() => {
+    const normalized = normalizeModelName(selectedModel);
+    if (normalized !== selectedModel) {
+      setSelectedModel(normalized);
+    }
+  }, [selectedModel, setSelectedModel]);
 
   useEffect(() => {
     const applySettings = (latestSettings) => {
       const preferred = latestSettings?.assistant?.preferred_model || latestSettings?.global?.default_model || '';
       if (preferred) {
-        setSelectedModel(preferred);
+        setSelectedModel(normalizeModelName(preferred));
       }
       if (!latestSettings?.assistant?.keep_chat_history) {
         setChatMessages([]);
@@ -62,12 +83,12 @@ const ChatAssistantScreen = () => {
               setSelectedModel(modelNames[0]);
             }
           } else {
-            setLocalModels(['llama3.2:1b']);
+            setLocalModels([DEFAULT_AI_MODEL]);
           }
         }
       } catch (err) {
         console.error('Failed to load models:', err);
-        setLocalModels(['llama3.2:1b']);
+        setLocalModels([DEFAULT_AI_MODEL]);
       }
     };
     fetchModels();
@@ -100,7 +121,7 @@ const ChatAssistantScreen = () => {
 
       const res = await apiClient.post('/api/v2/chat/assistant', { 
         message: userMsg.content, 
-        model: selectedModel, 
+        model: activeModel, 
         history 
       });
 
@@ -156,8 +177,8 @@ const ChatAssistantScreen = () => {
         <Stack direction="row" spacing={1.5} alignItems="center">
           <FormControl size="small" sx={{ minWidth: 160 }}>
             <Select
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
+              value={availableModels.length > 0 ? activeModel : 'loading'}
+              onChange={e => setSelectedModel(normalizeModelName(e.target.value))}
               disabled={availableModels.length === 0}
               sx={{ 
                 fontSize: '0.875rem', 

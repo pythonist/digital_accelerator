@@ -2,6 +2,7 @@
 Factory for selecting the active LLM provider.
 
 Supported providers:
+  - openai
   - ollama
   - gpt4all
 """
@@ -17,6 +18,11 @@ def _as_bool(raw, default=False):
 
 
 def _instantiate_provider(provider: str):
+    if provider == "openai":
+        from llm.openai_wrapper import OpenAIWrapper
+
+        return OpenAIWrapper()
+
     if provider == "gpt4all":
         from llm.gpt4all_wrapper import GPT4AllWrapper
 
@@ -27,20 +33,37 @@ def _instantiate_provider(provider: str):
 
         return OllamaWrapper()
 
-    raise ValueError(f"Unsupported LLM_PROVIDER '{provider}'. Expected 'ollama' or 'gpt4all'.")
+    raise ValueError(f"Unsupported LLM_PROVIDER '{provider}'. Expected 'openai', 'gpt4all', or 'ollama'.")
 
 
 def load_llm_provider():
-    requested_provider = str(os.getenv("LLM_PROVIDER") or "gpt4all").strip().lower() or "gpt4all"
+    requested_raw = os.getenv("LLM_PROVIDER")
+    requested_provider = str(requested_raw or "").strip().lower()
+    if not requested_provider:
+        requested_provider = "openai" if os.getenv("OPENAI_API_KEY") else "gpt4all"
+
     ollama_enabled = _as_bool(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK"), default=False)
     if requested_provider == "ollama" and not ollama_enabled:
         print("Ollama provider is disabled for this environment; using GPT4All.")
         requested_provider = "gpt4all"
+
     fallback_chain = [requested_provider]
-    if requested_provider == "ollama":
+
+    if requested_provider == "openai":
         fallback_chain.append("gpt4all")
-    elif requested_provider == "gpt4all" and ollama_enabled:
+    elif requested_provider == "ollama":
+        fallback_chain.extend(["openai", "gpt4all"])
+    elif requested_provider == "gpt4all":
+        if os.getenv("OPENAI_API_KEY"):
+            fallback_chain.append("openai")
+    if requested_provider != "ollama" and ollama_enabled:
         fallback_chain.append("ollama")
+
+    deduped_chain = []
+    for provider in fallback_chain:
+        if provider not in deduped_chain:
+            deduped_chain.append(provider)
+    fallback_chain = deduped_chain
 
     errors = []
 

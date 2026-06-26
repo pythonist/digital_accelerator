@@ -548,6 +548,50 @@ def mlops_upload_dataset(dataset_type):
 
 # â”€â”€â”€ Dataset List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+def _prepopulate_shared_datasets(data_dir: Path):
+    import shutil
+    src_candidates = [
+        Path(__file__).resolve().parents[4] / "data_generation_scripts" / "aml_pipeline_output_v5",
+        Path("data_generation_scripts/aml_pipeline_output_v5"),
+        Path("../data_generation_scripts/aml_pipeline_output_v5"),
+        Path("e:/Trae/AI_AML_tool/data_generation_scripts/aml_pipeline_output_v5")
+    ]
+    
+    src_dir = None
+    for cand in src_candidates:
+        if cand.exists() and cand.is_dir():
+            src_dir = cand
+            break
+            
+    if not src_dir:
+        logger.warning("MLOps: data_generation_scripts/aml_pipeline_output_v5 not found. Skipping auto-populate.")
+        return
+
+    shared_dir = data_dir / "shared_fcc"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    
+    files_to_copy = {
+        "accounts.csv": "accounts.csv",
+        "alerts.csv": "alerts.csv",
+        "cases.csv": "cases.csv",
+        "customers.csv": "customers.csv",
+        "str_reports.csv": "str.csv",
+        "transactions.csv": "transactions.csv"
+    }
+    
+    for src_name, dest_name in files_to_copy.items():
+        src_path = src_dir / src_name
+        dest_path = shared_dir / dest_name
+        
+        if src_path.exists():
+            if not dest_path.exists() or dest_path.stat().st_size != src_path.stat().st_size:
+                logger.info(f"MLOps: Auto-populating {dest_name} from {src_name}")
+                try:
+                    shutil.copy2(src_path, dest_path)
+                except Exception as e:
+                    logger.error(f"Failed to auto-populate {dest_name}: {e}")
+
+
 @mlops_workbench_bp.route("/datasets", methods=["GET"])
 def mlops_list_datasets():
     """
@@ -575,20 +619,21 @@ def mlops_list_datasets():
             pipeline_id = None
 
         sync_param = str(request.args.get("sync") or "").strip().lower()
-        do_sync = sync_param in {"1", "true", "yes", "on", "force", "full"}
         force_sync = sync_param in {"force", "full"}
         synced = []
+        do_sync = True
 
-        if do_sync:
-            data_dir = resolve_mlops_data_dir(env_root, create_if_missing=False)
-            if data_dir.exists():
-                synced = mlops_svc.sync_from_directory(
-                    tenant_id=tenant_id,
-                    env_id=env_id,
-                    data_dir=data_dir,
-                    force=force_sync,
-                    pipeline_type=pipeline_type or "fcc",
-                )
+        # Run prepopulation and sync unconditionally on every list call to ensure shared files are catalogued
+        data_dir = resolve_mlops_data_dir(env_root, create_if_missing=True)
+        _prepopulate_shared_datasets(data_dir)
+        if data_dir.exists():
+            synced = mlops_svc.sync_from_directory(
+                tenant_id=tenant_id,
+                env_id=env_id,
+                data_dir=data_dir,
+                force=force_sync,
+                pipeline_type=pipeline_type or "fcc",
+            )
 
         datasets = mlops_svc.list_datasets(
             tenant_id,

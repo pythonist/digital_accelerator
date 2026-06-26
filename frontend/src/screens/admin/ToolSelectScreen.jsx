@@ -27,7 +27,7 @@ import {
   Science,
 } from '@mui/icons-material';
 import { useAppContext } from '@context/AppContext';
-import SentinelLogo from '../../assets/PwC_2025_Logo.svg';
+import SentinelLogo from '../../assets/PwC_2025_logo.svg';
 
 const colors = {
   bg: '#F2F2F2',

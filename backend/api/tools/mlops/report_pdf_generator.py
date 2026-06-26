@@ -274,24 +274,22 @@ class FCCWorkbenchNarrativeService:
             yield provided
 
         try:
-            from api.service_locator import services
+            from llm.provider_factory import load_llm_provider
 
-            service_ollama = getattr(services, "ollama_wrapper", None)
-            if service_ollama is not None:
-                yield service_ollama
+            provider = load_llm_provider()
+            if provider is not None:
+                yield provider
         except Exception:
             pass
 
         try:
-            from llm.ollama_wrapper import OllamaWrapper
+            from api.service_locator import services
 
-            for url in (None, "http://localhost:11434", "http://localhost:11435"):
-                try:
-                    yield OllamaWrapper(base_url=url) if url else OllamaWrapper()
-                except Exception:
-                    continue
+            service_provider = getattr(services, "llm_provider", None) or getattr(services, "_gpt4all_wrapper", None)
+            if service_provider is not None:
+                yield service_provider
         except Exception:
-            return
+            pass
 
     def _resolve_model(self, ollama: Any) -> Optional[str]:
         if not ollama:
@@ -302,13 +300,12 @@ class FCCWorkbenchNarrativeService:
             available = []
 
         preferred = [
-            "llama3.2:1b",
+            "gpt-4o-mini",
             "qwen2.5:1.5b",
             "qwen2.5:0.5b",
             "phi3:mini",
             "gemma2:2b",
             "tinyllama",
-            "llama3.2:3b",
         ]
         lowered = {name.lower(): name for name in available if name}
         for wanted in preferred:

@@ -6,14 +6,32 @@ from api.services import services
 class LLMReportService:
     def _candidates(self):
         candidates = []
+        try:
+            from llm.provider_factory import load_llm_provider
+
+            provider = load_llm_provider()
+            if provider is not None:
+                candidates.append(provider)
+        except Exception:
+            pass
         for item in (
             getattr(services, "llm_provider", None),
-            getattr(services, "ollama_wrapper", None),
             getattr(services, "_gpt4all_wrapper", None),
         ):
             if item:
                 candidates.append(item)
-        return candidates
+        deduped = []
+        seen = set()
+        for item in candidates:
+            key = (
+                str(getattr(item, "provider_name", "") or item.__class__.__name__).lower(),
+                str(getattr(item, "default_model", "") or "").lower(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     def _generate(self, prompt, *, system_prompt, model=None, temperature=0.1, max_tokens=700):
         for candidate in self._candidates():

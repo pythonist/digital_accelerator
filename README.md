@@ -1,5 +1,18 @@
 # AI_AML_tool
 
+## Changelog (2026-06-27)
+
+### UX & Layout Improvements
+* Fixed Recharts bug causing flat/missing charts in EDA components by removing faulty exit animations.
+* Removed drop-shadows and thick container borders across MLOps Workbench and Feature Governance to reduce boxiness.
+* Replaced side-by-side model algorithm grid with a clean vertical stack.
+* Redesigned Model Lab static facts into a compact, inline horizontal row rather than bulky grid boxes.
+* Flattened Model Grain selection into seamless row highlights instead of outlined cards.
+* Rounded corner radiuses for modeling studio control buttons to align with standard UI conventions.
+* Restored missing side padding on the main MLOps canvas.
+* Modified rail step icons in the left nav to be circular rather than square blocks.
+
+
 AML multi-workbench application with Flask backend and Vite + React frontend.
 
 ## Quick Start (Fresh Clone)

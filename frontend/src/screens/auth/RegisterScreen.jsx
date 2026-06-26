@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // 1. Assets & Theme
-import SentinelLogo from '../../assets/PwC_2025_Logo.svg';
+import SentinelLogo from '../../assets/PwC_2025_logo.svg';
 import { pwcColors } from '../../tools/calibration/theme';
 
 // 2. Motion Wrappers (From your specified path)

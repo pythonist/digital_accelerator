@@ -62,35 +62,116 @@ class UniversalRuleEngine:
     def reload_rules(self):
         self.rules = self._load_rules()
 
+    def _quote_identifier(self, value: str) -> str:
+        return '"' + str(value).replace('"', '""') + '"'
+
+    def _table_columns(self, conn, table_name: str) -> List[str]:
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f'PRAGMA table_info({self._quote_identifier(table_name)})')
+            return [str(row['name']) for row in cursor.fetchall()]
+        except Exception:
+            return []
+
+    def _find_column(self, columns: List[str], exact_names: List[str], fuzzy_terms: List[str] = None) -> str:
+        lowered = {str(col).strip().lower(): str(col) for col in columns}
+        for name in exact_names or []:
+            match = lowered.get(str(name).strip().lower())
+            if match:
+                return match
+        for term in fuzzy_terms or []:
+            term = str(term).strip().lower()
+            if not term:
+                continue
+            for col in columns:
+                if term in str(col).strip().lower():
+                    return str(col)
+        return ""
+
+    def _fetch_table_by_value(self, conn, table_name: str, column_name: str, value: Any) -> pd.DataFrame:
+        if not column_name or value is None or str(value).strip() == "":
+            return pd.DataFrame()
+        try:
+            table_sql = self._quote_identifier(table_name)
+            col_sql = self._quote_identifier(column_name)
+            return pd.read_sql(
+                f"SELECT * FROM {table_sql} WHERE CAST({col_sql} AS TEXT) = ?",
+                conn,
+                params=[str(value)],
+            )
+        except Exception:
+            return pd.DataFrame()
+
+    def _first_existing_value(self, rows: List[Dict[str, Any]], keys: List[str]) -> str:
+        key_set = [str(k).lower() for k in keys]
+        for row in rows:
+            lowered = {str(k).lower(): k for k in row.keys()}
+            for key in key_set:
+                actual = lowered.get(key)
+                if actual is None:
+                    continue
+                value = row.get(actual)
+                if value is not None and str(value).strip():
+                    return str(value).strip()
+        return ""
+
     # --- SMART DATA FETCHING ---
     def _fetch_case_data(self, case_id: str) -> pd.DataFrame:
         """Fetch transaction data for a specific case"""
         conn = self.db_manager.connect()
         try:
-            cursor = conn.cursor()
-            
-            # Try multiple table and column combinations
-            queries = [
-                # Try transactions table with various case_id columns
-                f'SELECT * FROM transactions WHERE case_id = ?',
-                f'SELECT * FROM transactions WHERE Case_ID = ?',
-                f'SELECT * FROM transactions WHERE caseid = ?',
-                f'SELECT * FROM transactions WHERE "Case ID" = ?',
-                
-                # Try alerts table
-                f'SELECT * FROM alerts WHERE case_id = ?',
-                f'SELECT * FROM alerts WHERE Case_ID = ?',
-            ]
-            
-            for query in queries:
-                try:
-                    df = pd.read_sql(query, conn, params=[str(case_id)])
+            txn_cols = self._table_columns(conn, "transactions")
+            alert_cols = self._table_columns(conn, "alerts")
+            case_cols = self._table_columns(conn, "cases")
+
+            txn_case_col = self._find_column(txn_cols, ["case_id", "caseid", "case id"], ["case"])
+            alert_case_col = self._find_column(alert_cols, ["case_id", "caseid", "case id"], ["case"])
+            case_case_col = self._find_column(case_cols, ["case_id", "caseid", "id", "case id"], ["case"])
+
+            if txn_case_col:
+                df = self._fetch_table_by_value(conn, "transactions", txn_case_col, case_id)
+                if not df.empty:
+                    print(f"Found {len(df)} transactions for case {case_id} via transactions.{txn_case_col}")
+                    return df
+
+            case_rows: List[Dict[str, Any]] = []
+            if case_case_col:
+                case_df = self._fetch_table_by_value(conn, "cases", case_case_col, case_id)
+                if not case_df.empty:
+                    case_rows = case_df.replace({pd.NA: None}).to_dict(orient="records")
+
+            alert_rows: List[Dict[str, Any]] = []
+            if alert_case_col:
+                alert_df = self._fetch_table_by_value(conn, "alerts", alert_case_col, case_id)
+                if not alert_df.empty:
+                    alert_rows = alert_df.replace({pd.NA: None}).to_dict(orient="records")
+
+            lookup_rows = case_rows + alert_rows
+            txn_id = self._first_existing_value(lookup_rows, ["transaction_id", "txn_id", "trans_id"])
+            customer_id = self._first_existing_value(lookup_rows, ["customer_id", "cust_id", "customerid", "client_id"])
+            account_id = self._first_existing_value(lookup_rows, ["account_id", "acct_id", "accountid", "account_no"])
+
+            for value, exact, fuzzy, label in [
+                (txn_id, ["transaction_id", "txn_id", "trans_id"], ["transaction"], "transaction id"),
+                (customer_id, ["customer_id", "cust_id", "customerid", "client_id"], ["customer", "client"], "customer id"),
+                (account_id, ["account_id", "acct_id", "accountid", "account_no"], ["account"], "account id"),
+            ]:
+                col = self._find_column(txn_cols, exact, fuzzy)
+                if col and value:
+                    df = self._fetch_table_by_value(conn, "transactions", col, value)
                     if not df.empty:
-                        print(f"Found {len(df)} transactions for case {case_id}")
+                        if txn_case_col and txn_case_col not in df.columns:
+                            df[txn_case_col] = case_id
+                        elif "case_id" not in {str(c).lower() for c in df.columns}:
+                            df["case_id"] = case_id
+                        print(f"Found {len(df)} transactions for case {case_id} via {label}")
                         return df
-                except Exception as e:
-                    continue
-            
+
+            if alert_rows:
+                alert_df = pd.DataFrame(alert_rows)
+                print(f"Using {len(alert_df)} alert rows as rule-engine evidence for case {case_id}")
+                return alert_df
+
             print(f"No transactions found for case {case_id}")
             return pd.DataFrame()
             

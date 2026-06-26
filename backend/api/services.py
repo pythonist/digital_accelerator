@@ -264,10 +264,14 @@ class ServiceContainer:
 
         paths = [
             f"env/{tenant_id}/{env_id}/investigation/investigation.db",
+            f"../env/{tenant_id}/{env_id}/investigation/investigation.db",
             f"backend/env/{tenant_id}/{env_id}/investigation/investigation.db",
             f"data/environments/{env_id}/database.db",
+            f"../data/environments/{env_id}/database.db",
             f"data/environments/{env_id}/investigation.db",
+            f"../data/environments/{env_id}/investigation.db",
             f"data/{tenant_id}/{env_id}/database.db",
+            f"../data/{tenant_id}/{env_id}/database.db",
             f"backend/data/environments/{env_id}/database.db",
         ]
 

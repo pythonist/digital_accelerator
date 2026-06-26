@@ -1,12 +1,11 @@
 import json
-import requests
 import traceback
 import sqlite3
 
 class AIMasterBuilder:
     def __init__(self, db_manager):
         self.db_manager = db_manager
-        self.ollama_url = "http://localhost:11434/api/generate"
+        self._llm_provider = None
 
     def get_schema_summary(self):
         """
@@ -60,16 +59,24 @@ class AIMasterBuilder:
 
         try:
             print(f"🧠 Asking AI ({model}) for Master Data Strategy...")
-            response = requests.post(self.ollama_url, json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.1} # Low temp for consistent JSON
-            })
-            
-            result = response.json()
-            strategy = json.loads(result['response'])
+            if self._llm_provider is None:
+                from llm.provider_factory import load_llm_provider
+                self._llm_provider = load_llm_provider()
+            if not self._llm_provider or not self._llm_provider.check_connection():
+                raise RuntimeError("AI provider is not available")
+            response = self._llm_provider.generate(
+                prompt=prompt,
+                model=model or getattr(self._llm_provider, "default_model", None),
+                temperature=0.1,
+                max_tokens=700,
+            )
+            if not response.get("success"):
+                raise RuntimeError(response.get("error") or "AI provider returned no response")
+
+            text = str(response.get("response") or "").strip()
+            if text.startswith("```"):
+                text = text.replace("```json", "").replace("```", "").strip()
+            strategy = json.loads(text)
             return strategy
 
         except Exception as e:

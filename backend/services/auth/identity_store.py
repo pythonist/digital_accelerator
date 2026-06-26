@@ -39,6 +39,8 @@ class IdentityStore:
         self._init_schema()
         self._ensure_bcrypt()
         self.migrate_legacy_files()
+        self._enforce_single_demo_user()
+
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.config.db_path)
@@ -138,6 +140,42 @@ class IdentityStore:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (str(uuid.uuid4()), email_s, str(pwd_hash), tid, str(role), disabled, created_at, created_at),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _enforce_single_demo_user(self) -> None:
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM users WHERE email != 'admin@fccanalytics.com'")
+            cur.execute("DELETE FROM tenants WHERE domain != 'fccanalytics.com'")
+            
+            cur.execute("SELECT tenant_id FROM tenants WHERE domain = 'fccanalytics.com'")
+            tenant = cur.fetchone()
+            if not tenant:
+                cur.execute(
+                    "INSERT INTO tenants (tenant_id, domain, tenant_name, created_at) VALUES (?, ?, ?, ?)",
+                    ("fccanalytics", "fccanalytics.com", "FCCANALYTICS", float(time.time()))
+                )
+            
+            cur.execute("SELECT user_id FROM users WHERE email = 'admin@fccanalytics.com'")
+            user = cur.fetchone()
+            pwd_hash = self.hash_password("admin")
+            now = float(time.time())
+            if not user:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, email, password_hash, tenant_id, role, disabled, created_at, updated_at)
+                    VALUES (?, 'admin@fccanalytics.com', ?, 'fccanalytics', 'TENANT_ADMIN', 0, ?, ?)
+                    """,
+                    (str(uuid.uuid4()), pwd_hash, now, now)
+                )
+            else:
+                cur.execute(
+                    "UPDATE users SET password_hash = ?, role = 'TENANT_ADMIN', disabled = 0, updated_at = ? WHERE email = 'admin@fccanalytics.com'",
+                    (pwd_hash, now)
                 )
             conn.commit()
         finally:
@@ -249,6 +287,8 @@ class IdentityStore:
         email_s = str(email or "").strip().lower()
         if not email_s:
             raise ValueError("Email is required")
+        if email_s != "admin@fccanalytics.com":
+            raise ValueError("Registration is disabled. Only the root user admin@fccanalytics.com is allowed.")
         pwd_hash = self.hash_password(password or "")
         now = float(time.time())
         user_id = str(uuid.uuid4())
@@ -272,6 +312,8 @@ class IdentityStore:
         email_s = str(email or "").strip().lower()
         if not email_s:
             raise ValueError("Email is required")
+        if email_s != "admin@fccanalytics.com":
+            raise ValueError("Registration is disabled. Only the root user admin@fccanalytics.com is allowed.")
         if not password_hash:
             raise ValueError("Password hash is required")
         now = float(time.time())

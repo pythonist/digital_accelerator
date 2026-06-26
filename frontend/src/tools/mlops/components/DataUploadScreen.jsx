@@ -1580,7 +1580,7 @@ const DataUploadScreen = ({
       
       {/* ── Main 3-column body ─────────────────────────────────────────────── */}
       <Box sx={{
-        flex: 1, minHeight: 0,
+        height: 'calc(100vh - 160px)', minHeight: '500px',
         display: 'grid',
         gridTemplateColumns: { xs: '1fr', lg: '280px 340px 1fr' },
         gap: 0,
