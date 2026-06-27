@@ -981,6 +981,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   const [preprocessDataset, setPreprocessDataset] = useState(null);
   const [building,          setBuilding]          = useState(false);
   const [modelRun,          setModelRun]          = useState(null);
+  const [trainedModels,     setTrainedModels]     = useState(saved.trainedModels || []);
   const [validationReport,  setValidationReport]  = useState(null);
   const [registryEntry,     setRegistryEntry]     = useState(null);
   const [activeModelRun,    setActiveModelRun]    = useState(null);
@@ -1008,6 +1009,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       setPreprocessPreview(null);
       setPreprocessDataset(null);
       setModelRun(null);
+      setTrainedModels([]);
       setValidationReport(null);
       setRegistryEntry(null);
       setActiveModelRun(null);
@@ -1356,6 +1358,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     setPreprocessDataset(null);
     setBuilding(false);
     setModelRun(null);
+    setTrainedModels([]);
     setActiveModelRun(null);
     setValidationReport(null);
     setRegistryEntry(null);
@@ -1496,6 +1499,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   useEffect(() => { lsWrite({ experimentName }); },  [experimentName]);
   useEffect(() => { lsWrite({ railCollapsed }); },   [railCollapsed]);
   useEffect(() => { lsWrite({ showContext }); },     [showContext]);
+  useEffect(() => { lsWrite({ trainedModels }); },   [trainedModels]);
   useEffect(() => { lsWrite({ targetColumn }); },    [targetColumn]);
   useEffect(() => { lsWrite({ reportRunId }); },     [reportRunId]);
   useEffect(() => () => {
@@ -2060,6 +2064,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     setPreprocessDataset(null);
     setBuilding(false);
     setModelRun(null);
+    setTrainedModels([]);
     setActiveModelRun(null);
     setValidationReport(null);
     setRegistryEntry(null);
@@ -6223,7 +6228,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       masterDataset={masterDataset} targetColumn={targetColumn}
                       activePipelineId={validActivePipelineId}
                       activePipelineName={activePipelineName}
+                      trainedModels={trainedModels}
+                      activeModelRun={effectiveActiveModelRun || modelRun}
                       onModelComplete={handleModelComplete} onOpenReport={handleOpenReport}
+                      onActiveModelSelect={(model) => adoptModelRun(model, { resumeExisting: true })}
                       initialActiveTab={modelActiveTab}
                       onActiveTabChange={setModelActiveTab}
                     />
@@ -6233,6 +6241,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       activePipelineId={validActivePipelineId}
                       datasetId={preprocessDataset?.dataset_id || masterDataset?.dataset_id || null}
                       activeModelRun={effectiveActiveModelRun || modelRun}
+                      trainedModels={trainedModels}
                       validationReport={effectiveValidationReport}
                       initialActiveTab={validationActiveTab}
                       onActiveTabChange={setValidationActiveTab}
@@ -6249,6 +6258,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       uploadedDatasets={datasets} masterDataset={masterDataset}
                       targetColumn={targetColumn} preprocessedDataset={preprocessDataset}
                       activeModelRun={effectiveActiveModelRun || modelRun} validationReport={effectiveValidationReport}
+                      trainedModels={trainedModels}
+                      onActiveModelSelect={(model) => adoptModelRun(model, { resumeExisting: true })}
                       registryEntry={effectiveRegistryEntry || registryEntry}
                       activePipelineName={activePipelineName}
                       activePipelineId={validActivePipelineId}

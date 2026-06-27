@@ -1,5 +1,22 @@
 # Change History
 
+## 2026-06-27 - Evaluate Tab Redesign and Progress Stepper
+
+Commit scope:
+- Redesign the Evaluate tab and the Training Progress tracker in the MLOps Model Training panel.
+- Update the layout to replace boxy dashboard cards with a sleek, full-width design matching updated mockups.
+
+Files changed:
+- `frontend/src/tools/mlops/components/ModelTrainingPanel.jsx`
+- `frontend/src/tools/mlops/screens/MLOpsWorkbench.jsx`
+
+Summary:
+- Removed the old `StructuredTrainingProgress` blocky design and replaced it with a modern horizontal stepper with circles, custom icons, and animated connecting lines.
+- Redesigned the "Evaluate" tab to eliminate outer paper boxes, replacing them with full-width orange decorative header bars.
+- Ensured header text is styled cleanly in white inside the orange header bars.
+- Resolved multiple syntax and unbalanced JSX tag errors introduced during the iterative layout restructuring.
+- Implemented logic in MLOpsWorkbench and ModelTrainingPanel to allow multiple models to be trained and compared in the same pipeline session.
+
 ## 2026-03-04 - Cortex V2 naming restore
 
 Commit scope:

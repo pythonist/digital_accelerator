@@ -1543,7 +1543,7 @@ const ScoringLedger = ({ jobId, grain, hmlHigh, hmlLow, results, grainOptions = 
 
 // ── MetricBox ─────────────────────────────────────────────────────────────────
 const MetricBox = ({ label, value, sub, emphasis = false }) => (
-  <Paper
+  <Box
     variant="outlined"
     sx={{
       p: 1.5,
@@ -1561,7 +1561,7 @@ const MetricBox = ({ label, value, sub, emphasis = false }) => (
       {typeof value === 'number' ? (value <= 1 ? value.toFixed(3) : value.toFixed(0)) : value ?? '-'}
     </Typography>
     {sub && <Typography sx={{ fontSize: 10, color: T.textDim }}>{sub}</Typography>}
-  </Paper>
+  </Box>
 );
 
 const PreviewDataTable = ({ title, preview, tone = 'default' }) => {
@@ -1803,11 +1803,11 @@ const StructuredTrainingProgress = ({ jobStatus }) => {
   const progress = Number(jobStatus?.progress ?? 0);
   const stageText = String(jobStatus?.current_stage || '').toLowerCase();
   const steps = [
-    { id: 'prepare', label: 'Prepare', hint: 'Build clean feature matrix' },
-    { id: 'split', label: 'Split', hint: 'Create validation holdout' },
-    { id: 'fit', label: 'Fit', hint: 'Train the selected algorithm' },
-    { id: 'evaluate', label: 'Evaluate', hint: 'Score holdout and compute metrics' },
-    { id: 'explain', label: 'Explain', hint: 'Generate interpretable drivers' },
+    { id: 'prepare', label: 'Prepare' },
+    { id: 'split', label: 'Split' },
+    { id: 'fit', label: 'Fit' },
+    { id: 'evaluate', label: 'Evaluate' },
+    { id: 'explain', label: 'Explain' },
   ];
   const inferStatus = (step, idx) => {
     if (jobStatus?.status === 'failed') return progress > idx * 20 ? 'failed' : 'pending';
@@ -1817,32 +1817,78 @@ const StructuredTrainingProgress = ({ jobStatus }) => {
     if (progress >= idx * 20) return 'in_progress';
     return 'pending';
   };
+
   return (
-    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fcfcfd' }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
-        <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>Training Progress</Typography>
-        <Typography sx={{ fontSize: 11, color: T.textDim }}>{jobStatus?.current_stage || 'Waiting to start'}</Typography>
-      </Stack>
-      <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(5, minmax(0, 1fr))' } }}>
+    <Box sx={{ width: '100%', py: 4, px: { xs: 2, md: 6 }, bgcolor: '#fff', borderRadius: 2, boxShadow: '0 1px 3px rgba(0,0,0,0.05)', mb: 3, border: '1px solid #eaebec' }}>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         {steps.map((step, idx) => {
           const status = inferStatus(step, idx);
-          const palette = status === 'completed'
-            ? { bg: '#fff7ed', border: T.orange, text: T.orange }
-            : status === 'in_progress'
-              ? { bg: '#f8fafc', border: '#cbd5e1', text: T.textPrimary }
-              : status === 'failed'
-                ? { bg: '#fef2f2', border: '#fecaca', text: T.red }
-                : { bg: '#ffffff', border: T.border, text: T.textDim };
+          const isLast = idx === steps.length - 1;
+          
+          let circleBg, circleIcon, chipBg, chipColor, chipText;
+          if (status === 'completed') {
+            circleBg = '#22c55e'; // Green
+            circleIcon = <CheckCircle sx={{ color: '#fff', fontSize: 24 }} />;
+            chipBg = '#22c55e';
+            chipColor = '#fff';
+            chipText = 'Completed';
+          } else if (status === 'in_progress') {
+            circleBg = '#2563eb'; // Blue
+            circleIcon = null;
+            chipBg = '#2563eb';
+            chipColor = '#fff';
+            chipText = 'In Progress';
+          } else if (status === 'failed') {
+            circleBg = '#ef4444'; // Red
+            circleIcon = <Close sx={{ color: '#fff', fontSize: 24 }} />;
+            chipBg = '#ef4444';
+            chipColor = '#fff';
+            chipText = 'Failed';
+          } else {
+            circleBg = '#e5e7eb'; // Grey
+            circleIcon = null;
+            chipBg = '#f3f4f6';
+            chipColor = '#374151';
+            chipText = 'Pending';
+          }
+
           return (
-            <Box key={step.id} sx={{ p: 1.25, borderRadius: 1.5, border: `1px solid ${palette.border}`, bgcolor: palette.bg }}>
-              <Typography sx={{ fontSize: 10, color: T.textDim, textTransform: 'uppercase', letterSpacing: 0.5 }}>{status.replace('_', ' ')}</Typography>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: palette.text }}>{step.label}</Typography>
-              <Typography sx={{ fontSize: 10.5, color: T.textDim, mt: 0.25 }}>{step.hint}</Typography>
-            </Box>
+            <React.Fragment key={step.id}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 80, flexShrink: 0, zIndex: 1 }}>
+                <Box
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '50%',
+                    bgcolor: circleBg,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mb: 2,
+                    boxShadow: status === 'in_progress' ? '0 0 0 6px rgba(37,99,235,0.1)' : 'none',
+                    transition: 'all 0.3s'
+                  }}
+                >
+                  {circleIcon}
+                </Box>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, mb: 1 }}>
+                  STEP {idx + 1}
+                </Typography>
+                <Box sx={{ px: 1.5, py: 0.5, borderRadius: 4, bgcolor: chipBg, color: chipColor, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  {chipText}
+                </Box>
+              </Box>
+              
+              {!isLast && (
+                <Box sx={{ flexGrow: 1, height: 4, bgcolor: '#e5e7eb', mt: '22px', mx: -2, zIndex: 0, position: 'relative' }}>
+                  <Box sx={{ width: status === 'completed' ? '100%' : '0%', height: '100%', bgcolor: '#22c55e', transition: 'width 0.5s' }} />
+                </Box>
+              )}
+            </React.Fragment>
           );
         })}
       </Box>
-    </Paper>
+    </Box>
   );
 };
 
@@ -4694,6 +4740,7 @@ const ModelTrainingPanel = ({
               </Stack>
             </Stack>
           </Paper>
+
           <StructuredTrainingProgress jobStatus={jobStatus} />
           <TrainingDAG jobStatus={jobStatus} algoObj={activeRunOption} />
           <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 2, bgcolor: '#fafbfc' }}>
@@ -4815,45 +4862,49 @@ const ModelTrainingPanel = ({
             {jobId && <Button size="small" variant="outlined" sx={{ mt: 1.5, textTransform: 'none', borderColor: T.border, color: T.textMuted }} onClick={() => fetchResults(jobId)}>Load Results</Button>}
           </Paper>
         ) : (
-          <Stack spacing={2.5}>
-            <Stack spacing={1.25}>
-              <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                <MetricBox label="ROC-AUC" value={m.roc_auc} />
-                <MetricBox label="PR-AUC"  value={prAuc} emphasis={isFocusMetric('pr_auc')} />
-                <MetricBox label="CV AUC"  value={m.cv_auc} />
+          <Stack spacing={4}>
+            <Box>
+              <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Performance Metrics</Typography>
+</Box>
+              <Stack spacing={1.25}>
+                <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                  <MetricBox label="ROC-AUC" value={m.roc_auc} />
+                  <MetricBox label="PR-AUC"  value={prAuc} emphasis={isFocusMetric('pr_auc')} />
+                  <MetricBox label="CV AUC"  value={m.cv_auc} />
+                </Stack>
+                <Typography sx={{ fontSize: 11.5, color: T.textDim }}>
+                  Binary decision metrics at the approved operating threshold ({threshold.toFixed(2)})
+                </Typography>
+                <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+                  <MetricBox label="Precision"    value={thresholdMetrics.precision} emphasis={isFocusMetric('precision')} />
+                  <MetricBox label="Recall"       value={thresholdMetrics.recall} emphasis={isFocusMetric('recall')} />
+                  <MetricBox label="F1 Score"     value={thresholdMetrics.f1} emphasis={isFocusMetric('f1')} />
+                  <MetricBox label="Accuracy"     value={thresholdMetrics.accuracy} emphasis={isFocusMetric('accuracy')} />
+                  <MetricBox label="Specificity"  value={thresholdMetrics.specificity} emphasis={isFocusMetric('specificity')} />
+                  <MetricBox label="Balanced Acc" value={thresholdMetrics.balanced_accuracy} emphasis={isFocusMetric('balanced_accuracy')} />
+                </Stack>
               </Stack>
-              <Typography sx={{ fontSize: 11.5, color: T.textDim }}>
-                Binary decision metrics at the approved operating threshold ({threshold.toFixed(2)})
-              </Typography>
-              <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-                <MetricBox label="Precision"    value={thresholdMetrics.precision} emphasis={isFocusMetric('precision')} />
-                <MetricBox label="Recall"       value={thresholdMetrics.recall} emphasis={isFocusMetric('recall')} />
-                <MetricBox label="F1 Score"     value={thresholdMetrics.f1} emphasis={isFocusMetric('f1')} />
-                <MetricBox label="Accuracy"     value={thresholdMetrics.accuracy} emphasis={isFocusMetric('accuracy')} />
-                <MetricBox label="Specificity"  value={thresholdMetrics.specificity} emphasis={isFocusMetric('specificity')} />
-                <MetricBox label="Balanced Acc" value={thresholdMetrics.balanced_accuracy} emphasis={isFocusMetric('balanced_accuracy')} />
-              </Stack>
-            </Stack>
+            </Box>
 
-            {results?.mode === 'supervised' && (
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff8f4', borderColor: '#f1d5c7' }}>
-                <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} justifyContent="space-between">
-                  <Box sx={{ maxWidth: 840 }}>
-                    <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>
-                      Decision path explorer
-                    </Typography>
-                    <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.45, lineHeight: 1.7 }}>
-                      Use a real holdout sample to show which conditions pushed the model toward suppressing or escalating an alert. Tree models use their native path; other algorithms use a surrogate tree built from the trained scorer.
-                    </Typography>
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                      <Chip label={treeExplanation?.tree_kind === 'surrogate' ? 'Surrogate tree explainer' : 'Native tree explainer'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
-                      <Chip label={`${Array.isArray(treeExplanation?.sample_candidates) ? treeExplanation.sample_candidates.length : 0} sample trace${Array.isArray(treeExplanation?.sample_candidates) && treeExplanation.sample_candidates.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
-                      {treeExplanation?.selected_sample?.entity_id && (
-                        <Chip label={`Selected sample ${treeExplanation.selected_sample.entity_id}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
-                      )}
-                    </Stack>
-                  </Box>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+              {/* Left Column: Decision path explorer */}
+              {results?.mode === 'supervised' ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Decision path explorer</Typography>
+</Box>
+                  <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.45, lineHeight: 1.7, flexGrow: 1 }}>
+                    Use a real holdout sample to show which conditions pushed the model toward suppressing or escalating an alert. Tree models use their native path; other algorithms use a surrogate tree built from the trained scorer.
+                  </Typography>
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1, mb: 2 }}>
+                    <Chip label={treeExplanation?.tree_kind === 'surrogate' ? 'Surrogate tree explainer' : 'Native tree explainer'} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    <Chip label={`${Array.isArray(treeExplanation?.sample_candidates) ? treeExplanation.sample_candidates.length : 0} sample trace${Array.isArray(treeExplanation?.sample_candidates) && treeExplanation.sample_candidates.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    {treeExplanation?.selected_sample?.entity_id && (
+                      <Chip label={`Selected sample ${treeExplanation.selected_sample.entity_id}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    )}
+                  </Stack>
+                  <Stack direction="row" spacing={1} mt="auto">
                     <Button
                       variant="contained"
                       onClick={() => setTreeWorkbenchOpen(true)}
@@ -4870,25 +4921,30 @@ const ModelTrainingPanel = ({
                       Back to train tab
                     </Button>
                   </Stack>
-                </Stack>
-              </Paper>
-            )}
+                </Box>
+              ) : <Box />}
 
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
-              <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 0.75 }}>Threshold deployment policy</Typography>
-              <Typography sx={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.7 }}>
-                Default operating threshold is {(deployThresholdPolicy?.default_threshold ?? DEFAULT_BUSINESS_THRESHOLD).toFixed(2)}. FCC will only allow deployable thresholds between {thresholdBandMin.toFixed(2)} and {thresholdBandMax.toFixed(2)} while still showing the broader trade-off curve for review.
-              </Typography>
-              {deployThresholdPolicy?.deployable_threshold != null && (
-                <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 0.75 }}>
-                  Best deployable threshold for this run: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{Number(deployThresholdPolicy.deployable_threshold).toFixed(2)}</Box>
+              {/* Right Column: Threshold deployment policy */}
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Threshold deployment policy</Typography>
+</Box>
+                <Typography sx={{ fontSize: 11.5, color: T.textMuted, lineHeight: 1.7 }}>
+                  Default operating threshold is {(deployThresholdPolicy?.default_threshold ?? DEFAULT_BUSINESS_THRESHOLD).toFixed(2)}. FCC will only allow deployable thresholds between {thresholdBandMin.toFixed(2)} and {thresholdBandMax.toFixed(2)} while still showing the broader trade-off curve for review.
                 </Typography>
-              )}
-            </Paper>
+                {deployThresholdPolicy?.deployable_threshold != null && (
+                  <Typography sx={{ fontSize: 11.5, color: T.textMuted, mt: 'auto', pt: 2 }}>
+                    Best deployable threshold for this run: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{Number(deployThresholdPolicy.deployable_threshold).toFixed(2)}</Box>
+                  </Typography>
+                )}
+              </Box>
+            </Box>
 
             {qualityReview?.review_required && (
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff7ed', borderColor: '#fed7aa' }}>
-                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 0.75 }}>Quality guard review required</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Quality guard review required</Typography>
+</Box>
                 <Stack spacing={0.75}>
                   {(qualityReview?.findings || []).map((finding, idx) => (
                     <Typography key={`${finding?.code || 'finding'}-${idx}`} sx={{ fontSize: 11.5, color: T.textMuted }}>
@@ -4896,89 +4952,94 @@ const ModelTrainingPanel = ({
                     </Typography>
                   ))}
                 </Stack>
-              </Paper>
+              </Box>
             )}
 
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
-              <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                <Functions sx={{ fontSize: 15, color: T.textDim }} />
-                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>Optimization Objective</Typography>
-              </Stack>
-              <Stack spacing={1.25}>
-                <ToggleButtonGroup
-                  value={objectiveId}
-                  exclusive
-                  onChange={(_, v) => v && setObjectiveId(v)}
-                  size="small"
-                  sx={{ flexWrap: 'wrap', gap: 0.75 }}
-                >
-                  {OBJECTIVE_OPTIONS.map((opt) => (
-                    <ToggleButton
-                      key={opt.id}
-                      value={opt.id}
-                      sx={{
-                        textTransform: 'none',
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        borderRadius: 1,
-                        px: 1.25,
-                        py: 0.5,
-                        borderColor: T.border,
-                      }}
-                    >
-                      {opt.label}
-                    </ToggleButton>
-                  ))}
-                </ToggleButtonGroup>
-                <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                  {objective.description} Primary metric: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{objective.metricLabel}</Box>.
-                </Typography>
-                <TextField
-                  size="small"
-                  multiline
-                  minRows={2}
-                  value={objectiveReason}
-                  onChange={(e) => setObjectiveReasons((p) => ({ ...p, [objectiveId]: e.target.value }))}
-                  placeholder={objective.rationalePlaceholder}
-                  label="Why this objective?"
-                  sx={{ maxWidth: 720, '& .MuiOutlinedInput-root': { borderRadius: 1.5, fontSize: 12 } }}
-                />
-                <Typography sx={{ fontSize: 10.5, color: T.textDim }}>
-                  This selection does not retrain the model; it guides metric emphasis and reporting.
-                </Typography>
-              </Stack>
-            </Paper>
-
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fafbfc' }}>
-              <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                <Functions sx={{ fontSize: 15, color: T.textDim }} />
-                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>Metric Guidance</Typography>
-              </Stack>
-              {posRateLabel && (
-                <Typography sx={{ fontSize: 11.5, color: T.textDim, mb: 0.75 }}>
-                  Positive rate in test set: {posRateLabel}
-                </Typography>
-              )}
-              <Stack spacing={0.5}>
-                <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
-                  <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>Objective:</Box> {objective.label}.
-                </Typography>
-                {objective.guidance.map((line) => (
-                  <Typography key={line} sx={{ fontSize: 11.5, color: T.textMuted }}>
-                    {line}
+            <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+  <Functions sx={{ fontSize: 15, color: T.textDim }} />
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Optimization Objective</Typography>
+</Box>
+                <Stack spacing={1.25}>
+                  <ToggleButtonGroup
+                    value={objectiveId}
+                    exclusive
+                    onChange={(_, v) => v && setObjectiveId(v)}
+                    size="small"
+                    sx={{ flexWrap: 'wrap', gap: 0.75 }}
+                  >
+                    {OBJECTIVE_OPTIONS.map((opt) => (
+                      <ToggleButton
+                        key={opt.id}
+                        value={opt.id}
+                        sx={{
+                          textTransform: 'none',
+                          fontSize: 11.5,
+                          fontWeight: 600,
+                          borderRadius: 1,
+                          px: 1.25,
+                          py: 0.5,
+                          borderColor: T.border,
+                        }}
+                      >
+                        {opt.label}
+                      </ToggleButton>
+                    ))}
+                  </ToggleButtonGroup>
+                  <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                    {objective.description} Primary metric: <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>{objective.metricLabel}</Box>.
                   </Typography>
-                ))}
-                {objectiveReason && (
-                  <Typography sx={{ fontSize: 11.5, color: T.textDim }}>
-                    Rationale: {objectiveReason}
+                  <TextField
+                    size="small"
+                    multiline
+                    minRows={2}
+                    value={objectiveReason}
+                    onChange={(e) => setObjectiveReasons((p) => ({ ...p, [objectiveId]: e.target.value }))}
+                    placeholder={objective.rationalePlaceholder}
+                    label="Why this objective?"
+                    sx={{ maxWidth: 720, '& .MuiOutlinedInput-root': { borderRadius: 1.5, fontSize: 12 } }}
+                  />
+                  <Typography sx={{ fontSize: 10.5, color: T.textDim }}>
+                    This selection does not retrain the model; it guides metric emphasis and reporting.
+                  </Typography>
+                </Stack>
+              </Box>
+
+              <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+  <Functions sx={{ fontSize: 15, color: T.textDim }} />
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Metric Guidance</Typography>
+</Box>
+                {posRateLabel && (
+                  <Typography sx={{ fontSize: 11.5, color: T.textDim, mb: 0.75 }}>
+                    Positive rate in test set: {posRateLabel}
                   </Typography>
                 )}
-              </Stack>
-            </Paper>
+                <Stack spacing={0.5}>
+                  <Typography sx={{ fontSize: 11.5, color: T.textMuted }}>
+                    <Box component="span" sx={{ fontWeight: 700, color: T.textPrimary }}>Objective:</Box> {objective.label}.
+                  </Typography>
+                  {objective.guidance.map((line) => (
+                    <Typography key={line} sx={{ fontSize: 11.5, color: T.textMuted }}>
+                      {line}
+                    </Typography>
+                  ))}
+                  {objectiveReason && (
+                    <Typography sx={{ fontSize: 11.5, color: T.textDim, mt: 1 }}>
+                      Rationale: {objectiveReason}
+                    </Typography>
+                  )}
+                </Stack>
+              </Box>
+            </Box>
 
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' } }}>
-              <Stack spacing={2}>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Stack spacing={4}>
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Performance Metrics</Typography>
+</Box>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1.5}>
                     <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary }}>Confusion Matrix</Typography>
                     {evalLoading && <CircularProgress size={13} sx={{ color: T.orange }} />}
@@ -4995,10 +5056,12 @@ const ModelTrainingPanel = ({
                     <Typography sx={{ fontSize: 12, fontWeight: 700, color: T.orange }}>{threshold.toFixed(2)}</Typography>
                   </Stack>
                   <Slider value={threshold} min={thresholdBandMin} max={thresholdBandMax} step={0.01} onChange={(_, v) => setThreshold(v)} size="small" sx={{ color: T.orange }} />
-                </Paper>
+                </Box>
 
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.5 }}>Suppression vs Review Quality</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Suppression vs Review Quality</Typography>
+</Box>
                   <Box sx={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 300 }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
@@ -5024,12 +5087,14 @@ const ModelTrainingPanel = ({
                       </tbody>
                     </table>
                   </Box>
-                </Paper>
+                </Box>
               </Stack>
 
-              <Stack spacing={2}>
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.5 }}>ROC Curve</Typography>
+              <Stack spacing={4}>
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>ROC Curve</Typography>
+</Box>
                   <ResponsiveContainer width="100%" height={190}>
                     <LineChart data={rocData} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -5061,10 +5126,12 @@ const ModelTrainingPanel = ({
                       />
                     </LineChart>
                   </ResponsiveContainer>
-                </Paper>
+                </Box>
 
-                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, mb: 1.5 }}>Precision-Recall Curve</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Box sx={{ width: '100%', bgcolor: T.orange, px: 1.5, py: 0.75, mb: 1.5 }}>
+  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>Precision-Recall Curve</Typography>
+</Box>
                   <ResponsiveContainer width="100%" height={190}>
                     <LineChart data={prData} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -5096,7 +5163,7 @@ const ModelTrainingPanel = ({
                       />
                     </LineChart>
                   </ResponsiveContainer>
-                </Paper>
+                </Box>
               </Stack>
             </Box>
 
