@@ -74,15 +74,15 @@ const ToolSelectScreen = () => {
       requiresData: false,
       path: '/investigation',
     },
-    {
-      key: 'calibration',
-      name: 'Cortex',
-      description: 'AI-assisted environment for rule optimization, threshold tuning, scenario simulation, and performance impact analysis',
-      icon: Tune,
-      color: '#00A152',
-      path: '/calibration',
-      locked: !activeEnv,
-    },
+    // {
+    //   key: 'calibration',
+    //   name: 'Cortex',
+    //   description: 'AI-assisted environment for rule optimization, threshold tuning, scenario simulation, and performance impact analysis',
+    //   icon: Tune,
+    //   color: '#00A152',
+    //   path: '/calibration',
+    //   locked: !activeEnv,
+    // },
     {
       key: 'mule_detection',
       name: 'Mule Detection Intelligence',
@@ -94,7 +94,7 @@ const ToolSelectScreen = () => {
     },
     {
       key: 'btsy',
-      name: 'Cortex V2',
+      name: 'Cortex',
       description: 'Bank Threshold Simulation Tool - data-driven threshold calibration, scenario simulation, and impact analysis for AML rule optimization',
       icon: BlurCircular,
       color: '#D04A02',
