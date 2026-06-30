@@ -60,6 +60,7 @@ export const getInvestigationNavigationSections = (hasData = false) => ([
     items: [
       { id: 'casepack', label: 'Case Packs', icon: Description, disabled: !hasData },
       { id: 'investigate', label: 'Copilot Investigation', icon: Search, disabled: !hasData },
+      { id: 'agentic', label: 'Agentic Investigation', icon: Psychology, highlight: true },
       { id: 'tree', label: 'Lineage Explorer', icon: AccountTree, disabled: !hasData },
       { id: 'retrieval_compare', label: 'Case Retrieval', icon: ContentCopy, disabled: !hasData },
       { id: 'chat', label: 'AI Assistant', icon: Chat },

@@ -1,5 +1,21 @@
 # Change History
 
+## 2026-06-30 - OpenRouter Integration and Dev Script Fix
+
+Commit scope:
+- Fix PowerShell parser error preventing the local development launcher from running properly.
+- Reconfigure the backend LLM client layer to support OpenRouter API format natively to enable Nemotron reasoning capabilities.
+
+Files changed:
+- `start-dev.ps1`
+- `backend/.env`
+- `backend/api/routes/llm_clients.py`
+
+Summary:
+- Changed invalid variable interpolation `$port:` to `${port}:` in `start-dev.ps1` to resolve scope parser failures.
+- Updated `.env` keys and URLs to map `NEMOTRON` references to OpenRouter with the appropriate `nemotron-3-ultra-550b-a55b:free` model name.
+- Rewrote the `nemotron` execution flow in `llm_clients.py` to use `requests` instead of the OpenAI SDK. This ensures custom OpenRouter payload arguments, such as `{"reasoning": {"enabled": True}}`, are successfully preserved and delivered to the upstream API.
+
 ## 2026-06-27 - Evaluate Tab Redesign and Progress Stepper
 
 Commit scope:

@@ -171,7 +171,7 @@ def _register_blueprints(app: Flask, backend_profile: str):
         from api.routes.reports import reports_bp
         from api.routes.typology import typology_bp
         from api.routes.case_facts import case_facts_bp
-        from api.routes.calibration import calibration_bp
+        # from api.routes.calibration import calibration_bp
         from api.tools.btsy.behaviour_reconstruction.routes import behaviour_reconstruction_bp
 
         app.register_blueprint(admin_bp, url_prefix="/api")
@@ -192,6 +192,9 @@ def _register_blueprints(app: Flask, backend_profile: str):
         app.register_blueprint(typology_bp, url_prefix="/api/v2")
         app.register_blueprint(case_facts_bp, url_prefix="/api/v2")
 
+        from api.routes.agentic import agentic_bp
+        app.register_blueprint(agentic_bp)
+
         try:
             from api.routes.mule_detection import mule_bp
 
@@ -208,6 +211,7 @@ def _register_blueprints(app: Flask, backend_profile: str):
 
             app.register_blueprint(btsy_bp, url_prefix="/api/btsy")
             status["btsy"] = True
+
         except Exception as e:
             print("BTSY module import failed:", repr(e))
             traceback.print_exc()
@@ -221,11 +225,12 @@ def _register_blueprints(app: Flask, backend_profile: str):
         except Exception:
             status["connectors"] = False
 
-        if calibration_bp:
-            app.register_blueprint(calibration_bp, url_prefix="/api/v2/calibration")
-            status["calibration"] = True
-        else:
-            status["calibration"] = False
+        # if calibration_bp:
+        #     app.register_blueprint(calibration_bp, url_prefix="/api/v2/calibration")
+        #     status["calibration"] = True
+        # else:
+        #     status["calibration"] = False
+        status["calibration"] = False
 
     try:
         from api.routes.mlops import mlops_bp
@@ -386,6 +391,10 @@ def create_app() -> Flask:
         if request.path.startswith("/api"):
             return jsonify({"error": "Internal Server Error"}), 500
         return jsonify({"error": "Internal Server Error"}), 500
+
+    @app.before_request
+    def _set_llm_model_context():
+        g.llm_model = request.headers.get("X-LLM-Model")
 
     @app.before_request
     def _trace_api_request_start():

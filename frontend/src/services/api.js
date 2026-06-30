@@ -32,6 +32,12 @@ class APIClient {
         if (!config.params.env_id) config.params.env_id = activeEnv;
       }
 
+      // Inject chosen LLM model
+      const llmModel = localStorage.getItem('llm_model');
+      if (llmModel) {
+        config.headers['X-LLM-Model'] = llmModel;
+      }
+
       const isFormData = typeof FormData !== 'undefined' && config?.data instanceof FormData;
       if (isFormData && config.headers) {
         delete config.headers['Content-Type'];

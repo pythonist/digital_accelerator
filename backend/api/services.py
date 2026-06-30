@@ -230,6 +230,8 @@ class ServiceContainer:
         REGISTRY.register("rag", _load_rag, feature_flag_env="ENABLE_RAG")
 
         # Graph builder
+
+        # Graph builder
         def _load_graph():
             if not self.investigation_db:
                 raise RuntimeError("Investigation DB not available for graph builder")
@@ -238,22 +240,22 @@ class ServiceContainer:
         REGISTRY.register("graph", _load_graph, feature_flag_env="ENABLE_GRAPH")
 
         # Calibration DB and engines
-        def _load_calibration_db():
-            from modules.calibration import load_calibration_db
-            return load_calibration_db(run_migrations)
-        REGISTRY.register("calibration_db", _load_calibration_db, feature_flag_env="ENABLE_CALIBRATION")
+        # def _load_calibration_db():
+        #     from modules.calibration import load_calibration_db
+        #     return load_calibration_db(run_migrations)
+        # REGISTRY.register("calibration_db", _load_calibration_db, feature_flag_env="ENABLE_CALIBRATION")
 
-        def _load_percentile_engine():
-            db = REGISTRY.get("calibration_db")
-            from modules.calibration import load_percentile_engine
-            return load_percentile_engine(db)
-        REGISTRY.register("percentile_engine", _load_percentile_engine, feature_flag_env="ENABLE_CALIBRATION")
+        # def _load_percentile_engine():
+        #     db = REGISTRY.get("calibration_db")
+        #     from modules.calibration import load_percentile_engine
+        #     return load_percentile_engine(db)
+        # REGISTRY.register("percentile_engine", _load_percentile_engine, feature_flag_env="ENABLE_CALIBRATION")
 
-        def _load_threshold_simulator():
-            db = REGISTRY.get("calibration_db")
-            from modules.calibration import load_threshold_simulator
-            return load_threshold_simulator(db)
-        REGISTRY.register("threshold_simulator", _load_threshold_simulator, feature_flag_env="ENABLE_CALIBRATION")
+        # def _load_threshold_simulator():
+        #     db = REGISTRY.get("calibration_db")
+        #     from modules.calibration import load_threshold_simulator
+        #     return load_threshold_simulator(db)
+        # REGISTRY.register("threshold_simulator", _load_threshold_simulator, feature_flag_env="ENABLE_CALIBRATION")
 
     # ---------------------------------------------------
     # STATELESS DB FACTORY (CRITICAL)

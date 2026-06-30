@@ -59,9 +59,29 @@ class OpenAIWrapper:
         self._connection_checked = False
         self._connection_ok = False
 
+    def _get_context_overrides(self) -> tuple[str, str, str]:
+        model = self.default_model
+        base_url = self.base_url
+        api_key = self.api_key
+        try:
+            from flask import has_request_context, g
+            if has_request_context():
+                req_model = getattr(g, "llm_model", None)
+                if req_model == "nemotron":
+                    model = "nvidia/nemotron-3-ultra-550b-a55b"
+                    base_url = "https://openrouter.ai/api/v1"
+                    api_key = os.getenv("OPENROUTER_API_KEY") or api_key
+                elif req_model == "chatgpt":
+                    # explicitly requested chatgpt
+                    pass
+        except ImportError:
+            pass
+        return model, base_url, api_key
+
     def _headers(self) -> Dict[str, str]:
+        _, _, api_key = self._get_context_overrides()
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
 
@@ -88,20 +108,21 @@ class OpenAIWrapper:
         if not self.api_key:
             return []
         try:
+            model, base_url, _ = self._get_context_overrides()
             response = requests.get(
-                f"{self.base_url}/models",
+                f"{base_url}/models",
                 headers=self._headers(),
                 timeout=min(REQUEST_TIMEOUT, 15),
             )
             if response.status_code != 200:
-                return [self.default_model]
+                return [model]
             models = response.json().get("data") or []
             names = sorted({str(item.get("id") or "").strip() for item in models if item.get("id")})
-            if self.default_model and self.default_model not in names:
-                names.insert(0, self.default_model)
+            if model and model not in names:
+                names.insert(0, model)
             return names[:100]
         except Exception:
-            return [self.default_model] if self.default_model else []
+            return [model] if model else []
 
     def _chat_payload(
         self,
@@ -122,16 +143,27 @@ class OpenAIWrapper:
             messages.append({"role": role, "content": str(message.get("content") or "")})
         messages.append({"role": "user", "content": str(prompt or "")})
 
+        dyn_model, _, _ = self._get_context_overrides()
+        
+        # Override with global setting if frontend specifically chose it
+        try:
+            from flask import has_request_context, g
+            if has_request_context() and getattr(g, "llm_model", None) in {"nemotron", "chatgpt"}:
+                model = dyn_model
+        except ImportError:
+            pass
+
         return {
-            "model": model or self.default_model,
+            "model": model or dyn_model,
             "messages": messages,
             "temperature": float(temperature),
             token_key: _bounded_tokens(max_tokens),
         }
 
     def _post_chat(self, payload: Dict) -> requests.Response:
+        _, base_url, _ = self._get_context_overrides()
         return requests.post(
-            f"{self.base_url}/chat/completions",
+            f"{base_url}/chat/completions",
             headers=self._headers(),
             json=payload,
             timeout=REQUEST_TIMEOUT,
@@ -146,8 +178,9 @@ class OpenAIWrapper:
         max_tokens: int = 800,
     ) -> Dict:
         start = time.time()
-        if not self.api_key:
-            return {"success": False, "error": "OPENAI_API_KEY is not configured", "provider": self.provider_name}
+        _, _, api_key = self._get_context_overrides()
+        if not api_key:
+            return {"success": False, "error": "API_KEY is not configured", "provider": self.provider_name}
         try:
             payload = self._chat_payload(
                 prompt,

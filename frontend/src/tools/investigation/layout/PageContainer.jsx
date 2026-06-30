@@ -97,7 +97,7 @@ const PageContainer = ({
         - Standard padding (p: 3)
         - No extra margins here
       */}
-      <Box sx={{ p: 3, flex: 1 }}>
+      <Box sx={{ p: 3, flex: 1, display: 'flex', flexDirection: 'column' }}>
         {children}
       </Box>
     </Box>

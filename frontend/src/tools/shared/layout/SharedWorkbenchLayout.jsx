@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AppBar,
@@ -21,6 +21,7 @@ import {
   Typography,
   Collapse,
   alpha,
+  Select,
 } from '@mui/material';
 import { styled, useTheme } from '@mui/material/styles';
 import {
@@ -100,6 +101,15 @@ const SharedWorkbenchLayout = ({
   navShape = 'sharp',
   headerActions = null,
 }) => {
+  const [llmModel, setLlmModel] = useState(localStorage.getItem('llm_model') || 'chatgpt');
+
+  const handleModelChange = (e) => {
+    const newModel = e.target.value;
+    setLlmModel(newModel);
+    localStorage.setItem('llm_model', newModel);
+    window.location.reload();
+  };
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
@@ -527,6 +537,26 @@ const SharedWorkbenchLayout = ({
               )}
 
               {headerActions}
+
+              <Select
+                value={llmModel}
+                onChange={handleModelChange}
+                size="small"
+                variant="outlined"
+                sx={{
+                  color: 'white',
+                  height: 28,
+                  fontSize: '0.75rem',
+                  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'white' },
+                  '& .MuiSvgIcon-root': { color: 'white' },
+                  mr: 1
+                }}
+              >
+                <MenuItem value="chatgpt" sx={{ fontSize: '0.8rem' }}>ChatGPT</MenuItem>
+                <MenuItem value="nemotron" sx={{ fontSize: '0.8rem' }}>Nemotron 3 Ultra</MenuItem>
+              </Select>
 
               <Tooltip title="Help">
                 <IconButton size="small" sx={{ color: 'white', p: 0.5 }}>

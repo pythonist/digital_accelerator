@@ -324,16 +324,36 @@ def is_conversational(msg):
 @llm_bp.route('/llm/models', methods=['GET'])
 def list_models():
     try:
+        from flask import g, request
+        with open("llm_debug.txt", "a") as f:
+            f.write(f"--- new request ---\n")
+            f.write(f"DEBUG: X-LLM-Model from headers: {request.headers.get('X-LLM-Model')}\n")
+            f.write(f"DEBUG: g.llm_model: {getattr(g, 'llm_model', None)}\n")
+            
         llm_service = _get_llm_service()
         if not llm_service:
             return jsonify({'success': False, 'available': False, 'models': [], 'error': 'AI provider unavailable'}), 200
+        
         available = bool(llm_service.check_connection())
+        models_list = llm_service.list_models()
+        
+        # Get the actual default model for the current context
+        try:
+            model_override, _, _ = getattr(llm_service, '_get_context_overrides', lambda: (None, None, None))()
+        except Exception:
+            model_override = None
+        default_model = model_override or getattr(llm_service, 'default_model', None)
+        
+        with open("llm_debug.txt", "a") as f:
+            f.write(f"DEBUG: provider_name: {getattr(llm_service, 'provider_name', 'local_ai')}\n")
+            f.write(f"DEBUG: models list returned: {models_list}\n")
+            
         return jsonify({
             'success': available,
             'available': available,
             'provider': getattr(llm_service, 'provider_name', 'local_ai'),
-            'default_model': getattr(llm_service, 'default_model', None),
-            'models': llm_service.list_models(),
+            'default_model': default_model,
+            'models': models_list,
             'error': None if available else 'AI provider unavailable',
         }), 200
     except Exception as e:

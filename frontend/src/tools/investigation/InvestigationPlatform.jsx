@@ -39,6 +39,7 @@ import CasePriorityInbox from './screens/cases/CasePriorityInbox';
 import CasePackViewer from './screens/cases/CasePackViewer';
 import DataTreeScreen from './screens/cases/DataTreeScreen';
 import ChatAssistantScreen from './screens/cases/ChatAssistantScreen';
+import AgenticInvestigationScreen from './screens/cases/AgenticInvestigationScreen';
 import CaseInvestigationScreen from './screens/cases/CaseInvestigationScreen';
 import CaseResolutionWorkspace from './screens/cases/CaseResolutionWorkspace';
 import CaseRetrievalComparePage from './screens/cases/retrieval_compare/CaseRetrievalComparePage';
@@ -281,6 +282,7 @@ const InvestigationPlatform = () => {
       case 'escalation_history': return <EscalationHistoryPage />;
       case 'tree': return <DataTreeScreen />;
       case 'chat': return <ChatAssistantScreen />;
+      case 'agentic': return <AgenticInvestigationScreen caseId={handoff?.selected_case_id || 'CASE-10024'} />;
 
       // Analysis
       case 'rules': return <RuleEngineScreen />;

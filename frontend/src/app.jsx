@@ -15,7 +15,7 @@ const EnvironmentModuleTransitionScreen = lazyWithReload(() => import("@screens/
 const ToolSelectScreen = lazyWithReload(() => import("@screens/admin/ToolSelectScreen"), 'tools');
 
 const InvestigationPlatform = lazyWithReload(() => import("@tools/investigation/InvestigationPlatform"), 'investigation');
-const CalibrationPlatform = lazyWithReload(() => import("@tools/calibration/CalibrationPlatform"), 'calibration');
+// const CalibrationPlatform = lazyWithReload(() => import("@tools/calibration/CalibrationPlatform"), 'calibration');
 const MulePlatform = lazyWithReload(() => import("@tools/mule_detection/MulePlatform"), 'mule');
 const BTSYPlatform = lazyWithReload(() => import("@tools/btsy/BTSYPlatform"), 'btsy');
 const MLOpsPlatform = lazyWithReload(() => import("@tools/mlops/MLOpsPlatform"), 'mlops');
@@ -23,7 +23,7 @@ const MLOpsPlatform = lazyWithReload(() => import("@tools/mlops/MLOpsPlatform"),
 const RESTORE_ENTRY_PATHS = new Set(['/', '/environments']);
 const TOOL_ROUTE_PREFIXES = [
   ['/investigation', 'investigation'],
-  ['/calibration', 'calibration'],
+  // ['/calibration', 'calibration'],
   ['/mule', 'mule_detection'],
   ['/btsy', 'btsy'],
   ['/mlops', 'mlops'],
@@ -243,7 +243,7 @@ const AppRoutes = () => {
         {/* Tool Platforms */}
         <Route element={<ToolLayout />}>
           <Route path="/investigation/*" element={<RouteSuspense><InvestigationPlatform /></RouteSuspense>} />
-          <Route path="/calibration/*" element={<RouteSuspense><CalibrationPlatform /></RouteSuspense>} />
+          {/* <Route path="/calibration/*" element={<RouteSuspense><CalibrationPlatform /></RouteSuspense>} /> */}
           <Route path="/mule/*" element={<RouteSuspense><MulePlatform /></RouteSuspense>} />
           <Route path="/btsy/*" element={<RouteSuspense><BTSYPlatform /></RouteSuspense>} />
           <Route path="/mlops/*" element={<RouteSuspense><MLOpsPlatform /></RouteSuspense>} />

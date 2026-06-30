@@ -1,9 +1,110 @@
 [CmdletBinding()]
 param(
-    [switch]$MlopsOnly
+    [switch]$MlopsOnly,
+    [switch]$StopOnly,
+    [int]$BackendPort = 5000,
+    [int]$FrontendPort = 5173
 )
 
 $ErrorActionPreference = "Stop"
+
+function Stop-DevProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId,
+        [Parameter(Mandatory = $true)]
+        [string]$Reason
+    )
+
+    if ($ProcessId -eq $PID) {
+        return
+    }
+
+    try {
+        $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+        Write-Host "Stopping PID $ProcessId ($($proc.ProcessName)): $Reason" -ForegroundColor Yellow
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    } catch {
+        Write-Host "PID $ProcessId already stopped or could not be stopped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
+function Stop-DevPortOwners {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int[]]$Ports
+    )
+
+    foreach ($port in ($Ports | Sort-Object -Unique)) {
+        try {
+            $owners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty OwningProcess -Unique
+            foreach ($owner in $owners) {
+                if ($owner -and $owner -ne 0) {
+                    Stop-DevProcess -ProcessId ([int]$owner) -Reason "listening on dev port $port"
+                }
+            }
+        } catch {
+            Write-Host "Could not inspect port ${port}: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+    }
+}
+
+function Stop-ProjectDevProcesses {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$BackendDir,
+        [Parameter(Mandatory = $true)]
+        [string]$FrontendDir,
+        [Parameter(Mandatory = $true)]
+        [int]$BackendPort,
+        [Parameter(Mandatory = $true)]
+        [int]$FrontendPort
+    )
+
+    $repoPattern = [regex]::Escape($RepoRoot)
+    $backendPattern = [regex]::Escape($BackendDir)
+    $frontendPattern = [regex]::Escape($FrontendDir)
+    $matched = @{}
+
+    $processes = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine }
+    foreach ($proc in $processes) {
+        $cmd = [string]$proc.CommandLine
+        $pidValue = [int]$proc.ProcessId
+        if ($pidValue -eq $PID) {
+            continue
+        }
+
+        $isProjectBackend = (
+            $cmd -match "app\.py" -and
+            (
+                $cmd -match $repoPattern -or
+                $cmd -match $backendPattern -or
+                ($cmd -match "python" -and $cmd -match "(^|[\\/\s`"'])app\.py([`"'\s]|$)")
+            )
+        )
+        $isProjectFrontend = (
+            $cmd -match "vite" -and
+            (
+                $cmd -match $repoPattern -or
+                $cmd -match $frontendPattern -or
+                $cmd -match "frontend"
+            )
+        )
+
+        if ($isProjectBackend -or $isProjectFrontend) {
+            $matched[$pidValue] = if ($isProjectBackend) { "project backend app.py process" } else { "project Vite frontend process" }
+        }
+    }
+
+    foreach ($entry in $matched.GetEnumerator()) {
+        Stop-DevProcess -ProcessId ([int]$entry.Key) -Reason ([string]$entry.Value)
+    }
+
+    Stop-DevPortOwners -Ports @($BackendPort, 5000, 5001, $FrontendPort)
+}
 
 function Convert-ToSingleQuotedLiteral {
     param(
@@ -228,6 +329,13 @@ if (-not (Test-Path -LiteralPath $frontendDir)) {
     throw "Frontend directory not found: $frontendDir"
 }
 
+Stop-ProjectDevProcesses -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDir $frontendDir -BackendPort $BackendPort -FrontendPort $FrontendPort
+
+if ($StopOnly) {
+    Write-Host "Stopped stale backend/frontend dev processes. StopOnly was set, so nothing was started." -ForegroundColor Green
+    return
+}
+
 if (-not (Test-Path -LiteralPath $backendEnvFile) -and (Test-Path -LiteralPath $backendEnvExample)) {
     Copy-Item -LiteralPath $backendEnvExample -Destination $backendEnvFile
 }
@@ -263,10 +371,10 @@ $pythonArgLiteral = @($pythonLaunchSpec.Arguments | ForEach-Object {
 }) -join " "
 $backendAppPath = Join-Path $backendDir "app.py"
 $backendAppPathLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendAppPath
-$backendProfileCommand = if ($MlopsOnly) { "$env:AML_BACKEND_PROFILE='mlops'; " } else { "" }
+$backendProfileValue = if ($MlopsOnly) { "mlops" } else { "full" }
 
-$backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; $backendProfileCommand & '$pythonExecutableLiteral' $pythonArgLiteral '$backendAppPathLiteral'"
-$frontendCommand = "Set-Location -LiteralPath '$frontendDirLiteral'; npm run dev"
+$backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; `$env:APP_PORT='$BackendPort'; `$env:PORT='$BackendPort'; `$env:AML_BACKEND_PROFILE='$backendProfileValue'; & '$pythonExecutableLiteral' $pythonArgLiteral '$backendAppPathLiteral'"
+$frontendCommand = "Set-Location -LiteralPath '$frontendDirLiteral'; npm run dev -- --host 0.0.0.0 --port $FrontendPort"
 
 Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-NoExit",
@@ -288,3 +396,5 @@ if ($pythonLaunchSpec.Arguments) {
 }
 $pythonLaunchSummary = $pythonLaunchSummaryParts -join " "
 Write-Host "Started backend using $pythonLaunchSummary and frontend (npm run dev) in separate PowerShell windows."
+Write-Host "Backend:  http://127.0.0.1:${BackendPort}" -ForegroundColor Green
+Write-Host "Frontend: http://127.0.0.1:${FrontendPort}" -ForegroundColor Green

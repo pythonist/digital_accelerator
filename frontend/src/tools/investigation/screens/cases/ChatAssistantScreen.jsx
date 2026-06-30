@@ -80,7 +80,12 @@ const ChatAssistantScreen = () => {
           if (modelNames.length > 0) {
             setLocalModels(modelNames);
             if (!modelNames.includes(selectedModel)) {
-              setSelectedModel(modelNames[0]);
+              const backendDefault = res.data.default_model;
+              if (backendDefault && modelNames.includes(backendDefault)) {
+                setSelectedModel(backendDefault);
+              } else {
+                setSelectedModel(modelNames[0]);
+              }
             }
           } else {
             setLocalModels([DEFAULT_AI_MODEL]);
@@ -211,7 +216,7 @@ const ChatAssistantScreen = () => {
          - overflow: 'hidden' prevents double scrollbars.
          - gap: 2 adds spacing between Chat Area and Input Area.
       */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', gap: 2 }}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', gap: 2, width: '100%' }}>
         
         {/* CHAT MESSAGES CONTAINER */}
         <Paper 
