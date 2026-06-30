@@ -118,6 +118,10 @@ def _run(kind: str, model: str, system: str, user: str, temperature: float, json
             )
             resp.raise_for_status()
             resp_json = resp.json()
+            if "error" in resp_json:
+                raise LLMError(f"OpenRouter error: {resp_json['error']}")
+            if "choices" not in resp_json:
+                raise LLMError(f"OpenRouter missing choices: {resp_json}")
             message = resp_json['choices'][0]['message']
             content = (message.get('content') or "").strip()
             
@@ -193,3 +197,11 @@ def nemotron_summarize(tool_name: str, raw_output: str, current_memory: str = ""
         "Update the investigation memory from this tool output."
     )
     return _run("nemotron", NEMOTRON_MODEL, system, user, temperature=0.1, json_mode=False)
+
+def run_llm_text(provider: str, system: str, user: str, temperature: float = 0.2) -> str:
+    model = OPENAI_MODEL if provider == "chatgpt" else NEMOTRON_MODEL
+    return _run(provider, model, system, user, temperature, json_mode=False)
+
+def run_llm_json(provider: str, system: str, user: str, temperature: float = 0.1) -> str:
+    model = OPENAI_MODEL if provider == "chatgpt" else NEMOTRON_MODEL
+    return _run(provider, model, system, user, temperature, json_mode=True)

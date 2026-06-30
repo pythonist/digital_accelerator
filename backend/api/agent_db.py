@@ -153,6 +153,24 @@ def get_session_by_case(case_id: str):
     conn.close()
     return dict(row) if row else None
 
+def get_all_latest_sessions():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''
+        SELECT s.*, 
+               (SELECT model FROM llm_interaction_log l WHERE l.session_id = s.id LIMIT 1) as model
+        FROM investigation_session s
+        WHERE id IN (
+            SELECT id FROM investigation_session 
+            GROUP BY case_id 
+            HAVING start_time = MAX(start_time)
+        )
+        ORDER BY start_time DESC
+    ''')
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def get_activities(session_id: str, limit: int = 100):
     conn = get_db_connection()
     c = conn.cursor()

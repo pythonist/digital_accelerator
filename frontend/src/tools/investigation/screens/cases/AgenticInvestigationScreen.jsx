@@ -3,15 +3,18 @@ import {
   Box, Typography, Paper, Button,
   List, ListItem, ListItemButton, ListItemText, Chip,
   CircularProgress, Alert, Stack, Accordion, AccordionSummary, AccordionDetails,
-  Dialog, DialogTitle, DialogContent, DialogActions, LinearProgress
+  Dialog, DialogTitle, DialogContent, DialogActions, LinearProgress,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow
 } from '@mui/material';
 import {
   PlayArrow, Stop, CheckCircle, RadioButtonUnchecked,
   ExpandMore, FiberManualRecord, ShowChart, AttachMoney, Bolt,
   Terminal, ListAlt, Psychology, Description as DescriptionIcon,
   FactCheck, ReportProblem, ArrowForward, HelpOutline, PersonOutline,
-  Download, AccountTree
+  Download, AccountTree, ViewList
 } from '@mui/icons-material';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import apiClient from '@services/api';
 import PageContainer from '../../layout/PageContainer';
 
@@ -21,9 +24,18 @@ import { useAppContext } from '@context/AppContext';
 const ACCENT = '#e8590c';        // PwC orange — primary actions / active tab underline
 const BORDER = '#e5e7eb';        // hairline border used on every card
 const TEXT_PRIMARY = '#0f172a';
-const TEXT_SECONDARY = '#64748b';
+const TEXT_SECONDARY = '#475569';
 const SURFACE = '#ffffff';
-const SURFACE_MUTED = '#f8f9fb';
+const SURFACE_MUTED = '#f8fafc';
+
+const cleanMarkdown = (text) => {
+  if (!text) return '';
+  let cleaned = text.replace(/^#+(?=[^\s#])/gm, (match) => match + ' ');
+  cleaned = cleaned.replace(/^(\d+\.\s+[A-Z].*)$/gm, '### $1');
+  cleaned = cleaned.replace(/^([A-Z][a-z]+(?: [A-Z][a-z]+)* Summary.*)$/gm, '### $1');
+  cleaned = cleaned.replace(/([^\n])\n(\s*\|)/g, '$1\n\n$2');
+  return cleaned;
+};
 
 const RISK_COLOR = (score) => {
   if (score >= 80) return '#dc2626';
@@ -68,6 +80,7 @@ const cardSx = {
 };
 
 const TABS = [
+  { key: 'analysis', label: 'Analysis Table', icon: ViewList },
   { key: 'overview', label: 'Overview', icon: ShowChart },
   { key: 'log', label: 'Live Log', icon: Terminal },
   { key: 'plan', label: 'Plan', icon: ListAlt },
@@ -78,7 +91,8 @@ const TABS = [
 
 const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
   const { caseList } = useAppContext();
-  const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId || 'CASE-10024');
+  const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId || '');
+  const [selectedModel, setSelectedModel] = useState('chatgpt');
   const [status, setStatus] = useState('not_started');
   const [session, setSession] = useState(null);
   const [plan, setPlan] = useState([]);
@@ -90,7 +104,8 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
   const [llmLogs, setLlmLogs] = useState([]);
   const [trace, setTrace] = useState(null);
   const [selectedStep, setSelectedStep] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('analysis');
+  const [recentSessions, setRecentSessions] = useState([]);
 
   const consoleRef = useRef(null);
 
@@ -115,8 +130,21 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
   };
 
   useEffect(() => {
-    fetchStatus();
+    if (selectedCaseId) {
+      fetchStatus();
+    }
   }, [selectedCaseId]);
+
+  useEffect(() => {
+    const fetchSessions = () => {
+      apiClient.get('/api/v2/agentic/sessions')
+        .then(res => setRecentSessions(res))
+        .catch(e => console.error('Failed to fetch recent sessions', e));
+    };
+    fetchSessions();
+    const interval = setInterval(fetchSessions, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (status === 'running' && selectedCaseId) {
@@ -151,7 +179,7 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
 
   const handleStart = async () => {
     try {
-      await apiClient.post('/api/v2/agentic/start', { case_id: selectedCaseId });
+      await apiClient.post('/api/v2/agentic/start', { case_id: selectedCaseId, selected_model: selectedModel });
       setStatus('running');
       setActivities([]);
       setTrace(null);
@@ -193,36 +221,58 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
       breadcrumbs={['Investigation', 'Agentic Workflow']}
       actions={<Box />}
     >
-      {!selectedCaseId ? (
-        <Alert severity="info">Select a case to start an agentic investigation.</Alert>
-      ) : (
-        <Box sx={{ ...cardSx, overflow: 'hidden' }}>
+      <Box sx={{ ...cardSx, overflow: 'hidden' }}>
 
-          {/* Header strip — case identity, status, risk, primary action */}
-          <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        {/* Header strip — case identity, status, risk, primary action */}
+        <Box sx={{ p: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <select
+              value={selectedCaseId}
+              onChange={(e) => {
+                setSelectedCaseId(e.target.value);
+                setStatus('not_started');
+                setSession(null);
+                setPlan([]);
+                setMemory(null);
+                setDocuments([]);
+                setActivities([]);
+                setFindings(null);
+                setToolLogs([]);
+                setLlmLogs([]);
+                setTrace(null);
+                setActiveTab('overview');
+              }}
+              disabled={status === 'running'}
+              style={{
+                padding: '8px 32px 8px 12px',
+                backgroundColor: TEXT_PRIMARY,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                outline: 'none',
+                cursor: status === 'running' ? 'default' : 'pointer',
+              }}
+            >
+              <option value="" disabled>Select a case...</option>
+              {caseList && caseList.length > 0 ? (
+                caseList.map((c) => (
+                  <option key={c.case_id} value={c.case_id}>{c.case_id}</option>
+                ))
+              ) : null}
+            </select>
+
+
               <select
-                value={selectedCaseId}
-                onChange={(e) => {
-                  setSelectedCaseId(e.target.value);
-                  setStatus('not_started');
-                  setSession(null);
-                  setPlan([]);
-                  setMemory(null);
-                  setDocuments([]);
-                  setActivities([]);
-                  setFindings(null);
-                  setToolLogs([]);
-                  setLlmLogs([]);
-                  setTrace(null);
-                  setActiveTab('overview');
-                }}
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
                 disabled={status === 'running'}
                 style={{
                   padding: '8px 32px 8px 12px',
-                  backgroundColor: TEXT_PRIMARY,
-                  color: '#fff',
-                  border: 'none',
+                  backgroundColor: SURFACE_MUTED,
+                  color: TEXT_PRIMARY,
+                  border: `1px solid ${BORDER}`,
                   borderRadius: 4,
                   fontSize: '0.85rem',
                   fontWeight: 600,
@@ -230,33 +280,30 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                   cursor: status === 'running' ? 'default' : 'pointer',
                 }}
               >
-                {caseList && caseList.length > 0 ? (
-                  caseList.map((c) => (
-                    <option key={c.case_id} value={c.case_id}>{c.case_id}</option>
-                  ))
-                ) : (
-                  <option value={selectedCaseId}>{selectedCaseId}</option>
-                )}
+                <option value="chatgpt">ChatGPT (gpt-4o-mini)</option>
+                <option value="nemotron">Nemotron (OpenRouter)</option>
               </select>
 
               <Box>
                 <Typography variant="subtitle1" sx={{ fontWeight: 700, color: TEXT_PRIMARY, lineHeight: 1.2 }}>
-                  Case {selectedCaseId}
+                  Case {selectedCaseId || 'Unselected'}
                 </Typography>
-                <Chip
-                  label={status.replace('_', ' ').toUpperCase()}
-                  size="small"
-                  sx={{
-                    height: 20,
-                    mt: 0.5,
-                    fontSize: '0.65rem',
-                    fontWeight: 700,
-                    borderRadius: 0.5,
-                    bgcolor: status === 'failed' ? '#fef2f2' : status === 'completed' ? '#f0fdf4' : status === 'running' ? '#eff6ff' : SURFACE_MUTED,
-                    color: status === 'failed' ? '#dc2626' : status === 'completed' ? '#16a34a' : status === 'running' ? '#2563eb' : ACCENT,
-                    border: `1px solid ${status === 'failed' ? '#fecaca' : status === 'completed' ? '#bbf7d0' : status === 'running' ? '#bfdbfe' : '#fed7aa'}`,
-                  }}
-                />
+                {selectedCaseId && (
+                  <Chip
+                    label={status.replace('_', ' ').toUpperCase()}
+                    size="small"
+                    sx={{
+                      height: 20,
+                      mt: 0.5,
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      borderRadius: 0.5,
+                      bgcolor: status === 'failed' ? '#fef2f2' : status === 'completed' ? '#f0fdf4' : status === 'running' ? '#eff6ff' : SURFACE_MUTED,
+                      color: status === 'failed' ? '#dc2626' : status === 'completed' ? '#16a34a' : status === 'running' ? '#2563eb' : ACCENT,
+                      border: `1px solid ${status === 'failed' ? '#fecaca' : status === 'completed' ? '#bbf7d0' : status === 'running' ? '#bfdbfe' : '#fed7aa'}`,
+                    }}
+                  />
+                )}
               </Box>
             </Box>
 
@@ -330,7 +377,7 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                   }}>
                     {tab.label}
                   </Typography>
-                  {tab.key === 'plan' && plan.length > 0 && (
+                  {tab.key === 'plan' && plan.length > 0 && !needsRealRun && (
                     <Chip
                       label={`${completedSteps}/${totalSteps}`}
                       size="small"
@@ -350,7 +397,7 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
           </Box>
 
           <Box sx={{ borderTop: `1px solid ${BORDER}`, p: 2.5, minHeight: 420 }}>
-            {needsRealRun && (
+            {needsRealRun && activeTab !== 'analysis' && (
               <Alert
                 severity="warning"
                 sx={{ mb: 2, borderRadius: 0.5 }}
@@ -364,6 +411,78 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                 {` ${trace?.findings_count || 0}`} structured findings, and {trace?.document_count || 0} old documents.
                 Run a real AI investigation to generate ChatGPT/Nemotron traces, evidence-backed findings, and full reports.
               </Alert>
+            )}
+
+            {/* ---------------- ANALYSIS TABLE ---------------- */}
+            {activeTab === 'analysis' && (
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700, color: TEXT_PRIMARY, mb: 3 }}>
+                  Recent Agentic Investigations
+                </Typography>
+                
+                {recentSessions.length === 0 ? (
+                  <Alert severity="info">No recent agentic investigations found. Select a case from the dropdown above to begin.</Alert>
+                ) : (
+                  <TableContainer component={Paper} sx={{ ...cardSx, border: `1px solid ${BORDER}` }}>
+                    <Table size="small">
+                      <TableHead sx={{ bgcolor: SURFACE_MUTED }}>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: TEXT_SECONDARY }}>CASE ID</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: TEXT_SECONDARY }}>STATUS</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: TEXT_SECONDARY }}>RISK SCORE</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: TEXT_SECONDARY }}>LLM MODEL</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: TEXT_SECONDARY }}>STARTED</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: TEXT_SECONDARY }}>COMPLETED</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {recentSessions.map(sess => (
+                          <TableRow 
+                            key={sess.id} 
+                            hover 
+                            onClick={() => {
+                              setSelectedCaseId(sess.case_id);
+                              setActiveTab('overview');
+                            }}
+                            sx={{ cursor: 'pointer', '&:last-child td, &:last-child th': { border: 0 } }}
+                          >
+                            <TableCell sx={{ fontWeight: 600, color: TEXT_PRIMARY }}>
+                              {sess.case_id}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={sess.status.replace('_', ' ').toUpperCase()}
+                                size="small"
+                                sx={{
+                                  height: 22,
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  borderRadius: 1,
+                                  bgcolor: sess.status === 'failed' ? '#fef2f2' : sess.status === 'completed' ? '#f0fdf4' : sess.status === 'running' ? '#eff6ff' : SURFACE_MUTED,
+                                  color: sess.status === 'failed' ? '#dc2626' : sess.status === 'completed' ? '#16a34a' : sess.status === 'running' ? '#2563eb' : ACCENT,
+                                  border: `1px solid ${sess.status === 'failed' ? '#fecaca' : sess.status === 'completed' ? '#bbf7d0' : sess.status === 'running' ? '#bfdbfe' : '#fed7aa'}`,
+                                }}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ fontWeight: 700, color: sess.risk_score ? RISK_COLOR(sess.risk_score) : TEXT_SECONDARY }}>
+                              {sess.risk_score != null ? sess.risk_score.toFixed(0) : '—'}
+                            </TableCell>
+                            <TableCell sx={{ fontSize: '0.8rem', color: TEXT_SECONDARY }}>
+                              {sess.model || '—'}
+                            </TableCell>
+                            <TableCell sx={{ fontSize: '0.8rem', color: TEXT_SECONDARY }}>
+                              {sess.start_time ? new Date(sess.start_time).toLocaleString() : '—'}
+                            </TableCell>
+                            <TableCell sx={{ fontSize: '0.8rem', color: TEXT_SECONDARY }}>
+                              {sess.end_time ? new Date(sess.end_time).toLocaleString() : '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </Box>
             )}
 
             {/* ---------------- OVERVIEW ---------------- */}
@@ -385,7 +504,9 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                           <CheckCircle sx={{ fontSize: 15, color: '#16a34a' }} />
                           <Typography sx={sectionLabelSx}>Steps complete</Typography>
                         </Box>
-                        <Typography variant="h5" sx={{ fontWeight: 700 }}>{completedSteps} / {totalSteps}</Typography>
+                        <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                          {needsRealRun ? 'Run Analysis' : `${completedSteps} / ${totalSteps}`}
+                        </Typography>
                       </Box>
 
                       <Box sx={{ flex: '1 1 180px', p: 2, borderRight: { xs: 'none', sm: `1px solid ${BORDER}` } }}>
@@ -485,11 +606,31 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                                     {f.severity}
                                   </Typography>
                                 </Box>
-                              );
-                            })}
-                        </Stack>
-                      </Box>
-                    )}
+                                );
+                              })}
+                          </Stack>
+                        </Box>
+                      )}
+
+                      {/* Risk Assessment Basis */}
+                      {findings?.risk_drivers?.length > 0 && (
+                        <Box sx={{ mt: 3 }}>
+                          <Typography sx={sectionLabelSx}>Risk Assessment Basis</Typography>
+                          <Stack spacing={1.25} sx={{ mt: 1.25 }}>
+                            {findings.risk_drivers.map((d, i) => (
+                              <Paper key={i} sx={{ ...cardSx, p: 2 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                  <ReportProblem sx={{ fontSize: 16, color: ACCENT }} />
+                                  <Typography variant="body2" sx={{ fontWeight: 700, color: TEXT_PRIMARY }}>{d.driver}</Typography>
+                                </Box>
+                                <Typography variant="body2" sx={{ color: TEXT_SECONDARY, lineHeight: 1.6, mb: 1, ml: 3 }}>
+                                  {d.explanation}
+                                </Typography>
+                              </Paper>
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
 
                     {status === 'running' && (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -560,9 +701,11 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                               }}
                             />
                           </Box>
-                          <Typography variant="caption" sx={{ color: TEXT_SECONDARY, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                            {row.summary || 'No summary captured.'}
-                          </Typography>
+                          <Box sx={{ color: TEXT_SECONDARY, typography: 'caption', '& p': { mt: 0, mb: 1 }, '& ul, & ol': { mt: 0, mb: 1, pl: 2 }, '& h1, & h2, & h3': { color: TEXT_PRIMARY, fontWeight: 700, mt: 1.5, mb: 0.5, fontSize: '0.85rem' } }}>
+                            <ReactMarkdown>
+                              {row.summary || 'No summary captured.'}
+                            </ReactMarkdown>
+                          </Box>
                         </Paper>
                       ))}
                     </Stack>
@@ -857,11 +1000,12 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                   Live summary of evidence collected across all tools.
                 </Typography>
                 <Box sx={{
-                  bgcolor: SURFACE_MUTED, border: `1px solid ${BORDER}`, color: TEXT_PRIMARY,
-                  p: 2, borderRadius: 0.5, fontFamily: 'monospace', fontSize: '0.78rem',
-                  whiteSpace: 'pre-wrap', minHeight: 300, lineHeight: 1.7,
+                  bgcolor: SURFACE_MUTED, border: `1px solid ${BORDER}`, p: 2, borderRadius: 0.5,
+                  minHeight: 300, color: TEXT_SECONDARY, typography: 'body2',
+                  '& p': { mt: 0, mb: 1.5, lineHeight: 1.7 }, '& ul, & ol': { mt: 0, mb: 1.5, pl: 2, lineHeight: 1.7 },
+                  '& h1, & h2, & h3': { color: TEXT_PRIMARY, fontWeight: 700, mt: 2.5, mb: 1 }
                 }}>
-                  {memory ? memory.memory_text : 'Memory is empty.'}
+                  {memory ? <ReactMarkdown>{memory.memory_text}</ReactMarkdown> : 'Memory is empty.'}
                 </Box>
                 {llmLogs.length > 0 && (
                   <Box sx={{ mt: 2.5 }}>
@@ -940,9 +1084,26 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                           </Box>
                         </AccordionSummary>
                         <AccordionDetails sx={{ borderTop: `1px solid ${BORDER}`, p: 2.5 }}>
-                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: TEXT_PRIMARY, lineHeight: 1.7 }}>
-                            {doc.content}
-                          </Typography>
+                            <Box sx={{
+                              color: TEXT_PRIMARY, typography: 'body2',
+                              '& p': { mt: 0, mb: 1.5, lineHeight: 1.7 }, '& ul, & ol': { mt: 0, mb: 1.5, pl: 2.5, lineHeight: 1.7 },
+                              '& h1, & h2, & h3, & h4': { 
+                                color: '#fff', 
+                                bgcolor: ACCENT, 
+                                fontWeight: 700, 
+                                mt: 3, 
+                                mb: 1.5, 
+                                p: 1, 
+                                borderRadius: 0.5 
+                              },
+                              '& h1': { fontSize: '1.25rem' }, '& h2': { fontSize: '1.1rem' }, '& h3': { fontSize: '0.95rem' },
+                              '& hr': { my: 2, borderColor: BORDER },
+                              '& table': { width: '100%', borderCollapse: 'collapse', mb: 2 },
+                              '& th, & td': { border: `1px solid ${BORDER}`, p: 1, textAlign: 'left' },
+                              '& th': { bgcolor: SURFACE_MUTED, fontWeight: 700 }
+                            }}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanMarkdown(doc.content)}</ReactMarkdown>
+                            </Box>
                         </AccordionDetails>
                       </Accordion>
                     ))}
@@ -953,7 +1114,6 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
 
           </Box>
         </Box>
-      )}
 
       {/* Step detail dialog */}
       <Dialog open={Boolean(selectedStep)} onClose={() => setSelectedStep(null)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 1 } }}>

@@ -1,5 +1,26 @@
 # Change History
 
+## 2026-06-30 - Agentic Investigation Dashboard and Formatting Polish
+
+Commit scope:
+- Overhaul the Agentic Investigation tab with a live Recent Sessions dashboard.
+- Redesign the PDF generation and frontend markdown renderer to properly style reports and tables.
+
+Files changed:
+- `frontend/src/tools/investigation/screens/cases/AgenticInvestigationScreen.jsx`
+- `backend/api/agent_db.py`
+- `backend/api/routes/agentic.py`
+- `frontend/package.json`
+
+Summary:
+- Replaced the blank initial state with an active Analysis Table (Recent Investigations) showing case ID, status, risk score, LLM model used, and timestamps.
+- Updated `AgenticInvestigationScreen.jsx` UI layout so the dashboard stays permanently pinned to the left of the Overview tab.
+- Set up a continuous polling loop so the Analysis Table auto-updates while background cases are running.
+- Restructured `agent_db.py` SQL query to join `llm_interaction_log` and surface the specific LLM model used for each case session.
+- Installed `remark-gfm` in the frontend and applied strict markdown parsing to force tables and headers into proper formatting.
+- Updated `reportlab` logic in `agentic.py` to parse markdown table syntax and inline bold syntax directly into formatted PDF objects.
+- Injected custom PwC Orange (`#e8590c`) into both frontend CSS and backend PDF styles for all headings.
+
 ## 2026-06-30 - OpenRouter Integration and Dev Script Fix
 
 Commit scope:
