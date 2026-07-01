@@ -105,3 +105,5 @@ python app.py
 
 url - https://fcc-aml-workbench-ih5rjb44sq-uc.a.run.app
 
+LATEST - https://ai-aml-tool-78524323441.us-central1.run.app/login
+
