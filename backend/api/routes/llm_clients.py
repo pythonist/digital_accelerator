@@ -99,6 +99,8 @@ def _run(kind: str, model: str, system: str, user: str, temperature: float, json
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "HTTP-Referer": "https://ai-aml-tool.local",
+                "X-Title": "AI AML Tool",
             }
             
             data = {
@@ -114,35 +116,41 @@ def _run(kind: str, model: str, system: str, user: str, temperature: float, json
             if json_mode:
                 data["response_format"] = {"type": "json_object"}
                 
-            resp = requests.post(
-                f"{NEMOTRON_BASE_URL}/chat/completions",
-                headers=headers,
-                json=data,
-                timeout=LLM_TIMEOUT,
-                verify=not DISABLE_SSL_VERIFY
-            )
-            resp.raise_for_status()
-            resp_json = resp.json()
-            if "error" in resp_json:
-                raise LLMError(f"OpenRouter error: {resp_json['error']}")
-            if "choices" not in resp_json:
-                raise LLMError(f"OpenRouter missing choices: {resp_json}")
-            message = resp_json['choices'][0]['message']
-            content = (message.get('content') or "").strip()
-            
-            _last_call = {
-                "provider": kind,
-                "model": model,
-                "base_url": NEMOTRON_BASE_URL,
-                "latency_ms": int((perf_counter() - started) * 1000),
-                "prompt_chars": len(system or "") + len(user or ""),
-                "response_chars": len(content),
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-            }
-            
-            if not content:
-                raise LLMError(f"{kind} returned an empty response.")
-            return content
+            try:
+                resp = requests.post(
+                    f"{NEMOTRON_BASE_URL}/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=LLM_TIMEOUT,
+                    verify=not DISABLE_SSL_VERIFY
+                )
+                resp.raise_for_status()
+                resp_json = resp.json()
+                if "error" in resp_json:
+                    raise LLMError(f"OpenRouter error: {resp_json['error']}")
+                if "choices" not in resp_json:
+                    raise LLMError(f"OpenRouter missing choices: {resp_json}")
+                message = resp_json['choices'][0]['message']
+                content = (message.get('content') or "").strip()
+                
+                _last_call = {
+                    "provider": kind,
+                    "model": model,
+                    "base_url": NEMOTRON_BASE_URL,
+                    "latency_ms": int((perf_counter() - started) * 1000),
+                    "prompt_chars": len(system or "") + len(user or ""),
+                    "response_chars": len(content),
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                }
+                
+                if not content:
+                    raise LLMError(f"{kind} returned an empty response.")
+                return content
+            except Exception as e:
+                print(f"⚠️ OpenRouter/Nemotron failed ({e}). Firewall block detected. Auto-falling back to ChatGPT...")
+                # Auto-fallback to ChatGPT if OpenRouter is blocked by a corporate firewall
+                kind = "chatgpt"
+                model = OPENAI_MODEL
 
         # Standard OpenAI client flow for other models (e.g. chatgpt)
         kwargs = {
