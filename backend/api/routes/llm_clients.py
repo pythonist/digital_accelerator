@@ -27,7 +27,7 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 NEMOTRON_MODEL = os.environ.get("NEMOTRON_MODEL", "nvidia/nemotron-4-340b-instruct").strip().strip('"').strip("'")
 NEMOTRON_BASE_URL = os.environ.get("NEMOTRON_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 LLM_TIMEOUT = float(os.environ.get("AGENTIC_LLM_TIMEOUT", os.environ.get("LLM_TIMEOUT", "90")) or 90)
-DISABLE_SSL_VERIFY = str(os.environ.get("DISABLE_SSL_VERIFY", "")).strip().lower() in ("1", "true", "yes")
+DISABLE_SSL_VERIFY = str(os.environ.get("DISABLE_SSL_VERIFY", "")).strip().strip('"').strip("'").lower() in ("1", "true", "yes")
 
 _openai_client = None
 _nemotron_client = None
