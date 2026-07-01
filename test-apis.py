@@ -5,50 +5,59 @@ import ssl
 import json
 
 print("==================================================")
-print("       AI API Connection Diagnostic Tester        ")
+print("     Deep API Connection Tester (Actual POST)     ")
 print("==================================================")
 
-# Allow ignoring SSL if they want to test that specific bypass
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
-def test_endpoint(name, url, headers):
+def test_endpoint(name, url, headers, payload):
     print(f"\nTesting {name} -> {url}")
     print("--------------------------------------------------")
     
-    req = urllib.request.Request(url, headers=headers)
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
     
     try:
-        # First test WITH standard SSL
-        with urllib.request.urlopen(req, timeout=10) as response:
-            print(f"✅ SUCCESS! Connected to {name} with strict SSL.")
-            return True
-    except urllib.error.URLError as e:
-        if "CERTIFICATE_VERIFY_FAILED" in str(e.reason):
-            print(f"⚠️ SSL INTERCEPTION DETECTED for {name}!")
-            print("   Your corporate firewall is rewriting SSL certificates.")
-            print("   Testing again with SSL verification disabled...")
+        # We will try WITH SSL verification disabled immediately to bypass that specific layer, 
+        # so we can see the ACTUAL response body from the firewall.
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            body = response.read().decode('utf-8')
             
+            print(f"✅ HTTP Status: {response.getcode()} (The server accepted the connection)")
+            
+            # Now we try to parse the body to see if it's actually AI data or a Firewall webpage
             try:
-                # Test WITHOUT SSL verification
-                with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
-                    print(f"✅ SUCCESS! Connected to {name} by bypassing SSL verification.")
-                    return True
-            except Exception as bypass_e:
-                print(f"❌ FAILED: Even with SSL disabled, connection failed: {bypass_e}")
+                json_data = json.loads(body)
+                print(f"✅ SUCCESS! Valid JSON received: {str(json_data)[:100]}...")
+                return True
+            except json.JSONDecodeError:
+                print("❌ ERROR: Connection succeeded, but we did NOT receive valid JSON!")
+                print("==================================================")
+                print("THIS IS WHAT YOUR FIREWALL RETURNED INSTEAD OF THE API:")
+                print("==================================================")
+                print(body[:1000])  # Print the first 1000 characters of the HTML block page
+                print("==================================================")
+                print("As you can see above, your firewall is intercepting the connection and returning an HTML webpage.")
                 return False
                 
+    except urllib.error.URLError as e:
+        print(f"❌ NETWORK BLOCKED: Python cannot reach {name} at all.")
+        
+        # If it returns a 403 Forbidden or similar HTTP error, we can read the body too
+        if hasattr(e, 'read'):
+            body = e.read().decode('utf-8')
+            print("\nFIREWALL/SERVER RESPONSE BODY:")
+            print(body[:1000])
         else:
-            print(f"❌ NETWORK BLOCKED: Python cannot reach {name} at all.")
-            print(f"   Error: {e.reason}")
-            print("   This means your VPN/Firewall is completely dropping the connection.")
-            return False
+            print(f"Error: {e.reason}")
+        return False
     except Exception as e:
         print(f"❌ UNEXPECTED ERROR: {e}")
         return False
 
-# Grab keys from environment if they exist, otherwise ask
+
 openai_key = os.environ.get("OPENAI_API_KEY", "")
 openrouter_key = os.environ.get("OPENROUTER_API_KEY", "") or os.environ.get("NEMOTRON_API_KEY", "")
 
@@ -58,21 +67,41 @@ if not openai_key:
 if not openrouter_key:
     openrouter_key = input("Enter OpenRouter/Nemotron API Key (sk-or-...): ").strip()
 
-print("\nStarting diagnostics...")
+# Standard chat completion payload
+test_payload = {
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Say hello!"}],
+    "max_tokens": 10
+}
+
+openrouter_payload = {
+    "model": "nvidia/nemotron-4-340b-instruct",
+    "messages": [{"role": "user", "content": "Say hello!"}],
+    "max_tokens": 10
+}
+
+print("\nStarting Deep Diagnostics...")
 
 test_endpoint(
     "ChatGPT (OpenAI)", 
-    "https://api.openai.com/v1/models", 
-    {"Authorization": f"Bearer {openai_key}"}
+    "https://api.openai.com/v1/chat/completions", 
+    {
+        "Authorization": f"Bearer {openai_key}",
+        "Content-Type": "application/json"
+    },
+    test_payload
 )
 
 test_endpoint(
     "Nemotron (OpenRouter)", 
-    "https://openrouter.ai/api/v1/auth/key", 
-    {"Authorization": f"Bearer {openrouter_key}"}
+    "https://openrouter.ai/api/v1/chat/completions", 
+    {
+        "Authorization": f"Bearer {openrouter_key}",
+        "Content-Type": "application/json"
+    },
+    openrouter_payload
 )
 
 print("\n==================================================")
-print("If both say NETWORK BLOCKED, you MUST disconnect")
-print("from the VPN or use a mobile hotspot for the demo.")
+print("If you see HTML code above, your VPN is spoofing the connection.")
 print("==================================================")
