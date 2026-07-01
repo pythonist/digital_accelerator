@@ -27,6 +27,7 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 NEMOTRON_MODEL = os.environ.get("NEMOTRON_MODEL", "nvidia/nemotron-4-340b-instruct").strip().strip('"').strip("'")
 NEMOTRON_BASE_URL = os.environ.get("NEMOTRON_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 LLM_TIMEOUT = float(os.environ.get("AGENTIC_LLM_TIMEOUT", os.environ.get("LLM_TIMEOUT", "90")) or 90)
+DISABLE_SSL_VERIFY = str(os.environ.get("DISABLE_SSL_VERIFY", "")).strip().lower() in ("1", "true", "yes")
 
 _openai_client = None
 _nemotron_client = None
@@ -43,13 +44,16 @@ def _secret(name: str) -> str:
 
 def _client(kind: str) -> OpenAI:
     global _openai_client, _nemotron_client
+    
+    import httpx
+    http_client = httpx.Client(verify=False) if DISABLE_SSL_VERIFY else None
 
     if kind == "chatgpt":
         api_key = _secret("OPENAI_API_KEY")
         if not api_key:
             raise LLMError("OPENAI_API_KEY is not configured.")
         if _openai_client is None:
-            _openai_client = OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL, timeout=LLM_TIMEOUT)
+            _openai_client = OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL, timeout=LLM_TIMEOUT, http_client=http_client)
         return _openai_client
 
     if kind == "nemotron":
@@ -57,7 +61,7 @@ def _client(kind: str) -> OpenAI:
         if not api_key:
             raise LLMError("NEMOTRON_API_KEY or OPENROUTER_API_KEY is not configured.")
         if _nemotron_client is None:
-            _nemotron_client = OpenAI(api_key=api_key, base_url=NEMOTRON_BASE_URL, timeout=LLM_TIMEOUT)
+            _nemotron_client = OpenAI(api_key=api_key, base_url=NEMOTRON_BASE_URL, timeout=LLM_TIMEOUT, http_client=http_client)
         return _nemotron_client
 
     raise LLMError(f"Unknown LLM client kind: {kind}")
@@ -114,7 +118,8 @@ def _run(kind: str, model: str, system: str, user: str, temperature: float, json
                 f"{NEMOTRON_BASE_URL}/chat/completions",
                 headers=headers,
                 json=data,
-                timeout=LLM_TIMEOUT
+                timeout=LLM_TIMEOUT,
+                verify=not DISABLE_SSL_VERIFY
             )
             resp.raise_for_status()
             resp_json = resp.json()
