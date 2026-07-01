@@ -22,8 +22,10 @@ except Exception:
     pass
 
 
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip().strip('"').strip("'")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip() or "sk-proj-YOUR_OPENAI_KEY_HERE"
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip().strip('"').strip("'")
+NEMOTRON_API_KEY = os.environ.get("NEMOTRON_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")).strip() or "sk-or-v1-YOUR_OPENROUTER_KEY_HERE"
 NEMOTRON_MODEL = os.environ.get("NEMOTRON_MODEL", "nvidia/nemotron-4-340b-instruct").strip().strip('"').strip("'")
 NEMOTRON_BASE_URL = os.environ.get("NEMOTRON_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 LLM_TIMEOUT = float(os.environ.get("AGENTIC_LLM_TIMEOUT", os.environ.get("LLM_TIMEOUT", "90")) or 90)
