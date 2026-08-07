@@ -37,6 +37,19 @@ def _instantiate_provider(provider: str):
 
 
 def load_llm_provider():
+    """Return the single provider router used by every module.
+
+    The router keeps provider selection request-scoped, so a local GGUF,
+    OpenAI-compatible API, OpenRouter, or Ollama can be chosen without
+    rebuilding the Flask process.
+    """
+    from llm.unified_provider import UnifiedLLMProvider
+
+    return UnifiedLLMProvider()
+
+
+def load_legacy_llm_provider():
+    """Legacy environment-only provider loader retained for scripts."""
     requested_raw = os.getenv("LLM_PROVIDER")
     requested_provider = str(requested_raw or "").strip().lower()
     if not requested_provider:

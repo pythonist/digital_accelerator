@@ -59,38 +59,8 @@ const RouteLoader = () => (
   </div>
 );
 
-class RouteErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  render() {
-    if (!this.state.hasError) return this.props.children;
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-100">
-        <div className="border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="mb-3 text-sm font-semibold text-slate-900">This screen needs a refresh.</p>
-          <button
-            className="border border-orange-700 bg-orange-700 px-4 py-2 text-sm font-semibold text-white"
-            onClick={() => window.location.reload()}
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
-    );
-  }
-}
-
 const RouteSuspense = ({ children }) => (
-  <RouteErrorBoundary>
-    <Suspense fallback={<RouteLoader />}>{children}</Suspense>
-  </RouteErrorBoundary>
+  <Suspense fallback={<RouteLoader />}>{children}</Suspense>
 );
 
 const NavigationStateManager = () => {

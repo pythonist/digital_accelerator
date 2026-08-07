@@ -325,6 +325,8 @@ def is_conversational(msg):
 def list_models():
     try:
         from flask import g, request
+        from llm.model_registry import model_catalog
+        catalog = model_catalog()
         with open("llm_debug.txt", "a") as f:
             f.write(f"--- new request ---\n")
             f.write(f"DEBUG: X-LLM-Model from headers: {request.headers.get('X-LLM-Model')}\n")
@@ -332,10 +334,18 @@ def list_models():
             
         llm_service = _get_llm_service()
         if not llm_service:
-            return jsonify({'success': False, 'available': False, 'models': [], 'error': 'AI provider unavailable'}), 200
+            return jsonify({
+                'success': False,
+                'available': False,
+                'models': catalog,
+                'catalog': catalog,
+                'error': 'AI provider unavailable',
+            }), 200
         
         available = bool(llm_service.check_connection())
         models_list = llm_service.list_models()
+        if not models_list:
+            models_list = catalog
         
         # Get the actual default model for the current context
         try:
@@ -354,6 +364,7 @@ def list_models():
             'provider': getattr(llm_service, 'provider_name', 'local_ai'),
             'default_model': default_model,
             'models': models_list,
+            'catalog': models_list,
             'error': None if available else 'AI provider unavailable',
         }), 200
     except Exception as e:

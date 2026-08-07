@@ -2,7 +2,8 @@
 param(
     [switch]$MlopsOnly,
     [switch]$StopOnly,
-    [int]$BackendPort = 5000,
+    [switch]$DevFrontend,
+    [int]$BackendPort = 5173,
     [int]$FrontendPort = 5173
 )
 
@@ -145,6 +146,28 @@ function Test-PythonModule {
     }
 }
 
+function Disable-BrokenCertificateHooks {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VenvDir
+    )
+
+    $sitePackages = Join-Path $VenvDir "Lib\site-packages"
+    $hookFiles = @(
+        "pip_system_certs.pth",
+        "python-certifi-win32-init.pth"
+    )
+
+    foreach ($hookFile in $hookFiles) {
+        $source = Join-Path $sitePackages $hookFile
+        $disabled = "$source.disabled"
+        if ((Test-Path -LiteralPath $source) -and -not (Test-Path -LiteralPath $disabled)) {
+            Move-Item -LiteralPath $source -Destination $disabled
+            Write-Host "Disabled incompatible Python certificate hook: $hookFile" -ForegroundColor DarkYellow
+        }
+    }
+}
+
 function Resolve-AnyPythonExecutable {
     param(
         [Parameter(Mandatory = $true)]
@@ -208,6 +231,7 @@ function Ensure-BackendPython {
 
     if (Test-Path -LiteralPath $backendVenvPy) {
         Write-Host "Using existing backend virtual environment: $backendVenvPy" -ForegroundColor Green
+        Disable-BrokenCertificateHooks -VenvDir $backendVenv
         if (-not (Test-PythonModule -Executable $backendVenvPy -ModuleName "flask")) {
             Write-Host "Existing backend venv is missing Flask or backend packages. Installing requirements..." -ForegroundColor Yellow
             & $backendVenvPy -m pip install --upgrade pip
@@ -315,6 +339,11 @@ function Resolve-PythonLaunchSpec {
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $repoRoot "backend"
 $frontendDir = Join-Path $repoRoot "frontend"
+$frontendBuildDir = $frontendDir
+$frontendDirectoryInfo = Get-Item -LiteralPath $frontendDir -ErrorAction SilentlyContinue
+if ($frontendDirectoryInfo -and $frontendDirectoryInfo.Target) {
+    $frontendBuildDir = [string]$frontendDirectoryInfo.Target
+}
 $backendEnvFile = Join-Path $backendDir ".env"
 $backendEnvExample = Join-Path $backendDir ".env.example"
 $frontendEnvFile = Join-Path $frontendDir ".env"
@@ -361,6 +390,45 @@ if (-not (Test-Path -LiteralPath $frontendNodeModules)) {
     }
 }
 
+if (-not $DevFrontend) {
+    $frontendDistDir = Join-Path $frontendBuildDir "dist"
+    $frontendIndex = Join-Path $frontendDistDir "index.html"
+    $needsFrontendBuild = -not (Test-Path -LiteralPath $frontendIndex)
+    if (-not $needsFrontendBuild) {
+        $sourceFiles = Get-ChildItem -LiteralPath (Join-Path $frontendBuildDir "src"), (Join-Path $frontendBuildDir "public") -Recurse -File -ErrorAction SilentlyContinue
+        $sourceFiles += Get-Item (Join-Path $frontendBuildDir "index.html"), (Join-Path $frontendBuildDir "package.json"), (Join-Path $frontendBuildDir "vite.config.js") -ErrorAction SilentlyContinue
+        $newestSource = $sourceFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $needsFrontendBuild = $newestSource -and ($newestSource.LastWriteTime -gt (Get-Item $frontendIndex).LastWriteTime)
+    }
+
+    if ($needsFrontendBuild) {
+        Write-Host "Building production frontend bundle..." -ForegroundColor Cyan
+        Push-Location $frontendBuildDir
+        try {
+            npm run build
+            if ($LASTEXITCODE -ne 0) {
+                throw "Frontend production build failed."
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Host "Existing production frontend is up to date; skipping npm run build." -ForegroundColor DarkGreen
+    }
+
+    $backendDistDir = Join-Path $backendDir "dist"
+    if (-not (Test-Path -LiteralPath (Join-Path $frontendDistDir "index.html"))) {
+        throw "Frontend build did not produce frontend/dist/index.html."
+    }
+    New-Item -ItemType Directory -Path $backendDistDir -Force | Out-Null
+    $backendAssetsDir = Join-Path $backendDistDir "assets"
+    if (Test-Path -LiteralPath $backendAssetsDir) {
+        Remove-Item -LiteralPath $backendAssetsDir -Recurse -Force
+    }
+    Copy-Item -Path (Join-Path $frontendDistDir "*") -Destination $backendDistDir -Recurse -Force
+    Write-Host "Production frontend copied to backend/dist and will be served by Flask." -ForegroundColor Green
+}
+
 $backendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendDir
 $frontendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $frontendDir
 $pythonLaunchSpec = Ensure-BackendPython -RepoRoot $repoRoot -BackendDir $backendDir
@@ -383,18 +451,28 @@ Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-Command", $backendCommand
 ) | Out-Null
 
-Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoExit",
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-Command", $frontendCommand
-) | Out-Null
+if ($DevFrontend) {
+    Start-Process -FilePath "powershell.exe" -ArgumentList @(
+        "-NoExit",
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-Command", $frontendCommand
+    ) | Out-Null
+}
 
 $pythonLaunchSummaryParts = @($pythonExecutable)
 if ($pythonLaunchSpec.Arguments) {
     $pythonLaunchSummaryParts += $pythonLaunchSpec.Arguments
 }
 $pythonLaunchSummary = $pythonLaunchSummaryParts -join " "
-Write-Host "Started backend using $pythonLaunchSummary and frontend (npm run dev) in separate PowerShell windows."
+if ($DevFrontend) {
+    Write-Host "Started backend and Vite development frontend in separate PowerShell windows."
+} else {
+    Write-Host "Started backend serving the production frontend bundle in separate PowerShell window."
+}
 Write-Host "Backend:  http://127.0.0.1:${BackendPort}" -ForegroundColor Green
-Write-Host "Frontend: http://127.0.0.1:${FrontendPort}" -ForegroundColor Green
+if ($DevFrontend) {
+    Write-Host "Frontend: http://127.0.0.1:${FrontendPort}" -ForegroundColor Green
+} else {
+    Write-Host "Frontend: http://127.0.0.1:${BackendPort} (production build)" -ForegroundColor Green
+}

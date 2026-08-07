@@ -23,6 +23,12 @@ import {
   alpha,
   Select,
 } from '@mui/material';
+import {
+  readInvestigationSettings,
+  saveInvestigationSettings,
+  subscribeInvestigationSettings,
+} from '../../investigation/utils/investigationSettings';
+import { useAppContext } from '@context/AppContext';
 import { styled, useTheme } from '@mui/material/styles';
 import {
   ArrowBack,
@@ -97,17 +103,49 @@ const SharedWorkbenchLayout = ({
   activeEnvironment,
   onBackToTools,
   onLogout,
+  onOpenSettings,
   accentColor = '#cbd5e1',
   navShape = 'sharp',
   headerActions = null,
 }) => {
-  const [llmModel, setLlmModel] = useState(localStorage.getItem('llm_model') || 'chatgpt');
+  const { ollamaModels = [] } = useAppContext();
+  const [llmModel, setLlmModel] = useState(() => (
+    localStorage.getItem('llm_model') || readInvestigationSettings().global?.default_model || ''
+  ));
+  const availableModels = useMemo(() => {
+    const fallback = {
+      id: 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf',
+      name: 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf',
+      label: 'Local · Meta-Llama 3.1 8B',
+      provider: 'local',
+      offline: true,
+    };
+    const items = [...ollamaModels, fallback]
+      .map((item) => (typeof item === 'string' ? { id: item, name: item, label: item } : item))
+      .filter((item) => item?.id || item?.name);
+    const unique = new Map();
+    items.forEach((item) => unique.set(item.id || item.name, item));
+    return Array.from(unique.values());
+  }, [ollamaModels]);
 
-  const handleModelChange = (e) => {
-    const newModel = e.target.value;
-    setLlmModel(newModel);
-    localStorage.setItem('llm_model', newModel);
-    window.location.reload();
+  useEffect(() => subscribeInvestigationSettings((next) => {
+    const selected = next?.global?.default_model || '';
+    setLlmModel(selected);
+    if (selected) localStorage.setItem('llm_model', selected);
+    else localStorage.removeItem('llm_model');
+  }), []);
+
+  const handleModelChange = (event) => {
+    const selected = event.target.value === 'automatic' ? '' : event.target.value;
+    const nextSettings = readInvestigationSettings();
+    saveInvestigationSettings({
+      ...nextSettings,
+      global: {
+        ...nextSettings.global,
+        default_model: selected,
+      },
+    });
+    setLlmModel(selected);
   };
 
   const theme = useTheme();
@@ -539,23 +577,29 @@ const SharedWorkbenchLayout = ({
               {headerActions}
 
               <Select
-                value={llmModel}
+                value={llmModel || 'automatic'}
                 onChange={handleModelChange}
                 size="small"
                 variant="outlined"
+                displayEmpty
                 sx={{
                   color: 'white',
                   height: 28,
-                  fontSize: '0.75rem',
+                  minWidth: 180,
+                  maxWidth: 260,
+                  fontSize: '0.72rem',
                   '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
                   '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: 'white' },
                   '& .MuiSvgIcon-root': { color: 'white' },
-                  mr: 1
+                  mr: 1,
                 }}
               >
-                <MenuItem value="chatgpt" sx={{ fontSize: '0.8rem' }}>ChatGPT</MenuItem>
-                <MenuItem value="nemotron" sx={{ fontSize: '0.8rem' }}>Nemotron 3 Ultra</MenuItem>
+                <MenuItem value="automatic" sx={{ fontSize: '0.8rem' }}>Automatic</MenuItem>
+                {availableModels.map((model) => (
+                  <MenuItem key={model.id || model.name} value={model.id || model.name} sx={{ fontSize: '0.8rem' }}>
+                    {model.label || model.name}
+                  </MenuItem>
+                ))}
               </Select>
 
               <Tooltip title="Help">
@@ -598,7 +642,7 @@ const SharedWorkbenchLayout = ({
                   <ListItemIcon><Person fontSize="small" /></ListItemIcon>
                   <ListItemText primary="Profile" />
                 </MenuItem>
-                <MenuItem onClick={() => setAnchorElUser(null)}>
+                <MenuItem onClick={() => { setAnchorElUser(null); if (onOpenSettings) onOpenSettings(); }}>
                   <ListItemIcon><Settings fontSize="small" /></ListItemIcon>
                   <ListItemText primary="Settings" />
                 </MenuItem>

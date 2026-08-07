@@ -73,10 +73,12 @@ const InvestigationSettingsScreen = () => {
   const [notice, setNotice] = useState('');
 
   const availableModels = useMemo(() => {
-    const names = (ollamaModels || [])
-      .map((item) => (typeof item === 'string' ? item : item?.name))
-      .filter(Boolean);
-    return Array.from(new Set(names));
+    const items = (ollamaModels || [])
+      .map((item) => (typeof item === 'string' ? { id: item, name: item, label: item } : item))
+      .filter((item) => item?.id || item?.name);
+    const unique = new Map();
+    items.forEach((item) => unique.set(item.id || item.name, item));
+    return Array.from(unique.values());
   }, [ollamaModels]);
 
   const updateSection = (section, patch) => {
@@ -118,7 +120,11 @@ const InvestigationSettingsScreen = () => {
 
   const renderModelOptions = () => [
     <MenuItem key="inherit" value="">Use global default</MenuItem>,
-    ...availableModels.map((model) => <MenuItem key={model} value={model}>{model}</MenuItem>),
+    ...availableModels.map((model) => (
+      <MenuItem key={model.id || model.name} value={model.id || model.name}>
+        {model.label || model.name}
+      </MenuItem>
+    )),
   ];
 
   return (
@@ -168,9 +174,16 @@ const InvestigationSettingsScreen = () => {
                   onChange={(event) => updateSection('global', { default_model: event.target.value })}
                 >
                   <MenuItem value="">Use first available model</MenuItem>
-                  {availableModels.map((model) => <MenuItem key={model} value={model}>{model}</MenuItem>)}
+                  {availableModels.map((model) => (
+                    <MenuItem key={model.id || model.name} value={model.id || model.name}>
+                      {model.label || model.name}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
+              <Typography sx={{ fontSize: 12.5, color: '#64748b', lineHeight: 1.7 }}>
+                Local GGUF models are discovered from the backend model directories and work without internet access. Cloud and API models are shown when their credentials are configured.
+              </Typography>
               <FormControlLabel
                 control={(
                   <Switch

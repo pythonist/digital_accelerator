@@ -98,6 +98,7 @@ const CaseInvestigationScreen = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [streamStarted, setStreamStarted] = useState(false);
   const [exportingReport, setExportingReport] = useState(false);
   const [expandedSections, setExpandedSections] = useState({
     risk: true,
@@ -206,31 +207,77 @@ const CaseInvestigationScreen = () => {
     if (!text.trim() || generating) return;
     
     const userMsg = { role: 'user', content: text, timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '', streaming: true, timestamp: new Date() }]);
     setInput('');
     setGenerating(true);
+    setStreamStarted(false);
 
     try {
-      const res = await apiClient.post(`/api/v2/case/${selectedCaseId}/copilot`, {
-        question: text,
-        context: facts
+      const token = localStorage.getItem('auth_token');
+      const activeEnv = sessionStorage.getItem('active_env');
+      const selectedModel = localStorage.getItem('llm_model');
+      const response = await fetch(`/api/v2/case/${selectedCaseId}/copilot/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(activeEnv ? { 'X-Environment-ID': activeEnv } : {}),
+          ...(selectedModel ? { 'X-LLM-Model': selectedModel } : {}),
+        },
+        body: JSON.stringify({ question: text, context: facts }),
       });
-      
-      if (res.success) {
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: res.response,
-          timestamp: new Date()
-        }]);
-      } else {
-        throw new Error(res.error || 'Failed to generate response');
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Unable to start Copilot stream (${response.status})`);
       }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finished = false;
+      while (!finished) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        for (const rawEvent of events) {
+          const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data:'));
+          if (!dataLine) continue;
+          const payload = JSON.parse(dataLine.slice(5).trim());
+          if (rawEvent.includes('event: token')) {
+            setStreamStarted(true);
+            setMessages(prev => {
+              const next = [...prev];
+              const index = next.length - 1;
+              if (next[index]?.role === 'assistant') {
+                next[index] = { ...next[index], content: `${next[index].content || ''}${payload.token || ''}` };
+              }
+              return next;
+            });
+          } else if (rawEvent.includes('event: error')) {
+            throw new Error(payload.error || 'Copilot stream failed');
+          } else if (rawEvent.includes('event: done')) {
+            finished = true;
+          }
+        }
+        if (done) finished = true;
+      }
+      setMessages(prev => {
+        const next = [...prev];
+        const index = next.length - 1;
+        if (next[index]?.role === 'assistant') next[index] = { ...next[index], streaming: false };
+        return next;
+      });
     } catch (err) {
-      setMessages(prev => [...prev, { 
-        role: 'error', 
-        content: `Error: ${err.message}`,
-        timestamp: new Date()
-      }]);
+      setMessages(prev => {
+        const next = [...prev];
+        const index = next.length - 1;
+        if (next[index]?.role === 'assistant' && !next[index].content) {
+          next[index] = { ...next[index], role: 'error', content: `Error: ${err.message}`, streaming: false };
+          return next;
+        }
+        return [...next, { role: 'error', content: `Error: ${err.message}`, timestamp: new Date() }];
+      });
     } finally {
       setGenerating(false);
     }
@@ -606,7 +653,7 @@ const CaseInvestigationScreen = () => {
                     <Box sx={{ width: 36, height: 36, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><SmartToyIcon /></Box>
                     <Box>
                       <Typography variant="subtitle2" fontWeight="bold">AI Copilot</Typography>
-                      <Typography variant="caption" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>Powered by LLaMA 3.2</Typography>
+                      <Typography variant="caption" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>Evidence-grounded model assistance</Typography>
                     </Box>
                   </Stack>
                   <Chip label={`${messages.length} messages`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.15)', color: 'white', height: 24, fontSize: '0.7rem', fontWeight: 'bold' }} />
@@ -627,7 +674,16 @@ const CaseInvestigationScreen = () => {
                             {msg.role === 'user' ? (
                               <Typography variant="body2" sx={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.content}</Typography>
                             ) : (
-                              <MarkdownResponse content={msg.content} />
+                              <>
+                                {msg.streaming && !msg.content ? (
+                                  <Typography variant="body2" color="text.secondary">Analyzing case evidence…</Typography>
+                                ) : (
+                                  <MarkdownResponse content={msg.content} />
+                                )}
+                                {msg.streaming && msg.content && generating && (
+                                  <Typography component="span" sx={{ color: 'primary.main', animation: 'blink 1s step-end infinite' }}>▋</Typography>
+                                )}
+                              </>
                             )}
                             
                             <Typography variant="caption" sx={{ mt: 1, display: 'block', opacity: 0.7, fontSize: '0.65rem', color: msg.role === 'user' ? 'rgba(255,255,255,0.9)' : 'text.secondary' }}>{msg.timestamp?.toLocaleTimeString()}</Typography>
@@ -636,11 +692,12 @@ const CaseInvestigationScreen = () => {
                       </Stack>
                     ))}
                     
-                    {generating && (
+                    {generating && !streamStarted && (
                       <Stack direction="row" spacing={1.5} alignItems="center">
                         <Box sx={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#424242', color: 'white', border: '2px solid #212121' }}><SmartToyIcon fontSize="small" /></Box>
                         <Paper variant="outlined" sx={{ p: 2, borderWidth: 2, borderColor: '#e0e0e0' }}>
-                          <Stack direction="row" spacing={0.5}><CircularProgress size={8} /><CircularProgress size={8} /><CircularProgress size={8} /></Stack>
+                          <Typography variant="body2" color="text.secondary">Preparing evidence…</Typography>
+                          <LinearProgress sx={{ mt: 1, width: 180 }} />
                         </Paper>
                       </Stack>
                     )}

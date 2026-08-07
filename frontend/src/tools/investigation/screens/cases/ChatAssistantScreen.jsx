@@ -23,7 +23,7 @@ import {
 const DEFAULT_AI_MODEL = 'gpt-4o-mini';
 const normalizeModelName = (value) => {
   const text = String(value || '').trim();
-  return text && !text.toLowerCase().startsWith('llama') ? text : DEFAULT_AI_MODEL;
+  return text || DEFAULT_AI_MODEL;
 };
 
 const ChatAssistantScreen = () => {
@@ -38,7 +38,7 @@ const ChatAssistantScreen = () => {
 
   const availableModels = Array.from(new Set(
     (contextModels.length > 0 ? contextModels : localModels)
-      .map((model) => normalizeModelName(typeof model === 'string' ? model : model?.name))
+      .map((model) => normalizeModelName(typeof model === 'string' ? model : (model?.id || model?.name)))
       .filter(Boolean),
   ));
   const normalizedSelectedModel = normalizeModelName(selectedModel);

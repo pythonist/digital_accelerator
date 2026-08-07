@@ -272,6 +272,32 @@ class GPT4AllWrapper:
                 "latency_sec": round(time.time() - start, 2),
             }
 
+    def stream_generate(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.5,
+        max_tokens: int = 800,
+    ):
+        """Yield generated text chunks as they are produced by llama.cpp."""
+        try:
+            max_tokens = _bounded_tokens(max_tokens)
+            llm, _ = self._ensure_model(model)
+            composed = self._build_manual_prompt(prompt, system_prompt=system_prompt)
+            with self._lock:
+                stream = llm.generate(
+                    composed,
+                    max_tokens=max_tokens,
+                    temp=temperature,
+                    streaming=True,
+                )
+                for chunk in stream:
+                    if chunk:
+                        yield str(chunk)
+        except Exception as exc:
+            raise RuntimeError(str(exc)) from exc
+
     def chat(
         self,
         message: str,

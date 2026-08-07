@@ -19,6 +19,7 @@ import apiClient from '@services/api';
 import PageContainer from '../../layout/PageContainer';
 
 import { useAppContext } from '@context/AppContext';
+import { readInvestigationSettings, subscribeInvestigationSettings } from '../../utils/investigationSettings';
 
 // ---- Design tokens, lifted from the existing Case Packs / Priority Inbox screens ----
 const ACCENT = '#e8590c';        // PwC orange — primary actions / active tab underline
@@ -90,9 +91,14 @@ const TABS = [
 ];
 
 const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
-  const { caseList } = useAppContext();
+  const { caseList, ollamaModels } = useAppContext();
   const [selectedCaseId, setSelectedCaseId] = useState(initialCaseId || '');
-  const [selectedModel, setSelectedModel] = useState('chatgpt');
+  const [selectedModel, setSelectedModel] = useState(() => (
+    readInvestigationSettings()?.assistant?.preferred_model
+    || readInvestigationSettings()?.global?.default_model
+    || localStorage.getItem('llm_model')
+    || 'chatgpt'
+  ));
   const [status, setStatus] = useState('not_started');
   const [session, setSession] = useState(null);
   const [plan, setPlan] = useState([]);
@@ -108,6 +114,11 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
   const [recentSessions, setRecentSessions] = useState([]);
 
   const consoleRef = useRef(null);
+
+  useEffect(() => subscribeInvestigationSettings((next) => {
+    const preferred = next?.assistant?.preferred_model || next?.global?.default_model;
+    if (preferred && status !== 'running') setSelectedModel(preferred);
+  }), [status]);
 
   const fetchStatus = async () => {
     if (!selectedCaseId) return;
@@ -280,8 +291,17 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                   cursor: status === 'running' ? 'default' : 'pointer',
                 }}
               >
-                <option value="chatgpt">ChatGPT (gpt-4o-mini)</option>
-                <option value="nemotron">Nemotron (OpenRouter)</option>
+                {(ollamaModels || []).map((item) => {
+                  const id = typeof item === 'string' ? item : item?.id || item?.name;
+                  const label = typeof item === 'string' ? item : item?.label || item?.name;
+                  return id ? <option key={id} value={id}>{label}</option> : null;
+                })}
+                {!ollamaModels?.length ? (
+                  <>
+                    <option value="chatgpt">OpenAI · gpt-4o-mini</option>
+                    <option value="nemotron">OpenRouter · Nemotron</option>
+                  </>
+                ) : null}
               </select>
 
               <Box>

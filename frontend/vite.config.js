@@ -10,7 +10,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 1500,
   },
   resolve: {
-    preserveSymlinks: true,
+    // Keep React and React Router as singletons so lazy chunks share context.
+    dedupe: ['react', 'react-dom', 'react-router', 'react-router-dom'],
     alias: {
       '@context': path.resolve(__dirname, './src/context'),
       '@services': path.resolve(__dirname, './src/services'),
@@ -29,6 +30,11 @@ export default defineConfig({
     force: process.env.VITE_FORCE_OPTIMIZE_DEPS === 'true',
   },
   server: {
+    allowedHosts: [
+      'fccanalytics.online',
+      'www.fccanalytics.online',
+      'fcip-dev.fccanalytics.online',
+    ],
     headers: {
       'Content-Security-Policy': "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;",
     },

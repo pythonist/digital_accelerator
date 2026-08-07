@@ -1,5 +1,20 @@
 # Change History
 
+## 2026-08-07 - Unified LLM Routing, Local GGUF Support, and Copilot Streaming
+
+Commit scope:
+- Add selectable cloud, API, and local GGUF model support across FCIP.
+- Stream Copilot investigation responses progressively in the UI.
+- Stabilize the production frontend build and local startup workflow.
+
+Files and systems changed:
+- Added a unified model registry/provider layer and GPT4All streaming support.
+- Added local GGUF model definitions and discovery support for `H:\\OllamaModels`.
+- Added Copilot SSE streaming with progressive response rendering.
+- Removed fixed LLaMA branding from the Copilot header.
+- Added production-build freshness checks and synchronized frontend assets into `backend/dist`.
+- Deduplicated React Router dependencies and resolved junction-path builds for navigation stability.
+
 ## 2026-06-30 - Agentic Investigation Dashboard and Formatting Polish
 
 Commit scope:

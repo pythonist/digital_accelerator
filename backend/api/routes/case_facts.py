@@ -1,11 +1,12 @@
 """
 Case Facts Routes - FINAL VERSION with Explicit Environment Resolution
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from api.middleware.auth_middleware import require_auth
 from api.services import services
 from api.utils import handle_errors
 import asyncio
+import json
 import traceback
 import os
 
@@ -349,6 +350,89 @@ Provide a clear, professional response based ONLY on these facts. Be concise and
             "error": f"Copilot error: {str(e)}",
             "details": traceback.format_exc() if os.getenv('DEBUG') else None
         }), 500
+
+
+@case_facts_bp.route('/case/<case_id>/copilot/stream', methods=['POST'])
+@require_auth()
+def copilot_assist_stream(case_id):
+    """Stream Copilot output as server-sent events for progressive rendering."""
+    data = request.get_json(silent=True) or {}
+    question = str(data.get('question') or '').strip()
+    if not question:
+        return jsonify({"success": False, "error": "No question provided"}), 400
+
+    def emit(event, payload):
+        return f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
+
+    def generate_events():
+        try:
+            from case_facts.facts_builder import build_case_facts
+
+            db_manager, env_id = resolve_db(request)
+            case_facts = asyncio.run(build_case_facts(
+                case_id=case_id,
+                env_id=env_id,
+                tenant_id=request.tenant_id,
+                db_manager=db_manager,
+            ))
+            facts_summary = f"""Case {case_id} Investigation Summary:
+
+RISK PROFILE:
+- Overall Risk Score: {case_facts.overall_risk_score:.1f}/100
+- Risk Level: {case_facts.customer_risk_rating.value.upper()}
+- Alert Type: {case_facts.alert_type}
+- Customer: {case_facts.customer_name} (ID: {case_facts.customer_id})
+
+KEY RISK DRIVERS:
+{chr(10).join(f"• {d.factor}: {d.explanation}" for d in case_facts.risk_drivers[:5])}
+
+TRANSACTION ACTIVITY (30 Days):
+- Total Volume: ${case_facts.patterns_30d.total_volume:,.2f}
+- Transaction Count: {case_facts.patterns_30d.total_count}
+- Average Amount: ${case_facts.patterns_30d.avg_amount:,.2f}
+- Cash Ratio: {case_facts.patterns_30d.cash_ratio:.1%}
+
+NETWORK ANALYSIS:
+- Network Nodes: {case_facts.network.total_nodes}
+- Transaction Links: {case_facts.network.total_edges}
+- Network Density: {case_facts.network.density:.3f}
+
+INVESTIGATION CONTEXT:
+- Previous Alerts: {case_facts.previous_alerts_count}
+- Rules Triggered: {', '.join(case_facts.rules_triggered) if case_facts.rules_triggered else 'None'}
+- Typologies: {', '.join(case_facts.typologies_detected) if case_facts.typologies_detected else 'None'}
+
+INVESTIGATOR QUESTION: {question}
+
+Provide a clear, professional response based ONLY on these facts. Be concise and actionable."""
+
+            llm_service = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+            if not llm_service or not llm_service.check_connection():
+                yield emit("error", {"error": "LLM service is not available."})
+                return
+
+            yield emit("status", {"message": "Evidence prepared. Generating response…"})
+            for chunk in llm_service.stream_generate(
+                prompt=facts_summary,
+                system_prompt="You are an AML investigation assistant. Provide clear, professional responses based ONLY on the provided case facts. Be concise and focus on actionable insights.",
+                temperature=0.7,
+                max_tokens=500,
+            ):
+                yield emit("token", {"token": chunk})
+            yield emit("done", {"case_id": case_id, "env_id": env_id})
+        except Exception as exc:
+            traceback.print_exc()
+            yield emit("error", {"error": f"Copilot stream failed: {exc}"})
+
+    return Response(
+        stream_with_context(generate_events()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @case_facts_bp.route('/env/<env_id>/validate', methods=['GET'])

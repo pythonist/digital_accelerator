@@ -76,6 +76,16 @@ def _setup_cors(app: Flask) -> None:
     )
 
 
+def _setup_frontend_cache_policy(app: Flask) -> None:
+    """Prevent browsers from keeping an outdated SPA entrypoint after a build."""
+    @app.after_request
+    def _frontend_entry_no_cache(response):
+        if request.path == "/" or request.path.endswith("/index.html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
+
 def _iter_routes(app: Flask):
     return sorted(app.url_map.iter_rules(), key=lambda r: (r.rule, ",".join(sorted(r.methods or []))))
 
@@ -374,6 +384,7 @@ def create_app() -> Flask:
 
     tenant_context_middleware(app)
     _setup_cors(app)
+    _setup_frontend_cache_policy(app)
 
     from api.service_locator import services
 

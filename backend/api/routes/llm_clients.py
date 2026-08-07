@@ -22,14 +22,11 @@ except Exception:
     pass
 
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip() or "sk-proj-YOUR_OPENAI_KEY_HERE"
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip().strip('"').strip("'")
-NEMOTRON_API_KEY = os.environ.get("NEMOTRON_API_KEY", os.environ.get("OPENROUTER_API_KEY", "")).strip() or "sk-or-v1-YOUR_OPENROUTER_KEY_HERE"
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 NEMOTRON_MODEL = os.environ.get("NEMOTRON_MODEL", "nvidia/nemotron-4-340b-instruct").strip().strip('"').strip("'")
 NEMOTRON_BASE_URL = os.environ.get("NEMOTRON_BASE_URL", "https://integrate.api.nvidia.com/v1").strip().rstrip("/")
 LLM_TIMEOUT = float(os.environ.get("AGENTIC_LLM_TIMEOUT", os.environ.get("LLM_TIMEOUT", "90")) or 90)
-DISABLE_SSL_VERIFY = str(os.environ.get("DISABLE_SSL_VERIFY", "")).strip().strip('"').strip("'").lower() in ("1", "true", "yes")
 
 _openai_client = None
 _nemotron_client = None
@@ -46,16 +43,13 @@ def _secret(name: str) -> str:
 
 def _client(kind: str) -> OpenAI:
     global _openai_client, _nemotron_client
-    
-    import httpx
-    http_client = httpx.Client(verify=False) if DISABLE_SSL_VERIFY else None
 
     if kind == "chatgpt":
         api_key = _secret("OPENAI_API_KEY")
         if not api_key:
             raise LLMError("OPENAI_API_KEY is not configured.")
         if _openai_client is None:
-            _openai_client = OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL, timeout=LLM_TIMEOUT, http_client=http_client)
+            _openai_client = OpenAI(api_key=api_key, base_url=OPENAI_BASE_URL, timeout=LLM_TIMEOUT)
         return _openai_client
 
     if kind == "nemotron":
@@ -63,7 +57,7 @@ def _client(kind: str) -> OpenAI:
         if not api_key:
             raise LLMError("NEMOTRON_API_KEY or OPENROUTER_API_KEY is not configured.")
         if _nemotron_client is None:
-            _nemotron_client = OpenAI(api_key=api_key, base_url=NEMOTRON_BASE_URL, timeout=LLM_TIMEOUT, http_client=http_client)
+            _nemotron_client = OpenAI(api_key=api_key, base_url=NEMOTRON_BASE_URL, timeout=LLM_TIMEOUT)
         return _nemotron_client
 
     raise LLMError(f"Unknown LLM client kind: {kind}")
@@ -92,69 +86,6 @@ def _run(kind: str, model: str, system: str, user: str, temperature: float, json
     global _last_call
     started = perf_counter()
     try:
-        if kind == "nemotron":
-            import requests
-            api_key = _secret("NEMOTRON_API_KEY") or _secret("OPENROUTER_API_KEY")
-            if not api_key:
-                raise LLMError("NEMOTRON_API_KEY or OPENROUTER_API_KEY is not configured.")
-            
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://ai-aml-tool.local",
-                "X-Title": "AI AML Tool",
-            }
-            
-            data = {
-                "model": model,
-                "temperature": temperature,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                "reasoning": {"enabled": True}
-            }
-            
-            if json_mode:
-                data["response_format"] = {"type": "json_object"}
-                
-            try:
-                resp = requests.post(
-                    f"{NEMOTRON_BASE_URL}/chat/completions",
-                    headers=headers,
-                    json=data,
-                    timeout=LLM_TIMEOUT,
-                    verify=not DISABLE_SSL_VERIFY
-                )
-                resp.raise_for_status()
-                resp_json = resp.json()
-                if "error" in resp_json:
-                    raise LLMError(f"OpenRouter error: {resp_json['error']}")
-                if "choices" not in resp_json:
-                    raise LLMError(f"OpenRouter missing choices: {resp_json}")
-                message = resp_json['choices'][0]['message']
-                content = (message.get('content') or "").strip()
-                
-                _last_call = {
-                    "provider": kind,
-                    "model": model,
-                    "base_url": NEMOTRON_BASE_URL,
-                    "latency_ms": int((perf_counter() - started) * 1000),
-                    "prompt_chars": len(system or "") + len(user or ""),
-                    "response_chars": len(content),
-                    "timestamp": datetime.utcnow().isoformat() + "Z",
-                }
-                
-                if not content:
-                    raise LLMError(f"{kind} returned an empty response.")
-                return content
-            except Exception as e:
-                print(f"⚠️ OpenRouter/Nemotron failed ({e}). Firewall block detected. Auto-falling back to ChatGPT...")
-                # Auto-fallback to ChatGPT if OpenRouter is blocked by a corporate firewall
-                kind = "chatgpt"
-                model = OPENAI_MODEL
-
-        # Standard OpenAI client flow for other models (e.g. chatgpt)
         kwargs = {
             "model": model,
             "temperature": temperature,
@@ -213,10 +144,36 @@ def nemotron_summarize(tool_name: str, raw_output: str, current_memory: str = ""
     )
     return _run("nemotron", NEMOTRON_MODEL, system, user, temperature=0.1, json_mode=False)
 
+
 def run_llm_text(provider: str, system: str, user: str, temperature: float = 0.2) -> str:
+    """Compatibility entry point used by the agentic workflow."""
+    if str(provider or "").lower().startswith(("local:", "gpt4all:", "ollama:", "openai:", "openrouter:")):
+        from llm.unified_provider import UnifiedLLMProvider
+        result = UnifiedLLMProvider().generate(
+            prompt=user,
+            model=provider,
+            system_prompt=system,
+            temperature=temperature,
+        )
+        if not result.get("success"):
+            raise LLMError(result.get("error") or "Selected LLM provider failed.")
+        return str(result.get("response") or "")
     model = OPENAI_MODEL if provider == "chatgpt" else NEMOTRON_MODEL
     return _run(provider, model, system, user, temperature, json_mode=False)
 
+
 def run_llm_json(provider: str, system: str, user: str, temperature: float = 0.1) -> str:
+    """Compatibility entry point for JSON-formatted LLM responses."""
+    if str(provider or "").lower().startswith(("local:", "gpt4all:", "ollama:", "openai:", "openrouter:")):
+        from llm.unified_provider import UnifiedLLMProvider
+        result = UnifiedLLMProvider().generate(
+            prompt=user,
+            model=provider,
+            system_prompt=system,
+            temperature=temperature,
+        )
+        if not result.get("success"):
+            raise LLMError(result.get("error") or "Selected LLM provider failed.")
+        return str(result.get("response") or "")
     model = OPENAI_MODEL if provider == "chatgpt" else NEMOTRON_MODEL
     return _run(provider, model, system, user, temperature, json_mode=True)

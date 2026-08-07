@@ -119,7 +119,8 @@ export const AppProvider = ({ children }) => {
   const fetchModels = useCallback(async () => {
     try {
       const data = await apiClient.get('/api/v2/llm/models');
-      if (data.success && Array.isArray(data.models)) setOllamaModels(data.models);
+      const catalog = Array.isArray(data.catalog) ? data.catalog : data.models;
+      if (Array.isArray(catalog)) setOllamaModels(catalog);
     } catch (err) {}
   }, []);
 
