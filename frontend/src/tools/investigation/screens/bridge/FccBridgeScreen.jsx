@@ -9,8 +9,14 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   Paper,
+  Radio,
+  RadioGroup,
   Stack,
   Switch,
   Table,
@@ -50,6 +56,8 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
   const [importingId, setImportingId] = useState('');
   const [clearingQueue, setClearingQueue] = useState(false);
   const [prepareInvestigationContext, setPrepareInvestigationContext] = useState(true);
+  const [pendingImportRow, setPendingImportRow] = useState(null);
+  const [generationMode, setGenerationMode] = useState('default');
 
   const hasActiveWorkspace = Boolean(String(activeEnv || '').trim());
 
@@ -78,9 +86,20 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
     [prepareInvestigationContext],
   );
 
-  const handleImport = async (row) => {
+  const openImportDialog = (row) => {
+    setPendingImportRow(row || null);
+    setGenerationMode('default');
+  };
+
+  const closeImportDialog = () => {
+    if (importingId) return;
+    setPendingImportRow(null);
+  };
+
+  const handleImport = async (row, selectedGenerationMode = 'default') => {
     const publishId = String(row?.publish_id || '').trim();
     if (!publishId || !hasActiveWorkspace) return;
+    const shouldPrepareContext = selectedGenerationMode === 'advanced' && prepareInvestigationContext;
     setImportingId(publishId);
     setError(null);
     setSuccessMessage('');
@@ -91,8 +110,9 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
         merge_existing: false,
         replace_existing: true,
         rerank_after_import: true,
-        prepare_investigation_context: prepareInvestigationContext,
+        prepare_investigation_context: shouldPrepareContext,
         context_profile: 'balanced',
+        generation_mode: selectedGenerationMode,
       });
       const imported = res?.import || {};
       const importedCases = Number(imported?.imported_case_count || 0).toLocaleString();
@@ -121,6 +141,7 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
         imported_case_ids: importedCaseIds,
         imported_case_count: Number(imported?.imported_case_count || importedCaseIds.length || 0),
         imported_alert_count: Number(imported?.imported_alert_count || 0),
+        generation_mode: imported?.generation_mode || selectedGenerationMode,
         selected_case_id: importedCaseIds[0] || null,
       });
       apiClient.saveFccWorkflowSession({
@@ -149,19 +170,21 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
           imported_case_ids: importedCaseIds,
           imported_case_count: Number(imported?.imported_case_count || importedCaseIds.length || 0),
           imported_alert_count: Number(imported?.imported_alert_count || 0),
+          generation_mode: imported?.generation_mode || selectedGenerationMode,
           selected_case_id: importedCaseIds[0] || null,
         },
         status: 'sentinel_ready',
       }).catch(() => {});
       setActiveScreen?.('fcc_bridge');
       setSuccessMessage(
-        `Imported ${importedCases} Sentinel cases and ${importedAlerts} alerts from ${sourceRows} FCC retained rows into shared workspace ${activeEnv}. Published case count: ${sourcePublishedCases}.`,
+        `Imported ${importedCases} Sentinel cases and ${importedAlerts} alerts from ${sourceRows} FCC retained rows into shared workspace ${activeEnv}. Published case count: ${sourcePublishedCases}. Mode: ${selectedGenerationMode === 'advanced' ? 'Advanced' : 'Default'}.`,
       );
       await loadPublishedRuns();
     } catch (err) {
       setError(err.message || 'Failed to import FCC bridge package.');
     } finally {
       setImportingId('');
+      setPendingImportRow(null);
     }
   };
 
@@ -380,7 +403,7 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
                             variant="contained"
                             size="small"
                             disabled={!hasActiveWorkspace || isImporting}
-                            onClick={() => handleImport(row)}
+                            onClick={() => openImportDialog(row)}
                           >
                             {isImporting ? 'Importing...' : 'Import Into Shared Workspace'}
                           </Button>
@@ -400,6 +423,91 @@ const FccBridgeScreen = ({ setActiveScreen }) => {
           </Alert>
         ) : null}
       </Stack>
+
+      <Dialog open={Boolean(pendingImportRow)} onClose={closeImportDialog} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          Import FCC Package
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2.2}>
+            <Alert severity="info" variant="outlined">
+              Importing again will rebuild the Sentinel workspace for this published run and replace the current imported queue.
+            </Alert>
+            <Box>
+              <Typography variant="body2" color="text.secondary">
+                Select how the Sentinel investigation data should be generated.
+              </Typography>
+            </Box>
+            <RadioGroup
+              value={generationMode}
+              onChange={(event) => setGenerationMode(event.target.value)}
+            >
+              <Stack spacing={1.5}>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    borderColor: generationMode === 'default' ? 'primary.main' : 'divider',
+                    backgroundColor: generationMode === 'default' ? '#f8fafc' : 'background.paper',
+                  }}
+                >
+                  <FormControlLabel
+                    value="default"
+                    control={<Radio />}
+                    label={(
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                          Default
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Uses the original compact FCC package shape with one primary transaction per retained alert.
+                        </Typography>
+                      </Box>
+                    )}
+                  />
+                </Paper>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    borderColor: generationMode === 'advanced' ? 'primary.main' : 'divider',
+                    backgroundColor: generationMode === 'advanced' ? '#f8fafc' : 'background.paper',
+                  }}
+                >
+                  <FormControlLabel
+                    value="advanced"
+                    control={<Radio />}
+                    label={(
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+                          Advanced
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Rebuilds richer Sentinel context with varied transaction timelines, counterparties, countries, and rule-aligned activity.
+                        </Typography>
+                      </Box>
+                    )}
+                  />
+                </Paper>
+              </Stack>
+            </RadioGroup>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={closeImportDialog} disabled={Boolean(importingId)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            disabled={!pendingImportRow || Boolean(importingId)}
+            onClick={() => handleImport(pendingImportRow, generationMode)}
+          >
+            {importingId ? 'Importing...' : 'Import Selected Mode'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </PageContainer>
   );
 };

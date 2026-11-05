@@ -6,13 +6,17 @@ from api.services import services
 class LLMReportService:
     def _candidates(self):
         candidates = []
-        for item in (
-            getattr(services, "llm_provider", None),
-            getattr(services, "ollama_wrapper", None),
-            getattr(services, "_gpt4all_wrapper", None),
-        ):
-            if item:
-                candidates.append(item)
+        try:
+            from llm.provider_factory import load_llm_provider
+
+            provider = load_llm_provider()
+            if provider is not None:
+                candidates.append(provider)
+        except Exception:
+            pass
+        service_provider = getattr(services, "llm_provider", None)
+        if service_provider and service_provider not in candidates:
+            candidates.append(service_provider)
         return candidates
 
     def _generate(self, prompt, *, system_prompt, model=None, temperature=0.1, max_tokens=700):

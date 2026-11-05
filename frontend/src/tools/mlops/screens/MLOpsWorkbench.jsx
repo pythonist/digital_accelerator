@@ -876,7 +876,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   const [persona,         setPersona]         = useState(saved.persona || 'business');
   const [experimentName,  setExperimentName]  = useState(savedPipelineSession.name || DEFAULT_EXPERIMENT_NAME);
   const [railCollapsed,   setRailCollapsed]   = useState(Boolean(saved.railCollapsed));
-  const [showContext,     setShowContext]      = useState(true);
+  const [showContext,     setShowContext]      = useState(saved.showContext !== false);
   const [mobileRailOpen,  setMobileRailOpen]  = useState(false);
   const [viewportWidth,   setViewportWidth]   = useState(
     typeof window === 'undefined' ? 1600 : window.innerWidth,
@@ -981,6 +981,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   const [preprocessDataset, setPreprocessDataset] = useState(null);
   const [building,          setBuilding]          = useState(false);
   const [modelRun,          setModelRun]          = useState(null);
+  const [trainedModels,     setTrainedModels]     = useState(saved.trainedModels || []);
   const [validationReport,  setValidationReport]  = useState(null);
   const [registryEntry,     setRegistryEntry]     = useState(null);
   const [activeModelRun,    setActiveModelRun]    = useState(null);
@@ -1008,6 +1009,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
       setPreprocessPreview(null);
       setPreprocessDataset(null);
       setModelRun(null);
+      setTrainedModels([]);
       setValidationReport(null);
       setRegistryEntry(null);
       setActiveModelRun(null);
@@ -1356,6 +1358,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     setPreprocessDataset(null);
     setBuilding(false);
     setModelRun(null);
+    setTrainedModels([]);
     setActiveModelRun(null);
     setValidationReport(null);
     setRegistryEntry(null);
@@ -1495,6 +1498,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
   useEffect(() => { lsWrite({ persona }); },         [persona]);
   useEffect(() => { lsWrite({ experimentName }); },  [experimentName]);
   useEffect(() => { lsWrite({ railCollapsed }); },   [railCollapsed]);
+  useEffect(() => { lsWrite({ showContext }); },     [showContext]);
+  useEffect(() => { lsWrite({ trainedModels }); },   [trainedModels]);
   useEffect(() => { lsWrite({ targetColumn }); },    [targetColumn]);
   useEffect(() => { lsWrite({ reportRunId }); },     [reportRunId]);
   useEffect(() => () => {
@@ -2059,6 +2064,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
     setPreprocessDataset(null);
     setBuilding(false);
     setModelRun(null);
+    setTrainedModels([]);
     setActiveModelRun(null);
     setValidationReport(null);
     setRegistryEntry(null);
@@ -4588,13 +4594,13 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
         featureStoreState?.outputDatasetId,
         featureStoreState?.dataset_id,
       ]);
-      if (resumedFeatureStore) setFeatureStoreDataset(resumedFeatureStore);
+      setFeatureStoreDataset(resumedFeatureStore || null);
 
       const resumedPreprocessed = firstById([
         preprocessState?.preprocessedDatasetId,
         preprocessState?.outputDatasetId,
       ]);
-      if (isPreprocessDatasetSnapshot(resumedPreprocessed)) setPreprocessDataset(resumedPreprocessed);
+      setPreprocessDataset(isPreprocessDatasetSnapshot(resumedPreprocessed) ? resumedPreprocessed : null);
 
       const resumedMaster = firstById([
         masterState?.builtMasterDatasetId,
@@ -4608,10 +4614,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
         } else if (isMasterDatasetSnapshot(resumedMaster)) {
           setMasterDataset(resumedMaster);
         }
+      } else {
+        setMasterDataset(null);
       }
 
       const restoredTarget = String(targetState?.currentTargetColumn || targetState?.selectedTargetColumn || '').trim();
-      if (restoredTarget) setTargetColumn(restoredTarget);
+      setTargetColumn(restoredTarget);
       setEdaDone(Boolean(edaState?.completed || edaState?.done || edaState?.eda_completed || edaState?.status === 'completed'));
       if (Array.isArray(preprocessState?.steps)) {
         setPreprocessSteps(normalizePreprocessSteps(preprocessState.steps));
@@ -4772,6 +4780,12 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
             grain: restoredRegistryEntry?.grain || registryState?.grain || 'alert',
           });
         }
+      } else {
+        setActiveModelRun(null);
+        setModelRun(null);
+        setReportRunId('');
+        setValidationReport(null);
+        setRegistryEntry(null);
       }
 
       const requestedStep = String(
@@ -5389,7 +5403,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                   }}
                 >
                   <Box sx={{
-                    width: 28, height: 28, borderRadius: 0, flexShrink: 0,
+                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     bgcolor: isDone ? 'rgba(46,125,50,0.18)' : isStale ? 'rgba(163,111,0,0.18)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
                       border: `1.5px solid ${isDone ? D.done : isStale ? D.warning : isActive ? D.orange : isLocked ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'}`,
@@ -5864,7 +5878,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                         }}
                       >
                         <Box sx={{
-                          width: 28, height: 28, borderRadius: 0, flexShrink: 0,
+                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           bgcolor:  isDone ? 'rgba(46,125,50,0.18)' : isStale ? 'rgba(163,111,0,0.18)' : isActive ? 'rgba(208,74,2,0.2)' : isLocked ? D.locked : 'rgba(255,255,255,0.05)',
                           border: `1.5px solid ${isDone ? D.done : isStale ? D.warning : isActive ? D.orange : isLocked ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'}`,
@@ -6075,7 +6089,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
               </Box>
             )}
 
-            <Box id="fcc-workbench-main-canvas" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: activeStep === 'master' ? 'auto' : 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? { xs: 0.5, md: 1 } : { xs: 1, md: 2 } }}>
+            <Box id="fcc-workbench-main-canvas" sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: activeStep === 'master' ? 'auto' : 'hidden', p: isDashboard ? 0 : activeStep === 'master' ? { xs: 0.5, md: 1 } : { xs: 1, md: 2 }, bgcolor: '#fff' }}>
               {!isGlobalRegistryView && businessStaleCard ? (
                 <BusinessStaleStepCard
                   currentStepLabel={businessStaleCard.currentStepLabel}
@@ -6214,7 +6228,10 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       masterDataset={masterDataset} targetColumn={targetColumn}
                       activePipelineId={validActivePipelineId}
                       activePipelineName={activePipelineName}
+                      trainedModels={trainedModels}
+                      activeModelRun={effectiveActiveModelRun || modelRun}
                       onModelComplete={handleModelComplete} onOpenReport={handleOpenReport}
+                      onActiveModelSelect={(model) => adoptModelRun(model, { resumeExisting: true })}
                       initialActiveTab={modelActiveTab}
                       onActiveTabChange={setModelActiveTab}
                     />
@@ -6224,6 +6241,7 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       activePipelineId={validActivePipelineId}
                       datasetId={preprocessDataset?.dataset_id || masterDataset?.dataset_id || null}
                       activeModelRun={effectiveActiveModelRun || modelRun}
+                      trainedModels={trainedModels}
                       validationReport={effectiveValidationReport}
                       initialActiveTab={validationActiveTab}
                       onActiveTabChange={setValidationActiveTab}
@@ -6240,6 +6258,8 @@ const MLOpsWorkbench = ({ renderAutoBuild, routeRunId = null, routeStepId = '', 
                       uploadedDatasets={datasets} masterDataset={masterDataset}
                       targetColumn={targetColumn} preprocessedDataset={preprocessDataset}
                       activeModelRun={effectiveActiveModelRun || modelRun} validationReport={effectiveValidationReport}
+                      trainedModels={trainedModels}
+                      onActiveModelSelect={(model) => adoptModelRun(model, { resumeExisting: true })}
                       registryEntry={effectiveRegistryEntry || registryEntry}
                       activePipelineName={activePipelineName}
                       activePipelineId={validActivePipelineId}

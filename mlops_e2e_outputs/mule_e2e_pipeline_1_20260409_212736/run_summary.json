@@ -1,0 +1,1247 @@
+{
+  "pipeline_id": 1,
+  "pipeline_name": "Mule E2E API 20260409_212736",
+  "env_id": "fcc_e2e_realapi3",
+  "source_dir": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\environments\\fcc_env\\mlops\\data\\mule_bundle\\pipeline_4",
+  "uploaded_sources_count": 11,
+  "master_preview_summary": {
+    "base_rows": 10000,
+    "data_quality_status": "warning",
+    "estimated_column_count": 37,
+    "estimated_final_rows": 10000,
+    "feature_group_count": 4,
+    "final_dataset_estimate": "10,000 rows x 37 columns",
+    "insights": {
+      "account_type_analysis": {
+        "column": "account_type",
+        "distribution": [
+          {
+            "count": 4515,
+            "pct": 45.15,
+            "value": "SAVINGS"
+          },
+          {
+            "count": 2015,
+            "pct": 20.15,
+            "value": "CURRENT"
+          },
+          {
+            "count": 1440,
+            "pct": 14.4,
+            "value": "SALARY"
+          },
+          {
+            "count": 536,
+            "pct": 5.36,
+            "value": "WALLET"
+          },
+          {
+            "count": 525,
+            "pct": 5.25,
+            "value": "NRE"
+          },
+          {
+            "count": 494,
+            "pct": 4.94,
+            "value": "NRO"
+          },
+          {
+            "count": 475,
+            "pct": 4.75,
+            "value": "OD"
+          }
+        ]
+      },
+      "categorical_highlights": [
+        {
+          "column": "account_id",
+          "distinct_count": 10000,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "top_values": [
+            {
+              "count": 1,
+              "pct": 0.01,
+              "value": "ACC00000001"
+            },
+            {
+              "count": 1,
+              "pct": 0.01,
+              "value": "ACC00006671"
+            },
+            {
+              "count": 1,
+              "pct": 0.01,
+              "value": "ACC00006664"
+            },
+            {
+              "count": 1,
+              "pct": 0.01,
+              "value": "ACC00006665"
+            },
+            {
+              "count": 1,
+              "pct": 0.01,
+              "value": "ACC00006666"
+            }
+          ]
+        },
+        {
+          "column": "upi_primary_device_id",
+          "distinct_count": 9940,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "top_values": [
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "DEV634953"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "DEV513839"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "DEV829284"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "DEV956394"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "DEV730347"
+            }
+          ]
+        },
+        {
+          "column": "customer_id",
+          "distinct_count": 8000,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "top_values": [
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "CUST0001453"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "CUST0000329"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "CUST0000491"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "CUST0001918"
+            },
+            {
+              "count": 2,
+              "pct": 0.02,
+              "value": "CUST0000631"
+            }
+          ]
+        },
+        {
+          "column": "customer_customer_name",
+          "distinct_count": 7881,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "top_values": [
+            {
+              "count": 4,
+              "pct": 0.04,
+              "value": "Yasti Rama"
+            },
+            {
+              "count": 4,
+              "pct": 0.04,
+              "value": "Amara Chacko"
+            },
+            {
+              "count": 4,
+              "pct": 0.04,
+              "value": "Abhiram Mistry"
+            },
+            {
+              "count": 4,
+              "pct": 0.04,
+              "value": "Ijaya Pandey"
+            },
+            {
+              "count": 4,
+              "pct": 0.04,
+              "value": "Ekaraj Dhar"
+            }
+          ]
+        },
+        {
+          "column": "customer_customer_date_of_birth",
+          "distinct_count": 6538,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "top_values": [
+            {
+              "count": 7,
+              "pct": 0.07,
+              "value": "1983-04-02"
+            },
+            {
+              "count": 7,
+              "pct": 0.07,
+              "value": "1998-09-08"
+            },
+            {
+              "count": 6,
+              "pct": 0.06,
+              "value": "1994-12-03"
+            },
+            {
+              "count": 6,
+              "pct": 0.06,
+              "value": "1968-12-02"
+            },
+            {
+              "count": 6,
+              "pct": 0.06,
+              "value": "2002-08-18"
+            }
+          ]
+        },
+        {
+          "column": "customer_customer_open_date",
+          "distinct_count": 4089,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "top_values": [
+            {
+              "count": 11,
+              "pct": 0.11,
+              "value": "2010-04-02"
+            },
+            {
+              "count": 10,
+              "pct": 0.1,
+              "value": "2019-08-25"
+            },
+            {
+              "count": 10,
+              "pct": 0.1,
+              "value": "2019-10-08"
+            },
+            {
+              "count": 10,
+              "pct": 0.1,
+              "value": "2013-04-16"
+            },
+            {
+              "count": 10,
+              "pct": 0.1,
+              "value": "2012-01-24"
+            }
+          ]
+        },
+        {
+          "column": "account_open_date",
+          "distinct_count": 3370,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "top_values": [
+            {
+              "count": 9,
+              "pct": 0.09,
+              "value": "2016-02-27"
+            },
+            {
+              "count": 9,
+              "pct": 0.09,
+              "value": "2016-11-25"
+            },
+            {
+              "count": 9,
+              "pct": 0.09,
+              "value": "2017-10-22"
+            },
+            {
+              "count": 9,
+              "pct": 0.09,
+              "value": "2018-02-23"
+            },
+            {
+              "count": 9,
+              "pct": 0.09,
+              "value": "2022-06-10"
+            }
+          ]
+        },
+        {
+          "column": "customer_customer_last_kyc_update_date",
+          "distinct_count": 3346,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "top_values": [
+            {
+              "count": 15,
+              "pct": 0.15,
+              "value": "2024-09-17"
+            },
+            {
+              "count": 14,
+              "pct": 0.14,
+              "value": "2024-06-23"
+            },
+            {
+              "count": 13,
+              "pct": 0.13,
+              "value": "2024-10-17"
+            },
+            {
+              "count": 13,
+              "pct": 0.13,
+              "value": "2024-12-24"
+            },
+            {
+              "count": 13,
+              "pct": 0.13,
+              "value": "2023-01-12"
+            }
+          ]
+        },
+        {
+          "column": "last_activity_date",
+          "distinct_count": 364,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "top_values": [
+            {
+              "count": 54,
+              "pct": 0.54,
+              "value": "2025-02-04"
+            },
+            {
+              "count": 42,
+              "pct": 0.42,
+              "value": "2024-10-02"
+            },
+            {
+              "count": 40,
+              "pct": 0.4,
+              "value": "2025-02-06"
+            },
+            {
+              "count": 39,
+              "pct": 0.39,
+              "value": "2024-08-08"
+            },
+            {
+              "count": 39,
+              "pct": 0.39,
+              "value": "2025-03-09"
+            }
+          ]
+        },
+        {
+          "column": "account_type",
+          "distinct_count": 7,
+          "dtype": "object",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "top_values": [
+            {
+              "count": 4515,
+              "pct": 45.15,
+              "value": "SAVINGS"
+            },
+            {
+              "count": 2015,
+              "pct": 20.15,
+              "value": "CURRENT"
+            },
+            {
+              "count": 1440,
+              "pct": 14.4,
+              "value": "SALARY"
+            },
+            {
+              "count": 536,
+              "pct": 5.36,
+              "value": "WALLET"
+            },
+            {
+              "count": 525,
+              "pct": 5.25,
+              "value": "NRE"
+            }
+          ]
+        }
+      ],
+      "column_catalog": [
+        {
+          "column": "account_age_days",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 3370
+        },
+        {
+          "column": "account_balance_current",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 9993
+        },
+        {
+          "column": "account_currency",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 4
+        },
+        {
+          "column": "account_freeze_flag",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 2
+        },
+        {
+          "column": "account_freeze_reason_code",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 5
+        },
+        {
+          "column": "account_id",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 10000
+        },
+        {
+          "column": "account_limit_current",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 9997
+        },
+        {
+          "column": "account_open_date",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 3370
+        },
+        {
+          "column": "account_reactivation_date",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 97.3,
+          "source_group": "accounts",
+          "unique_count": 165
+        },
+        {
+          "column": "account_status",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 3
+        },
+        {
+          "column": "account_type",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 7
+        },
+        {
+          "column": "avg_balance_30d",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 9991
+        },
+        {
+          "column": "avg_balance_90d",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 9990
+        },
+        {
+          "column": "customer_id",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 8000
+        },
+        {
+          "column": "last_activity_date",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 364
+        },
+        {
+          "column": "upi_device_binding_count",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 5
+        },
+        {
+          "column": "upi_linked_account_count",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 4
+        },
+        {
+          "column": "upi_primary_device_id",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "unique_count": 9940
+        },
+        {
+          "column": "upi_vpa_id",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 14.78,
+          "source_group": "accounts",
+          "unique_count": 8522
+        },
+        {
+          "column": "customer_customer_date_of_birth",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 6538
+        },
+        {
+          "column": "customer_customer_gender",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 3
+        },
+        {
+          "column": "customer_customer_kyc_status",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 3
+        },
+        {
+          "column": "customer_customer_last_kyc_update_date",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 3346
+        },
+        {
+          "column": "customer_customer_name",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 7881
+        },
+        {
+          "column": "customer_customer_open_date",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 4089
+        },
+        {
+          "column": "customer_customer_risk_rating",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 4
+        },
+        {
+          "column": "customer_customer_segment",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 5
+        },
+        {
+          "column": "customer_customer_status",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 3
+        },
+        {
+          "column": "customer_customer_type",
+          "dtype": "object",
+          "family": "categorical",
+          "null_pct": 0.0,
+          "source_group": "customer_context",
+          "unique_count": 2
+        },
+        {
+          "column": "device_signal_count",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "device_intelligence",
+          "unique_count": 19
+        },
+        {
+          "column": "device_signal_device_id_nunique",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "device_intelligence",
+          "unique_count": 4
+        },
+        {
+          "column": "device_signal_ip_address_nunique",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "device_intelligence",
+          "unique_count": 19
+        },
+        {
+          "column": "external_signal_count",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 95.36,
+          "source_group": "external_signals",
+          "unique_count": 4
+        },
+        {
+          "column": "external_signal_signal_type_nunique",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 95.36,
+          "source_group": "external_signals",
+          "unique_count": 4
+        },
+        {
+          "column": "txn_count",
+          "dtype": "int64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "transaction_behavior",
+          "unique_count": 135
+        },
+        {
+          "column": "txn_transaction_amount_max",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "transaction_behavior",
+          "unique_count": 2
+        },
+        {
+          "column": "txn_transaction_amount_mean",
+          "dtype": "float64",
+          "family": "numeric",
+          "null_pct": 0.0,
+          "source_group": "transaction_behavior",
+          "unique_count": 10000
+        }
+      ],
+      "numeric_highlights": [
+        {
+          "column": "account_limit_current",
+          "dtype": "float64",
+          "max": 17872199.91,
+          "mean": 132280.2248,
+          "median": 58767.07,
+          "min": 37.14,
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "std": 297131.0249
+        },
+        {
+          "column": "txn_transaction_amount_max",
+          "dtype": "float64",
+          "max": 200000.0,
+          "mean": 103500.0,
+          "median": 100000.0,
+          "min": 100000.0,
+          "null_pct": 0.0,
+          "source_group": "transaction_behavior",
+          "std": 18377.9759
+        },
+        {
+          "column": "account_balance_current",
+          "dtype": "float64",
+          "max": 4755921.83,
+          "mean": 44320.7745,
+          "median": 21404.815,
+          "min": 16.0,
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "std": 88136.4745
+        },
+        {
+          "column": "avg_balance_30d",
+          "dtype": "float64",
+          "max": 4467357.23,
+          "mean": 42094.0363,
+          "median": 20312.86,
+          "min": 8.89,
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "std": 83767.6201
+        },
+        {
+          "column": "txn_transaction_amount_mean",
+          "dtype": "float64",
+          "max": 79343.2672,
+          "mean": 40663.1883,
+          "median": 39981.6391,
+          "min": 19338.3198,
+          "null_pct": 0.0,
+          "source_group": "transaction_behavior",
+          "std": 7966.0438
+        },
+        {
+          "column": "avg_balance_90d",
+          "dtype": "float64",
+          "max": 4103402.02,
+          "mean": 37685.4596,
+          "median": 18063.375,
+          "min": 5.64,
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "std": 75765.921
+        },
+        {
+          "column": "account_age_days",
+          "dtype": "int64",
+          "max": 3742.0,
+          "mean": 2000.2646,
+          "median": 2013.0,
+          "min": 32.0,
+          "null_pct": 0.0,
+          "source_group": "accounts",
+          "std": 1018.4315
+        },
+        {
+          "column": "txn_count",
+          "dtype": "int64",
+          "max": 447.0,
+          "mean": 60.0,
+          "median": 48.0,
+          "min": 25.0,
+          "null_pct": 0.0,
+          "source_group": "transaction_behavior",
+          "std": 62.3483
+        },
+        {
+          "column": "device_signal_count",
+          "dtype": "int64",
+          "max": 19.0,
+          "mean": 4.3506,
+          "median": 4.0,
+          "min": 1.0,
+          "null_pct": 0.0,
+          "source_group": "device_intelligence",
+          "std": 2.5877
+        },
+        {
+          "column": "device_signal_ip_address_nunique",
+          "dtype": "int64",
+          "max": 19.0,
+          "mean": 4.3506,
+          "median": 4.0,
+          "min": 1.0,
+          "null_pct": 0.0,
+          "source_group": "device_intelligence",
+          "std": 2.5877
+        }
+      ],
+      "overview": {
+        "boolean_columns": 0,
+        "categorical_columns": 21,
+        "column_count": 37,
+        "datetime_columns": 0,
+        "numeric_columns": 16,
+        "row_count": 10000
+      },
+      "source_groups": [
+        {
+          "column_count": 19,
+          "group": "accounts"
+        },
+        {
+          "column_count": 10,
+          "group": "customer_context"
+        },
+        {
+          "column_count": 3,
+          "group": "device_intelligence"
+        },
+        {
+          "column_count": 3,
+          "group": "transaction_behavior"
+        },
+        {
+          "column_count": 2,
+          "group": "external_signals"
+        }
+      ]
+    },
+    "joined_sources": [
+      "customer_context",
+      "transaction_behavior",
+      "external_signals",
+      "device_intelligence"
+    ],
+    "label_readiness": true,
+    "sources_loaded": 11,
+    "target": "mule_flag",
+    "warnings": [
+      "Counterparties cannot be aggregated to account_id with the current schema."
+    ]
+  },
+  "master_build": {
+    "row_count": 10000,
+    "column_count": 37,
+    "output_table_name": "mule_abt_e2e_1"
+  },
+  "feature_store": {
+    "status": "ready",
+    "total_features": 210,
+    "selected_features_count": 202,
+    "generation_error": null
+  },
+  "preprocessing": {
+    "build_status": "built",
+    "feature_count_estimate": 5
+  },
+  "model": {
+    "status": "trained",
+    "metrics": {
+      "anomaly": {
+        "algorithm": "isolation_forest",
+        "enabled": true,
+        "flagged_accounts": 812,
+        "mean_score": 0.15080432742215993
+      },
+      "graph": {
+        "accounts_with_shared_devices": 138,
+        "enabled": true,
+        "graph_edge_count": 21798,
+        "graph_node_count": 29807,
+        "highest_graph_risk_score": 0.556638821260106,
+        "max_cluster_size": 341,
+        "rings_detected": 1902,
+        "top_clusters": [
+          {
+            "account_count": 341,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0001",
+            "node_count": 1651,
+            "pattern_tags": [
+              "transacts_with",
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00000039",
+              "ACC00000040",
+              "ACC00000041",
+              "ACC00000056",
+              "ACC00000099",
+              "ACC00000104"
+            ],
+            "shared_device_accounts": 10,
+            "suspicious_edges": 1804,
+            "suspicious_nodes": 906
+          },
+          {
+            "account_count": 2,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0002",
+            "node_count": 11,
+            "pattern_tags": [
+              "linked_to_complaint",
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00005752",
+              "ACC00008514"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 8,
+            "suspicious_nodes": 7
+          },
+          {
+            "account_count": 2,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0003",
+            "node_count": 10,
+            "pattern_tags": [
+              "logs_in_from",
+              "linked_to_complaint",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00005515",
+              "ACC00008287"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 7,
+            "suspicious_nodes": 7
+          },
+          {
+            "account_count": 2,
+            "avg_model_score": 0.0,
+            "cluster_id": "RING-0004",
+            "node_count": 8,
+            "pattern_tags": [
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00001072",
+              "ACC00009704"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 5,
+            "suspicious_nodes": 7
+          }
+        ]
+      },
+      "risk_bands": {
+        "high": 0.75,
+        "medium": 0.45
+      },
+      "supervised": {
+        "business_view": "Out of the top 200 flagged accounts, approximately 70 are expected to be true mules.",
+        "decision_threshold": 0.5,
+        "f1": 1.0,
+        "lift_top_decile": 9.999999999999998,
+        "pr_auc": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "top_n_capture": 0.35
+      },
+      "typology": {
+        "classes": [
+          "layering_mule"
+        ],
+        "enabled": true,
+        "model": "gradient_boosting"
+      }
+    },
+    "typology_enabled": true
+  },
+  "validation": {
+    "status": "validated",
+    "summary": {
+      "average_score": 0.03498944444444445,
+      "confusion_matrix": {
+        "fn": 0,
+        "fp": 0,
+        "tn": 9650,
+        "tp": 350
+      },
+      "event_loss_rate": 0.0,
+      "f1": 1.0,
+      "graph_enabled": true,
+      "graph_summary": {
+        "accounts_with_shared_devices": 138,
+        "enabled": true,
+        "graph_edge_count": 21798,
+        "graph_node_count": 29807,
+        "highest_graph_risk_score": 0.556638821260106,
+        "max_cluster_size": 341,
+        "rings_detected": 1902,
+        "top_clusters": [
+          {
+            "account_count": 2,
+            "avg_model_score": 1.0,
+            "cluster_id": "RING-0001",
+            "node_count": 10,
+            "pattern_tags": [
+              "logs_in_from",
+              "owns",
+              "shares_device"
+            ],
+            "sample_accounts": [
+              "ACC00004444",
+              "ACC00006916"
+            ],
+            "shared_device_accounts": 2,
+            "suspicious_edges": 10,
+            "suspicious_nodes": 5
+          },
+          {
+            "account_count": 1,
+            "avg_model_score": 1.0,
+            "cluster_id": "RING-0002",
+            "node_count": 9,
+            "pattern_tags": [
+              "linked_to_complaint",
+              "logs_in_from",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00003147"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 8,
+            "suspicious_nodes": 5
+          },
+          {
+            "account_count": 1,
+            "avg_model_score": 1.0,
+            "cluster_id": "RING-0003",
+            "node_count": 9,
+            "pattern_tags": [
+              "logs_in_from",
+              "linked_to_complaint",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00007814"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 8,
+            "suspicious_nodes": 5
+          },
+          {
+            "account_count": 1,
+            "avg_model_score": 1.0,
+            "cluster_id": "RING-0004",
+            "node_count": 8,
+            "pattern_tags": [
+              "logs_in_from",
+              "linked_to_complaint",
+              "owns"
+            ],
+            "sample_accounts": [
+              "ACC00006635"
+            ],
+            "shared_device_accounts": 0,
+            "suspicious_edges": 7,
+            "suspicious_nodes": 5
+          }
+        ]
+      },
+      "high_risk_count": 350,
+      "low_risk_count": 9650,
+      "medium_risk_count": 0,
+      "positive_class_rate": 0.035,
+      "pr_auc": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "thresholds": {
+        "high": 0.75,
+        "medium": 0.45
+      },
+      "top_accounts": [
+        {
+          "account_id": "ACC00006351",
+          "graph_cluster_id": "RING-0001",
+          "graph_risk_score": 0.415201831451738,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00004499",
+          "graph_cluster_id": "RING-0045",
+          "graph_risk_score": 0.1480740725427351,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00009219",
+          "graph_cluster_id": "RING-0012",
+          "graph_risk_score": 0.1820079595479733,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00001673",
+          "graph_cluster_id": "RING-0001",
+          "graph_risk_score": 0.5165625787967505,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00009769",
+          "graph_cluster_id": "RING-0062",
+          "graph_risk_score": 0.1247841355704209,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00005935",
+          "graph_cluster_id": "RING-0152",
+          "graph_risk_score": 0.0909609627374277,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00002098",
+          "graph_cluster_id": "RING-0001",
+          "graph_risk_score": 0.5165713901183234,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00005933",
+          "graph_cluster_id": "RING-0001",
+          "graph_risk_score": 0.3814508002178607,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00006716",
+          "graph_cluster_id": "RING-0028",
+          "graph_risk_score": 0.1585707219869176,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00005926",
+          "graph_cluster_id": "RING-0046",
+          "graph_risk_score": 0.1480740725427351,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00003147",
+          "graph_cluster_id": "RING-0024",
+          "graph_risk_score": 0.1586438948199108,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        },
+        {
+          "account_id": "ACC00009962",
+          "graph_cluster_id": "RING-0001",
+          "graph_risk_score": 0.4489849844901271,
+          "mule_risk_score": 1.0,
+          "predicted_mule_flag": 1,
+          "predicted_mule_typology": "layering_mule",
+          "risk_band": "High Risk",
+          "supporting_signals": "txn count 30d | typology available flag | rapid outflow count 30d",
+          "top_drivers": "txn count 30d, typology available flag"
+        }
+      ],
+      "top_n_capture": 0.2857142857142857,
+      "total_accounts_scored": 10000,
+      "typology_classes_detected": [
+        "layering_mule",
+        "missing"
+      ],
+      "typology_prediction_coverage": 1.0,
+      "validation_status": "ready",
+      "warnings": []
+    }
+  },
+  "artifacts": {
+    "master_dataset": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_abt_e2e_1.csv",
+    "feature_store_selected": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_feature_store_1_selected.csv",
+    "feature_store_full": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_feature_store_final.csv",
+    "feature_catalog": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_feature_catalog_final.csv",
+    "preprocess_dataset": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_feature_studio_1.csv",
+    "model_bundle": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_model_bundle_1.joblib",
+    "model_output": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_model_output_1.csv",
+    "validation_graph": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\artifacts\\mule_validation_graph_1_1.json"
+  },
+  "inference_preview_csv": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\mule_inference_preview.csv",
+  "high_risk_csv": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736\\mule_high_risk_top100.csv",
+  "output_dir": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\mule_e2e_pipeline_1_20260409_212736"
+}

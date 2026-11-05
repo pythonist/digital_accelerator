@@ -570,23 +570,32 @@ class CasePackGenerator:
         
         # Monthly Trend
         trend = []
-        date_col = self._get_col_name(df, ['date', 'dt', 'time'])
+        date_col = self._get_col_name(df, ['txn_timestamp', 'timestamp', 'transaction_date', 'txn_date', 'created_at', 'date', 'dt', 'time'])
         if date_col:
             try:
-                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce', utc=True).dt.tz_convert(None)
                 monthly = df.groupby(df[date_col].dt.to_period('M'))[amt_col].sum()
                 trend = [{"month": str(p), "volume": v} for p, v in monthly.items()]
             except: pass
 
         # Flow Ratio
-        type_col = self._get_col_name(df, ['type', 'dr_cr', 'direction'])
+        type_col = self._get_col_name(df, ['type', 'dr_cr', 'direction', 'txn_type', 'flow_type'])
         credit = 0
         debit = 0
         if type_col:
-            credit = df[df[type_col].astype(str).str.lower().str.contains('cr|dep|in')][amt_col].sum()
-            debit = df[df[type_col].astype(str).str.lower().str.contains('dr|with|out')][amt_col].sum()
+            is_credit = df[type_col].astype(str).str.lower().str.contains('cr|dep|in|rec|recv')
+            is_debit = df[type_col].astype(str).str.lower().str.contains('dr|deb|wit|out|pay|send')
+            credit = df[is_credit][amt_col].sum()
+            debit = df[is_debit][amt_col].sum()
+            if credit == 0 and debit == 0 and (df[amt_col] < 0).any():
+                credit = df[df[amt_col] > 0][amt_col].sum()
+                debit = abs(df[df[amt_col] < 0][amt_col].sum())
         else:
-            debit = df[amt_col].sum() # Default
+            if (df[amt_col] < 0).any():
+                credit = df[df[amt_col] > 0][amt_col].sum()
+                debit = abs(df[df[amt_col] < 0][amt_col].sum())
+            else:
+                debit = df[amt_col].sum() # Default
 
         return {
             "total_volume": float(df[amt_col].sum()),
@@ -600,7 +609,11 @@ class CasePackGenerator:
         if not txns: return {"top_counterparties": [], "geographic_exposure": {}}
         df = pd.DataFrame(txns)
         
-        party_col = self._get_col_name(df, ['party', 'beneficiary', 'remitter', 'name', 'desc'])
+        party_col = self._get_col_name(df, [
+            'counterparty_account', 'counterparty_account_id', 'counterparty',
+            'beneficiary_account', 'beneficiary', 'receiver_account',
+            'payee_account', 'party', 'remitter', 'merchant_name', 'name', 'desc'
+        ])
         amt_col = self._get_col_name(df, ['amount', 'amt'])
         
         top_cps = []
@@ -611,7 +624,7 @@ class CasePackGenerator:
 
         # Geo Risk (Mock or via Country Col)
         geo = {}
-        country_col = self._get_col_name(df, ['country', 'cntry'])
+        country_col = self._get_col_name(df, ['beneficiary_country', 'counterparty_country', 'country', 'cntry'])
         if country_col:
             geo = df[country_col].value_counts().head(5).to_dict()
         

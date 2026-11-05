@@ -1,5 +1,74 @@
 # Change History
 
+## 2026-08-07 - Unified LLM Routing, Local GGUF Support, and Copilot Streaming
+
+Commit scope:
+- Add selectable cloud, API, and local GGUF model support across FCIP.
+- Stream Copilot investigation responses progressively in the UI.
+- Stabilize the production frontend build and local startup workflow.
+
+Files and systems changed:
+- Added a unified model registry/provider layer and GPT4All streaming support.
+- Added local GGUF model definitions and discovery support for `H:\\OllamaModels`.
+- Added Copilot SSE streaming with progressive response rendering.
+- Removed fixed LLaMA branding from the Copilot header.
+- Added production-build freshness checks and synchronized frontend assets into `backend/dist`.
+- Deduplicated React Router dependencies and resolved junction-path builds for navigation stability.
+
+## 2026-06-30 - Agentic Investigation Dashboard and Formatting Polish
+
+Commit scope:
+- Overhaul the Agentic Investigation tab with a live Recent Sessions dashboard.
+- Redesign the PDF generation and frontend markdown renderer to properly style reports and tables.
+
+Files changed:
+- `frontend/src/tools/investigation/screens/cases/AgenticInvestigationScreen.jsx`
+- `backend/api/agent_db.py`
+- `backend/api/routes/agentic.py`
+- `frontend/package.json`
+
+Summary:
+- Replaced the blank initial state with an active Analysis Table (Recent Investigations) showing case ID, status, risk score, LLM model used, and timestamps.
+- Updated `AgenticInvestigationScreen.jsx` UI layout so the dashboard stays permanently pinned to the left of the Overview tab.
+- Set up a continuous polling loop so the Analysis Table auto-updates while background cases are running.
+- Restructured `agent_db.py` SQL query to join `llm_interaction_log` and surface the specific LLM model used for each case session.
+- Installed `remark-gfm` in the frontend and applied strict markdown parsing to force tables and headers into proper formatting.
+- Updated `reportlab` logic in `agentic.py` to parse markdown table syntax and inline bold syntax directly into formatted PDF objects.
+- Injected custom PwC Orange (`#e8590c`) into both frontend CSS and backend PDF styles for all headings.
+
+## 2026-06-30 - OpenRouter Integration and Dev Script Fix
+
+Commit scope:
+- Fix PowerShell parser error preventing the local development launcher from running properly.
+- Reconfigure the backend LLM client layer to support OpenRouter API format natively to enable Nemotron reasoning capabilities.
+
+Files changed:
+- `start-dev.ps1`
+- `backend/.env`
+- `backend/api/routes/llm_clients.py`
+
+Summary:
+- Changed invalid variable interpolation `$port:` to `${port}:` in `start-dev.ps1` to resolve scope parser failures.
+- Updated `.env` keys and URLs to map `NEMOTRON` references to OpenRouter with the appropriate `nemotron-3-ultra-550b-a55b:free` model name.
+- Rewrote the `nemotron` execution flow in `llm_clients.py` to use `requests` instead of the OpenAI SDK. This ensures custom OpenRouter payload arguments, such as `{"reasoning": {"enabled": True}}`, are successfully preserved and delivered to the upstream API.
+
+## 2026-06-27 - Evaluate Tab Redesign and Progress Stepper
+
+Commit scope:
+- Redesign the Evaluate tab and the Training Progress tracker in the MLOps Model Training panel.
+- Update the layout to replace boxy dashboard cards with a sleek, full-width design matching updated mockups.
+
+Files changed:
+- `frontend/src/tools/mlops/components/ModelTrainingPanel.jsx`
+- `frontend/src/tools/mlops/screens/MLOpsWorkbench.jsx`
+
+Summary:
+- Removed the old `StructuredTrainingProgress` blocky design and replaced it with a modern horizontal stepper with circles, custom icons, and animated connecting lines.
+- Redesigned the "Evaluate" tab to eliminate outer paper boxes, replacing them with full-width orange decorative header bars.
+- Ensured header text is styled cleanly in white inside the orange header bars.
+- Resolved multiple syntax and unbalanced JSX tag errors introduced during the iterative layout restructuring.
+- Implemented logic in MLOpsWorkbench and ModelTrainingPanel to allow multiple models to be trained and compared in the same pipeline session.
+
 ## 2026-03-04 - Cortex V2 naming restore
 
 Commit scope:

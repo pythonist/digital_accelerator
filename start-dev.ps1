@@ -1,9 +1,134 @@
 [CmdletBinding()]
 param(
-    [switch]$MlopsOnly
+    [switch]$MlopsOnly,
+    [switch]$StopOnly,
+    [switch]$DevFrontend,
+    [Alias('l')]
+    [switch]$Local,
+    [int]$BackendPort = 5173,
+    [int]$FrontendPort = 5173
 )
 
 $ErrorActionPreference = "Stop"
+
+$systemPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+$userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+if ($systemPath -or $userPath) {
+    $env:Path = "$systemPath;$userPath;$env:Path"
+}
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    if (Test-Path "C:\Program Files\nodejs") {
+        $env:Path = "C:\Program Files\nodejs;$env:Path"
+    } else {
+        $wingetNode = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "node.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($wingetNode) {
+            $env:Path = "$($wingetNode.DirectoryName);$env:Path"
+        }
+    }
+}
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    if (Test-Path "$env:LOCALAPPDATA\Programs\Python\Python312") {
+        $env:Path = "$env:LOCALAPPDATA\Programs\Python\Python312;$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;$env:Path"
+    }
+}
+
+function Stop-DevProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId,
+        [Parameter(Mandatory = $true)]
+        [string]$Reason
+    )
+
+    if ($ProcessId -eq $PID) {
+        return
+    }
+
+    try {
+        $proc = Get-Process -Id $ProcessId -ErrorAction Stop
+        Write-Host "Stopping PID $ProcessId ($($proc.ProcessName)): $Reason" -ForegroundColor Yellow
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    } catch {
+        Write-Host "PID $ProcessId already stopped or could not be stopped: $($_.Exception.Message)" -ForegroundColor DarkYellow
+    }
+}
+
+function Stop-DevPortOwners {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int[]]$Ports
+    )
+
+    foreach ($port in ($Ports | Sort-Object -Unique)) {
+        try {
+            $owners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty OwningProcess -Unique
+            foreach ($owner in $owners) {
+                if ($owner -and $owner -ne 0) {
+                    Stop-DevProcess -ProcessId ([int]$owner) -Reason "listening on dev port $port"
+                }
+            }
+        } catch {
+            Write-Host "Could not inspect port ${port}: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        }
+    }
+}
+
+function Stop-ProjectDevProcesses {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot,
+        [Parameter(Mandatory = $true)]
+        [string]$BackendDir,
+        [Parameter(Mandatory = $true)]
+        [string]$FrontendDir,
+        [Parameter(Mandatory = $true)]
+        [int]$BackendPort,
+        [Parameter(Mandatory = $true)]
+        [int]$FrontendPort
+    )
+
+    $repoPattern = [regex]::Escape($RepoRoot)
+    $backendPattern = [regex]::Escape($BackendDir)
+    $frontendPattern = [regex]::Escape($FrontendDir)
+    $matched = @{}
+
+    $processes = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine }
+    foreach ($proc in $processes) {
+        $cmd = [string]$proc.CommandLine
+        $pidValue = [int]$proc.ProcessId
+        if ($pidValue -eq $PID) {
+            continue
+        }
+
+        $isProjectBackend = (
+            $cmd -match "app\.py" -and
+            (
+                $cmd -match $repoPattern -or
+                $cmd -match $backendPattern -or
+                ($cmd -match "python" -and $cmd -match "(^|[\\/\s`"'])app\.py([`"'\s]|$)")
+            )
+        )
+        $isProjectFrontend = (
+            $cmd -match "vite" -and
+            (
+                $cmd -match $repoPattern -or
+                $cmd -match $frontendPattern -or
+                $cmd -match "frontend"
+            )
+        )
+
+        if ($isProjectBackend -or $isProjectFrontend) {
+            $matched[$pidValue] = if ($isProjectBackend) { "project backend app.py process" } else { "project Vite frontend process" }
+        }
+    }
+
+    foreach ($entry in $matched.GetEnumerator()) {
+        Stop-DevProcess -ProcessId ([int]$entry.Key) -Reason ([string]$entry.Value)
+    }
+
+    Stop-DevPortOwners -Ports @($BackendPort, 5000, 5001, $FrontendPort)
+}
 
 function Convert-ToSingleQuotedLiteral {
     param(
@@ -41,6 +166,28 @@ function Test-PythonModule {
         return ($LASTEXITCODE -eq 0)
     } catch {
         return $false
+    }
+}
+
+function Disable-BrokenCertificateHooks {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VenvDir
+    )
+
+    $sitePackages = Join-Path $VenvDir "Lib\site-packages"
+    $hookFiles = @(
+        "pip_system_certs.pth",
+        "python-certifi-win32-init.pth"
+    )
+
+    foreach ($hookFile in $hookFiles) {
+        $source = Join-Path $sitePackages $hookFile
+        $disabled = "$source.disabled"
+        if ((Test-Path -LiteralPath $source) -and -not (Test-Path -LiteralPath $disabled)) {
+            Move-Item -LiteralPath $source -Destination $disabled
+            Write-Host "Disabled incompatible Python certificate hook: $hookFile" -ForegroundColor DarkYellow
+        }
     }
 }
 
@@ -107,6 +254,7 @@ function Ensure-BackendPython {
 
     if (Test-Path -LiteralPath $backendVenvPy) {
         Write-Host "Using existing backend virtual environment: $backendVenvPy" -ForegroundColor Green
+        Disable-BrokenCertificateHooks -VenvDir $backendVenv
         if (-not (Test-PythonModule -Executable $backendVenvPy -ModuleName "flask")) {
             Write-Host "Existing backend venv is missing Flask or backend packages. Installing requirements..." -ForegroundColor Yellow
             & $backendVenvPy -m pip install --upgrade pip
@@ -214,6 +362,11 @@ function Resolve-PythonLaunchSpec {
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $repoRoot "backend"
 $frontendDir = Join-Path $repoRoot "frontend"
+$frontendBuildDir = $frontendDir
+$frontendDirectoryInfo = Get-Item -LiteralPath $frontendDir -ErrorAction SilentlyContinue
+if ($frontendDirectoryInfo -and $frontendDirectoryInfo.Target) {
+    $frontendBuildDir = [string]$frontendDirectoryInfo.Target
+}
 $backendEnvFile = Join-Path $backendDir ".env"
 $backendEnvExample = Join-Path $backendDir ".env.example"
 $frontendEnvFile = Join-Path $frontendDir ".env"
@@ -226,6 +379,13 @@ if (-not (Test-Path -LiteralPath $backendDir)) {
 
 if (-not (Test-Path -LiteralPath $frontendDir)) {
     throw "Frontend directory not found: $frontendDir"
+}
+
+Stop-ProjectDevProcesses -RepoRoot $repoRoot -BackendDir $backendDir -FrontendDir $frontendDir -BackendPort $BackendPort -FrontendPort $FrontendPort
+
+if ($StopOnly) {
+    Write-Host "Stopped stale backend/frontend dev processes. StopOnly was set, so nothing was started." -ForegroundColor Green
+    return
 }
 
 if (-not (Test-Path -LiteralPath $backendEnvFile) -and (Test-Path -LiteralPath $backendEnvExample)) {
@@ -253,20 +413,60 @@ if (-not (Test-Path -LiteralPath $frontendNodeModules)) {
     }
 }
 
+if (-not $DevFrontend) {
+    $frontendDistDir = Join-Path $frontendBuildDir "dist"
+    $frontendIndex = Join-Path $frontendDistDir "index.html"
+    $needsFrontendBuild = -not (Test-Path -LiteralPath $frontendIndex)
+    if (-not $needsFrontendBuild) {
+        $sourceFiles = Get-ChildItem -LiteralPath (Join-Path $frontendBuildDir "src"), (Join-Path $frontendBuildDir "public") -Recurse -File -ErrorAction SilentlyContinue
+        $sourceFiles += Get-Item (Join-Path $frontendBuildDir "index.html"), (Join-Path $frontendBuildDir "package.json"), (Join-Path $frontendBuildDir "vite.config.js") -ErrorAction SilentlyContinue
+        $newestSource = $sourceFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $needsFrontendBuild = $newestSource -and ($newestSource.LastWriteTime -gt (Get-Item $frontendIndex).LastWriteTime)
+    }
+
+    if ($needsFrontendBuild) {
+        Write-Host "Building production frontend bundle..." -ForegroundColor Cyan
+        Push-Location $frontendBuildDir
+        try {
+            npm run build
+            if ($LASTEXITCODE -ne 0) {
+                throw "Frontend production build failed."
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Host "Existing production frontend is up to date; skipping npm run build." -ForegroundColor DarkGreen
+    }
+
+    $backendDistDir = Join-Path $backendDir "dist"
+    if (-not (Test-Path -LiteralPath (Join-Path $frontendDistDir "index.html"))) {
+        throw "Frontend build did not produce frontend/dist/index.html."
+    }
+    New-Item -ItemType Directory -Path $backendDistDir -Force | Out-Null
+    $backendAssetsDir = Join-Path $backendDistDir "assets"
+    if (Test-Path -LiteralPath $backendAssetsDir) {
+        Remove-Item -LiteralPath $backendAssetsDir -Recurse -Force
+    }
+    Copy-Item -Path (Join-Path $frontendDistDir "*") -Destination $backendDistDir -Recurse -Force
+    Write-Host "Production frontend copied to backend/dist and will be served by Flask." -ForegroundColor Green
+}
+
 $backendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendDir
 $frontendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $frontendDir
 $pythonLaunchSpec = Ensure-BackendPython -RepoRoot $repoRoot -BackendDir $backendDir
 $pythonExecutable = $pythonLaunchSpec.Executable
 $pythonExecutableLiteral = Convert-ToSingleQuotedLiteral -PathValue $pythonExecutable
-$pythonArgLiteral = @($pythonLaunchSpec.Arguments | ForEach-Object {
+$pythonArgsList = @($pythonLaunchSpec.Arguments | Where-Object { $_ } | ForEach-Object {
     "'$(Convert-ToSingleQuotedLiteral -PathValue $_)'"
-}) -join " "
+})
+$pythonArgsSection = if ($pythonArgsList.Count -gt 0) { ($pythonArgsList -join " ") + " " } else { "" }
 $backendAppPath = Join-Path $backendDir "app.py"
 $backendAppPathLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendAppPath
-$backendProfileCommand = if ($MlopsOnly) { "$env:AML_BACKEND_PROFILE='mlops'; " } else { "" }
+$backendProfileValue = if ($MlopsOnly) { "mlops" } else { "full" }
 
-$backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; $backendProfileCommand & '$pythonExecutableLiteral' $pythonArgLiteral '$backendAppPathLiteral'"
-$frontendCommand = "Set-Location -LiteralPath '$frontendDirLiteral'; npm run dev"
+$backendCommand = "[System.Environment]::SetEnvironmentVariable('APP_PORT', '$BackendPort', 'Process'); [System.Environment]::SetEnvironmentVariable('PORT', '$BackendPort', 'Process'); [System.Environment]::SetEnvironmentVariable('AML_BACKEND_PROFILE', '$backendProfileValue', 'Process'); Set-Location -LiteralPath '$backendDirLiteral'; & '$pythonExecutableLiteral' -u $pythonArgsSection'$backendAppPathLiteral'"
+$frontendCommand = "Set-Location -LiteralPath '$frontendDirLiteral'; npm run dev -- --host 0.0.0.0 --port $FrontendPort"
 
 Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-NoExit",
@@ -275,16 +475,52 @@ Start-Process -FilePath "powershell.exe" -ArgumentList @(
     "-Command", $backendCommand
 ) | Out-Null
 
-Start-Process -FilePath "powershell.exe" -ArgumentList @(
-    "-NoExit",
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-Command", $frontendCommand
-) | Out-Null
+if ($DevFrontend) {
+    Start-Process -FilePath "powershell.exe" -ArgumentList @(
+        "-NoExit",
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-Command", $frontendCommand
+    ) | Out-Null
+}
+
+$cloudflaredCmd = Get-Command "cloudflared" -ErrorAction SilentlyContinue
+if ($cloudflaredCmd) {
+    # Always stop any old running cloudflared tunnel process
+    Get-Process -Name "cloudflared" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    
+    if (-not $Local) {
+        $tunnelCommand = "cloudflared tunnel --cred-file 'C:\Users\kriss\.cloudflared\2dd27d86-9029-40fe-8a27-65d29bcf7ce6.json' run 2dd27d86-9029-40fe-8a27-65d29bcf7ce6"
+        Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-WindowStyle", "Hidden",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-Command", $tunnelCommand
+        ) | Out-Null
+    }
+}
 
 $pythonLaunchSummaryParts = @($pythonExecutable)
 if ($pythonLaunchSpec.Arguments) {
     $pythonLaunchSummaryParts += $pythonLaunchSpec.Arguments
 }
 $pythonLaunchSummary = $pythonLaunchSummaryParts -join " "
-Write-Host "Started backend using $pythonLaunchSummary and frontend (npm run dev) in separate PowerShell windows."
+if ($DevFrontend) {
+    Write-Host "Started backend and Vite development frontend in separate PowerShell windows."
+} else {
+    Write-Host "Started backend serving the production frontend bundle in separate PowerShell window."
+}
+Write-Host "Backend:  http://127.0.0.1:${BackendPort}" -ForegroundColor Green
+if ($DevFrontend) {
+    Write-Host "Frontend: http://127.0.0.1:${FrontendPort}" -ForegroundColor Green
+} else {
+    Write-Host "Frontend: http://127.0.0.1:${BackendPort} (production build)" -ForegroundColor Green
+}
+if ($Local) {
+    Write-Host "Mode:     Local Only (Cloudflare Tunnel Disabled)" -ForegroundColor Yellow
+    Write-Host "Open:     http://localhost:${BackendPort}" -ForegroundColor White
+    Start-Process "http://localhost:${BackendPort}"
+} elseif ($cloudflaredCmd) {
+    Write-Host "Public:   https://fccanalytics.online (Cloudflare Tunnel Live)" -ForegroundColor Cyan
+}
+

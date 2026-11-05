@@ -4,7 +4,7 @@ export const INVESTIGATION_SETTINGS_UPDATED_EVENT = 'fcip-investigation-settings
 
 export const defaultInvestigationSettings = {
   global: {
-    default_model: '',
+    default_model: 'local:qwen2.5-3b-instruct-q2_k.gguf',
     show_guides_by_default: false,
     compact_density: false,
     auto_refresh_live_views: true,
@@ -74,6 +74,11 @@ export const saveInvestigationSettings = (settings) => {
   const merged = deepMerge(defaultInvestigationSettings, settings || {});
   if (canUseStorage()) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    if (merged.global?.default_model) {
+      window.localStorage.setItem('llm_model', merged.global.default_model);
+    } else {
+      window.localStorage.removeItem('llm_model');
+    }
     window.dispatchEvent(new CustomEvent(INVESTIGATION_SETTINGS_UPDATED_EVENT, {
       detail: merged,
     }));

@@ -399,8 +399,9 @@ const SectionCard = ({ eyebrow, title, subtitle, action, children }) => (
     elevation={0}
     sx={{
       borderRadius: 0,
-      border: `1px solid ${T.border}`,
+      border: 'none',
       bgcolor: T.surface,
+      
       overflow: 'hidden',
     }}>
     <Stack
@@ -408,23 +409,23 @@ const SectionCard = ({ eyebrow, title, subtitle, action, children }) => (
       justifyContent="space-between"
       alignItems="flex-start"
       spacing={1.5}
-      sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${T.border}` }}>
+      sx={{ px: 2, py: 1.25 }}>
       <Box>
-        <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+        <Typography sx={{ fontSize: 10, fontWeight: 800, color: T.orange, textTransform: 'uppercase', letterSpacing: 0.7 }}>
           {eyebrow}
         </Typography>
-        <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.text }}>
+        <Typography sx={{ fontSize: 15, fontWeight: 800, color: T.text }}>
           {title}
         </Typography>
         {subtitle && (
-          <Typography sx={{ fontSize: 12, color: T.textMuted, mt: 0.35 }}>
+          <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 0.2 }}>
             {subtitle}
           </Typography>
         )}
       </Box>
       {action}
     </Stack>
-    <Box sx={{ p: 2 }}>
+    <Box sx={{ px: 2, pb: 2 }}>
       {children}
     </Box>
   </Paper>
@@ -1039,7 +1040,7 @@ const BusinessFeatureCard = ({ profile, onOpenReview }) => {
     <Paper
       elevation={0}
       sx={{
-        borderRadius: 2,
+        borderRadius: 0,
         border: `1px solid ${verdictMeta.border}`,
         bgcolor: '#fff',
         p: 1.4,
@@ -1101,7 +1102,7 @@ const BusinessFeatureCard = ({ profile, onOpenReview }) => {
       </Box>
 
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
-        <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 0.9, bgcolor: T.surfaceAlt }}>
+        <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 0.9, bgcolor: '#fff' }}>
           <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: T.textMuted, textTransform: 'uppercase' }}>
             Strength
           </Typography>
@@ -1112,7 +1113,7 @@ const BusinessFeatureCard = ({ profile, onOpenReview }) => {
             </Typography>
           </Stack>
         </Paper>
-        <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 0.9, bgcolor: T.surfaceAlt }}>
+        <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 0.9, bgcolor: '#fff' }}>
           <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: T.textMuted, textTransform: 'uppercase' }}>
             Safety
           </Typography>
@@ -1127,7 +1128,7 @@ const BusinessFeatureCard = ({ profile, onOpenReview }) => {
         </Paper>
       </Box>
 
-      <Paper elevation={0} sx={{ border: `1px solid ${verdictMeta.border}`, borderRadius: 1.5, p: 0.95, bgcolor: verdictMeta.bg }}>
+      <Paper elevation={0} sx={{ border: `1px solid ${verdictMeta.border}`, borderRadius: 0, p: 0.95, bgcolor: verdictMeta.bg }}>
         <Typography sx={{ fontSize: 11, fontWeight: 800, color: verdictMeta.color, textTransform: 'uppercase' }}>
           Business verdict
         </Typography>
@@ -1171,14 +1172,14 @@ const FeatureGovernanceWorkbench = ({
   const [techniqueId, setTechniqueId] = useState('');
   const [comparisonTechniqueIds, setComparisonTechniqueIds] = useState([]);
   const [comparisonMinSupport, setComparisonMinSupport] = useState(2);
-  const [includeReviewInConsensus, setIncludeReviewInConsensus] = useState(false);
+  const [includeReviewInConsensus, setIncludeReviewInConsensus] = useState(true);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [techniqueResultsDialogOpen, setTechniqueResultsDialogOpen] = useState(false);
   const [comparisonMatrixDialogOpen, setComparisonMatrixDialogOpen] = useState(false);
   const [applyFeedback, setApplyFeedback] = useState(null);
   const [overrideNote, setOverrideNote] = useState('');
   const [overrides, setOverrides] = useState({});
-  const [viewMode, setViewMode] = useState(safeLower(persona) === 'technical' ? 'technical' : 'business');
+  const [viewMode, setViewMode] = useState('technical');
 
   const fallbackPayload = useMemo(() => (
     buildFallbackPayload({ masterDataset, datasets, targetColumn })
@@ -1848,16 +1849,10 @@ const FeatureGovernanceWorkbench = ({
             sx={{
               display: 'grid',
               gap: 1.5,
-              gridTemplateColumns: isBusinessView
-                ? '1fr'
-                : '1fr',
-              '@media (min-width: 1880px)': isBusinessView
-                ? {}
-                : { gridTemplateColumns: 'minmax(420px, 0.95fr) minmax(760px, 1.45fr)' },
-              alignItems: 'stretch',
+              gridTemplateColumns: '1fr',
             }}
           >
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 2, p: 1.5, bgcolor: T.surfaceAlt, minWidth: 0 }}>
+            <Box sx={{ borderRadius: 0, p: 1.5, bgcolor: '#fff', minWidth: 0 }}>
               <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text, mb: 1 }}>
                 {isBusinessView ? 'Business sign-off summary' : 'Leakage and readiness summary'}
               </Typography>
@@ -1871,7 +1866,7 @@ const FeatureGovernanceWorkbench = ({
                 }}
               >
                 {(isBusinessView ? businessSummaryCards : summaryCards).map((card) => (
-                  <Paper key={card.label} elevation={0} sx={{ borderRadius: 1.5, border: `1px solid ${T.border}`, bgcolor: '#fff', p: 1.1, minWidth: 0 }}>
+                  <Box key={card.label} sx={{ borderRadius: 0, bgcolor: '#fff', p: 1.1, minWidth: 0 }}>
                     <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: T.orange, textTransform: 'uppercase', lineHeight: 1.2, wordBreak: 'break-word' }}>
                       {card.label}
                     </Typography>
@@ -1881,23 +1876,23 @@ const FeatureGovernanceWorkbench = ({
                     <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 0.35 }}>
                       {card.meta}
                     </Typography>
-                  </Paper>
+                  </Box>
                 ))}
               </Box>
               {isBusinessView && (
-                <Paper elevation={0} sx={{ mt: 1, borderRadius: 1.5, border: `1px solid ${T.successBorder}`, bgcolor: T.successBg, p: 1.1 }}>
+                <Box sx={{ mt: 1, borderRadius: 0, bgcolor: T.successBg, p: 1.1 }}>
                   <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: T.success, textTransform: 'uppercase' }}>
                     Overall health
                   </Typography>
                   <Typography sx={{ fontSize: 12.5, color: T.text, mt: 0.35 }}>
                     {healthSummary}
                   </Typography>
-                </Paper>
+                </Box>
               )}
-            </Paper>
+            </Box>
 
             {!isBusinessView && (
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 2, p: 1.5, bgcolor: '#fff', minWidth: 0 }}>
+            <Box sx={{ borderRadius: 0, p: 1.5, bgcolor: '#fff', minWidth: 0 }}>
               <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1 }}>
                 <Box>
                   <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
@@ -1916,7 +1911,7 @@ const FeatureGovernanceWorkbench = ({
                 )}
               </Stack>
 
-              <Alert severity="success" icon={<AutoFixHigh />} sx={{ mb: 1, borderRadius: 1.5, fontSize: 11.5 }}>
+              <Alert severity="success" icon={<AutoFixHigh />} sx={{ mb: 1, borderRadius: 0, fontSize: 11.5 }}>
                 Start with <strong>{techniqueLookup[recommendedTechniqueId]?.label || 'Information Gain'}</strong>. Use <strong>Chi-Square</strong> for categorical fields, <strong>Variance Threshold</strong> for near-constant numeric fields, and <strong>Correlation Filter / VIF</strong> for duplicate numeric signals.
               </Alert>
 
@@ -1950,7 +1945,7 @@ const FeatureGovernanceWorkbench = ({
                   </Select>
                 </FormControl>
                 {activeTechnique && (
-                  <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1, flex: 1, minWidth: 0, bgcolor: T.surfaceAlt }}>
+                  <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1, flex: 1, minWidth: 0, bgcolor: '#fff' }}>
                     <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                       Plain-language question
                     </Typography>
@@ -1967,8 +1962,8 @@ const FeatureGovernanceWorkbench = ({
                 )}
               </Stack>
 
-              <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, bgcolor: T.surfaceAlt }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ px: 1.25, py: 0.9, borderBottom: `1px solid ${T.border}` }}>
+              <Box sx={{ borderRadius: 0, bgcolor: '#fff' }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ px: 1.25, py: 0.9 }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                     Technique results
                   </Typography>
@@ -1982,13 +1977,13 @@ const FeatureGovernanceWorkbench = ({
                     >
                       Open full list
                     </Button>
-                    <Chip label={`${activeTechniqueRows.length} row${activeTechniqueRows.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                    <Chip label={`${activeTechniqueRows.length} row${activeTechniqueRows.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: 'none' }} />
                   </Stack>
                 </Stack>
                 {!!activeTechniqueTopRows.length && (
                   <Box sx={{ px: 1, pt: 1, display: 'grid', gap: 0.9, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
                     {activeTechniqueTopRows.slice(0, 4).map((row) => (
-                      <Paper key={row.id} elevation={0} sx={{ borderRadius: 1.25, border: `1px solid ${T.border}`, bgcolor: '#fff', p: 1 }}>
+                      <Paper key={row.id} elevation={0} sx={{ borderRadius: 0, border: 'none', bgcolor: '#fff', p: 1 }}>
                         <Stack direction="row" justifyContent="space-between" spacing={1}>
                           <Typography sx={{ fontSize: 12.25, fontWeight: 800, color: T.text }}>
                             {row.displayName}
@@ -2021,7 +2016,7 @@ const FeatureGovernanceWorkbench = ({
                       <Box component="thead">
                         <Box component="tr">
                           {['Feature', 'Score', 'Why this row appears'].map((header) => (
-                            <Box key={header} component="th" sx={{ textAlign: 'left', fontSize: 10.5, color: T.textMuted, px: 1, py: 0.7, borderBottom: `1px solid ${T.border}`, position: 'sticky', top: 0, bgcolor: T.surfaceAlt, zIndex: 1 }}>
+                            <Box key={header} component="th" sx={{ textAlign: 'left', fontSize: 10.5, color: T.textMuted, px: 1, py: 0.7, position: 'sticky', top: 0, bgcolor: '#fff', zIndex: 1 }}>
                               {header}
                             </Box>
                           ))}
@@ -2030,13 +2025,13 @@ const FeatureGovernanceWorkbench = ({
                       <Box component="tbody">
                         {activeTechniqueRows.slice(0, 10).map((row, index) => (
                           <Box component="tr" key={`${activeTechnique?.id || 'tech'}-${row.feature || index}`}>
-                            <Box component="td" sx={{ px: 1, py: 0.8, borderBottom: `1px solid ${T.border}`, fontWeight: 700 }}>
+                            <Box component="td" sx={{ px: 1, py: 0.8, fontWeight: 700 }}>
                               {humanize(row.feature || '-')}
                             </Box>
-                            <Box component="td" sx={{ px: 1, py: 0.8, borderBottom: `1px solid ${T.border}`, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                            <Box component="td" sx={{ px: 1, py: 0.8, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                               {fmtScore(row.score ?? row.rank_value, 4)}
                             </Box>
-                            <Box component="td" sx={{ px: 1, py: 0.8, borderBottom: `1px solid ${T.border}`, color: T.textMuted }}>
+                            <Box component="td" sx={{ px: 1, py: 0.8, color: T.textMuted }}>
                               {clip(row.reason || activeTechnique?.description || '-', 92)}
                             </Box>
                           </Box>
@@ -2044,7 +2039,7 @@ const FeatureGovernanceWorkbench = ({
                       </Box>
                     </Box>
                   ) : (
-                    <Alert severity="info" icon={<InfoOutlined />} sx={{ m: 1, borderRadius: 1.5, fontSize: 11.5 }}>
+                    <Alert severity="info" icon={<InfoOutlined />} sx={{ m: 1, borderRadius: 0, fontSize: 11.5 }}>
                       {activeTechniqueMessage || 'No specific rows were returned for this technique on the current feature set. The technique is still available, but nothing was flagged strongly enough to list here.'}
                     </Alert>
                   )}
@@ -2054,10 +2049,10 @@ const FeatureGovernanceWorkbench = ({
                     Showing the top 10 rows here to keep the page compact. Use <strong>Open full list</strong> for the full technique result set.
                   </Typography>
                 )}
-              </Paper>
+              </Box>
 
-              <Paper elevation={0} sx={{ mt: 1, border: `1px solid ${T.border}`, borderRadius: 1.5, bgcolor: '#fff' }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.25, py: 0.9, borderBottom: `1px solid ${T.border}` }}>
+              <Box sx={{ mt: 1, borderRadius: 0, bgcolor: '#fff' }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.25, py: 0.9 }}>
                   <Box>
                     <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                       Comparative vote matrix and downstream feature set
@@ -2092,13 +2087,13 @@ const FeatureGovernanceWorkbench = ({
                     <Alert
                       severity={applyFeedback.tone || 'success'}
                       icon={<CheckCircle />}
-                      sx={{ mb: 1.1, borderRadius: 1.5, fontSize: 11.5 }}
+                      sx={{ mb: 1.1, borderRadius: 0, fontSize: 11.5 }}
                     >
                       {applyFeedback.message}
                     </Alert>
                   )}
                   {appliedGovernanceStep && (
-                    <Alert severity="success" icon={<CheckCircle />} sx={{ mb: 1.1, borderRadius: 1.5, fontSize: 11.5 }}>
+                    <Alert severity="success" icon={<CheckCircle />} sx={{ mb: 1.1, borderRadius: 0, fontSize: 11.5 }}>
                       {appliedGovernanceMode} is currently active in the preprocessing pipeline. {appliedGovernanceKeptCount} feature{appliedGovernanceKeptCount === 1 ? '' : 's'} are flowing forward and {appliedGovernanceExcludedCount} feature{appliedGovernanceExcludedCount === 1 ? '' : 's'} are being removed by the governed drop-columns step.
                     </Alert>
                   )}
@@ -2106,12 +2101,12 @@ const FeatureGovernanceWorkbench = ({
                   <Alert
                     severity="info"
                     icon={<InfoOutlined />}
-                    sx={{ mb: 1.1, borderRadius: 1.5, fontSize: 11.5 }}
+                    sx={{ mb: 1.1, borderRadius: 0, fontSize: 11.5 }}
                   >
                     Fast mode uses sampled master data and the quick ranking/filter techniques below. Heavy wrapper and explainer families are intentionally skipped here so the Clean & Transform step stays responsive.
                   </Alert>
                   {!!selectedSlowTechniqueLabels.length && (
-                    <Alert severity="warning" icon={<WarningAmber />} sx={{ mb: 1.1, borderRadius: 1.5, fontSize: 11.5 }}>
+                    <Alert severity="warning" icon={<WarningAmber />} sx={{ mb: 1.1, borderRadius: 0, fontSize: 11.5 }}>
                       Slow technique selected: {selectedSlowTechniqueLabels.join(', ')}. Use Fast set for a quicker walkthrough.
                     </Alert>
                   )}
@@ -2166,7 +2161,7 @@ const FeatureGovernanceWorkbench = ({
                             sx={{
                               p: 0.85,
                               minHeight: 92,
-                              borderRadius: 1.25,
+                              borderRadius: 0,
                               cursor: 'pointer',
                               border: `1px solid ${selected ? T.orange : T.border}`,
                               bgcolor: selected ? T.orangeLight : '#fff',
@@ -2250,7 +2245,7 @@ const FeatureGovernanceWorkbench = ({
                         key={`summary-${summary.id}`}
                         label={`${summary.label}: ${summary.count}`}
                         size="small"
-                        sx={{ bgcolor: T.surfaceAlt, border: `1px solid ${T.border}` }}
+                        sx={{ bgcolor: '#fff', border: 'none' }}
                       />
                     ))}
                     <Chip label={`Gold: ${consensusTierCounts.gold}`} size="small" sx={{ bgcolor: CONSENSUS_TIER_META.gold.bg, color: CONSENSUS_TIER_META.gold.color, fontWeight: 700 }} />
@@ -2261,7 +2256,7 @@ const FeatureGovernanceWorkbench = ({
                   </Stack>
 
                   {!!comparisonTechniqueSummaries.length && (
-                    <Paper elevation={0} sx={{ mb: 1.1, border: `1px solid ${T.border}`, borderRadius: 1.25, p: 1, bgcolor: T.surfaceAlt }}>
+                    <Paper elevation={0} sx={{ mb: 1.1, border: 'none', borderRadius: 0, p: 1, bgcolor: '#fff' }}>
                       <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', xl: '1.15fr 0.85fr' } }}>
                         <Box>
                           <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
@@ -2286,8 +2281,8 @@ const FeatureGovernanceWorkbench = ({
                     </Paper>
                   )}
 
-                  <Paper elevation={0} sx={{ mb: 1.1, border: `1px solid ${T.border}`, borderRadius: 1.25, overflow: 'hidden' }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ px: 1.25, py: 0.9, bgcolor: T.surfaceAlt, borderBottom: `1px solid ${T.border}` }}>
+                  <Paper elevation={0} sx={{ mb: 1.1, border: 'none', borderRadius: 0, overflow: 'hidden' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} sx={{ px: 1.25, py: 0.9, bgcolor: '#fff' }}>
                       <Box>
                         <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                           Comparative vote matrix
@@ -2296,7 +2291,7 @@ const FeatureGovernanceWorkbench = ({
                           Each selected technique gets its own column. Gold, Silver, and Bronze are assigned from the total support count.
                         </Typography>
                       </Box>
-                      <Chip label={`${comparisonMatrixRows.length} voted feature${comparisonMatrixRows.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                      <Chip label={`${comparisonMatrixRows.length} voted feature${comparisonMatrixRows.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: 'none' }} />
                     </Stack>
                     {comparisonTechniqueSummaries.length ? (
                       <Box sx={{ overflowX: 'auto' }}>
@@ -2313,7 +2308,6 @@ const FeatureGovernanceWorkbench = ({
                                     color: T.textMuted,
                                     px: 1,
                                     py: 0.8,
-                                    borderBottom: `1px solid ${T.border}`,
                                     bgcolor: '#fff',
                                     whiteSpace: 'nowrap',
                                   }}
@@ -2326,7 +2320,7 @@ const FeatureGovernanceWorkbench = ({
                           <Box component="tbody">
                             {matrixPreviewRows.map((profile) => (
                               <Box component="tr" key={`matrix-row-${profile.feature}`}>
-                                <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, minWidth: 300, verticalAlign: 'top' }}>
+                                <Box component="td" sx={{ px: 1, py: 0.9, minWidth: 300, verticalAlign: 'top' }}>
                                   <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                                     {profile.displayName}
                                   </Typography>
@@ -2337,7 +2331,7 @@ const FeatureGovernanceWorkbench = ({
                                     Technical: {clip(profile.technicalConsensusText, 170)}
                                   </Typography>
                                 </Box>
-                                <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                                <Box component="td" sx={{ px: 1, py: 0.9, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                                   <Chip
                                     label={profile.tierMeta.label}
                                     size="small"
@@ -2352,7 +2346,7 @@ const FeatureGovernanceWorkbench = ({
                                     {profile.tierMeta.businessLabel}
                                   </Typography>
                                 </Box>
-                                <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                                <Box component="td" sx={{ px: 1, py: 0.9, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                                   <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                                     {profile.supportCount}/{profile.techniqueCount}
                                   </Typography>
@@ -2364,7 +2358,7 @@ const FeatureGovernanceWorkbench = ({
                                   <Box
                                     key={`matrix-cell-${profile.feature}-${cell.id}`}
                                     component="td"
-                                    sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, minWidth: 128, verticalAlign: 'top' }}
+                                    sx={{ px: 1, py: 0.9, minWidth: 128, verticalAlign: 'top' }}
                                   >
                                     <Chip
                                       label={cell.scoreText}
@@ -2387,7 +2381,7 @@ const FeatureGovernanceWorkbench = ({
                         </Box>
                       </Box>
                     ) : (
-                      <Alert severity="info" icon={<InfoOutlined />} sx={{ m: 1.25, borderRadius: 1.5, fontSize: 11.5 }}>
+                      <Alert severity="info" icon={<InfoOutlined />} sx={{ m: 1.25, borderRadius: 0, fontSize: 11.5 }}>
                         Choose at least one technique to build the vote matrix.
                       </Alert>
                     )}
@@ -2399,7 +2393,7 @@ const FeatureGovernanceWorkbench = ({
                   </Paper>
 
                   <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', xl: '1fr 1fr' } }}>
-                    <Paper elevation={0} sx={{ border: `1px solid ${T.successBorder}`, borderRadius: 1.25, overflow: 'hidden' }}>
+                    <Paper elevation={0} sx={{ border: `1px solid ${T.successBorder}`, borderRadius: 0, overflow: 'hidden' }}>
                       <Box sx={{ px: 1, py: 0.85, bgcolor: T.successBg, borderBottom: `1px solid ${T.successBorder}` }}>
                         <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: T.success }}>
                           Flowing downstream now
@@ -2423,14 +2417,14 @@ const FeatureGovernanceWorkbench = ({
                             ))}
                           </Stack>
                         ) : (
-                          <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                          <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                             No common downstream features yet. Add more techniques or reduce the support threshold.
                           </Alert>
                         )}
                       </ScrollArea>
                     </Paper>
 
-                    <Paper elevation={0} sx={{ border: `1px solid ${T.warnBorder}`, borderRadius: 1.25, overflow: 'hidden' }}>
+                    <Box sx={{ border: `1px solid ${T.warnBorder}`, borderRadius: 0, overflow: 'hidden' }}>
                       <Box sx={{ px: 1, py: 0.85, bgcolor: T.warnBg, borderBottom: `1px solid ${T.warnBorder}` }}>
                         <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: T.warn }}>
                           Common features that still need attention
@@ -2462,22 +2456,22 @@ const FeatureGovernanceWorkbench = ({
                             ))}
                           </Stack>
                         ) : (
-                          <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                          <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                             No common features are currently blocked or waiting for review.
                           </Alert>
                         )}
                       </ScrollArea>
-                    </Paper>
+                    </Box>
                   </Box>
                 </Box>
-              </Paper>
+              </Box>
               <Dialog
                 open={comparisonMatrixDialogOpen}
                 onClose={() => setComparisonMatrixDialogOpen(false)}
                 fullWidth
                 maxWidth="xl"
               >
-                <DialogTitle sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${T.border}` }}>
+                <DialogTitle sx={{ px: 2, py: 1.5 }}>
                   <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
                     <Box>
                       <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.text }}>
@@ -2508,7 +2502,6 @@ const FeatureGovernanceWorkbench = ({
                                   color: T.textMuted,
                                   px: 1,
                                   py: 0.85,
-                                  borderBottom: `1px solid ${T.border}`,
                                   position: 'sticky',
                                   top: 0,
                                   bgcolor: '#fff',
@@ -2524,7 +2517,7 @@ const FeatureGovernanceWorkbench = ({
                         <Box component="tbody">
                           {comparisonMatrixRows.map((profile) => (
                             <Box component="tr" key={`dialog-matrix-row-${profile.feature}`}>
-                              <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, minWidth: 260, verticalAlign: 'top' }}>
+                              <Box component="td" sx={{ px: 1, py: 0.9, minWidth: 260, verticalAlign: 'top' }}>
                                 <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                                   {profile.displayName}
                                 </Typography>
@@ -2535,7 +2528,7 @@ const FeatureGovernanceWorkbench = ({
                                   {profile.businessConsensusText}
                                 </Typography>
                               </Box>
-                              <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, verticalAlign: 'top', minWidth: 200 }}>
+                              <Box component="td" sx={{ px: 1, py: 0.9, verticalAlign: 'top', minWidth: 200 }}>
                                 <Chip
                                   label={profile.decisionLabel}
                                   size="small"
@@ -2550,7 +2543,7 @@ const FeatureGovernanceWorkbench = ({
                                   {profile.technicalConsensusText}
                                 </Typography>
                               </Box>
-                              <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                              <Box component="td" sx={{ px: 1, py: 0.9, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                                 <Chip
                                   label={profile.tierMeta.label}
                                   size="small"
@@ -2565,7 +2558,7 @@ const FeatureGovernanceWorkbench = ({
                                   {profile.tierMeta.businessLabel}
                                 </Typography>
                               </Box>
-                              <Box component="td" sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                              <Box component="td" sx={{ px: 1, py: 0.9, verticalAlign: 'top', whiteSpace: 'nowrap' }}>
                                 <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                                   {profile.supportCount}/{profile.techniqueCount}
                                 </Typography>
@@ -2577,7 +2570,7 @@ const FeatureGovernanceWorkbench = ({
                                 <Box
                                   key={`dialog-matrix-cell-${profile.feature}-${cell.id}`}
                                   component="td"
-                                  sx={{ px: 1, py: 0.9, borderBottom: `1px solid ${T.border}`, minWidth: 140, verticalAlign: 'top' }}
+                                  sx={{ px: 1, py: 0.9, minWidth: 140, verticalAlign: 'top' }}
                                 >
                                   <Chip
                                     label={cell.scoreText}
@@ -2603,7 +2596,7 @@ const FeatureGovernanceWorkbench = ({
                       </Box>
                     </Box>
                   ) : (
-                    <Alert severity="info" icon={<InfoOutlined />} sx={{ m: 2, borderRadius: 1.5, fontSize: 11.5 }}>
+                    <Alert severity="info" icon={<InfoOutlined />} sx={{ m: 2, borderRadius: 0, fontSize: 11.5 }}>
                       Choose at least one technique to build the vote matrix.
                     </Alert>
                   )}
@@ -2615,7 +2608,7 @@ const FeatureGovernanceWorkbench = ({
                 fullWidth
                 maxWidth="lg"
               >
-                <DialogTitle sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${T.border}` }}>
+                <DialogTitle sx={{ px: 2, py: 1.5 }}>
                   <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="flex-start">
                     <Box>
                       <Typography sx={{ fontSize: 18, fontWeight: 800, color: T.text }}>
@@ -2634,12 +2627,12 @@ const FeatureGovernanceWorkbench = ({
                   {!!activeTechniqueTopRows.length && (
                     <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, mb: 1.5 }}>
                       {activeTechniqueTopRows.map((row) => (
-                        <Paper key={`dialog-${row.id}`} elevation={0} sx={{ borderRadius: 1.5, border: `1px solid ${T.border}`, p: 1.1, bgcolor: T.surfaceAlt }}>
+                        <Paper key={`dialog-${row.id}`} elevation={0} sx={{ borderRadius: 0, border: 'none', p: 1.1, bgcolor: '#fff' }}>
                           <Stack direction="row" justifyContent="space-between" spacing={1}>
                             <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                               {row.displayName}
                             </Typography>
-                            <Chip label={row.scoreText} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+                            <Chip label={row.scoreText} size="small" sx={{ bgcolor: '#fff', border: 'none' }} />
                           </Stack>
                           <Typography sx={{ fontSize: 11, color: T.text, mt: 0.6, lineHeight: 1.55 }}>
                             {row.businessExplanation}
@@ -2656,7 +2649,7 @@ const FeatureGovernanceWorkbench = ({
                       <Box component="thead">
                         <Box component="tr">
                           {['Feature', 'Score', 'Why this row appears'].map((header) => (
-                            <Box key={`dialog-head-${header}`} component="th" sx={{ textAlign: 'left', fontSize: 10.5, color: T.textMuted, px: 1, py: 0.8, borderBottom: `1px solid ${T.border}`, position: 'sticky', top: 0, bgcolor: '#fff', zIndex: 1 }}>
+                            <Box key={`dialog-head-${header}`} component="th" sx={{ textAlign: 'left', fontSize: 10.5, color: T.textMuted, px: 1, py: 0.8, position: 'sticky', top: 0, bgcolor: '#fff', zIndex: 1 }}>
                               {header}
                             </Box>
                           ))}
@@ -2665,13 +2658,13 @@ const FeatureGovernanceWorkbench = ({
                       <Box component="tbody">
                         {activeTechniqueRows.map((row, index) => (
                           <Box component="tr" key={`dialog-row-${activeTechnique?.id || 'tech'}-${row.feature || index}`}>
-                            <Box component="td" sx={{ px: 1, py: 0.85, borderBottom: `1px solid ${T.border}`, fontWeight: 700 }}>
+                            <Box component="td" sx={{ px: 1, py: 0.85, fontWeight: 700 }}>
                               {humanize(row.feature || '-')}
                             </Box>
-                            <Box component="td" sx={{ px: 1, py: 0.85, borderBottom: `1px solid ${T.border}`, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                            <Box component="td" sx={{ px: 1, py: 0.85, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                               {fmtScore(row.score ?? row.rank_value, 4)}
                             </Box>
-                            <Box component="td" sx={{ px: 1, py: 0.85, borderBottom: `1px solid ${T.border}`, color: T.textMuted }}>
+                            <Box component="td" sx={{ px: 1, py: 0.85, color: T.textMuted }}>
                               {row.reason || activeTechnique?.description || '-'}
                             </Box>
                           </Box>
@@ -2679,13 +2672,13 @@ const FeatureGovernanceWorkbench = ({
                       </Box>
                     </Box>
                   ) : (
-                    <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                    <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                       {activeTechniqueMessage || 'No rows are available for this technique yet.'}
                     </Alert>
                   )}
                 </DialogContent>
               </Dialog>
-            </Paper>
+            </Box>
             )}
           </Box>
         </Stack>
@@ -2708,21 +2701,21 @@ const FeatureGovernanceWorkbench = ({
                 onClick={() => setActiveBucket((prev) => (prev === bucket.id ? 'all' : bucket.id))}
                 elevation={0}
                 sx={{
-                  borderRadius: 1.75,
+                  borderRadius: 0,
                   border: `1px solid ${isActive ? meta.border : T.border}`,
                   bgcolor: isActive ? meta.bg : '#fff',
-                  p: 1.2,
+                  p: 0.9,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   '&:hover': { borderColor: meta.border, transform: 'translateY(-1px)' },
                 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: T.text, minHeight: 34 }}>
+                <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text, minHeight: 20, lineHeight: 1.2 }}>
                   {bucket.title}
                 </Typography>
-                <Typography sx={{ fontSize: 11, color: T.textMuted, minHeight: 36, mt: 0.45 }}>
+                <Typography sx={{ fontSize: 10, color: T.textMuted, minHeight: 24, mt: 0.35, lineHeight: 1.25 }}>
                   {bucket.description}
                 </Typography>
-                <Typography sx={{ fontSize: 30, fontWeight: 800, color: meta.color, mt: 0.7 }}>
+                <Typography sx={{ fontSize: 24, fontWeight: 800, color: meta.color, mt: 0.5, lineHeight: 1 }}>
                   {count}
                 </Typography>
               </Paper>
@@ -2739,11 +2732,11 @@ const FeatureGovernanceWorkbench = ({
           sx={{
             display: 'grid',
             gap: 1.25,
-            gridTemplateColumns: { xs: '1fr', xl: '1.35fr 0.9fr' },
+            gridTemplateColumns: '1fr',
             minHeight: { xs: 'auto', xl: '44vh' },
           }}>
-          <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <Box sx={{ px: 1.25, py: 1, borderBottom: `1px solid ${T.border}` }}>
+          <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <Box sx={{ px: 1.25, py: 1 }}>
               <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                 Feature inventory
               </Typography>
@@ -2795,27 +2788,33 @@ const FeatureGovernanceWorkbench = ({
                       onClick={() => setSelectedFeature(profile.feature)}
                       elevation={0}
                       sx={{
-                        borderRadius: 1.5,
+                        borderRadius: '4px',
                         border: `1px solid ${selected ? meta.border : T.border}`,
                         bgcolor: selected ? meta.bg : '#fff',
-                        p: 1.05,
+                        px: 1.25,
+                        py: 0.6,
                         cursor: 'pointer',
+                        transition: 'background-color 0.15s ease',
+                        '&:hover': { bgcolor: selected ? meta.bg : T.weakBg }
                       }}>
-                      <Stack direction="row" justifyContent="space-between" spacing={1}>
-                        <Box sx={{ minWidth: 0 }}>
-                          <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5}>
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
+                          <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                             {profile.displayName}
                           </Typography>
-                          <Typography sx={{ fontSize: 11, color: T.textMuted, mt: 0.25 }}>
+                          <Typography sx={{ fontSize: 10, color: T.textMuted }}>
                             {profile.sourceTable} · {humanize(profile.featureType)}
                           </Typography>
                         </Box>
-                        <Stack alignItems="flex-end" spacing={0.5}>
-                          <Chip label={meta.shortLabel} size="small" sx={{ bgcolor: meta.bg, color: meta.color, fontWeight: 700 }} />
+                        <Stack direction="row" alignItems="center" spacing={0.75} sx={{ flexShrink: 0 }}>
+                          <Chip label={meta.shortLabel} size="small" sx={{ height: 16, fontSize: 8.5, bgcolor: meta.bg, color: meta.color, fontWeight: 700, borderRadius: '3px' }} />
                           <Chip
                             label={`${profile.leakageRisk} risk`}
                             size="small"
                             sx={{
+                              height: 16,
+                              fontSize: 8.5,
+                              borderRadius: '3px',
                               bgcolor: profile.leakageRisk === 'high' ? T.dangerBg : profile.leakageRisk === 'medium' ? T.warnBg : T.successBg,
                               color: profile.leakageRisk === 'high' ? T.danger : profile.leakageRisk === 'medium' ? T.warn : T.success,
                               fontWeight: 700,
@@ -2829,9 +2828,12 @@ const FeatureGovernanceWorkbench = ({
                               openFeatureReview(profile.feature);
                             }}
                             sx={{
-                              minWidth: 84,
-                              fontSize: 11,
-                              py: 0.1,
+                              height: 20,
+                              minWidth: 54,
+                              fontSize: 9.5,
+                              px: 1,
+                              py: 0,
+                              textTransform: 'none',
                               ...(selected
                                 ? { bgcolor: T.orange, '&:hover': { bgcolor: '#b33f02' } }
                                 : { borderColor: T.border, color: T.text }),
@@ -2844,7 +2846,7 @@ const FeatureGovernanceWorkbench = ({
                   );
                 })}
                 {!visibleProfiles.length && (
-                  <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                  <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                     No features match the current filters.
                   </Alert>
                 )}
@@ -2852,8 +2854,8 @@ const FeatureGovernanceWorkbench = ({
             </ScrollArea>
           </Paper>
 
-          <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 2, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <Box sx={{ px: 1.25, py: 1, borderBottom: `1px solid ${T.border}` }}>
+          <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <Box sx={{ px: 1.25, py: 1 }}>
               <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                 Review queue
               </Typography>
@@ -2861,7 +2863,7 @@ const FeatureGovernanceWorkbench = ({
             <ScrollArea height="100%" sx={{ p: 1.25 }}>
               {selectedProfile ? (
                 <Stack spacing={1}>
-                  <Paper elevation={0} sx={{ border: `1px solid ${selectedMeta?.border || T.border}`, borderRadius: 1.5, p: 1.1, bgcolor: selectedMeta?.bg || '#fff' }}>
+                  <Paper elevation={0} sx={{ border: `1px solid ${selectedMeta?.border || T.border}`, borderRadius: 0, p: 1.1, bgcolor: selectedMeta?.bg || '#fff' }}>
                     <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                       Selected for review
                     </Typography>
@@ -2874,11 +2876,11 @@ const FeatureGovernanceWorkbench = ({
                     <Stack direction="row" spacing={0.6} useFlexGap flexWrap="wrap" sx={{ mt: 0.8 }}>
                       <Chip label={selectedProfile.decisionLabel} size="small" sx={{ bgcolor: selectedMeta?.bg, color: selectedMeta?.color, fontWeight: 700 }} />
                       <Chip label={availabilityLabel(selectedProfile, persona)} size="small" sx={{ bgcolor: T.infoBg, color: T.info, fontWeight: 700 }} />
-                      <Chip label={`${selectedProfile.leakageRisk} risk`} size="small" sx={{ bgcolor: T.surfaceAlt, color: T.text, fontWeight: 700 }} />
+                      <Chip label={`${selectedProfile.leakageRisk} risk`} size="small" sx={{ bgcolor: '#fff', color: T.text, fontWeight: 700 }} />
                     </Stack>
                   </Paper>
 
-                  <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1.1 }}>
+                  <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1.1 }}>
                     <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                       Current decision reason
                     </Typography>
@@ -2888,7 +2890,7 @@ const FeatureGovernanceWorkbench = ({
                   </Paper>
 
                   <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 0.9 }}>
-                    <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1 }}>
+                    <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1 }}>
                       <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                         Visible rows
                       </Typography>
@@ -2896,7 +2898,7 @@ const FeatureGovernanceWorkbench = ({
                         {visibleReviewCount}
                       </Typography>
                     </Paper>
-                    <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1 }}>
+                    <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1 }}>
                       <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                         Needs review
                       </Typography>
@@ -2928,7 +2930,7 @@ const FeatureGovernanceWorkbench = ({
                   </Stack>
                 </Stack>
               ) : (
-                <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                   Select a feature from the inventory to see its decision summary.
                 </Alert>
               )}
@@ -2942,7 +2944,7 @@ const FeatureGovernanceWorkbench = ({
         onClose={() => setReviewModalOpen(false)}
         fullWidth
         maxWidth="lg">
-        <DialogTitle sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${T.border}` }}>
+        <DialogTitle sx={{ px: 2, py: 1.5 }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
             <Box>
               <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase', letterSpacing: 0.7 }}>
@@ -2966,12 +2968,12 @@ const FeatureGovernanceWorkbench = ({
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={0.8} useFlexGap flexWrap="wrap" sx={{ mb: 1.5 }}>
                 <Chip label={selectedProfile.decisionLabel} size="small" sx={{ bgcolor: selectedMeta?.bg, color: selectedMeta?.color, fontWeight: 700 }} />
                 <Chip label={isBusinessView ? businessSafetyLabel(selectedProfile) : availabilityLabel(selectedProfile, persona)} size="small" sx={{ bgcolor: T.infoBg, color: T.info, fontWeight: 700 }} />
-                <Chip label={isBusinessView ? businessUniquenessLabel(selectedProfile) : `${selectedProfile.leakageRisk} leakage risk`} size="small" sx={{ bgcolor: T.surfaceAlt, color: T.text, fontWeight: 700 }} />
-                {!isBusinessView && selectedProfile.rankPosition != null && <Chip label={`Rank ${selectedProfile.rankPosition}`} size="small" sx={{ bgcolor: T.surfaceAlt, color: T.text }} />}
+                <Chip label={isBusinessView ? businessUniquenessLabel(selectedProfile) : `${selectedProfile.leakageRisk} leakage risk`} size="small" sx={{ bgcolor: '#fff', color: T.text, fontWeight: 700 }} />
+                {!isBusinessView && selectedProfile.rankPosition != null && <Chip label={`Rank ${selectedProfile.rankPosition}`} size="small" sx={{ bgcolor: '#fff', color: T.text }} />}
               </Stack>
 
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1fr' }, gap: 1.25 }}>
-                <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1.25 }}>
+                <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1.25 }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                     Decision summary
                   </Typography>
@@ -2986,7 +2988,7 @@ const FeatureGovernanceWorkbench = ({
                   </Typography>
                 </Paper>
 
-                <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1.25 }}>
+                <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1.25 }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                     {isBusinessView ? 'Business interpretation' : 'Technical evidence'}
                   </Typography>
@@ -3030,7 +3032,7 @@ const FeatureGovernanceWorkbench = ({
                   )}
                 </Paper>
 
-                <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1.25 }}>
+                <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1.25 }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                     {isBusinessView ? 'Risk if included wrongly' : 'Evidence and checks'}
                   </Typography>
@@ -3051,7 +3053,7 @@ const FeatureGovernanceWorkbench = ({
                   )}
                 </Paper>
 
-                <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1.25 }}>
+                <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1.25 }}>
                   <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                     Actions
                   </Typography>
@@ -3126,7 +3128,7 @@ const FeatureGovernanceWorkbench = ({
         subtitle="This answers what the field means, why it was kept or rejected, and whether it is fair to use at alert decision time.">
         {selectedProfile ? (
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.75, p: 1.25 }}>
+            <Paper elevation={0} sx={{ border: 'none', borderRadius: 1.75, p: 1.25 }}>
               <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                 What this feature means
               </Typography>
@@ -3134,7 +3136,7 @@ const FeatureGovernanceWorkbench = ({
                 {featureMeaning(selectedProfile.feature)}
               </Typography>
             </Paper>
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.75, p: 1.25 }}>
+            <Paper elevation={0} sx={{ border: 'none', borderRadius: 1.75, p: 1.25 }}>
               <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                 Why it was selected or not selected
               </Typography>
@@ -3142,7 +3144,7 @@ const FeatureGovernanceWorkbench = ({
                 {selectedProfile.decisionReason}
               </Typography>
             </Paper>
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.75, p: 1.25 }}>
+            <Paper elevation={0} sx={{ border: 'none', borderRadius: 1.75, p: 1.25 }}>
               <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                 Decision-time availability
               </Typography>
@@ -3159,7 +3161,7 @@ const FeatureGovernanceWorkbench = ({
                     : 'The field is classified as delayed or post-outcome and should not be used in real-time scoring.'}
               </Typography>
             </Paper>
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.75, p: 1.25 }}>
+            <Paper elevation={0} sx={{ border: 'none', borderRadius: 1.75, p: 1.25 }}>
               <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                 Technical evidence
               </Typography>
@@ -3192,7 +3194,7 @@ const FeatureGovernanceWorkbench = ({
                 </Typography>
               </Stack>
             </Paper>
-            <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.75, p: 1.25, gridColumn: { xs: 'auto', lg: '1 / span 2' } }}>
+            <Paper elevation={0} sx={{ border: 'none', borderRadius: 1.75, p: 1.25, gridColumn: { xs: 'auto', lg: '1 / span 2' } }}>
               <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase' }}>
                 Plain-language explanation
               </Typography>
@@ -3207,7 +3209,7 @@ const FeatureGovernanceWorkbench = ({
             </Paper>
           </Box>
         ) : (
-          <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+          <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
             Select a feature above to explain why it was kept, reviewed, or blocked.
           </Alert>
         )}
@@ -3224,7 +3226,7 @@ const FeatureGovernanceWorkbench = ({
 
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(3, minmax(0, 1fr))' }, gap: 1 }}>
             {firewallChecks.map((check) => (
-              <Paper key={check.id} elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, p: 1.1 }}>
+              <Paper key={check.id} elevation={0} sx={{ border: 'none', borderRadius: 0, p: 1.1 }}>
                 <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                   {check.label}
                 </Typography>
@@ -3237,7 +3239,7 @@ const FeatureGovernanceWorkbench = ({
                 {!!(check.examples || []).length && (
                   <Stack direction="row" spacing={0.55} useFlexGap flexWrap="wrap" sx={{ mt: 0.8 }}>
                     {(check.examples || []).slice(0, 4).map((example) => (
-                      <Chip key={`${check.id}-${example}`} label={humanize(example)} size="small" sx={{ bgcolor: T.surfaceAlt, border: `1px solid ${T.border}` }} />
+                      <Chip key={`${check.id}-${example}`} label={humanize(example)} size="small" sx={{ bgcolor: '#fff', border: 'none' }} />
                     ))}
                   </Stack>
                 )}
@@ -3245,18 +3247,18 @@ const FeatureGovernanceWorkbench = ({
             ))}
           </Box>
 
-          <Paper elevation={0} sx={{ border: `1px solid ${T.border}`, borderRadius: 1.5, bgcolor: T.surfaceAlt }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.2, py: 1, borderBottom: `1px solid ${T.border}` }}>
+          <Paper elevation={0} sx={{ border: 'none', borderRadius: 0, bgcolor: '#fff' }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ px: 1.2, py: 1 }}>
               <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                 High-risk features currently flagged
               </Typography>
-              <Chip label={`${highRiskProfiles.length} high-risk feature${highRiskProfiles.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: `1px solid ${T.border}` }} />
+              <Chip label={`${highRiskProfiles.length} high-risk feature${highRiskProfiles.length === 1 ? '' : 's'}`} size="small" sx={{ bgcolor: '#fff', border: 'none' }} />
             </Stack>
             <ScrollArea height={220} sx={{ p: 1 }}>
               {highRiskProfiles.length ? (
                 <Stack spacing={0.8}>
                   {highRiskProfiles.map((profile) => (
-                    <Paper key={profile.feature} elevation={0} sx={{ border: `1px solid ${T.dangerBorder}`, borderRadius: 1.25, p: 1, bgcolor: T.dangerBg }}>
+                    <Paper key={profile.feature} elevation={0} sx={{ border: `1px solid ${T.dangerBorder}`, borderRadius: 0, p: 1, bgcolor: T.dangerBg }}>
                       <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: T.text }}>
                         {profile.displayName}
                       </Typography>
@@ -3267,7 +3269,7 @@ const FeatureGovernanceWorkbench = ({
                   ))}
                 </Stack>
               ) : (
-                <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                   No high-risk features are currently flagged in the visible payload.
                 </Alert>
               )}
@@ -3337,7 +3339,7 @@ const FeatureGovernanceWorkbench = ({
                   </Stack>
                 </Paper>
               )) : (
-                <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                   No features currently need business sign-off.
                 </Alert>
               )}
@@ -3383,7 +3385,7 @@ const FeatureGovernanceWorkbench = ({
               </Box>
 
               {!businessVisibleProfiles.length && (
-                <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                   No features match the current business filters.
                 </Alert>
               )}
@@ -3399,7 +3401,7 @@ const FeatureGovernanceWorkbench = ({
           fullWidth
           maxWidth="md"
         >
-          <DialogTitle sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${T.border}` }}>
+          <DialogTitle sx={{ px: 2, py: 1.5 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
               <Box>
                 <Typography sx={{ fontSize: 11, fontWeight: 800, color: T.orange, textTransform: 'uppercase', letterSpacing: 0.7 }}>
@@ -3420,7 +3422,7 @@ const FeatureGovernanceWorkbench = ({
                 <Stack direction="row" spacing={0.7} useFlexGap flexWrap="wrap">
                   <Chip label={businessVerdictText(selectedProfile.decision)} size="small" sx={{ bgcolor: selectedMeta?.bg, color: selectedMeta?.color, fontWeight: 700 }} />
                   <Chip label={businessSafetyLabel(selectedProfile)} size="small" sx={{ bgcolor: T.infoBg, color: T.info, fontWeight: 700 }} />
-                  <Chip label={businessUniquenessLabel(selectedProfile)} size="small" sx={{ bgcolor: T.surfaceAlt, color: T.text, fontWeight: 700 }} />
+                  <Chip label={businessUniquenessLabel(selectedProfile)} size="small" sx={{ bgcolor: '#fff', color: T.text, fontWeight: 700 }} />
                 </Stack>
                 <BusinessFeatureCard profile={selectedProfile} onOpenReview={null} />
                 <Paper elevation={0} sx={{ border: `1px solid ${T.warnBorder}`, borderRadius: 1.6, p: 1.1, bgcolor: '#fffdf8' }}>
@@ -3507,13 +3509,13 @@ const FeatureGovernanceWorkbench = ({
                 {groupedApproved.length ? (
                   <Stack spacing={1}>
                     {groupedApproved.map((group) => (
-                      <Paper key={`approved-${group.source}`} elevation={0} sx={{ border: `1px solid ${T.successBorder}`, borderRadius: 1.25, p: 1 }}>
+                      <Paper key={`approved-${group.source}`} elevation={0} sx={{ border: `1px solid ${T.successBorder}`, borderRadius: 0, p: 1 }}>
                         <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                           {group.source}
                         </Typography>
                         <Stack spacing={0.55} sx={{ mt: 0.7 }}>
                           {group.values.map((item) => (
-                            <Box key={`approved-${item.feature}`} sx={{ borderBottom: `1px solid ${T.border}`, pb: 0.6, '&:last-child': { borderBottom: 'none', pb: 0 } }}>
+                            <Box key={`approved-${item.feature}`} sx={{  pb: 0.6, '&:last-child': { borderBottom: 'none', pb: 0 } }}>
                               <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>
                                 {item.displayName}
                               </Typography>
@@ -3527,7 +3529,7 @@ const FeatureGovernanceWorkbench = ({
                     ))}
                   </Stack>
                 ) : (
-                  <Alert severity="warning" icon={<WarningAmber />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                  <Alert severity="warning" icon={<WarningAmber />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                     No approved features are available yet. Review the blocked and review buckets before training.
                   </Alert>
                 )}
@@ -3547,13 +3549,13 @@ const FeatureGovernanceWorkbench = ({
                 {groupedExcluded.length ? (
                   <Stack spacing={1}>
                     {groupedExcluded.map((group) => (
-                      <Paper key={`excluded-${group.source}`} elevation={0} sx={{ border: `1px solid ${T.dangerBorder}`, borderRadius: 1.25, p: 1 }}>
+                      <Paper key={`excluded-${group.source}`} elevation={0} sx={{ border: `1px solid ${T.dangerBorder}`, borderRadius: 0, p: 1 }}>
                         <Typography sx={{ fontSize: 12, fontWeight: 800, color: T.text }}>
                           {group.source}
                         </Typography>
                         <Stack spacing={0.55} sx={{ mt: 0.7 }}>
                           {group.values.map((item) => (
-                            <Box key={`excluded-${item.feature}`} sx={{ borderBottom: `1px solid ${T.border}`, pb: 0.6, '&:last-child': { borderBottom: 'none', pb: 0 } }}>
+                            <Box key={`excluded-${item.feature}`} sx={{  pb: 0.6, '&:last-child': { borderBottom: 'none', pb: 0 } }}>
                               <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.text }}>
                                 {item.displayName}
                               </Typography>
@@ -3567,7 +3569,7 @@ const FeatureGovernanceWorkbench = ({
                     ))}
                   </Stack>
                 ) : (
-                  <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 1.5, fontSize: 11.5 }}>
+                  <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 0, fontSize: 11.5 }}>
                     No blocked or excluded features are currently present.
                   </Alert>
                 )}

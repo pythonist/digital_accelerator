@@ -17,8 +17,8 @@ ENV AML_AUTO_BOOTSTRAP_VENV=0
 ENV AML_BACKEND_PROFILE=full
 ENV PORT=5000
 ENV APP_PORT=5000
-ENV WEB_CONCURRENCY=4
-ENV GUNICORN_THREADS=8
+ENV WEB_CONCURRENCY=1
+ENV GUNICORN_THREADS=16
 ENV GUNICORN_TIMEOUT=600
 ENV GUNICORN_GRACEFUL_TIMEOUT=60
 ENV GUNICORN_KEEPALIVE=30
@@ -33,8 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade "pip<25" "setuptools<70" wheel && \
+    pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 COPY backend/ ./
 COPY --from=frontend-build /app/frontend/dist ./dist

@@ -1,11 +1,12 @@
 """
 Case Facts Routes - FINAL VERSION with Explicit Environment Resolution
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from api.middleware.auth_middleware import require_auth
 from api.services import services
 from api.utils import handle_errors
 import asyncio
+import json
 import traceback
 import os
 
@@ -14,7 +15,7 @@ case_facts_bp = Blueprint('case_facts', __name__)
 
 def resolve_db(req_obj):
     """
-    ✅ ENHANCED: Explicit environment resolution with better error messages
+    [SUCCESS] ENHANCED: Explicit environment resolution with better error messages
     Priority: Query Param → Header → Global Fallback (with warning)
     """
     tenant_id = req_obj.tenant_id
@@ -33,7 +34,7 @@ def resolve_db(req_obj):
         env_id = services.metadata_manager.active_env
         source = "global_fallback"
         if env_id:
-            print(f"⚠️  WARNING: Using global environment state ({env_id}). Frontend should pass env_id explicitly.")
+            print(f"[WARN]  WARNING: Using global environment state ({env_id}). Frontend should pass env_id explicitly.")
     
     if not env_id:
         raise ValueError(
@@ -41,14 +42,14 @@ def resolve_db(req_obj):
             "or header (X-Environment-ID). Check that AppContext.activeEnv is set."
         )
 
-    print(f"🔍 Environment Resolution: env_id={env_id}, tenant={tenant_id}, source={source}")
+    print(f"[ENV] Environment Resolution: env_id={env_id}, tenant={tenant_id}, source={source}")
 
     # 2. Get DB Manager (stateless factory)
     try:
         db_manager = services.get_investigation_db(env_id, tenant_id)
         return db_manager, env_id
     except Exception as e:
-        print(f"❌ DB Resolution Failed: {e}")
+        print(f"[ERROR] DB Resolution Failed: {e}")
         raise ValueError(f"Failed to access environment '{env_id}': {str(e)}")
 
 
@@ -58,7 +59,7 @@ def resolve_db(req_obj):
 @handle_errors
 def get_ranked_cases():
     """
-    ✅ FIXED: Get list of cases ranked by risk score with explicit env resolution
+    [SUCCESS] FIXED: Get list of cases ranked by risk score with explicit env resolution
     """
     try:
         db_manager, env_id = resolve_db(request)
@@ -102,7 +103,7 @@ def get_ranked_cases():
         try:
             cursor.execute(query)
         except Exception as e:
-            print(f"⚠️  Query failed, trying fallback: {e}")
+            print(f"[WARN]  Query failed, trying fallback: {e}")
             # Fallback for minimal schema
             cursor.execute("""
                 SELECT 
@@ -156,7 +157,7 @@ def get_ranked_cases():
             
         db_manager.close_connection(conn)
         
-        print(f"✅ Ranked {len(ranked_cases)} cases for env={env_id}")
+        print(f"[SUCCESS] Ranked {len(ranked_cases)} cases for env={env_id}")
         
         return jsonify({
             'success': True,
@@ -289,9 +290,9 @@ KEY RISK DRIVERS:
 {chr(10).join(f"• {d.factor}: {d.explanation}" for d in case_facts.risk_drivers[:5])}
 
 TRANSACTION ACTIVITY (30 Days):
-- Total Volume: ${case_facts.patterns_30d.total_volume:,.2f}
+- Total Volume: {case_facts.patterns_30d.total_volume:,.2f}
 - Transaction Count: {case_facts.patterns_30d.total_count}
-- Average Amount: ${case_facts.patterns_30d.avg_amount:,.2f}
+- Average Amount: {case_facts.patterns_30d.avg_amount:,.2f}
 - Cash Ratio: {case_facts.patterns_30d.cash_ratio:.1%}
 
 NETWORK ANALYSIS:
@@ -308,11 +309,11 @@ INVESTIGATOR QUESTION: {question}
 
 Provide a clear, professional response based ONLY on these facts. Be concise and actionable."""
 
-        llm_service = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+        llm_service = getattr(services, "llm_provider", None)
         if not llm_service or not llm_service.check_connection():
             return jsonify({
                 "success": False,
-                "error": "LLM service not available. Configure GPT4All or another local provider first."
+                "error": "OpenAI service not available. Check OPENAI_API_KEY in .env."
             }), 500
         
         result = llm_service.generate(
@@ -351,12 +352,95 @@ Provide a clear, professional response based ONLY on these facts. Be concise and
         }), 500
 
 
+@case_facts_bp.route('/case/<case_id>/copilot/stream', methods=['POST'])
+@require_auth()
+def copilot_assist_stream(case_id):
+    """Stream Copilot output as server-sent events for progressive rendering."""
+    data = request.get_json(silent=True) or {}
+    question = str(data.get('question') or '').strip()
+    if not question:
+        return jsonify({"success": False, "error": "No question provided"}), 400
+
+    def emit(event, payload):
+        return f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
+
+    def generate_events():
+        try:
+            from case_facts.facts_builder import build_case_facts
+
+            db_manager, env_id = resolve_db(request)
+            case_facts = asyncio.run(build_case_facts(
+                case_id=case_id,
+                env_id=env_id,
+                tenant_id=request.tenant_id,
+                db_manager=db_manager,
+            ))
+            facts_summary = f"""Case {case_id} Investigation Summary:
+
+RISK PROFILE:
+- Overall Risk Score: {case_facts.overall_risk_score:.1f}/100
+- Risk Level: {case_facts.customer_risk_rating.value.upper()}
+- Alert Type: {case_facts.alert_type}
+- Customer: {case_facts.customer_name} (ID: {case_facts.customer_id})
+
+KEY RISK DRIVERS:
+{chr(10).join(f"• {d.factor}: {d.explanation}" for d in case_facts.risk_drivers[:5])}
+
+TRANSACTION ACTIVITY (30 Days):
+- Total Volume: {case_facts.patterns_30d.total_volume:,.2f}
+- Transaction Count: {case_facts.patterns_30d.total_count}
+- Average Amount: {case_facts.patterns_30d.avg_amount:,.2f}
+- Cash Ratio: {case_facts.patterns_30d.cash_ratio:.1%}
+
+NETWORK ANALYSIS:
+- Network Nodes: {case_facts.network.total_nodes}
+- Transaction Links: {case_facts.network.total_edges}
+- Network Density: {case_facts.network.density:.3f}
+
+INVESTIGATION CONTEXT:
+- Previous Alerts: {case_facts.previous_alerts_count}
+- Rules Triggered: {', '.join(case_facts.rules_triggered) if case_facts.rules_triggered else 'None'}
+- Typologies: {', '.join(case_facts.typologies_detected) if case_facts.typologies_detected else 'None'}
+
+INVESTIGATOR QUESTION: {question}
+
+Provide a clear, professional response based ONLY on these facts. Be concise and actionable."""
+
+            llm_service = getattr(services, "llm_provider", None)
+            if not llm_service or not llm_service.check_connection():
+                yield emit("error", {"error": "LLM service is not available."})
+                return
+
+            yield emit("status", {"message": "Evidence prepared. Generating response…"})
+            for chunk in llm_service.stream_generate(
+                prompt=facts_summary,
+                system_prompt="You are an AML investigation assistant. Provide clear, professional responses based ONLY on the provided case facts. Be concise and focus on actionable insights.",
+                temperature=0.7,
+                max_tokens=500,
+            ):
+                yield emit("token", {"token": chunk})
+            yield emit("done", {"case_id": case_id, "env_id": env_id})
+        except Exception as exc:
+            traceback.print_exc()
+            yield emit("error", {"error": f"Copilot stream failed: {exc}"})
+
+    return Response(
+        stream_with_context(generate_events()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @case_facts_bp.route('/env/<env_id>/validate', methods=['GET'])
 @require_auth()
 @handle_errors
 def validate_environment(env_id):
     """
-    ✅ NEW: Validate that an environment database exists and has master data
+    [SUCCESS] NEW: Validate that an environment database exists and has master data
     Used by frontend to check readiness before showing Priority Inbox
     """
     try:

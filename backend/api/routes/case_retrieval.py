@@ -65,11 +65,19 @@ def case_retrieval_similar():
             "filters": json.loads(filters_raw) if filters_raw else {},
         }
     service = CaseSimilarityService(_get_db_manager())
+    try:
+        safe_top_k = int(payload.get("top_k") or 8)
+    except (TypeError, ValueError):
+        safe_top_k = 8
+    try:
+        safe_threshold = float(payload.get("threshold") or 0.0)
+    except (TypeError, ValueError):
+        safe_threshold = 0.0
     result = service.retrieve_similar_cases(
         base_case_id=str(payload.get("base_case_id") or ""),
         mode=payload.get("mode") or "hybrid",
-        top_k=int(payload.get("top_k") or 8),
-        threshold=float(payload.get("threshold") or 0.0),
+        top_k=safe_top_k,
+        threshold=safe_threshold,
         weights=payload.get("weights") or None,
         filters=payload.get("filters") or {},
     )

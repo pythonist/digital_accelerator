@@ -13,6 +13,7 @@ import {
   Stack,
   TextField,
   Typography,
+  Divider,
 } from '@mui/material';
 import {
   AssignmentTurnedIn as ResolutionIcon,
@@ -23,6 +24,11 @@ import {
   Refresh as RefreshIcon,
   Save as SaveIcon,
   WarningAmber as WarningIcon,
+  AccountBalance as BankIcon,
+  ReceiptLong as ReceiptIcon,
+  ShieldOutlined as ShieldIcon,
+  Timeline as TimelineIcon,
+  Layers as LayersIcon,
 } from '@mui/icons-material';
 
 import { useAppContext } from '@context/AppContext';
@@ -80,6 +86,31 @@ const slugify = (value) => String(value || '')
   .replace(/^_+|_+$/g, '') || 'item';
 
 const toArray = (value) => Array.isArray(value) ? value : [];
+
+const cleanSarText = (raw) => {
+  if (!raw) return '';
+  let text = String(raw).trim();
+  text = text.replace(/\$([0-9])/g, '$1');
+  if (text.startsWith('{') || text.includes('"sar_sections"')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed?.sar_sections)) {
+        return parsed.sar_sections
+          .map((s) => `${s.title || ''}\n${s.content || ''}`.trim())
+          .join('\n\n');
+      }
+    } catch (_) {
+      const matches = [];
+      const regex = /"title"\s*:\s*"([^"]+)"\s*,\s*"content"\s*:\s*"([^"]+)"/g;
+      let m;
+      while ((m = regex.exec(text)) !== null) {
+        matches.push(`${m[1]}\n${m[2]}`);
+      }
+      if (matches.length) return matches.join('\n\n');
+    }
+  }
+  return text;
+};
 
 const normalizeStrength = (value) => {
   const text = String(value || '').toLowerCase();
@@ -273,172 +304,39 @@ const buildGeneratedWorkspace = ({ selectedCaseId, savedSupportFile, moduleSnaps
     evidenceItems.push({
       id: `baseline_${slugify(item.type || item.category || index)}`,
       title: item.type?.replace(/_/g, ' ') || item.category || `Baseline deviation ${index + 1}`,
-      evidence_type: 'Baseline Anomaly',
-      source_module: 'Baseline',
-      source_records: [selectedCaseId, item.category].filter(Boolean),
-      occurred_at: baseline?.generated_at || baseline?.analysis_date,
-      why_it_matters: item.message || item.investigator_note || 'Current activity deviates from the customer baseline.',
-      strength: normalizeStrength(item.severity),
+      evidence_type: 'Behavioral Deviation',
+      source_module: 'Baseline Analysis',
+      source_records: [item.feature_name || item.metric || 'baseline_feature'].filter(Boolean),
+      occurred_at: item.date || item.observed_at || baseline?.generated_at,
+      why_it_matters: item.message || item.summary || 'Customer behavior deviates significantly from baseline profile.',
+      strength: normalizeStrength(item.severity || item.strength || 'Moderate'),
       analyst_status: 'pending',
       analyst_comment: '',
       is_key_evidence: false,
     });
   });
 
-  if (graphPatterns && Object.keys(graphPatterns).length) {
-    const graphFacts = [
-      Number(graphPatterns?.pass_through?.count || 0) > 0 ? `pass-through patterns (${graphPatterns.pass_through.count})` : null,
-      Number(graphPatterns?.multi_hop_chains?.count || 0) > 0 ? `multi-hop chains (${graphPatterns.multi_hop_chains.count})` : null,
-      Number(graphPatterns?.circular_chains?.count || 0) > 0 ? `circular chains (${graphPatterns.circular_chains.count})` : null,
-      Number(graphPatterns?.velocity_bursts_in_chains?.count || 0) > 0 ? `velocity bursts (${graphPatterns.velocity_bursts_in_chains.count})` : null,
-    ].filter(Boolean);
-
-    if (graphFacts.length) {
-      evidenceItems.push({
-        id: 'graph_flow_patterns',
-        title: 'Network flow pattern analysis',
-        evidence_type: 'Graph Relationship',
-        source_module: 'Graph Analysis',
-        source_records: toArray(graph?.graph?.paths).slice(0, 3).map((item, index) => item.id || `path_${index + 1}`),
-        occurred_at: graph?.generated_at,
-        why_it_matters: `Graph analysis surfaced ${graphFacts.join(', ')} across related entities and transaction paths.`,
-        strength: evidenceStrengthFromScore(Number(graphPatterns?.flow_score || 0) * 100, 65, 35),
-        analyst_status: 'pending',
-        analyst_comment: '',
-        is_key_evidence: false,
-      });
-    }
-  }
-
-  if (lineage?.evidence_summary) {
-    evidenceItems.push({
-      id: 'lineage_derivation_context',
-      title: 'Lineage-backed derivation review',
-      evidence_type: 'Relationship Intelligence',
-      source_module: 'Lineage Explorer',
-      source_records: [selectedCaseId],
-      occurred_at: lineage?.metadata?.generated_at,
-      why_it_matters: `Lineage review reports ${lineage.evidence_summary.evidence_strength || 'traceable'} evidence with ${lineage.evidence_summary.data_completeness || 'partial'} data completeness.`,
-      strength: normalizeStrength(lineage.evidence_summary.evidence_strength),
-      analyst_status: 'pending',
-      analyst_comment: '',
-      is_key_evidence: false,
-    });
-  }
-
-  vectorMatches.forEach((item) => {
-    evidenceItems.push({
-      id: `vector_${slugify(item.case_id)}`,
-      title: `Similarity to ${item.case_id}`,
-      evidence_type: 'Vector Match',
-      source_module: 'Vector Search',
-      source_records: [item.case_id],
-      occurred_at: vectorModule?.updated_at,
-      why_it_matters: item.summary || `Semantic similarity score ${compactNumber(item.score * 100, 0)}%.`,
-      strength: evidenceStrengthFromScore(item.score * 100, 82, 60),
-      analyst_status: 'pending',
-      analyst_comment: '',
-      is_key_evidence: false,
-    });
-  });
-
-  const evidenceById = new Map();
-  evidenceItems.forEach((item) => evidenceById.set(item.id, item));
-
-  const claims = [];
-  const pushClaim = (id, claim, matcher) => {
-    const supported = evidenceItems.filter(matcher).map((item) => item.id);
-    if (!supported.length) return;
-    claims.push({
-      id,
-      claim,
-      status: 'draft',
-      supported_evidence_ids: supported,
-      confidence: supported.some((item) => evidenceById.get(item)?.strength === 'Strong') ? 'High' : 'Moderate',
-      notes: '',
-    });
-  };
-
-  pushClaim(
-    'claim_structuring',
-    'Customer shows possible structuring or anomalous transaction cadence.',
-    (item) => /structur|baseline|alert inventory/i.test(`${item.title} ${item.why_it_matters}`),
-  );
-  pushClaim(
-    'claim_layering',
-    'Funds appear to move through linked entities in a manner consistent with layering or funnel-account behavior.',
-    (item) => /graph|flow|layer|funnel|pass-through|multi-hop/i.test(`${item.title} ${item.why_it_matters}`),
-  );
-  pushClaim(
-    'claim_peer_pattern',
-    'Activity aligns with previously investigated typologies and requires corroborated review.',
-    (item) => /vector|similarity|typology/i.test(`${item.title} ${item.why_it_matters}`),
-  );
-
-  if (!claims.length && hypothesisNarrative) {
-    claims.push({
-      id: 'claim_primary',
-      claim: hypothesisNarrative,
-      status: 'draft',
-      supported_evidence_ids: evidenceItems.slice(0, 2).map((item) => item.id),
-      confidence: 'Needs analyst review',
-      notes: '',
-    });
-  }
+  const claims = [
+    {
+      id: 'claim_originating_triggers',
+      claim: `Case ${selectedCaseId} was triggered by ${summary.alert_count} alert(s) requiring formal review.`,
+      status: summary.alert_count > 0 ? 'supported' : 'pending',
+      confidence: 'High',
+      supported_evidence_ids: ['casepack_alert_inventory'],
+      notes: 'Originating alert inventory tied to active case profile.',
+    },
+  ];
 
   const mitigatingFactors = [];
-  if (!toArray(baseline?.deviations).length) {
-    mitigatingFactors.push({
-      id: 'mitigating_no_baseline_spike',
-      factor: 'Current activity does not materially exceed the historical baseline.',
-      status: 'open',
-      analyst_note: '',
-    });
-  }
-  if (Number(facts?.facts?.alerts?.total_alerts || 0) <= 1) {
-    mitigatingFactors.push({
-      id: 'mitigating_limited_history',
-      factor: 'Limited prior alert history reduces confidence in repeat-behavior conclusions.',
-      status: 'open',
-      analyst_note: '',
-    });
-  }
-  if (!vectorMatches.length) {
-    mitigatingFactors.push({
-      id: 'mitigating_no_pattern_match',
-      factor: 'Vector search did not identify closely comparable historical cases.',
-      status: 'open',
-      analyst_note: '',
-    });
-  }
-
-  const summaryReferences = evidenceItems.slice(0, 6).map((item) => item.id);
-  const initialSummaryText = [
-    `Case ${selectedCaseId} was reviewed using case-pack context, retained alert activity, transaction history, baseline analysis, graph and lineage outputs, vector intelligence, and the current Evidence Pack.`,
-    hypothesisPattern
-      ? `The current working hypothesis is ${hypothesisPattern.toLowerCase()}, based on the available investigative indicators captured across the connected modules.`
-      : 'The current record does not yet support a single dominant typology, and the investigation remains open pending stronger corroboration.',
-    evidenceItems.length
-      ? `The current review identified ${evidenceItems.length} evidence item(s), including ${evidenceItems.slice(0, 3).map((item) => item.title.toLowerCase()).join(', ')}.`
-      : 'No material evidence items have been assembled yet from the underlying investigation modules.',
-    mitigatingFactors.length
-      ? `Mitigating considerations remain present, including ${mitigatingFactors[0].factor.toLowerCase()}.`
-      : 'No explicit mitigating factors were recorded in the current workspace state.',
-    'The case should not proceed to final SAR drafting unless the analyst validates the evidence base and confirms that the mapped findings are adequately supported.',
-  ].join(' ');
+  const initialSummaryText = `Case ${selectedCaseId} carries a risk score of ${summary.risk_score} with ${summary.alert_count} alerts reviewed. Investigation evidence is consolidated below for analyst substantiation.`;
+  const summaryReferences = evidenceItems.slice(0, 3).map((item) => item.id);
 
   const initialCaseSynthesis = {
-    reviewed: 'Case Pack context, retained alerts, transaction history, baseline outputs, network and lineage findings, vector intelligence, and analyst-authored inputs were reviewed.',
-    found: evidenceItems.length
-      ? `${evidenceItems.length} evidence item(s) were assembled from the connected modules for analyst validation.`
-      : 'No consolidated findings were available at the time of review.',
-    supports_suspicion: evidenceItems.length
-      ? 'Suspicion may be supported by the retained alerts, analytical deviations, and relationship findings recorded in the Evidence Pack, subject to analyst acceptance.'
-      : 'Suspicion is not yet supported because the Evidence Pack does not contain validated findings.',
-    weakens_suspicion: mitigatingFactors.length
-      ? mitigatingFactors.map((item) => item.factor).join(' ')
-      : 'No material contradictory factors were recorded.',
-    requires_validation: 'Analyst validation is required to confirm which evidence items should support the formal investigation narrative and any SAR recommendation.',
+    reviewed: `Alert inventory, transaction history (${toArray(casePack?.ledger).length} txns), baseline deviations, and counterparty records were reviewed.`,
+    found: hypothesisNarrative || 'Preliminary suspicious activity indicators require analyst substantiation.',
+    supports_suspicion: 'Pending analyst curation of the accepted Evidence Pack.',
+    weakens_suspicion: 'No explicit mitigating factors currently accepted.',
+    requires_validation: 'Analyst review of transactions and counterparty exposure required before SAR finalization.',
   };
 
   const initialSarSections = [
@@ -455,23 +353,17 @@ const buildGeneratedWorkspace = ({ selectedCaseId, savedSupportFile, moduleSnaps
   ].map((title) => ({
     id: `sar_${slugify(title)}`,
     title,
-    content: 'Draft not generated yet. Additional validated evidence may be required before this section is finalized.',
-    references: summaryReferences.slice(0, 3),
+    content: '',
+    references: summaryReferences,
   }));
 
   return {
     case_id: selectedCaseId,
-    title: 'Case Support File',
-    summary: {
-      ...summary,
-      recommended_disposition: 'Analyst Review Required',
-      confidence: 'Pending',
-    },
+    summary,
     hypothesis: {
-      title: 'Suspicion Hypothesis',
       pattern: hypothesisPattern,
       narrative: hypothesisNarrative,
-      supported: false,
+      updated_at: new Date().toISOString(),
     },
     evidence_items: evidenceItems,
     claims,
@@ -674,20 +566,32 @@ const deriveProgress = (supportFile) => {
   });
 };
 
-const ProgressRail = ({ steps }) => (
-  <Box sx={{ display: 'grid', gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`, gap: 1.5 }}>
-    {steps.map((step) => {
+/* Seamless Modern Progress Indicator */
+const SeamlessProgressRail = ({ steps }) => (
+  <Box
+    sx={{
+      display: 'grid',
+      gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))`,
+      gap: 1,
+      bgcolor: '#ffffff',
+      p: 1.5,
+      borderRadius: 2,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+    }}
+  >
+    {steps.map((step, idx) => {
       const active = step.state === 'current';
       const done = step.state === 'done';
       return (
-        <Paper
+        <Box
           key={step.key}
-          variant="outlined"
           sx={{
-            p: 1.5,
-            borderRadius: 2,
-            borderColor: done ? '#0f766e' : active ? '#d97706' : '#d6d9df',
-            background: done ? '#f0fdfa' : active ? '#fff7ed' : '#ffffff',
+            py: 1,
+            px: 1.5,
+            borderRadius: 1.5,
+            bgcolor: done ? '#f0fdf4' : active ? '#fff7ed' : '#f8fafc',
+            borderBottom: active ? '2.5px solid #ea580c' : done ? '2.5px solid #16a34a' : '2.5px solid transparent',
+            transition: 'all 0.2s ease',
           }}
         >
           <Stack direction="row" spacing={1} alignItems="center">
@@ -695,51 +599,31 @@ const ProgressRail = ({ steps }) => (
               sx={{
                 width: 18,
                 height: 18,
-                borderRadius: 99,
-                backgroundColor: done ? '#0f766e' : active ? '#d97706' : '#cbd5e1',
+                borderRadius: '50%',
+                bgcolor: done ? '#16a34a' : active ? '#ea580c' : '#cbd5e1',
                 color: '#fff',
-                fontSize: 11,
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                fontSize: 10,
+                fontWeight: 800,
+                display: 'grid',
+                placeItems: 'center',
                 flexShrink: 0,
               }}
             >
-              {done ? '✓' : ''}
+              {done ? '✓' : idx + 1}
             </Box>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: '#0f172a' }}>
+              <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {step.label}
               </Typography>
-              <Typography sx={{ fontSize: 10, color: '#64748b', textTransform: 'capitalize' }}>
+              <Typography sx={{ fontSize: 10, color: done ? '#16a34a' : active ? '#ea580c' : '#94a3b8', textTransform: 'capitalize' }}>
                 {step.state}
               </Typography>
             </Box>
           </Stack>
-        </Paper>
+        </Box>
       );
     })}
   </Box>
-);
-
-const SummaryMetric = ({ label, value, emphasize = false }) => (
-  <Paper
-    variant="outlined"
-    sx={{
-      p: 2,
-      borderRadius: 2,
-      borderColor: emphasize ? '#f59e0b' : '#d9dde5',
-      backgroundColor: emphasize ? '#fffbeb' : '#ffffff',
-    }}
-  >
-    <Typography sx={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-      {label}
-    </Typography>
-    <Typography sx={{ mt: 0.75, fontSize: emphasize ? 20 : 18, fontWeight: 800, color: '#0f172a' }}>
-      {value}
-    </Typography>
-  </Paper>
 );
 
 const CaseResolutionWorkspace = () => {
@@ -773,54 +657,47 @@ const CaseResolutionWorkspace = () => {
   useEffect(() => {
     const handleStoreUpdate = (event) => {
       const caseId = String(event?.detail?.case_id || '').trim();
-      if (!caseId || caseId !== String(selectedCaseId || '').trim()) return;
+      if (!caseId || caseId !== selectedCaseId) return;
       setRefreshToken((value) => value + 1);
     };
+
     window.addEventListener(CASE_RESOLUTION_EVENT, handleStoreUpdate);
     return () => window.removeEventListener(CASE_RESOLUTION_EVENT, handleStoreUpdate);
   }, [selectedCaseId]);
 
   useEffect(() => {
     if (!selectedCaseId) return;
+
     let active = true;
+    setLoading(true);
+    setError('');
 
     const loadWorkspace = async () => {
-      setLoading(true);
-      setError('');
-      setNotice('');
       const localModuleSnapshot = readCaseResolutionCase(selectedCaseId);
-      if (active) setModuleSnapshot(localModuleSnapshot);
+      setModuleSnapshot(localModuleSnapshot);
 
-      const responses = await Promise.allSettled([
-        apiClient.getCaseResolutionSupportFile(selectedCaseId),
+      let savedSupportFile = null;
+      try {
+        const supportRes = await apiClient.getCaseResolutionSupportFile(selectedCaseId);
+        savedSupportFile = supportRes?.support_file || null;
+      } catch (_) {}
+
+      const [factsRes, packRes, baselineRes, graphRes, lineageRes, vectorRes, aiExplainRes, aiReviewRes] = await Promise.allSettled([
         apiClient.getCaseFacts(selectedCaseId),
-        apiClient.get(`/api/v2/case-pack/${encodeURIComponent(selectedCaseId)}`),
-        apiClient.post('/api/v2/analysis/baseline/detect-deviations', { case_id: selectedCaseId, analysis_mode: 'comprehensive' }),
-        apiClient.post('/api/v2/analysis/graph/build-full-case', { case_id: selectedCaseId }),
-        apiClient.post('/api/v2/explorer/tree-data', { id: selectedCaseId }),
-        apiClient.post('/api/v2/rag/similar-cases', { case_id: selectedCaseId, top_k: 5 }),
-        apiClient.post('/api/v2/llm/explain-case', { case_id: selectedCaseId }),
-        apiClient.post('/api/v2/llm/review-questions', { case_id: selectedCaseId }),
+        apiClient.getCasePack(selectedCaseId),
+        apiClient.getBaselineComparison(selectedCaseId),
+        apiClient.getNetworkIntelligence(selectedCaseId),
+        apiClient.getEvidenceLineageTree(selectedCaseId),
+        apiClient.retrieveSimilarCases({ base_case_id: selectedCaseId, top_k: 4 }),
+        apiClient.explainCase(selectedCaseId),
+        apiClient.reviewCaseQuestions(selectedCaseId),
       ]);
 
       if (!active) return;
 
-      const [
-        supportRes,
-        factsRes,
-        casePackRes,
-        baselineRes,
-        graphRes,
-        lineageRes,
-        vectorRes,
-        aiExplainRes,
-        aiReviewRes,
-      ] = responses;
-
-      const savedSupportFile = supportRes.status === 'fulfilled' ? supportRes.value?.support_file : null;
       const nextLiveData = {
         facts: factsRes.status === 'fulfilled' ? factsRes.value : null,
-        casePack: casePackRes.status === 'fulfilled' ? casePackRes.value : null,
+        casePack: packRes.status === 'fulfilled' ? packRes.value : null,
         baseline: baselineRes.status === 'fulfilled' ? baselineRes.value : null,
         graph: graphRes.status === 'fulfilled' ? graphRes.value : null,
         lineage: lineageRes.status === 'fulfilled' ? lineageRes.value : null,
@@ -990,214 +867,323 @@ const CaseResolutionWorkspace = () => {
       subtitle="Evidence substantiation, analyst decisioning, and SAR drafting for a single defensible case record"
       breadcrumbs={['Resolution', 'Case Resolution & SAR Workspace']}
       actions={(
-        <Stack direction="row" spacing={1.25}>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={() => setRefreshToken((value) => value + 1)}
-            disabled={!selectedCaseId || loading}
-          >
-            Refresh
-          </Button>
-        </Stack>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<RefreshIcon />}
+          onClick={() => setRefreshToken((value) => value + 1)}
+          disabled={!selectedCaseId || loading}
+          sx={{ textTransform: 'none', fontWeight: 700 }}
+        >
+          Refresh
+        </Button>
       )}
     >
-      <Stack spacing={3}>
-        <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-          <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2.5} alignItems={{ xs: 'stretch', lg: 'center' }}>
-            <FormControl size="small" sx={{ minWidth: 280 }}>
-              <InputLabel>Case ID</InputLabel>
-              <Select value={selectedCaseId} label="Case ID" onChange={(event) => setSelectedCaseId(event.target.value)}>
+      <Stack spacing={2.5}>
+        {/* Seamless Case Selector Header */}
+        <Box
+          sx={{
+            p: 2,
+            bgcolor: '#ffffff',
+            borderRadius: 2.5,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+            display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
+            alignItems: { xs: 'stretch', md: 'center' },
+            justifyContent: 'space-between',
+            gap: 2,
+          }}
+        >
+          <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+            <FormControl size="small" sx={{ minWidth: 260 }}>
+              <InputLabel>Active Case Record</InputLabel>
+              <Select
+                value={selectedCaseId}
+                label="Active Case Record"
+                onChange={(event) => setSelectedCaseId(event.target.value)}
+                sx={{ borderRadius: 1.5 }}
+              >
                 {caseList.map((item) => {
                   const id = String(item.case_id || item.caseid || item.id || '');
                   return <MenuItem key={id} value={id}>{id}</MenuItem>;
                 })}
               </Select>
             </FormControl>
-            <Alert severity="info" sx={{ flex: 1, border: '1px solid #bfdbfe', backgroundColor: '#eff6ff' }}>
-              This workspace pulls the case JSON directly from the connected investigation APIs, shows the source data for review, and generates the SAR draft from the combined case record. The analyst can then edit the draft, add remarks, and submit the final disposition.
-            </Alert>
+            {supportFile?.summary && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip
+                  label={`Risk Score: ${compactNumber(supportFile.summary.risk_score, 0)}`}
+                  size="small"
+                  sx={{ bgcolor: '#fff7ed', color: '#c2410c', fontWeight: 800, fontSize: 11 }}
+                />
+                <Chip
+                  label={`Alerts: ${compactNumber(supportFile.summary.alert_count)}`}
+                  size="small"
+                  sx={{ bgcolor: '#f0fdfa', color: '#0d9488', fontWeight: 800, fontSize: 11 }}
+                />
+                <Chip
+                  label={supportFile.sar_readiness?.status || 'Review in Progress'}
+                  size="small"
+                  sx={{ bgcolor: '#f1f5f9', color: '#475569', fontWeight: 700, fontSize: 11 }}
+                />
+              </Stack>
+            )}
           </Stack>
-        </Paper>
+          <Typography sx={{ fontSize: 12, color: '#64748b', maxWidth: 460 }}>
+            Curate evidence items, inspect raw transaction telemetry, draft compliance narrative, and finalize regulatory disposition.
+          </Typography>
+        </Box>
 
         {error ? <Alert severity="error" onClose={() => setError('')}>{error}</Alert> : null}
         {notice ? <Alert severity="success" onClose={() => setNotice('')}>{notice}</Alert> : null}
 
         {loading || !supportFile ? (
-          <Paper variant="outlined" sx={{ p: 5, borderRadius: 2.5, textAlign: 'center' }}>
-            <CircularProgress size={34} />
+          <Box sx={{ p: 6, bgcolor: '#ffffff', borderRadius: 2.5, textAlign: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+            <CircularProgress size={32} sx={{ color: '#ea580c' }} />
             <Typography sx={{ mt: 2, fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
-              Preparing the case support workspace...
+              Synthesizing case records and telemetry...
             </Typography>
-          </Paper>
+          </Box>
         ) : (
           <>
-            <ProgressRail steps={supportFile.progress_steps || deriveProgress(supportFile)} />
+            {/* Seamless Progress Tracker */}
+            <SeamlessProgressRail steps={supportFile.progress_steps || deriveProgress(supportFile)} />
 
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.35fr 0.9fr' }, gap: 2.5, alignItems: 'start' }}>
-              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
-                  <ResolutionIcon sx={{ color: '#1d4ed8' }} />
-                  <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#0f172a' }}>Investigation Summary</Typography>
+            {/* ============================================================ */}
+            {/* SECTION 1: Case Snapshot & Executive Synthesis */}
+            {/* ============================================================ */}
+            <Box
+              sx={{
+                bgcolor: '#ffffff',
+                p: 3,
+                borderRadius: 2.5,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                <Stack direction="row" spacing={1.25} alignItems="center">
+                  <ResolutionIcon sx={{ fontSize: 20, color: '#2563eb' }} />
+                  <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+                    1. Case Intelligence & Synthesis
+                  </Typography>
                 </Stack>
-                <Typography sx={{ fontSize: 14, lineHeight: 1.9, color: '#1f2937', whiteSpace: 'pre-wrap' }}>
-                  {supportFile.investigation_summary?.text || 'Investigation narrative is not available yet.'}
-                </Typography>
-                <Typography sx={{ mt: 1.5, fontSize: 12.5, color: '#64748b' }}>
+                <Typography sx={{ fontSize: 11.5, color: '#94a3b8' }}>
                   {supportFile.investigation_summary?.status_note || supportFile.sar_readiness.reason}
                 </Typography>
-                <Stack direction="row" spacing={1} sx={{ mt: 1.75 }} flexWrap="wrap" useFlexGap>
+              </Box>
+
+              <Typography sx={{ fontSize: 13.5, lineHeight: 1.8, color: '#334155', mb: 2, whiteSpace: 'pre-wrap' }}>
+                {supportFile.investigation_summary?.text || 'Investigation narrative is being assembled from active telemetry.'}
+              </Typography>
+
+              {summaryReferences.length > 0 && (
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ pt: 1, borderTop: '1px solid #f1f5f9' }}>
+                  <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Linked Evidence:
+                  </Typography>
                   {summaryReferences.map((ref) => (
-                    <Chip key={ref} label={evidenceLookup.get(ref)?.title || ref} size="small" variant="outlined" />
+                    <Chip key={ref} label={evidenceLookup.get(ref)?.title || ref} size="small" sx={{ bgcolor: '#f8fafc', color: '#475569', fontSize: 11, fontWeight: 600 }} />
                   ))}
                 </Stack>
-              </Paper>
-
-              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
-                  <WarningIcon sx={{ color: '#d97706' }} />
-                  <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Case Snapshot</Typography>
-                </Stack>
-                <Stack spacing={1.25}>
-                  <SummaryMetric label="Case ID" value={supportFile.summary.case_id} />
-                  <SummaryMetric label="Alert Count" value={compactNumber(supportFile.summary.alert_count)} />
-                  <SummaryMetric label="Risk Score" value={compactNumber(supportFile.summary.risk_score, 0)} emphasize />
-                  <SummaryMetric label="SAR Readiness" value={supportFile.sar_readiness.status} />
-                </Stack>
-              </Paper>
+              )}
             </Box>
 
-            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-              <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a', mb: 2 }}>
-                Review Source Data
-              </Typography>
-              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr 1.15fr' }, gap: 2 }}>
-                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', mb: 1 }}>Alerts Reviewed</Typography>
+            {/* ============================================================ */}
+            {/* SECTION 2: Empirical Evidence & Transaction Dossier */}
+            {/* ============================================================ */}
+            <Box
+              sx={{
+                bgcolor: '#ffffff',
+                p: 3,
+                borderRadius: 2.5,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+              }}
+            >
+              <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 2.5 }}>
+                <ReceiptIcon sx={{ fontSize: 20, color: '#0284c7' }} />
+                <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+                  2. Empirical Evidence Dossier & Transaction Telemetry
+                </Typography>
+              </Stack>
+
+              {/* Dual Tables for Alerts & Transactions */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1fr 1.35fr' }, gap: 2.5, mb: 2.5 }}>
+                {/* Alerts List */}
+                <Box sx={{ bgcolor: '#f8fafc', p: 2, borderRadius: 2 }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a', mb: 1.5 }}>
+                    Retained Alerts ({toArray(liveData?.casePack?.alerts).length})
+                  </Typography>
                   <Box sx={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
-                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                          <th style={{ textAlign: 'left', padding: '8px 10px' }}>Alert</th>
-                          <th style={{ textAlign: 'left', padding: '8px 10px' }}>Rule</th>
-                          <th style={{ textAlign: 'left', padding: '8px 10px' }}>Date</th>
+                        <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Alert ID</th>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Triggered Rule</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Date</th>
                         </tr>
                       </thead>
                       <tbody>
                         {toArray(liveData?.casePack?.alerts).slice(0, 6).map((item, index) => (
-                          <tr key={`alert_row_${index + 1}`} style={{ borderTop: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '8px 10px' }}>{item.alert_id || item.ALERT_ID || '-'}</td>
-                            <td style={{ padding: '8px 10px' }}>{item.rule_triggered || item.RULE_TRIGGERED || '-'}</td>
-                            <td style={{ padding: '8px 10px' }}>{fmtDateTime(item.alert_date || item.ALERT_DATE || item.date)}</td>
+                          <tr key={`alert_row_${index + 1}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '8px', fontWeight: 700, color: '#0f172a' }}>{item.alert_id || item.ALERT_ID || '-'}</td>
+                            <td style={{ padding: '8px', color: '#334155' }}>{item.rule_triggered || item.RULE_TRIGGERED || '-'}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>{fmtDateTime(item.alert_date || item.ALERT_DATE || item.date)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </Box>
-                </Paper>
+                </Box>
 
-                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', mb: 1 }}>Related Transactions</Typography>
+                {/* Transactions List */}
+                <Box sx={{ bgcolor: '#f8fafc', p: 2, borderRadius: 2 }}>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a', mb: 1.5 }}>
+                    Reviewed Transaction Activity ({toArray(liveData?.casePack?.ledger).length})
+                  </Typography>
                   <Box sx={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
-                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                          <th style={{ textAlign: 'left', padding: '8px 10px' }}>Reference</th>
-                          <th style={{ textAlign: 'left', padding: '8px 10px' }}>Type</th>
-                          <th style={{ textAlign: 'right', padding: '8px 10px' }}>Amount</th>
-                          <th style={{ textAlign: 'left', padding: '8px 10px' }}>Date</th>
+                        <tr style={{ color: '#64748b', borderBottom: '1px solid #e2e8f0' }}>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Reference</th>
+                          <th style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 700 }}>Counterparty</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Amount</th>
+                          <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700 }}>Date</th>
                         </tr>
                       </thead>
                       <tbody>
                         {toArray(liveData?.casePack?.ledger).slice(0, 8).map((item, index) => (
-                          <tr key={`txn_row_${index + 1}`} style={{ borderTop: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '8px 10px' }}>{item.reference || item.transaction_id || item.TRANSACTION_ID || '-'}</td>
-                            <td style={{ padding: '8px 10px' }}>{item.type || item.txn_type || '-'}</td>
-                            <td style={{ padding: '8px 10px', textAlign: 'right' }}>{compactNumber(item.amount || item.TXN_AMOUNT || 0, 2)}</td>
-                            <td style={{ padding: '8px 10px' }}>{fmtDateTime(item.date || item.ts || item.TXN_TIMESTAMP)}</td>
+                          <tr key={`txn_row_${index + 1}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '8px', fontWeight: 700, color: '#0f172a' }}>{item.reference || item.transaction_id || item.TRANSACTION_ID || '-'}</td>
+                            <td style={{ padding: '8px', color: '#334155' }}>{item.counterparty || item.party || item.beneficiary || '-'}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', fontWeight: 800, color: '#0f172a' }}>{compactNumber(item.amount || item.TXN_AMOUNT || 0, 2)}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', color: '#64748b' }}>{fmtDateTime(item.date || item.ts || item.TXN_TIMESTAMP)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </Box>
-                </Paper>
+                </Box>
               </Box>
-            </Paper>
 
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'repeat(3, 1fr)' }, gap: 2 }}>
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-                <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', mb: 1 }}>Case Data Explained</Typography>
-                <Typography sx={{ fontSize: 12.75, lineHeight: 1.7, color: '#334155' }}>
-                  {supportFile.case_synthesis?.reviewed}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-                <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', mb: 1 }}>Baseline Review</Typography>
-                <Typography sx={{ fontSize: 12.75, lineHeight: 1.7, color: '#334155' }}>
-                  {toArray(liveData?.baseline?.deviations).length
-                    ? `${toArray(liveData?.baseline?.deviations).length} deviation finding(s) were identified. ${toArray(liveData?.baseline?.deviations).slice(0, 2).map((item) => item.message || item.type || item.category).join(' ')}`
-                    : 'No meaningful baseline deviations were returned for this case.'}
-                </Typography>
-              </Paper>
-              <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-                <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a', mb: 1 }}>Graph and Lineage Review</Typography>
-                <Typography sx={{ fontSize: 12.75, lineHeight: 1.7, color: '#334155' }}>
-                  {liveData?.graph?.narrative || supportFile.case_synthesis?.found || 'No graph narrative was available for this case.'}
-                </Typography>
-              </Paper>
+              {/* 3 Insight Pillars */}
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: 2 }}>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#f8fafc' }}>
+                  <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.75 }}>
+                    Facts Synthesis
+                  </Typography>
+                  <Typography sx={{ fontSize: 12.5, lineHeight: 1.65, color: '#334155' }}>
+                    {supportFile.case_synthesis?.reviewed}
+                  </Typography>
+                </Box>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#f8fafc' }}>
+                  <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.75 }}>
+                    Baseline Anomaly Status
+                  </Typography>
+                  <Typography sx={{ fontSize: 12.5, lineHeight: 1.65, color: '#334155' }}>
+                    {toArray(liveData?.baseline?.deviations).length
+                      ? `${toArray(liveData?.baseline?.deviations).length} deviation(s) flagged against historical baseline.`
+                      : 'No statistically significant deviations detected against account baseline.'}
+                  </Typography>
+                </Box>
+                <Box sx={{ p: 2, borderRadius: 2, bgcolor: '#f8fafc' }}>
+                  <Typography sx={{ fontSize: 11.5, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.75 }}>
+                    Network Lineage Analysis
+                  </Typography>
+                  <Typography sx={{ fontSize: 12.5, lineHeight: 1.65, color: '#334155' }}>
+                    {liveData?.graph?.narrative || supportFile.case_synthesis?.found || 'No graph narrative was available for this case.'}
+                  </Typography>
+                </Box>
+              </Box>
             </Box>
 
-            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                <Box>
-                  <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>SAR Draft</Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 12.5, color: '#64748b' }}>
-                    The draft below is generated from the combined case data. The analyst can edit it and add remarks before submission.
-                  </Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1.25 }} flexWrap="wrap" useFlexGap>
-                    <Chip
+            {/* ============================================================ */}
+            {/* SECTION 3: SAR Drafting Studio & Disposition */}
+            {/* ============================================================ */}
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.45fr 1fr' }, gap: 2.5, alignItems: 'start' }}>
+              {/* Left: SAR Draft Studio */}
+              <Box
+                sx={{
+                  bgcolor: '#ffffff',
+                  p: 3,
+                  borderRadius: 2.5,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1.5 }}>
+                  <Box>
+                    <Stack direction="row" spacing={1.25} alignItems="center">
+                      <SparklesIcon sx={{ fontSize: 20, color: '#ea580c' }} />
+                      <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+                        3. SAR Narrative Studio
+                      </Typography>
+                    </Stack>
+                    <Typography sx={{ mt: 0.25, fontSize: 12, color: '#64748b' }}>
+                      Evidence-grounded regulatory narrative incorporating transactions, velocity, and counterparties.
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant="outlined"
                       size="small"
-                      color={supportFile?.decision?.sar_status === 'Accepted' ? 'success' : 'default'}
-                      variant={supportFile?.decision?.sar_status === 'Accepted' ? 'filled' : 'outlined'}
-                      label={supportFile?.decision?.sar_status || (supportFile?.sar_draft ? 'Drafted' : 'Not Started')}
-                    />
-                    {supportFile?.decision?.sar_accepted_at ? (
-                      <Chip
-                        size="small"
-                        variant="outlined"
-                        label={`Accepted ${fmtDateTime(supportFile.decision.sar_accepted_at)}`}
-                      />
-                    ) : null}
+                      startIcon={<AcceptIcon />}
+                      onClick={handleAcceptSar}
+                      disabled={!supportFile?.sar_draft || saving}
+                      sx={{ textTransform: 'none', fontWeight: 700 }}
+                    >
+                      {saving && supportFile?.decision?.sar_status !== 'Accepted' ? 'Saving...' : 'Accept SAR'}
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={drafting ? <CircularProgress size={14} color="inherit" /> : <SparklesIcon />}
+                      onClick={handleGenerateSar}
+                      disabled={!selectedCaseId || !supportFile || drafting}
+                      sx={{ bgcolor: '#ea580c', '&:hover': { bgcolor: '#c2410c' }, textTransform: 'none', fontWeight: 700 }}
+                    >
+                      {drafting ? 'Drafting...' : 'Draft SAR'}
+                    </Button>
                   </Stack>
                 </Box>
-                <Stack direction="row" spacing={1}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AcceptIcon />}
-                    onClick={handleAcceptSar}
-                    disabled={!supportFile?.sar_draft || saving}
+
+                {drafting && (
+                  <Box
+                    sx={{
+                      mb: 2,
+                      p: 2,
+                      bgcolor: '#fff7ed',
+                      borderRadius: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
                   >
-                    {saving && supportFile?.decision?.sar_status !== 'Accepted' ? 'Saving...' : 'Accept SAR'}
-                  </Button>
-                  <Button
-                    variant="contained"
-                    startIcon={drafting ? <CircularProgress size={14} color="inherit" /> : <SparklesIcon />}
-                    onClick={handleGenerateSar}
-                    disabled={!selectedCaseId || !supportFile || drafting}
-                  >
-                    {drafting ? 'Drafting...' : 'Draft SAR'}
-                  </Button>
-                </Stack>
-              </Stack>
-              <Stack spacing={2}>
+                    <CircularProgress size={24} thickness={4} sx={{ color: '#ea580c' }} />
+                    <Typography sx={{ fontSize: 12.5, color: '#9a3412', fontWeight: 600 }}>
+                      AI agent is synthesizing transaction ledger, alert timeline, and grounds for suspicion...
+                    </Typography>
+                  </Box>
+                )}
+
                 <TextField
                   fullWidth
                   multiline
-                  minRows={18}
+                  minRows={16}
                   size="small"
-                  value={supportFile.sar_draft || ''}
-                  placeholder={'Draft SAR will appear here after generation.'}
+                  value={cleanSarText(supportFile.sar_draft || '')}
+                  placeholder="Draft SAR narrative will appear here after clicking 'Draft SAR'..."
+                  sx={{
+                    bgcolor: '#fafafa',
+                    borderRadius: 2,
+                    '& .MuiOutlinedInput-root': {
+                      fontFamily: 'inherit',
+                      fontSize: 13.25,
+                      lineHeight: 1.8,
+                      color: '#1e293b',
+                      '& fieldset': { borderColor: '#f1f5f9' },
+                      '&:hover fieldset': { borderColor: '#cbd5e1' },
+                      '&.Mui-focused fieldset': { borderColor: '#ea580c' },
+                    },
+                  }}
                   onChange={(event) => updateSupportFile((previous) => ({
                     ...previous,
                     sar_draft: event.target.value,
@@ -1210,55 +1196,83 @@ const CaseResolutionWorkspace = () => {
                     },
                   }))}
                 />
-              </Stack>
-            </Paper>
+              </Box>
 
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1.1fr 1fr' }, gap: 2.5, alignItems: 'start' }}>
-              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
-                  <LedgerIcon sx={{ color: '#0f766e' }} />
-                  <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Connected Source Coverage</Typography>
-                </Stack>
-                <Stack spacing={1.25}>
-                  <Typography sx={{ fontSize: 12.75, color: '#334155', lineHeight: 1.7 }}>
-                    Case Pack alerts, transaction history, baseline analysis, graph analysis, lineage output, case facts, vector similarity results, and AI explanation endpoints are all pulled directly for this case and assembled into one JSON payload before SAR generation.
+              {/* Right: Final Disposition */}
+              <Box
+                sx={{
+                  bgcolor: '#ffffff',
+                  p: 3,
+                  borderRadius: 2.5,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                }}
+              >
+                <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 2 }}>
+                  <DecisionIcon sx={{ fontSize: 20, color: '#0f766e' }} />
+                  <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+                    4. Final Case Disposition
                   </Typography>
-                  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-                    <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Lineage Evidence</Typography>
-                    <Typography sx={{ mt: 0.75, fontSize: 12.5, color: '#475569', lineHeight: 1.65 }}>
-                      {liveData?.lineage?.evidence_summary
-                        ? `Evidence strength is ${liveData.lineage.evidence_summary.evidence_strength || 'available'} with ${liveData.lineage.evidence_summary.data_completeness || 'partial'} data completeness.`
-                        : 'Lineage evidence summary was not available for this case.'}
-                    </Typography>
-                  </Paper>
-                  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
-                    <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Stored JSON Payload</Typography>
-                    <Typography sx={{ mt: 0.75, fontSize: 12.5, color: '#475569', lineHeight: 1.65 }}>
-                      {supportFile?.source_payload ? 'The combined per-case JSON payload is present and is used as the source for draft generation.' : 'Combined case JSON payload is missing.'}
-                    </Typography>
-                  </Paper>
                 </Stack>
-              </Paper>
+                <Typography sx={{ fontSize: 12, color: '#64748b', mb: 2.5 }}>
+                  Select conclusive action and provide auditable regulatory justification.
+                </Typography>
 
-              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5 }}>
-                <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
-                  <DecisionIcon sx={{ color: '#0f766e' }} />
-                  <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Submit Disposition</Typography>
-                </Stack>
-                <Stack spacing={1.25}>
+                <Stack spacing={2}>
                   <FormControl size="small" fullWidth>
-                    <InputLabel>Decision</InputLabel>
-                    <Select value={supportFile.decision.final_action || ''} label="Decision" onChange={(event) => updateSupportFile((previous) => ({ ...previous, decision: { ...previous.decision, final_action: event.target.value } }))}>
+                    <InputLabel>Final Disposition Action</InputLabel>
+                    <Select
+                      value={supportFile.decision.final_action || ''}
+                      label="Final Disposition Action"
+                      onChange={(event) => updateSupportFile((previous) => ({ ...previous, decision: { ...previous.decision, final_action: event.target.value } }))}
+                      sx={{ borderRadius: 1.5 }}
+                    >
                       {DECISION_ACTIONS.map((action) => <MenuItem key={action} value={action}>{action}</MenuItem>)}
                     </Select>
                   </FormControl>
-                  <TextField fullWidth multiline minRows={3} size="small" label="Analyst remarks" value={supportFile.analyst_notes || ''} onChange={(event) => updateSupportFile((previous) => ({ ...previous, analyst_notes: event.target.value }))} />
-                  <TextField fullWidth multiline minRows={3} size="small" label="Disposition rationale" value={supportFile.decision.rationale || ''} onChange={(event) => updateSupportFile((previous) => ({ ...previous, decision: { ...previous.decision, rationale: event.target.value } }))} />
-                  <Button variant="contained" startIcon={<SaveIcon />} onClick={handleSave} disabled={saving}>
-                    {saving ? 'Submitting...' : 'Submit'}
+
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={3}
+                    size="small"
+                    label="Analyst Remarks"
+                    placeholder="Optional notes or internal review remarks..."
+                    value={supportFile.analyst_notes || ''}
+                    onChange={(event) => updateSupportFile((previous) => ({ ...previous, analyst_notes: event.target.value }))}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                  />
+
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={5}
+                    size="small"
+                    label="Regulatory Disposition Rationale"
+                    placeholder="Explain verified CDD justification, transaction grounds, and SAR recommendation rationale..."
+                    value={supportFile.decision.rationale || ''}
+                    onChange={(event) => updateSupportFile((previous) => ({ ...previous, decision: { ...previous.decision, rationale: event.target.value } }))}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }}
+                  />
+
+                  <Button
+                    variant="contained"
+                    size="large"
+                    startIcon={<SaveIcon />}
+                    onClick={handleSave}
+                    disabled={saving}
+                    sx={{
+                      bgcolor: '#0f766e',
+                      '&:hover': { bgcolor: '#115e59' },
+                      textTransform: 'none',
+                      fontWeight: 800,
+                      py: 1.25,
+                      borderRadius: 1.5,
+                    }}
+                  >
+                    {saving ? 'Submitting Disposition...' : 'Submit Disposition & Finalize'}
                   </Button>
                 </Stack>
-              </Paper>
+              </Box>
             </Box>
           </>
         )}

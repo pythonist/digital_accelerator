@@ -8,111 +8,87 @@ import {
   Alert,
   Box,
   Button,
-  Card,
   Chip,
   CircularProgress,
   Collapse,
   Divider,
   FormControl,
   IconButton,
+  InputAdornment,
   MenuItem,
   Paper,
   Select,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
   Search as SearchIcon,
   Rule as RuleIcon,
   Layers as LayersIcon,
-  Security as ShieldIcon,
+  Shield as ShieldIcon,
   Settings as SettingsIcon,
   GpsFixed as TargetIcon,
   Timeline as ActivityIcon,
-  CheckCircle as CheckCircleIcon,
-  ChevronRight as ChevronRightIcon,
-  ExpandMore as ChevronDownIcon,
-  BarChart as BarChart3Icon,
+  CheckCircleOutline as CheckCircleIcon,
+  ErrorOutline as ErrorIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  BarChart as BarChartIcon,
   Bolt as ZapIcon,
   HelpOutline,
-  Psychology as BrainIcon,
-  VerifiedUser as VerifiedIcon,
-  Info as InfoIcon,
-  Close as XIcon,
+  InfoOutlined as InfoIcon,
+  Close as CloseIcon,
+  FilterList as FilterListIcon,
+  Visibility as ViewIcon,
 } from '@mui/icons-material';
-
-const SURFACE_SX = {
-  borderRadius: 0,
-  boxShadow: 'none',
-};
-
-const getSeverityColor = (severity) => {
-  const normalized = String(severity || '').toLowerCase();
-  if (normalized === 'critical') return 'error';
-  if (normalized === 'high') return 'warning';
-  if (normalized === 'medium') return 'info';
-  return 'success';
-};
-
-const extractRuleFields = (conditions = []) => {
-  if (!Array.isArray(conditions)) return [];
-  return Array.from(new Set(conditions.map((item) => String(item?.field || '').trim()).filter(Boolean)));
-};
 
 const formatAmount = (value) => {
   const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return '-';
-  return `INR ${numeric.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+  if (!Number.isFinite(numeric) || numeric === 0) return '-';
+  return `₹${numeric.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 };
 
-const SummaryMetric = ({ label, value, valueColor = '#0f172a', valueSize = 16 }) => (
-  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-    <Typography sx={{ fontSize: 12.5, color: '#64748b' }}>{label}</Typography>
-    <Typography sx={{ fontSize: valueSize, fontWeight: 800, color: valueColor }}>{value}</Typography>
-  </Box>
-);
+const getSeverityBadgeStyle = (severity) => {
+  const s = String(severity || '').toLowerCase();
+  if (s === 'critical') {
+    return { bgcolor: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 700 };
+  }
+  if (s === 'high') {
+    return { bgcolor: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', fontWeight: 700 };
+  }
+  if (s === 'medium') {
+    return { bgcolor: '#f8fafc', color: '#334155', border: '1px solid #cbd5e1', fontWeight: 600 };
+  }
+  return { bgcolor: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0', fontWeight: 600 };
+};
 
-const SectionBlock = ({ title, subtitle, icon, children }) => (
-  <Box>
-    <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 1 }}>
-      {icon}
-      <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>{title}</Typography>
-    </Stack>
-    <Typography sx={{ mb: 1.75, fontSize: 13, color: '#64748b' }}>{subtitle}</Typography>
-    {children}
-  </Box>
-);
-
-const ExplanationModal = ({ open, onClose, item }) => (
-  <Box
-    sx={{
-      position: 'fixed',
-      inset: 0,
-      zIndex: 1300,
-      bgcolor: 'rgba(15, 23, 42, 0.42)',
-      display: open ? 'flex' : 'none',
-      alignItems: 'center',
-      justifyContent: 'center',
-      p: 4,
-      backdropFilter: 'blur(6px)',
-    }}
-  >
-    <Paper sx={{ width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', borderRadius: 0 }}>
-      <Box sx={{ p: 2, borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc' }}>
-        <Typography sx={{ fontSize: 18, fontWeight: 800 }}>Detection Logic</Typography>
-        <IconButton onClick={onClose} sx={{ borderRadius: 0 }}>
-          <XIcon />
-        </IconButton>
-      </Box>
-      <Box sx={{ p: 3, overflowY: 'auto' }}>
-        <Typography sx={{ fontSize: 22, fontWeight: 900, color: '#0f172a' }}>{item?.name}</Typography>
-        <Typography sx={{ mt: 1, fontSize: 14, color: '#475569', lineHeight: 1.8 }}>
-          {item?.description || 'No description was returned for this finding.'}
-        </Typography>
-      </Box>
-    </Paper>
-  </Box>
-);
+const formatLogicExpression = (rule) => {
+  if (!rule.conditions || !Array.isArray(rule.conditions) || rule.conditions.length === 0) {
+    return rule.description || 'Heuristic Evaluation Pattern';
+  }
+  const opWord = ` ${rule.logic || 'AND'} `;
+  return rule.conditions
+    .map((c) => {
+      const field = c.field || 'field';
+      const op = c.operator || '=';
+      const val =
+        typeof c.value === 'number'
+          ? c.value >= 1000
+            ? `₹${c.value.toLocaleString('en-IN')}`
+            : c.value
+          : `'${c.value}'`;
+      return `${field} ${op} ${val}`;
+    })
+    .join(opWord);
+};
 
 const RuleEngineScreen = () => {
   const { caseList, loadCaseList } = useAppContext();
@@ -122,12 +98,15 @@ const RuleEngineScreen = () => {
   const [loading, setLoading] = useState(false);
   const [rulesLoading, setRulesLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [expandedItems, setExpandedItems] = useState({});
+  const [expandedRows, setExpandedRows] = useState({});
   const [showRuleManager, setShowRuleManager] = useState(false);
-  const [showExplanationFor, setShowExplanationFor] = useState(null);
   const [autoSelectEnabled, setAutoSelectEnabled] = useState(true);
-  const [filterSeverity, setFilterSeverity] = useState('all');
   const [showManual, setShowManual] = useState(false);
+
+  // Table Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'triggered', 'passed'
+  const [severityFilter, setSeverityFilter] = useState('all'); // 'all', 'critical', 'high', 'medium', 'low'
 
   useEffect(() => {
     if (caseList.length === 0) {
@@ -143,8 +122,8 @@ const RuleEngineScreen = () => {
     if (autoSelectEnabled && caseList.length > 0 && !selectedCaseId) {
       const priorityCase = [...caseList].sort((a, b) => {
         const severityWeight = { Critical: 4, High: 3, Medium: 2, Low: 1 };
-        const aSeverity = severityWeight[a.severity || a.Severity] || 0;
-        const bSeverity = severityWeight[b.severity || b.Severity] || 0;
+        const aSeverity = severityWeight[a.severity || a.Severity || a.risk_rating || a.priority] || 0;
+        const bSeverity = severityWeight[b.severity || b.Severity || b.risk_rating || b.priority] || 0;
         if (bSeverity !== aSeverity) return bSeverity - aSeverity;
         const aAlerts = a.alert_count || a.Alert_Count || (a.alerts ? a.alerts.length : 0) || 0;
         const bAlerts = b.alert_count || b.Alert_Count || (b.alerts ? b.alerts.length : 0) || 0;
@@ -154,7 +133,7 @@ const RuleEngineScreen = () => {
       if (id) {
         const normalizedId = String(id);
         setSelectedCaseId(normalizedId);
-        setTimeout(() => runAnalysis(normalizedId), 400);
+        setTimeout(() => runAnalysis(normalizedId), 300);
       }
     }
   }, [autoSelectEnabled, caseList, selectedCaseId]);
@@ -184,18 +163,23 @@ const RuleEngineScreen = () => {
         return;
       }
       setAnalysisResults(response);
-      const firstImportant = (response?.violations || []).find((item) => ['Critical', 'High'].includes(item?.severity));
-      setExpandedItems(firstImportant?.id ? { [firstImportant.id]: true } : {});
+      // Automatically expand first triggered violation if any
+      const violations = response?.violations || [];
+      if (violations.length > 0) {
+        setExpandedRows({ [violations[0].id]: true });
+      } else {
+        setExpandedRows({});
+      }
     } catch (analysisError) {
       console.error(analysisError);
-      setError('Failed to connect to the risk analysis engine. Please check the backend connection.');
+      setError('Failed to connect to the risk analysis engine. Please verify backend service.');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleExpand = (id) => {
-    setExpandedItems((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleRowExpand = (id) => {
+    setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
   const selectedCase = useMemo(
@@ -203,367 +187,685 @@ const RuleEngineScreen = () => {
     [caseList, selectedCaseId],
   );
 
-  const selectionReason = useMemo(() => {
-    if (!selectedCase || !autoSelectEnabled) return null;
-    const alerts = selectedCase.alert_count || selectedCase.Alert_Count || (selectedCase.alerts ? selectedCase.alerts.length : 0) || 0;
-    const severity = selectedCase.severity || selectedCase.Severity || 'Unknown';
-    return [
-      `Severity level: ${severity}`,
-      `${alerts} active alerts pending review`,
-      'Automatically prioritized based on risk indicators',
-    ];
-  }, [autoSelectEnabled, selectedCase]);
+  const selectedCaseSeverity = useMemo(() => {
+    if (!selectedCase) return 'Low';
+    return selectedCase.severity || selectedCase.Severity || selectedCase.risk_rating || selectedCase.priority || 'Low';
+  }, [selectedCase]);
 
-  const ruleCatalogById = useMemo(
-    () => new Map(ruleCatalog.map((rule) => [String(rule.id || '').trim(), rule])),
-    [ruleCatalog],
-  );
+  // Build Unified Rules Matrix (combines configured rules + triggered typology violations)
+  const unifiedRulesMatrix = useMemo(() => {
+    const violations = Array.isArray(analysisResults?.violations) ? analysisResults.violations : [];
+    const violationMap = new Map(violations.map((v) => [String(v.id || '').trim(), v]));
 
-  const allViolations = useMemo(() => {
-    const items = Array.isArray(analysisResults?.violations) ? analysisResults.violations : [];
-    if (filterSeverity === 'all') return items;
-    return items.filter((item) => String(item?.severity || '').toLowerCase() === filterSeverity);
-  }, [analysisResults, filterSeverity]);
+    // 1. Map all enabled catalog rules
+    const catalogRows = (ruleCatalog || [])
+      .filter((r) => r.enabled !== false)
+      .map((rule) => {
+        const ruleId = String(rule.id || '').trim();
+        const violation = violationMap.get(ruleId);
+        const isTriggered = Boolean(violation);
 
-  const allViolationIds = useMemo(
-    () => new Set((analysisResults?.violations || []).map((item) => String(item?.id || '').trim()).filter(Boolean)),
-    [analysisResults],
-  );
+        return {
+          id: ruleId,
+          name: rule.name || ruleId,
+          description: rule.description || '',
+          category: rule.category || 'Rule',
+          logic: rule.logic || 'AND',
+          conditions: rule.conditions || [],
+          configuredSeverity: rule.severity || 'Medium',
+          isTypology: false,
+          outcome: isTriggered ? 'TRIGGERED' : 'PASSED',
+          matchCount: violation?.match_count || 0,
+          triggeredValue: violation?.total_value || 0,
+          examples: violation?.examples || [],
+          explanation: violation?.explanation || null,
+        };
+      });
 
-  const triggeredRules = useMemo(
-    () => allViolations.filter((item) => !String(item?.id || '').startsWith('TYPO_')),
-    [allViolations],
-  );
+    // 2. Add any standalone typology violations that are not in the rule catalog
+    const catalogIdSet = new Set(catalogRows.map((r) => r.id));
+    const standaloneTypologies = violations
+      .filter((v) => !catalogIdSet.has(String(v.id || '').trim()))
+      .map((v) => ({
+        id: v.id,
+        name: v.name || v.id,
+        description: v.description || '',
+        category: v.category || 'Typology',
+        logic: 'HEURISTIC',
+        conditions: [],
+        configuredSeverity: v.severity || 'High',
+        isTypology: true,
+        outcome: 'TRIGGERED',
+        matchCount: v.match_count || 0,
+        triggeredValue: v.total_value || 0,
+        examples: v.examples || [],
+        explanation: v.explanation || null,
+      }));
 
-  const triggeredTypologies = useMemo(
-    () => allViolations.filter((item) => String(item?.id || '').startsWith('TYPO_')),
-    [allViolations],
-  );
+    return [...catalogRows, ...standaloneTypologies];
+  }, [ruleCatalog, analysisResults]);
 
-  const cleanRules = useMemo(
-    () => ruleCatalog
-      .filter((rule) => rule?.enabled !== false)
-      .filter((rule) => !allViolationIds.has(String(rule?.id || '').trim()))
-      .filter((rule) => filterSeverity === 'all' || String(rule?.severity || '').toLowerCase() === filterSeverity),
-    [allViolationIds, filterSeverity, ruleCatalog],
-  );
+  // Filtered Rows for Table Display
+  const filteredRows = useMemo(() => {
+    return unifiedRulesMatrix.filter((row) => {
+      // 1. Search Query Filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = row.name.toLowerCase().includes(q);
+        const matchesId = row.id.toLowerCase().includes(q);
+        const matchesDesc = row.description.toLowerCase().includes(q);
+        const matchesCat = row.category.toLowerCase().includes(q);
+        if (!matchesName && !matchesId && !matchesDesc && !matchesCat) return false;
+      }
 
-  const riskScoreColor = useMemo(() => {
-    const score = Number(analysisResults?.risk_score || 0);
-    if (score >= 75) return 'error.main';
-    if (score >= 50) return 'warning.main';
-    if (score >= 25) return 'info.main';
-    return 'success.main';
-  }, [analysisResults?.risk_score]);
+      // 2. Status Outcome Filter
+      if (statusFilter === 'triggered' && row.outcome !== 'TRIGGERED') return false;
+      if (statusFilter === 'passed' && row.outcome !== 'PASSED') return false;
 
-  const renderViolationCards = (items) => items.map((violation) => {
-    const isExpanded = !!expandedItems[violation.id];
-    const isTypology = String(violation?.id || '').startsWith('TYPO_');
-    const ruleDefinition = ruleCatalogById.get(String(violation?.id || '').trim()) || null;
-    const ruleFields = extractRuleFields(ruleDefinition?.conditions);
-    const examples = Array.isArray(violation?.examples) ? violation.examples : [];
+      // 3. Severity Filter
+      if (severityFilter !== 'all' && String(row.configuredSeverity).toLowerCase() !== severityFilter) {
+        return false;
+      }
 
-    return (
-      <Card key={violation.id} variant="outlined" sx={{ borderRadius: 0, boxShadow: 'none' }}>
-        <Box
-          onClick={() => toggleExpand(violation.id)}
-          sx={{ p: 2.25, cursor: 'pointer', bgcolor: isExpanded ? '#fafafa' : '#fff', '&:hover': { bgcolor: '#f8fafc' } }}
-        >
-          <Stack direction="row" spacing={1.5} alignItems="flex-start">
-            <IconButton size="small" sx={{ mt: 0.25, p: 0.25, borderRadius: 0 }}>
-              {isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
-            </IconButton>
-            <Box sx={{ mt: 0.4 }}>
-              {isTypology ? <LayersIcon sx={{ color: 'secondary.main', fontSize: 20 }} /> : <RuleIcon sx={{ color: 'primary.main', fontSize: 20 }} />}
-            </Box>
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-                <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#0f172a' }}>{violation.name}</Typography>
-                <Chip label={violation.severity} size="small" color={getSeverityColor(violation.severity)} sx={{ borderRadius: 0, fontWeight: 700 }} />
-                {isTypology ? (
-                  <Chip label="Typology" size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />
-                ) : (
-                  <Chip label="Rule Triggered" size="small" sx={{ borderRadius: 0, fontWeight: 700, bgcolor: '#eef2ff', color: '#1d4ed8' }} />
-                )}
-                {!isTypology && ruleFields.length > 0 && (
-                  <Chip label={`Fields: ${ruleFields.join(', ')}`} size="small" sx={{ borderRadius: 0, fontWeight: 600, maxWidth: 420 }} />
-                )}
-              </Stack>
-              <Typography sx={{ fontSize: 13.5, color: '#475569', lineHeight: 1.7 }}>
-                {violation.description || 'No description was returned for this finding.'}
-              </Typography>
-            </Box>
-            <Box sx={{ minWidth: 120, textAlign: 'right' }}>
-              <Typography sx={{ fontSize: 24, fontWeight: 800, color: '#0f172a' }}>{violation.match_count || 0}</Typography>
-              <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: '#64748b' }}>Matches</Typography>
-              <Typography sx={{ mt: 0.5, fontSize: 12.5, fontWeight: 700, color: '#1d4ed8' }}>{formatAmount(violation.total_value)}</Typography>
-            </Box>
-          </Stack>
-        </Box>
-        <Collapse in={isExpanded}>
-          <Divider />
-          <Box sx={{ p: 2.5 }}>
-            <Stack spacing={2}>
-              <Paper variant="outlined" sx={{ p: 1.75, borderRadius: 0, bgcolor: '#f8fafc' }}>
-                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                  <Typography sx={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.45, color: '#475569' }}>Category</Typography>
-                  <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a' }}>{violation.category || 'General'}</Typography>
-                  {!isTypology && (
-                    <>
-                      <Typography sx={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.45, color: '#475569', ml: 1 }}>Applies to</Typography>
-                      <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a' }}>
-                        {ruleFields.length > 0 ? ruleFields.join(', ') : 'No explicit fields declared'}
-                      </Typography>
-                    </>
-                  )}
-                </Stack>
-              </Paper>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Chip label={isTypology ? 'Behavioral pattern' : 'Configured rule'} size="small" icon={isTypology ? <LayersIcon /> : <ShieldIcon />} sx={{ borderRadius: 0, fontWeight: 700 }} />
-                {ruleDefinition?.logic && <Chip label={`Logic ${ruleDefinition.logic}`} size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />}
-                {ruleDefinition?.conditions?.length ? (
-                  <Chip label={`${ruleDefinition.conditions.length} condition(s)`} size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />
-                ) : null}
-              </Stack>
-              {examples.length > 0 && (
-                <Paper variant="outlined" sx={{ borderRadius: 0, overflow: 'hidden' }}>
-                  <Box sx={{ px: 2, py: 1.4, borderBottom: '1px solid #e2e8f0', bgcolor: '#fafafa' }}>
-                    <Typography sx={{ fontSize: 13.5, fontWeight: 800, color: '#0f172a' }}>Evidence snapshot</Typography>
-                  </Box>
-                  <Box sx={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                      <thead style={{ background: '#f8fafc' }}>
-                        <tr>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Date</th>
-                          <th style={{ padding: '10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0' }}>Amount</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Type</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e2e8f0' }}>Counterparty / Channel</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {examples.map((example, index) => (
-                          <tr key={`${violation.id}-evidence-${index}`}>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', fontFamily: 'monospace' }}>
-                              {example.date || example.txn_date || example.created_at || '-'}
-                            </td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9', textAlign: 'right', fontWeight: 700 }}>
-                              {formatAmount(example.amount || example.txn_amount)}
-                            </td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>{example.type || example.dr_cr || '-'}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #f1f5f9' }}>
-                              {example.party || example.counterparty || example.channel || example.mode || 'Unknown'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </Box>
-                </Paper>
-              )}
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<InfoIcon />}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setShowExplanationFor({ ...violation, ruleDefinition, ruleFields });
-                }}
-                sx={{ alignSelf: 'flex-start', borderRadius: 0, fontWeight: 700 }}
-              >
-                Show Detection Logic
-              </Button>
-            </Stack>
-          </Box>
-        </Collapse>
-      </Card>
-    );
-  });
+      return true;
+    });
+  }, [unifiedRulesMatrix, searchQuery, statusFilter, severityFilter]);
+
+  const triggeredCount = useMemo(() => unifiedRulesMatrix.filter((r) => r.outcome === 'TRIGGERED').length, [unifiedRulesMatrix]);
+  const passedCount = useMemo(() => unifiedRulesMatrix.filter((r) => r.outcome === 'PASSED').length, [unifiedRulesMatrix]);
 
   return (
     <PageContainer
       title="Risk Intelligence Hub"
-      subtitle="Unified rules and typology analysis"
+      subtitle="Deterministic rule evaluation and transaction-level pattern verification"
       breadcrumbs={['Analysis', 'Risk Hub']}
       actions={(
         <Stack direction="row" spacing={1.5}>
-          <Button variant="text" startIcon={<HelpOutline />} onClick={() => setShowManual(true)} size="small" sx={{ color: 'text.secondary', fontWeight: 700, borderRadius: 0 }}>
+          <Button
+            variant="text"
+            startIcon={<HelpOutline />}
+            onClick={() => setShowManual(true)}
+            size="small"
+            sx={{ color: 'text.secondary', fontWeight: 700, borderRadius: 1 }}
+          >
             Rule Guide
           </Button>
-          <Button variant="outlined" size="small" onClick={() => setAutoSelectEnabled((prev) => !prev)} startIcon={<ZapIcon />} color={autoSelectEnabled ? 'primary' : 'inherit'} sx={{ fontWeight: 700, borderRadius: 0 }}>
-            Smart Select
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setAutoSelectEnabled((prev) => !prev)}
+            startIcon={<ZapIcon />}
+            color={autoSelectEnabled ? 'primary' : 'inherit'}
+            sx={{ fontWeight: 700, borderRadius: 1 }}
+          >
+            Smart Select: {autoSelectEnabled ? 'ON' : 'OFF'}
           </Button>
-          <Button variant="contained" size="small" onClick={() => setShowRuleManager(true)} startIcon={<SettingsIcon />} sx={{ fontWeight: 700, borderRadius: 0 }}>
+          <Button
+            variant="contained"
+            size="small"
+            onClick={() => setShowRuleManager(true)}
+            startIcon={<SettingsIcon />}
+            sx={{ fontWeight: 700, borderRadius: 1 }}
+          >
             Manage Rules
           </Button>
         </Stack>
       )}
     >
       <RuleEngineManual open={showManual} onClose={() => setShowManual(false)} />
-      <Box sx={{ display: 'flex', gap: 3, height: 'calc(100vh - 220px)', minHeight: 540 }}>
-        <Stack spacing={3} sx={{ width: 320, flexShrink: 0, overflowY: 'auto', pr: 0.5 }}>
-          <Paper variant="outlined" sx={{ p: 2.5, ...SURFACE_SX }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography sx={{ fontSize: 12, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.55 }}>
-                Case Selection
+
+      <Box sx={{ display: 'flex', gap: 2.5, height: 'calc(100vh - 190px)', minHeight: 580 }}>
+        {/* ========================================================================= */}
+        {/* LEFT COLUMN: CASE SELECTION & CONTEXT TELEMETRY                           */}
+        {/* ========================================================================= */}
+        <Stack spacing={2} sx={{ width: 310, flexShrink: 0, overflowY: 'auto' }}>
+          {/* Case Selector Card */}
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              borderRadius: 1.5,
+              bgcolor: '#ffffff',
+              borderColor: '#e2e8f0',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+            }}
+          >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                Active Investigation Case
               </Typography>
-              {autoSelectEnabled && <Chip label="AUTO" size="small" color="primary" sx={{ borderRadius: 0, fontWeight: 700 }} />}
+              {autoSelectEnabled && (
+                <Chip label="AUTO" size="small" sx={{ height: 18, fontSize: 10, bgcolor: '#eff6ff', color: '#1d4ed8', fontWeight: 700 }} />
+              )}
             </Box>
-            <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-              <Select value={selectedCaseId} onChange={(e) => setSelectedCaseId(e.target.value)} displayEmpty sx={{ borderRadius: 0 }}>
+
+            <FormControl fullWidth size="small" sx={{ mb: 1.75 }}>
+              <Select
+                value={selectedCaseId}
+                onChange={(e) => {
+                  setSelectedCaseId(e.target.value);
+                  runAnalysis(e.target.value);
+                }}
+                displayEmpty
+                sx={{ borderRadius: 1, fontSize: 13, bgcolor: '#f8fafc' }}
+              >
                 <MenuItem value="" disabled>Choose case</MenuItem>
                 {caseList.map((item, index) => {
-                  const id = item.case_id || item.Case_ID || item.id || item.ID || `UNKNOWN-${index}`;
+                  const id = item.case_id || item.Case_ID || item.id || item.ID || `CASE-${index}`;
                   const alerts = item.alert_count || item.Alert_Count || (item.alerts ? item.alerts.length : 0) || 0;
-                  const severity = item.severity || item.Severity || 'Unknown';
+                  const severity = item.severity || item.Severity || item.risk_rating || item.priority || 'Low';
                   return (
                     <MenuItem key={`${id}-${index}`} value={String(id)}>
-                      <Typography variant="body2" noWrap>{id} | {severity} | {alerts} alerts</Typography>
+                      <Typography variant="body2" sx={{ fontSize: 13 }} noWrap>
+                        {id} • {severity} ({alerts} alerts)
+                      </Typography>
                     </MenuItem>
                   );
                 })}
               </Select>
             </FormControl>
-            <Button fullWidth variant="contained" size="large" onClick={() => runAnalysis()} disabled={loading || !selectedCaseId} startIcon={loading ? <CircularProgress size={18} color="inherit" /> : <SearchIcon />} sx={{ fontWeight: 800, borderRadius: 0 }}>
-              {loading ? 'Running Analysis...' : 'Run Analysis'}
+
+            <Button
+              fullWidth
+              variant="contained"
+              size="medium"
+              onClick={() => runAnalysis()}
+              disabled={loading || !selectedCaseId}
+              startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <SearchIcon sx={{ fontSize: 18 }} />}
+              sx={{
+                fontWeight: 700,
+                borderRadius: 1,
+                textTransform: 'none',
+                boxShadow: 'none',
+                bgcolor: '#0f172a',
+                '&:hover': { bgcolor: '#1e293b' },
+              }}
+            >
+              {loading ? 'Evaluating Rules...' : 'Run Evaluation'}
             </Button>
           </Paper>
-          {selectionReason && (
-            <Paper variant="outlined" sx={{ p: 2.5, bgcolor: '#eef2ff', borderColor: '#c7d2fe', ...SURFACE_SX }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
-                <TargetIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-                <Typography sx={{ fontSize: 14, fontWeight: 800, color: 'primary.dark' }}>Why This Case?</Typography>
-              </Box>
-              <Stack spacing={1}>
-                {selectionReason.map((factor) => (
-                  <Box key={factor} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-                    <ChevronRightIcon sx={{ fontSize: 16, color: 'primary.main', mt: 0.2 }} />
-                    <Typography sx={{ fontSize: 12.5, color: 'primary.dark' }}>{factor}</Typography>
-                  </Box>
-                ))}
-              </Stack>
-            </Paper>
-          )}
+
+          {/* Case Telemetry Summary */}
           {analysisResults && (
-            <Paper variant="outlined" sx={{ p: 2.5, ...SURFACE_SX }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <BarChart3Icon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>Analysis Summary</Typography>
-              </Box>
-              <Stack spacing={1.75}>
-                <SummaryMetric label="Transactions scanned" value={analysisResults.row_count || 0} />
-                <Divider />
-                <SummaryMetric label="Triggered findings" value={analysisResults.violations?.length || 0} valueColor="#b91c1c" />
-                <Divider />
-                <SummaryMetric label="Risk score" value={analysisResults.risk_score || 0} valueColor={riskScoreColor} valueSize={30} />
-                <Divider />
-                <SummaryMetric label="Rules tested" value={analysisResults.analysis_summary?.rules_tested || 0} />
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 1.5,
+                bgcolor: '#ffffff',
+                borderColor: '#e2e8f0',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+              }}
+            >
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 1.5 }}>
+                Evaluation Telemetry
+              </Typography>
+
+              <Stack spacing={1.25}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Transactions Scanned</Typography>
+                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                    {analysisResults.row_count || 0} txns
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Rules Evaluated</Typography>
+                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                    {unifiedRulesMatrix.length} controls
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Triggered Exceptions</Typography>
+                  <Typography sx={{ fontSize: 13, fontWeight: 800, color: triggeredCount > 0 ? '#dc2626' : '#16a34a' }}>
+                    {triggeredCount} {triggeredCount === 1 ? 'rule' : 'rules'}
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Case Baseline Risk</Typography>
+                  <Chip
+                    label={selectedCaseSeverity}
+                    size="small"
+                    sx={{
+                      height: 20,
+                      fontSize: 11,
+                      ...getSeverityBadgeStyle(selectedCaseSeverity),
+                    }}
+                  />
+                </Box>
               </Stack>
-              {(analysisResults.missing_columns || []).length > 0 && (
-                <Alert severity="warning" sx={{ mt: 2, borderRadius: 0 }}>
-                  <Typography sx={{ fontSize: 12.5, fontWeight: 800 }}>Missing data fields</Typography>
-                  <Typography sx={{ fontSize: 12.5 }}>{(analysisResults.missing_columns || []).join(', ')}</Typography>
-                </Alert>
-              )}
             </Paper>
           )}
+
+          {/* Regulatory Context Note */}
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              borderRadius: 1.5,
+              bgcolor: '#f8fafc',
+              borderColor: '#e2e8f0',
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }}>
+              <InfoIcon sx={{ fontSize: 16, color: '#475569' }} />
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
+                Evaluation Standard
+              </Typography>
+            </Stack>
+            <Typography sx={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.6 }}>
+              Rules are evaluated deterministically against all transactions linked to {selectedCaseId || 'the selected case'}.
+              Configured severities define control criticality, while the outcome confirms case compliance.
+            </Typography>
+          </Paper>
         </Stack>
-        <Paper variant="outlined" sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', ...SURFACE_SX }}>
-          <Box sx={{ px: 3, py: 2, borderBottom: '1px solid', borderColor: 'divider', bgcolor: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <ShieldIcon sx={{ color: 'primary.main' }} />
-              <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Detection Results</Typography>
-            </Box>
-            <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap>
-              <FormControl size="small" sx={{ minWidth: 160 }}>
-                <Select value={filterSeverity} onChange={(e) => setFilterSeverity(e.target.value)} sx={{ bgcolor: '#fff', borderRadius: 0, fontSize: 13 }}>
-                  <MenuItem value="all">All severities</MenuItem>
-                  <MenuItem value="critical">Critical only</MenuItem>
-                  <MenuItem value="high">High only</MenuItem>
-                  <MenuItem value="medium">Medium only</MenuItem>
-                  <MenuItem value="low">Low only</MenuItem>
-                </Select>
-              </FormControl>
-              <Chip label={`Triggered rules ${triggeredRules.length}`} size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />
-              <Chip label={`Typologies ${triggeredTypologies.length}`} size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />
-              <Chip label={`Clean rules ${cleanRules.length}`} size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />
-              {rulesLoading && <Chip label="Refreshing rule coverage" size="small" sx={{ borderRadius: 0, fontWeight: 700 }} />}
+
+        {/* ========================================================================= */}
+        {/* RIGHT COLUMN: PROFESSIONAL AUDIT-READY MATRIX TABLE                       */}
+        {/* ========================================================================= */}
+        <Paper
+          variant="outlined"
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            borderRadius: 1.5,
+            bgcolor: '#ffffff',
+            borderColor: '#e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          }}
+        >
+          {/* Table Header & Controls Bar */}
+          <Box
+            sx={{
+              px: 2.5,
+              py: 1.5,
+              borderBottom: '1px solid #e2e8f0',
+              bgcolor: '#f8fafc',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            {/* Left: Search & Filter Tabs */}
+            <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+              <TextField
+                size="small"
+                placeholder="Search rule or condition..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon sx={{ fontSize: 16, color: '#94a3b8' }} />
+                    </InputAdornment>
+                  ),
+                  sx: {
+                    height: 32,
+                    fontSize: 12.5,
+                    bgcolor: '#ffffff',
+                    width: 220,
+                    borderRadius: 1,
+                  },
+                }}
+              />
+
+              {/* Status Outcome Filter Chips */}
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Chip
+                  label={`All Rules (${unifiedRulesMatrix.length})`}
+                  size="small"
+                  onClick={() => setStatusFilter('all')}
+                  sx={{
+                    height: 26,
+                    fontSize: 11.5,
+                    fontWeight: statusFilter === 'all' ? 700 : 500,
+                    bgcolor: statusFilter === 'all' ? '#0f172a' : '#ffffff',
+                    color: statusFilter === 'all' ? '#ffffff' : '#475569',
+                    border: '1px solid #cbd5e1',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: statusFilter === 'all' ? '#1e293b' : '#f1f5f9' },
+                  }}
+                />
+                <Chip
+                  label={`Triggered (${triggeredCount})`}
+                  size="small"
+                  onClick={() => setStatusFilter('triggered')}
+                  sx={{
+                    height: 26,
+                    fontSize: 11.5,
+                    fontWeight: statusFilter === 'triggered' ? 700 : 500,
+                    bgcolor: statusFilter === 'triggered' ? '#dc2626' : '#ffffff',
+                    color: statusFilter === 'triggered' ? '#ffffff' : triggeredCount > 0 ? '#dc2626' : '#64748b',
+                    border: '1px solid',
+                    borderColor: statusFilter === 'triggered' ? '#dc2626' : triggeredCount > 0 ? '#fca5a5' : '#cbd5e1',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: statusFilter === 'triggered' ? '#b91c1c' : '#fef2f2' },
+                  }}
+                />
+                <Chip
+                  label={`Passed / Clean (${passedCount})`}
+                  size="small"
+                  onClick={() => setStatusFilter('passed')}
+                  sx={{
+                    height: 26,
+                    fontSize: 11.5,
+                    fontWeight: statusFilter === 'passed' ? 700 : 500,
+                    bgcolor: statusFilter === 'passed' ? '#16a34a' : '#ffffff',
+                    color: statusFilter === 'passed' ? '#ffffff' : '#16a34a',
+                    border: '1px solid',
+                    borderColor: statusFilter === 'passed' ? '#16a34a' : '#86efac',
+                    cursor: 'pointer',
+                    '&:hover': { bgcolor: statusFilter === 'passed' ? '#15803d' : '#f0fdf4' },
+                  }}
+                />
+              </Stack>
+            </Stack>
+
+            {/* Right: Severity Filter */}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography sx={{ fontSize: 11.5, color: '#64748b', fontWeight: 600 }}>Severity:</Typography>
+              <Select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                size="small"
+                sx={{
+                  height: 28,
+                  fontSize: 12,
+                  bgcolor: '#ffffff',
+                  borderRadius: 1,
+                  minWidth: 120,
+                }}
+              >
+                <MenuItem value="all">All Severities</MenuItem>
+                <MenuItem value="critical">Critical</MenuItem>
+                <MenuItem value="high">High</MenuItem>
+                <MenuItem value="medium">Medium</MenuItem>
+                <MenuItem value="low">Low</MenuItem>
+              </Select>
             </Stack>
           </Box>
-          <Box sx={{ flex: 1, overflowY: 'auto', p: 3, bgcolor: '#fff' }}>
-            {loading && (
-              <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'text.secondary' }}>
-                <ActivityIcon sx={{ fontSize: 48, mb: 2, color: 'primary.main' }} />
-                <Typography sx={{ fontSize: 17, fontWeight: 700 }}>Running comprehensive analysis...</Typography>
-                <Typography sx={{ fontSize: 13, color: '#64748b' }}>Scanning configured rules, typologies, and evidence snapshots.</Typography>
+
+          {/* Table Content Area */}
+          <Box sx={{ flex: 1, overflowY: 'auto', bgcolor: '#ffffff' }}>
+            {loading ? (
+              <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 6 }}>
+                <CircularProgress size={32} sx={{ color: '#0f172a', mb: 2 }} />
+                <Typography sx={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                  Evaluating Rules & Typologies...
+                </Typography>
+                <Typography sx={{ fontSize: 12, color: '#64748b', mt: 0.5 }}>
+                  Cross-referencing {selectedCaseId} ledger records with configured AML detection criteria.
+                </Typography>
               </Box>
-            )}
-            {error && !loading && (
-              <Alert severity="error" variant="outlined" sx={{ mb: 2, borderRadius: 0 }}>
-                <Typography sx={{ fontSize: 14, fontWeight: 800 }}>Analysis failed</Typography>
-                <Typography sx={{ fontSize: 13.5 }}>{error}</Typography>
-              </Alert>
-            )}
-            {!loading && !analysisResults && !error && (
-              <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'text.disabled', border: '2px dashed #e2e8f0', borderRadius: 0 }}>
-                <BrainIcon sx={{ fontSize: 60, mb: 2, opacity: 0.22 }} />
-                <Typography sx={{ fontSize: 22, fontWeight: 800, color: '#334155' }}>Ready to analyze</Typography>
-                <Typography sx={{ fontSize: 13.5, color: '#64748b' }}>Select a case and run analysis to review triggered rules and clean controls.</Typography>
+            ) : error ? (
+              <Box sx={{ p: 3 }}>
+                <Alert severity="error" variant="outlined" sx={{ borderRadius: 1 }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 700 }}>Analysis Error</Typography>
+                  <Typography sx={{ fontSize: 12.5 }}>{error}</Typography>
+                </Alert>
               </Box>
-            )}
-            {!loading && analysisResults && allViolations.length === 0 && (
-              <Box sx={{ borderRadius: 0, bgcolor: '#f0fdf4', border: '1px solid #bbf7d0', p: 6, textAlign: 'center' }}>
-                <CheckCircleIcon sx={{ fontSize: 64, color: 'success.main', mb: 2 }} />
-                <Typography sx={{ fontSize: 28, fontWeight: 800, color: '#166534' }}>Clean Profile</Typography>
-                <Typography sx={{ fontSize: 15, color: '#166534' }}>No violations detected in {analysisResults.row_count} transactions.</Typography>
+            ) : filteredRows.length === 0 ? (
+              <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', p: 6 }}>
+                <ShieldIcon sx={{ fontSize: 40, color: '#cbd5e1', mb: 1.5 }} />
+                <Typography sx={{ fontSize: 15, fontWeight: 700, color: '#334155' }}>
+                  No matching rules found
+                </Typography>
+                <Typography sx={{ fontSize: 12, color: '#64748b', mt: 0.5 }}>
+                  Adjust your search keyword or clear filters to view available evaluation rules.
+                </Typography>
               </Box>
-            )}
-            {!loading && analysisResults && (
-              <Stack spacing={3}>
-                {triggeredRules.length > 0 && (
-                  <SectionBlock title="Triggered Rules" subtitle="Rules that fired on the selected case and need analyst attention." icon={<RuleIcon sx={{ color: '#1d4ed8', fontSize: 18 }} />}>
-                    <Stack spacing={2}>{renderViolationCards(triggeredRules)}</Stack>
-                  </SectionBlock>
-                )}
-                {triggeredTypologies.length > 0 && (
-                  <SectionBlock title="Triggered Typologies" subtitle="Behavioral patterns that were detected across the case activity." icon={<LayersIcon sx={{ color: '#7c3aed', fontSize: 18 }} />}>
-                    <Stack spacing={2}>{renderViolationCards(triggeredTypologies)}</Stack>
-                  </SectionBlock>
-                )}
-                {cleanRules.length > 0 && (
-                  <SectionBlock title="Rules Reviewed And Passed" subtitle="Enabled rules that were evaluated and did not trigger for this case." icon={<VerifiedIcon sx={{ color: '#166534', fontSize: 18 }} />}>
-                    <Stack spacing={1.5}>
-                      {cleanRules.map((rule) => {
-                        const fields = extractRuleFields(rule.conditions);
-                        return (
-                          <Paper key={rule.id} variant="outlined" sx={{ p: 2, borderRadius: 0, bgcolor: '#fbfffc' }}>
-                            <Box sx={{ flex: 1 }}>
-                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.75 }}>
-                                <Typography sx={{ fontSize: 15.5, fontWeight: 800, color: '#0f172a' }}>{rule.name || rule.id}</Typography>
-                                <Chip label="Clean" size="small" color="success" sx={{ borderRadius: 0, fontWeight: 700 }} />
-                                <Chip label={rule.severity || 'Medium'} size="small" color={getSeverityColor(rule.severity)} sx={{ borderRadius: 0, fontWeight: 700 }} />
+            ) : (
+              <TableContainer sx={{ maxHeight: '100%' }}>
+                <Table stickyHeader size="small">
+                  <TableHead>
+                    <TableRow sx={{ '& th': { bgcolor: '#f8fafc', color: '#475569', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, borderBottom: '1px solid #e2e8f0', py: 1.2 } }}>
+                      <TableCell sx={{ width: 140 }}>Case Outcome</TableCell>
+                      <TableCell sx={{ minWidth: 240 }}>Rule & Description</TableCell>
+                      <TableCell sx={{ minWidth: 260 }}>Evaluated Logic & Conditions</TableCell>
+                      <TableCell sx={{ width: 130 }}>Configured Severity</TableCell>
+                      <TableCell sx={{ width: 130, textAlign: 'right' }}>Triggered Value</TableCell>
+                      <TableCell sx={{ width: 90, textAlign: 'center' }}>Details</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {filteredRows.map((row) => {
+                      const isExpanded = Boolean(expandedRows[row.id]);
+                      const isTriggered = row.outcome === 'TRIGGERED';
+
+                      return (
+                        <React.Fragment key={row.id}>
+                          <TableRow
+                            hover
+                            onClick={() => toggleRowExpand(row.id)}
+                            sx={{
+                              cursor: 'pointer',
+                              bgcolor: isExpanded ? '#f8fafc' : isTriggered ? '#fffafa' : '#ffffff',
+                              '&:hover': { bgcolor: isTriggered ? '#fef2f2' : '#f8fafc' },
+                              '& td': { borderBottom: isExpanded ? 'none' : '1px solid #f1f5f9', py: 1.25 },
+                            }}
+                          >
+                            {/* Column 1: Case Outcome */}
+                            <TableCell>
+                              {isTriggered ? (
+                                <Chip
+                                  label={`Triggered (${row.matchCount})`}
+                                  size="small"
+                                  sx={{
+                                    height: 22,
+                                    fontSize: 11,
+                                    bgcolor: '#fef2f2',
+                                    color: '#b91c1c',
+                                    border: '1px solid #fecaca',
+                                    fontWeight: 700,
+                                  }}
+                                />
+                              ) : (
+                                <Chip
+                                  label="Clean (0)"
+                                  size="small"
+                                  sx={{
+                                    height: 22,
+                                    fontSize: 11,
+                                    bgcolor: '#f8fafc',
+                                    color: '#15803d',
+                                    border: '1px solid #dcfce7',
+                                    fontWeight: 600,
+                                  }}
+                                />
+                              )}
+                            </TableCell>
+
+                            {/* Column 2: Rule Name & Description */}
+                            <TableCell>
+                              <Stack spacing={0.3}>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                                    {row.name}
+                                  </Typography>
+                                  <Chip
+                                    label={row.id}
+                                    size="small"
+                                    sx={{
+                                      height: 18,
+                                      fontSize: 10,
+                                      fontFamily: 'monospace',
+                                      bgcolor: '#f1f5f9',
+                                      color: '#475569',
+                                      borderRadius: 0.5,
+                                    }}
+                                  />
+                                </Stack>
+                                <Typography sx={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.4 }}>
+                                  {row.description || 'Standard transaction surveillance control.'}
+                                </Typography>
                               </Stack>
-                              <Typography sx={{ fontSize: 13.2, color: '#475569', lineHeight: 1.7 }}>
-                                {rule.description || 'No description provided.'}
+                            </TableCell>
+
+                            {/* Column 3: Evaluated Logic Expression */}
+                            <TableCell>
+                              <Typography
+                                sx={{
+                                  fontSize: 11.5,
+                                  fontFamily: 'monospace',
+                                  color: '#334155',
+                                  bgcolor: '#f8fafc',
+                                  p: '4px 8px',
+                                  borderRadius: 1,
+                                  border: '1px solid #e2e8f0',
+                                  display: 'inline-block',
+                                  maxWidth: 340,
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                                title={formatLogicExpression(row)}
+                              >
+                                {formatLogicExpression(row)}
                               </Typography>
-                              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.25 }}>
-                                {fields.map((field) => (
-                                  <Chip key={`${rule.id}-${field}`} label={field} size="small" sx={{ borderRadius: 0, fontWeight: 600 }} />
-                                ))}
-                                {rule.logic && <Chip label={`Logic ${rule.logic}`} size="small" sx={{ borderRadius: 0, fontWeight: 600 }} />}
-                                {Array.isArray(rule.conditions) && <Chip label={`${rule.conditions.length} condition(s)`} size="small" sx={{ borderRadius: 0, fontWeight: 600 }} />}
-                              </Stack>
-                            </Box>
-                          </Paper>
-                        );
-                      })}
-                    </Stack>
-                  </SectionBlock>
-                )}
-              </Stack>
+                            </TableCell>
+
+                            {/* Column 4: Configured Rule Severity */}
+                            <TableCell>
+                              <Chip
+                                label={row.configuredSeverity}
+                                size="small"
+                                sx={{
+                                  height: 20,
+                                  fontSize: 11,
+                                  ...getSeverityBadgeStyle(row.configuredSeverity),
+                                }}
+                              />
+                            </TableCell>
+
+                            {/* Column 5: Triggered Exposure */}
+                            <TableCell sx={{ textAlign: 'right' }}>
+                              <Typography sx={{ fontSize: 12.5, fontWeight: isTriggered ? 700 : 500, color: isTriggered ? '#b91c1c' : '#64748b' }}>
+                                {formatAmount(row.triggeredValue)}
+                              </Typography>
+                            </TableCell>
+
+                            {/* Column 6: Expand/Action Button */}
+                            <TableCell sx={{ textAlign: 'center' }}>
+                              <IconButton size="small" sx={{ p: 0.5, color: '#64748b' }}>
+                                {isExpanded ? <ExpandLessIcon sx={{ fontSize: 18 }} /> : <ExpandMoreIcon sx={{ fontSize: 18 }} />}
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+
+                          {/* Expanded Evidence & Logic Drawer Row */}
+                          <TableRow>
+                            <TableCell colSpan={6} sx={{ p: 0, borderBottom: isExpanded ? '1px solid #e2e8f0' : 'none' }}>
+                              <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                                <Box sx={{ p: 2.5, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+                                  <Stack spacing={2}>
+                                    {/* Parameter Summary Bar */}
+                                    <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                                      <Box>
+                                        <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                          Category
+                                        </Typography>
+                                        <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a' }}>
+                                          {row.category}
+                                        </Typography>
+                                      </Box>
+                                      <Divider orientation="vertical" flexItem sx={{ height: 24, my: 'auto' }} />
+
+                                      <Box>
+                                        <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                          Evaluation Logic
+                                        </Typography>
+                                        <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a' }}>
+                                          {row.logic} Operator ({row.conditions?.length || 0} criteria)
+                                        </Typography>
+                                      </Box>
+                                      <Divider orientation="vertical" flexItem sx={{ height: 24, my: 'auto' }} />
+
+                                      <Box>
+                                        <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                          Case Evaluation Result
+                                        </Typography>
+                                        <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: isTriggered ? '#b91c1c' : '#15803d' }}>
+                                          {isTriggered
+                                            ? `Triggered: ${row.matchCount} transaction(s) met criteria (${formatAmount(row.triggeredValue)})`
+                                            : `Passed: 0 transactions breached the ${formatLogicExpression(row)} threshold.`}
+                                        </Typography>
+                                      </Box>
+                                    </Box>
+
+                                    {/* Explanation Rationale if Triggered */}
+                                    {row.explanation && (
+                                      <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1, bgcolor: '#ffffff', borderColor: '#e2e8f0' }}>
+                                        <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', mb: 0.5 }}>
+                                          Detection Rationale
+                                        </Typography>
+                                        <Typography sx={{ fontSize: 12.5, color: '#1e293b' }}>
+                                          {row.explanation.why_flagged || row.explanation.trigger_logic || 'Trigger criteria substantiated by underlying ledger activity.'}
+                                        </Typography>
+                                      </Paper>
+                                    )}
+
+                                    {/* Evidence Transaction Snapshot (if Triggered) */}
+                                    {isTriggered && Array.isArray(row.examples) && row.examples.length > 0 && (
+                                      <Paper variant="outlined" sx={{ borderRadius: 1, overflow: 'hidden', borderColor: '#e2e8f0' }}>
+                                        <Box sx={{ px: 2, py: 1, bgcolor: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                                          <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: '#334155', textTransform: 'uppercase' }}>
+                                            Triggering Evidence Snapshot ({row.examples.length} shown)
+                                          </Typography>
+                                        </Box>
+                                        <Table size="small">
+                                          <TableHead>
+                                            <TableRow sx={{ '& th': { bgcolor: '#ffffff', fontSize: 11, fontWeight: 700, color: '#64748b' } }}>
+                                              <TableCell>Date</TableCell>
+                                              <TableCell sx={{ textAlign: 'right' }}>Amount</TableCell>
+                                              <TableCell>Type / Flow</TableCell>
+                                              <TableCell>Counterparty / Narrative</TableCell>
+                                            </TableRow>
+                                          </TableHead>
+                                          <TableBody>
+                                            {row.examples.map((ex, idx) => (
+                                              <TableRow key={idx} sx={{ '& td': { fontSize: 12, py: 0.75 } }}>
+                                                <TableCell sx={{ fontFamily: 'monospace' }}>
+                                                  {ex.date || ex.txn_date || ex.created_at || '-'}
+                                                </TableCell>
+                                                <TableCell sx={{ textAlign: 'right', fontWeight: 700, color: '#0f172a' }}>
+                                                  {formatAmount(ex.amount || ex.txn_amount)}
+                                                </TableCell>
+                                                <TableCell>{ex.type || ex.dr_cr || ex.direction || '-'}</TableCell>
+                                                <TableCell>
+                                                  {ex.party || ex.counterparty || ex.channel || ex.narrative || '-'}
+                                                </TableCell>
+                                              </TableRow>
+                                            ))}
+                                          </TableBody>
+                                        </Table>
+                                      </Paper>
+                                    )}
+                                  </Stack>
+                                </Box>
+                              </Collapse>
+                            </TableCell>
+                          </TableRow>
+                        </React.Fragment>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             )}
           </Box>
         </Paper>
       </Box>
+
+      {/* Rule Manager Modal */}
       <RuleEditor
         isOpen={showRuleManager}
         onClose={() => setShowRuleManager(false)}
@@ -574,9 +876,6 @@ const RuleEngineScreen = () => {
           }
         }}
       />
-      {showExplanationFor && (
-        <ExplanationModal open={Boolean(showExplanationFor)} onClose={() => setShowExplanationFor(null)} item={showExplanationFor} />
-      )}
     </PageContainer>
   );
 };

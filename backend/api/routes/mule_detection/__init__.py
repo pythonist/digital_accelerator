@@ -17,7 +17,7 @@ from typing import Dict, Optional
 
 # Import engines
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 duckdb, _DUCKDB_OK = safe_import("duckdb")
 try:
     from services.mule_detection.feature_engine import MuleFeatureEngine

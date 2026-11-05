@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AppBar,
@@ -21,7 +21,14 @@ import {
   Typography,
   Collapse,
   alpha,
+  Select,
 } from '@mui/material';
+import {
+  readInvestigationSettings,
+  saveInvestigationSettings,
+  subscribeInvestigationSettings,
+} from '../../investigation/utils/investigationSettings';
+import { useAppContext } from '@context/AppContext';
 import { styled, useTheme } from '@mui/material/styles';
 import {
   ArrowBack,
@@ -36,7 +43,7 @@ import {
   Person,
   Settings,
 } from '@mui/icons-material';
-import SentinelLogo from '@assets/PwC_2025_Logo.svg';
+import SentinelLogo from '@assets/PwC_2025_logo.svg';
 
 const HEADER_HEIGHT = 36;
 const DRAWER_WIDTH = 280;
@@ -96,14 +103,67 @@ const SharedWorkbenchLayout = ({
   activeEnvironment,
   onBackToTools,
   onLogout,
+  onOpenSettings,
   accentColor = '#cbd5e1',
   navShape = 'sharp',
   headerActions = null,
 }) => {
+  const { ollamaModels = [] } = useAppContext();
+  const [llmModel, setLlmModel] = useState(() => (
+    localStorage.getItem('llm_model') || readInvestigationSettings().global?.default_model || ''
+  ));
+  const availableModels = useMemo(() => {
+    const fallback = {
+      id: 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf',
+      name: 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf',
+      label: 'Local · Meta-Llama 3.1 8B',
+      provider: 'local',
+      offline: true,
+    };
+    const items = [...ollamaModels, fallback]
+      .map((item) => (typeof item === 'string' ? { id: item, name: item, label: item } : item))
+      .filter((item) => item?.id || item?.name);
+    const unique = new Map();
+    items.forEach((item) => unique.set(item.id || item.name, item));
+    return Array.from(unique.values());
+  }, [ollamaModels]);
+
+  useEffect(() => subscribeInvestigationSettings((next) => {
+    const selected = next?.global?.default_model || '';
+    setLlmModel(selected);
+    if (selected) localStorage.setItem('llm_model', selected);
+    else localStorage.removeItem('llm_model');
+  }), []);
+
+  const handleModelChange = (event) => {
+    const selected = event.target.value === 'automatic' ? '' : event.target.value;
+    const nextSettings = readInvestigationSettings();
+    saveInvestigationSettings({
+      ...nextSettings,
+      global: {
+        ...nextSettings.global,
+        default_model: selected,
+      },
+    });
+    setLlmModel(selected);
+  };
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sharedWorkbench.isCollapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sharedWorkbench.isCollapsed', isCollapsed);
+    } catch {}
+  }, [isCollapsed]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorElUser, setAnchorElUser] = useState(null);
   const isSharp = navShape === 'sharp';
@@ -516,6 +576,32 @@ const SharedWorkbenchLayout = ({
 
               {headerActions}
 
+              <Select
+                value={llmModel || 'automatic'}
+                onChange={handleModelChange}
+                size="small"
+                variant="outlined"
+                displayEmpty
+                sx={{
+                  color: 'white',
+                  height: 28,
+                  minWidth: 180,
+                  maxWidth: 260,
+                  fontSize: '0.72rem',
+                  '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
+                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.5)' },
+                  '& .MuiSvgIcon-root': { color: 'white' },
+                  mr: 1,
+                }}
+              >
+                <MenuItem value="automatic" sx={{ fontSize: '0.8rem' }}>Automatic</MenuItem>
+                {availableModels.map((model) => (
+                  <MenuItem key={model.id || model.name} value={model.id || model.name} sx={{ fontSize: '0.8rem' }}>
+                    {model.label || model.name}
+                  </MenuItem>
+                ))}
+              </Select>
+
               <Tooltip title="Help">
                 <IconButton size="small" sx={{ color: 'white', p: 0.5 }}>
                   <HelpOutline sx={{ fontSize: 18 }} />
@@ -556,7 +642,7 @@ const SharedWorkbenchLayout = ({
                   <ListItemIcon><Person fontSize="small" /></ListItemIcon>
                   <ListItemText primary="Profile" />
                 </MenuItem>
-                <MenuItem onClick={() => setAnchorElUser(null)}>
+                <MenuItem onClick={() => { setAnchorElUser(null); if (onOpenSettings) onOpenSettings(); }}>
                   <ListItemIcon><Settings fontSize="small" /></ListItemIcon>
                   <ListItemText primary="Settings" />
                 </MenuItem>

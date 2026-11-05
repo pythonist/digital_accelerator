@@ -504,7 +504,7 @@ def _build_validation_explain_fallback(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _maybe_upgrade_validation_explanation(body: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
-    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    wrapper = getattr(services, "llm_provider", None)
     if not wrapper:
         return fallback
     try:
@@ -623,7 +623,7 @@ def _build_release_summary_fallback(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _maybe_upgrade_release_summary(body: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
-    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    wrapper = getattr(services, "llm_provider", None)
     if not wrapper:
         return fallback
     try:

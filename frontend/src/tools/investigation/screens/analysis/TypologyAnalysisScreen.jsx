@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   CircularProgress,
+  Divider,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -24,6 +25,11 @@ import {
   HelpOutline as GuideIcon,
   Refresh as RefreshIcon,
   Save as SaveIcon,
+  Security as ShieldIcon,
+  Psychology as BrainIcon,
+  CheckCircleOutline as CheckIcon,
+  ArrowForward as ArrowIcon,
+  WarningAmber as WarningIcon,
 } from '@mui/icons-material';
 
 import { useAppContext } from '@context/AppContext';
@@ -56,29 +62,12 @@ const downloadJson = (fileName, payload) => {
   URL.revokeObjectURL(url);
 };
 
-const SummarySection = ({ title, children }) => (
-  <Paper variant="outlined" sx={{ p: 1.9, borderRadius: 2.5 }}>
-    <Typography sx={{ fontSize: 14.2, fontWeight: 800, color: '#0f172a' }}>{title}</Typography>
-    <Box sx={{ mt: 1 }}>{children}</Box>
-  </Paper>
-);
-
-const EmptyState = () => (
-  <Paper variant="outlined" sx={{ p: 5, borderRadius: 2.5, textAlign: 'center' }}>
-    <Typography sx={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>Select a case to begin typology intelligence assessment</Typography>
-    <Typography sx={{ mt: 1.1, fontSize: 13.2, color: '#64748b', maxWidth: 760, mx: 'auto', lineHeight: 1.8 }}>
-      This module helps investigators understand whether the visible case behavior aligns with known suspicious patterns such as mule activity, structuring, layering, funnel behavior, pass-through use, or high-risk corridor exposure.
-    </Typography>
-  </Paper>
-);
-
 const TypologyAnalysisScreen = () => {
   const { caseList, loadCaseList, activeCaseId, priorityBuckets, getFilteredCaseList } = useAppContext();
   const [selectedCaseId, setSelectedCaseId] = useState('');
   const [analysisMode, setAnalysisMode] = useState('balanced');
   const [usePriorityFilter, setUsePriorityFilter] = useState(true);
-  const [centerTab, setCenterTab] = useState('summary');
-  const [rightTab, setRightTab] = useState('snapshot');
+  const [activeTab, setActiveTab] = useState('summary');
   const [guideOpen, setGuideOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -88,7 +77,7 @@ const TypologyAnalysisScreen = () => {
   const [analystNotes, setAnalystNotes] = useState('');
   const [feedback, setFeedback] = useState({ open: false, severity: 'success', message: '' });
 
-  const displayCases = usePriorityFilter && priorityBuckets?.enabled ? getFilteredCaseList() : (caseList || []);
+  const displayCases = usePriorityFilter && priorityBuckets?.enabled ? getFilteredCaseList() : caseList || [];
 
   useEffect(() => {
     loadCaseList();
@@ -100,13 +89,17 @@ const TypologyAnalysisScreen = () => {
     if (preferred) setSelectedCaseId(preferred);
   }, [activeCaseId, displayCases, selectedCaseId]);
 
-  const caseOptions = useMemo(() => (displayCases || []).map((item, index) => {
-    const caseId = String(item.case_id || item.caseid || item.id || `CASE-${index}`);
-    return {
-      value: caseId,
-      label: `${caseId}${item.customer_id ? ` | ${item.customer_id}` : ''}`,
-    };
-  }), [displayCases]);
+  const caseOptions = useMemo(
+    () =>
+      (displayCases || []).map((item, index) => {
+        const caseId = String(item.case_id || item.caseid || item.id || `CASE-${index}`);
+        return {
+          value: caseId,
+          label: `${caseId}${item.customer_id ? ` | ${item.customer_id}` : ''}`,
+        };
+      }),
+    [displayCases]
+  );
 
   const loadHistory = async (caseId) => {
     if (!caseId) return;
@@ -148,7 +141,8 @@ const TypologyAnalysisScreen = () => {
 
   useEffect(() => {
     if (!selectedCaseId) return;
-    apiClient.getSavedTypologyAssessment(selectedCaseId)
+    apiClient
+      .getSavedTypologyAssessment(selectedCaseId)
       .then(async (response) => {
         if (response.saved?.payload) {
           setAssessment(response.saved.payload);
@@ -187,198 +181,425 @@ const TypologyAnalysisScreen = () => {
     }
   };
 
+  const snapshot = assessment?.case_snapshot || {};
+
   return (
     <PageContainer
       title="Typology Intelligence"
-      subtitle="Assess whether visible case behavior aligns with known AML and fraud patterns using explainable pattern scoring and supporting evidence."
+      subtitle="Assess whether visible case behavior aligns with known AML and fraud patterns using explainable pattern scoring"
       breadcrumbs={['Analysis', 'Typology Intelligence']}
       actions={(
-        <Stack direction="row" spacing={1.1}>
-          <Button size="small" variant="outlined" startIcon={<GuideIcon />} onClick={() => setGuideOpen(true)}>Guide</Button>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={() => assessment && downloadJson(`typology_intelligence_${selectedCaseId}.json`, assessment)} disabled={!assessment}>Export</Button>
-          <Button size="small" variant="outlined" startIcon={<AddToReportIcon />} onClick={() => handleSave(true)} disabled={!assessment || saving}>Add to Report</Button>
-          <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={() => runAssessment()} disabled={!selectedCaseId || loading}>Re-run Analysis</Button>
-          <Button size="small" variant="contained" startIcon={<SaveIcon />} onClick={() => handleSave(false)} disabled={!assessment || saving}>Save Assessment</Button>
+        <Stack direction="row" spacing={1.25}>
+          <Button size="small" variant="text" startIcon={<GuideIcon />} onClick={() => setGuideOpen(true)} sx={{ color: '#475569', fontWeight: 700 }}>
+            Guide
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={() => assessment && downloadJson(`typology_intelligence_${selectedCaseId}.json`, assessment)}
+            disabled={!assessment}
+            sx={{ fontWeight: 600, borderRadius: 1 }}
+          >
+            Export
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<AddToReportIcon />}
+            onClick={() => handleSave(true)}
+            disabled={!assessment || saving}
+            sx={{ fontWeight: 600, borderRadius: 1 }}
+          >
+            Add to Report
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={() => runAssessment()}
+            disabled={!selectedCaseId || loading}
+            sx={{ fontWeight: 600, borderRadius: 1 }}
+          >
+            Re-run
+          </Button>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<SaveIcon />}
+            onClick={() => handleSave(false)}
+            disabled={!assessment || saving}
+            sx={{ fontWeight: 700, borderRadius: 1, bgcolor: '#0f172a', '&:hover': { bgcolor: '#1e293b' } }}
+          >
+            Save Assessment
+          </Button>
         </Stack>
       )}
     >
-      <Stack spacing={2.5}>
+      <Stack spacing={2}>
+        {/* Consolidated Executive Telemetry Strip */}
         <TypologySummaryBar summary={assessment?.summary_bar} />
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '300px minmax(0, 1fr) 340px' }, gap: 2 }}>
+        {/* 2-Column High-Density Workbench */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '300px minmax(0, 1fr)' }, gap: 2 }}>
+          {/* LEFT COLUMN: Controls & Compact Case Snapshot */}
           <Stack spacing={2}>
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-              <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>Assessment Controls</Typography>
-              <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+            {/* Assessment Controls */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 1.5,
+                bgcolor: '#ffffff',
+                borderColor: '#e2e8f0',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+              }}
+            >
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 1.5 }}>
+                Assessment Controls
+              </Typography>
+
+              <Stack spacing={1.5}>
                 <FormControl fullWidth size="small">
-                  <InputLabel>Case</InputLabel>
-                  <Select value={selectedCaseId} label="Case" onChange={(event) => setSelectedCaseId(event.target.value)}>
+                  <InputLabel>Case Record</InputLabel>
+                  <Select
+                    value={selectedCaseId}
+                    label="Case Record"
+                    onChange={(event) => setSelectedCaseId(event.target.value)}
+                    sx={{ borderRadius: 1, fontSize: 13, bgcolor: '#f8fafc' }}
+                  >
                     {caseOptions.map((item) => (
                       <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
 
-                {priorityBuckets?.enabled ? (
+                {priorityBuckets?.enabled && (
                   <FormControlLabel
                     control={<Checkbox checked={usePriorityFilter} onChange={(event) => setUsePriorityFilter(event.target.checked)} size="small" />}
-                    label={<Typography sx={{ fontSize: 12.4, fontWeight: 600 }}>Use current case bucket filter</Typography>}
+                    label={<Typography sx={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Use priority bucket filter</Typography>}
                   />
-                ) : null}
+                )}
 
                 <FormControl fullWidth size="small">
                   <InputLabel>Analysis Mode</InputLabel>
-                  <Select value={analysisMode} label="Analysis Mode" onChange={(event) => setAnalysisMode(event.target.value)}>
+                  <Select
+                    value={analysisMode}
+                    label="Analysis Mode"
+                    onChange={(event) => setAnalysisMode(event.target.value)}
+                    sx={{ borderRadius: 1, fontSize: 13, bgcolor: '#f8fafc' }}
+                  >
                     {ANALYSIS_MODES.map((mode) => (
                       <MenuItem key={mode.value} value={mode.value}>{mode.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
 
-                <Button variant="contained" onClick={() => runAssessment()} disabled={!selectedCaseId || loading}>
-                  {loading ? 'Running Assessment...' : 'Run Typology Assessment'}
+                <Button
+                  variant="contained"
+                  fullWidth
+                  onClick={() => runAssessment()}
+                  disabled={!selectedCaseId || loading}
+                  sx={{
+                    fontWeight: 700,
+                    borderRadius: 1,
+                    bgcolor: '#0f172a',
+                    '&:hover': { bgcolor: '#1e293b' },
+                    textTransform: 'none',
+                    py: 0.8,
+                  }}
+                >
+                  {loading ? 'Evaluating Patterns...' : 'Run Typology Assessment'}
                 </Button>
               </Stack>
             </Paper>
 
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5 }}>
-              <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>What this module helps answer</Typography>
-              <Stack spacing={0.8} sx={{ mt: 1.3 }}>
-                {[
-                  'What suspicious behavioral pattern is visible in the case',
-                  'Why the pattern is being detected',
-                  'What evidence supports or weakens that view',
-                  'How strongly the current case aligns to known typologies',
-                  'What the investigator should verify next',
-                ].map((item) => (
-                  <Typography key={item} sx={{ fontSize: 12.6, color: '#334155', lineHeight: 1.55 }}>{item}</Typography>
-                ))}
+            {/* Integrated Case Snapshot (No nested floating squares) */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                borderRadius: 1.5,
+                bgcolor: '#ffffff',
+                borderColor: '#e2e8f0',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+              }}
+            >
+              <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 1.5 }}>
+                Entity Profile Snapshot
+              </Typography>
+
+              <Stack spacing={1.25}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Case ID</Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
+                    {snapshot.case_id || selectedCaseId || '-'}
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Customer</Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a' }}>
+                    {snapshot.customer || snapshot.customer_id || '-'}
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Account ID</Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a', fontFamily: 'monospace' }}>
+                    {snapshot.account_id || '-'}
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Suspicious Volume</Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#0f172a' }}>
+                    {snapshot.total_suspicious_amount != null
+                      ? `₹${Number(snapshot.total_suspicious_amount).toLocaleString('en-IN')}`
+                      : '-'}
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Active Alerts</Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: snapshot.alert_count > 0 ? '#dc2626' : '#16a34a' }}>
+                    {snapshot.alert_count || 0} alert(s)
+                  </Typography>
+                </Box>
+                <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>Baseline Risk</Typography>
+                  <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>
+                    {snapshot.severity || 'Low'} ({snapshot.risk_score || 0})
+                  </Typography>
+                </Box>
               </Stack>
             </Paper>
           </Stack>
 
-          <Stack spacing={2}>
-            <Paper variant="outlined" sx={{ borderRadius: 2.5, overflow: 'hidden' }}>
-              <Tabs value={centerTab} onChange={(_, value) => setCenterTab(value)} sx={{ px: 1.5, pt: 1 }}>
-                <Tab value="summary" label="Summary" />
-                <Tab value="breakdown" label="Typology Breakdown" />
-                <Tab value="evidence" label="Evidence" />
+          {/* RIGHT COLUMN: Seamless Studio Workbench */}
+          <Paper
+            variant="outlined"
+            sx={{
+              borderRadius: 1.5,
+              bgcolor: '#ffffff',
+              borderColor: '#e2e8f0',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+              minHeight: 580,
+            }}
+          >
+            {/* Header Tabs Bar */}
+            <Box sx={{ borderBottom: '1px solid #e2e8f0', bgcolor: '#f8fafc', px: 2 }}>
+              <Tabs
+                value={activeTab}
+                onChange={(_, val) => setActiveTab(val)}
+                sx={{
+                  minHeight: 44,
+                  '& .MuiTab-root': {
+                    minHeight: 44,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    textTransform: 'none',
+                    py: 1,
+                  },
+                }}
+              >
+                <Tab value="summary" label="Assessment Brief" />
+                <Tab value="breakdown" label="Typology Matrix" />
+                <Tab value="evidence" label="Forensic Evidence" />
                 <Tab value="signals" label="Supporting Signals" />
                 <Tab value="guidance" label="Investigator Guidance" />
-                <Tab value="history" label="History" />
+                <Tab value="notes" label="Analyst Notes" />
+                <Tab value="history" label="Audit History" />
               </Tabs>
-            </Paper>
+            </Box>
 
-            {!selectedCaseId && !loading ? <EmptyState /> : null}
-            {loading ? (
-              <Paper variant="outlined" sx={{ p: 5, borderRadius: 2.5, textAlign: 'center' }}>
-                <CircularProgress size={34} />
-                <Typography sx={{ mt: 1.5, fontSize: 13.5, color: '#475569' }}>Running typology intelligence assessment...</Typography>
-              </Paper>
-            ) : null}
+            {/* Studio Canvas Area */}
+            <Box sx={{ p: 3, flex: 1, overflowY: 'auto' }}>
+              {loading ? (
+                <Box sx={{ py: 10, textAlign: 'center' }}>
+                  <CircularProgress size={32} sx={{ color: '#0f172a', mb: 2 }} />
+                  <Typography sx={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>
+                    Analyzing Behavioral Patterns...
+                  </Typography>
+                  <Typography sx={{ fontSize: 12, color: '#64748b', mt: 0.5 }}>
+                    Evaluating rapid movement, structuring heuristics, mule retention ratios, and corridor exposures.
+                  </Typography>
+                </Box>
+              ) : !assessment ? (
+                <Box sx={{ py: 10, textAlign: 'center' }}>
+                  <BrainIcon sx={{ fontSize: 44, color: '#cbd5e1', mb: 1.5 }} />
+                  <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>
+                    Ready for Typology Intelligence
+                  </Typography>
+                  <Typography sx={{ fontSize: 12.5, color: '#64748b', maxWidth: 480, mx: 'auto', mt: 0.5 }}>
+                    Select an active investigation case and run assessment to evaluate transaction behavioral alignment.
+                  </Typography>
+                </Box>
+              ) : (
+                <>
+                  {/* TAB 1: Unified Assessment Brief (Zero nested square boxes) */}
+                  {activeTab === 'summary' && (
+                    <Stack spacing={3}>
+                      {/* Section 1: Executive Assessment Narrative */}
+                      <Box>
+                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 1 }}>
+                          Executive Synthesis
+                        </Typography>
+                        <Typography sx={{ fontSize: 13.5, color: '#1e293b', lineHeight: 1.75 }}>
+                          {assessment.summary_sections?.assessment_overview ||
+                            'Assessment synthesized based on current transaction, alert, and counterparty evidence.'}
+                        </Typography>
+                      </Box>
+                      <Divider sx={{ borderColor: '#f1f5f9' }} />
 
-            {!loading && assessment ? (
-              <>
-                {centerTab === 'summary' ? (
-                  <Stack spacing={1.4}>
-                    <SummarySection title="Typology Assessment Overview">
-                      <Typography sx={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{assessment.summary_sections?.assessment_overview}</Typography>
-                    </SummarySection>
-                    <SummarySection title="Primary Typology">
-                      <Typography sx={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{assessment.summary_sections?.primary_typology}</Typography>
-                    </SummarySection>
-                    <SummarySection title="Supporting Typologies">
-                      <Typography sx={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{assessment.summary_sections?.supporting_typologies}</Typography>
-                    </SummarySection>
-                    <SummarySection title="Why this pattern was detected">
-                      <Typography sx={{ fontSize: 13, color: '#334155', lineHeight: 1.7 }}>{assessment.summary_sections?.why_detected}</Typography>
-                    </SummarySection>
-                    <SummarySection title="Key evidence and signals">
-                      <Stack spacing={0.65}>
-                        {(assessment.summary_sections?.key_evidence_and_signals || []).map((item, index) => (
-                          <Typography key={`signal-${index}`} sx={{ fontSize: 12.7, color: '#334155', lineHeight: 1.6 }}>{item}</Typography>
-                        ))}
-                      </Stack>
-                    </SummarySection>
-                    <SummarySection title="Recommended next steps">
-                      <Stack spacing={0.65}>
-                        {(assessment.summary_sections?.recommended_next_steps || []).map((item, index) => (
-                          <Typography key={`step-${index}`} sx={{ fontSize: 12.7, color: '#334155', lineHeight: 1.6 }}>{item}</Typography>
-                        ))}
-                      </Stack>
-                    </SummarySection>
-                    <SummarySection title="Confidence and limitations">
-                      <Stack spacing={0.65}>
-                        {(assessment.summary_sections?.confidence_and_limitations || []).map((item, index) => (
-                          <Typography key={`limit-${index}`} sx={{ fontSize: 12.7, color: '#334155', lineHeight: 1.6 }}>{item}</Typography>
-                        ))}
-                      </Stack>
-                    </SummarySection>
-                  </Stack>
-                ) : null}
-                {centerTab === 'breakdown' ? <TypologyBreakdownTable rows={assessment.typology_rows} /> : null}
-                {centerTab === 'evidence' ? <TypologyEvidencePanel rows={assessment.typology_rows} /> : null}
-                {centerTab === 'signals' ? <SupportingSignalsPanel groups={assessment.supporting_signals} /> : null}
-                {centerTab === 'guidance' ? <InvestigatorGuidancePanel guidance={assessment.investigator_guidance} /> : null}
-                {centerTab === 'history' ? (
-                  historyLoading ? (
-                    <Paper variant="outlined" sx={{ p: 3, borderRadius: 2.5 }}><CircularProgress size={26} /></Paper>
-                  ) : (
-                    <TypologyAssessmentHistory rows={historyRows} />
-                  )
-                ) : null}
-              </>
-            ) : null}
-          </Stack>
+                      {/* Section 2: Pattern Identification & Detection Rationale */}
+                      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
+                        <Box>
+                          <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 0.75 }}>
+                            Primary Identified Typology
+                          </Typography>
+                          <Typography sx={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', mb: 0.5 }}>
+                            {assessment.summary_sections?.primary_typology || 'Standard Profile'}
+                          </Typography>
+                          <Typography sx={{ fontSize: 12.5, color: '#475569', lineHeight: 1.6 }}>
+                            Supporting: {assessment.summary_sections?.supporting_typologies || 'None Detected'}
+                          </Typography>
+                        </Box>
 
-          <Stack spacing={2}>
-            <Paper variant="outlined" sx={{ borderRadius: 2.5, overflow: 'hidden' }}>
-              <Tabs value={rightTab} onChange={(_, value) => setRightTab(value)} sx={{ px: 1.5, pt: 1 }}>
-                <Tab value="snapshot" label="Case Snapshot" />
-                <Tab value="notes" label="Notes" />
-                <Tab value="report" label="Report Snippets" />
-                <Tab value="limitations" label="Limitations" />
-              </Tabs>
-            </Paper>
+                        <Box>
+                          <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 0.75 }}>
+                            Detection Rationale
+                          </Typography>
+                          <Typography sx={{ fontSize: 12.5, color: '#334155', lineHeight: 1.65 }}>
+                            {assessment.summary_sections?.why_detected ||
+                              'Behavioral signals aligned with known suspicious typology rules.'}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Divider sx={{ borderColor: '#f1f5f9' }} />
 
-            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2.5, minHeight: 420 }}>
-              {rightTab === 'snapshot' ? <TypologyCaseSnapshot snapshot={assessment?.case_snapshot} /> : null}
-              {rightTab === 'notes' ? (
-                <Stack spacing={1.2}>
-                  <Typography sx={{ fontSize: 14.4, fontWeight: 800, color: '#0f172a' }}>Assessment Notes</Typography>
-                  <TextField
-                    fullWidth
-                    multiline
-                    minRows={15}
-                    value={analystNotes}
-                    onChange={(event) => setAnalystNotes(event.target.value)}
-                    placeholder="Capture typology review notes, validation comments, or escalation rationale."
-                  />
-                </Stack>
-              ) : null}
-              {rightTab === 'report' ? <TypologyReportSnippetsPanel snippets={assessment?.report_snippets} /> : null}
-              {rightTab === 'limitations' ? (
-                <Stack spacing={0.8}>
-                  {(assessment?.summary_sections?.confidence_and_limitations || [assessment?.limitations_note]).filter(Boolean).map((item, index) => (
-                    <Typography key={`limitation-${index}`} sx={{ fontSize: 12.7, color: '#334155', lineHeight: 1.65 }}>{item}</Typography>
-                  ))}
-                </Stack>
-              ) : null}
-            </Paper>
-          </Stack>
+                      {/* Section 3: Key Evidence Signals */}
+                      <Box>
+                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 1.25 }}>
+                          Substantiating Forensic Signals
+                        </Typography>
+                        <Stack spacing={0.85}>
+                          {(assessment.summary_sections?.key_evidence_and_signals || []).map((item, index) => (
+                            <Stack key={`signal-${index}`} direction="row" spacing={1.25} alignItems="flex-start">
+                              <CheckIcon sx={{ fontSize: 16, color: '#16a34a', mt: 0.3, flexShrink: 0 }} />
+                              <Typography sx={{ fontSize: 12.8, color: '#1e293b', lineHeight: 1.5 }}>
+                                {item}
+                              </Typography>
+                            </Stack>
+                          ))}
+                        </Stack>
+                      </Box>
+                      <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                      {/* Section 4: Recommended Next Steps */}
+                      <Box>
+                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.6, mb: 1.25 }}>
+                          Recommended Investigative Next Steps
+                        </Typography>
+                        <Stack spacing={0.85}>
+                          {(assessment.summary_sections?.recommended_next_steps || []).map((item, index) => (
+                            <Stack key={`step-${index}`} direction="row" spacing={1.25} alignItems="flex-start">
+                              <ArrowIcon sx={{ fontSize: 15, color: '#2563eb', mt: 0.3, flexShrink: 0 }} />
+                              <Typography sx={{ fontSize: 12.8, color: '#1e293b', lineHeight: 1.5 }}>
+                                {item}
+                              </Typography>
+                            </Stack>
+                          ))}
+                        </Stack>
+                      </Box>
+                      <Divider sx={{ borderColor: '#f1f5f9' }} />
+
+                      {/* Section 5: Confidence & Limitations Note */}
+                      <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
+                        <Typography sx={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, mb: 0.75 }}>
+                          Confidence & Data Governance Scope
+                        </Typography>
+                        <Stack spacing={0.5}>
+                          {(assessment.summary_sections?.confidence_and_limitations || []).map((item, index) => (
+                            <Typography key={`limit-${index}`} sx={{ fontSize: 12, color: '#64748b', lineHeight: 1.55 }}>
+                              • {item}
+                            </Typography>
+                          ))}
+                        </Stack>
+                      </Box>
+                    </Stack>
+                  )}
+
+                  {/* TAB 2: Typology Matrix & Breakdown Table */}
+                  {activeTab === 'breakdown' && <TypologyBreakdownTable rows={assessment.typology_rows} />}
+
+                  {/* TAB 3: Forensic Evidence Panel */}
+                  {activeTab === 'evidence' && <TypologyEvidencePanel rows={assessment.typology_rows} />}
+
+                  {/* TAB 4: Supporting Signals */}
+                  {activeTab === 'signals' && <SupportingSignalsPanel groups={assessment.supporting_signals} />}
+
+                  {/* TAB 5: Investigator Guidance */}
+                  {activeTab === 'guidance' && <InvestigatorGuidancePanel guidance={assessment.investigator_guidance} />}
+
+                  {/* TAB 6: Analyst Notes */}
+                  {activeTab === 'notes' && (
+                    <Stack spacing={1.5}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                        Investigator Review Notes & Assessment Rationale
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        minRows={14}
+                        value={analystNotes}
+                        onChange={(e) => setAnalystNotes(e.target.value)}
+                        placeholder="Document observations, customer business validation, counterparty justifications, or escalation decisions..."
+                        sx={{
+                          bgcolor: '#f8fafc',
+                          borderRadius: 1,
+                          '& textarea': { fontSize: 13 },
+                        }}
+                      />
+                      <Button
+                        variant="contained"
+                        onClick={() => handleSave(false)}
+                        disabled={saving}
+                        sx={{ alignSelf: 'flex-start', fontWeight: 700, borderRadius: 1, bgcolor: '#0f172a', textTransform: 'none' }}
+                      >
+                        {saving ? 'Saving Notes...' : 'Save Notes'}
+                      </Button>
+                    </Stack>
+                  )}
+
+                  {/* TAB 7: Historical Audit Log */}
+                  {activeTab === 'history' && (
+                    historyLoading ? (
+                      <Box sx={{ py: 6, textAlign: 'center' }}><CircularProgress size={24} /></Box>
+                    ) : (
+                      <TypologyAssessmentHistory rows={historyRows} />
+                    )
+                  )}
+                </>
+              )}
+            </Box>
+          </Paper>
         </Box>
-
-        {assessment && assessment.primary_typology?.confidence === 'Limited Evidence' ? (
-          <Alert severity="info" sx={{ border: '1px solid #bfdbfe', backgroundColor: '#eff6ff' }}>
-            Limited evidence is available for the current case. Treat this typology assessment as investigation guidance rather than a decision-ready conclusion.
-          </Alert>
-        ) : null}
       </Stack>
 
       <TypologyGuideDrawer open={guideOpen} onClose={() => setGuideOpen(false)} />
 
-      <Snackbar open={feedback.open} autoHideDuration={4500} onClose={() => setFeedback((previous) => ({ ...previous, open: false }))}>
-        <Alert severity={feedback.severity} onClose={() => setFeedback((previous) => ({ ...previous, open: false }))}>
+      <Snackbar open={feedback.open} autoHideDuration={4500} onClose={() => setFeedback((prev) => ({ ...prev, open: false }))}>
+        <Alert severity={feedback.severity} onClose={() => setFeedback((prev) => ({ ...prev, open: false }))}>
           {feedback.message}
         </Alert>
       </Snackbar>

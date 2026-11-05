@@ -93,34 +93,9 @@ def check_auth():
 
 @auth_bp.route("/register/init", methods=["POST"])
 def register_init():
-    data = request.json or {}
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password") or ""
-
-    if not email:
-        return jsonify({"error": "Email is required"}), 400
-    if not password:
-        return jsonify({"error": "Password is required"}), 400
-
-    if identity_store.get_user_by_email(email):
-        return jsonify({"error": "User already registered"}), 400
-
-    tenant_id, tenant_name, _domain = identity_store.upsert_tenant_from_email(email)
-    if not tenant_id:
-        return jsonify({"error": "Invalid email format. Please use a valid email address."}), 400
-
-    role = "TENANT_ADMIN" if identity_store.count_users_in_tenant(tenant_id) == 0 else "TENANT_USER"
-    user = identity_store.create_user_with_hash(email, identity_store.hash_password(password), tenant_id, role)
-
-    return jsonify(
-        {
-            "success": True,
-            "tenant_name": tenant_name,
-            "is_first_user": role == "TENANT_ADMIN",
-            "user": {"username": user.get("email"), "role": user.get("role"), "tenant_id": user.get("tenant_id")},
-            "message": f"Account created successfully as {user.get('role')}",
-        }
-    )
+    return jsonify({
+        "error": "Registration is disabled. Please use the pre-configured credentials: admin@fccanalytics.com (password: admin)"
+    }), 400
 
 
 @auth_bp.route("/login", methods=["POST"])

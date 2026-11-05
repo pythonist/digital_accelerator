@@ -49,7 +49,7 @@ DEFAULT_ALLOW_DOWNLOAD = _as_bool(
     default=False,
 )
 DEFAULT_THREADS = int(os.getenv("LLM_THREADS") or os.getenv("GPT4ALL_THREADS") or "0") or None
-DEFAULT_CTX = int(os.getenv("LLM_CONTEXT_WINDOW") or os.getenv("GPT4ALL_CONTEXT_WINDOW") or "2048")
+DEFAULT_CTX = int(os.getenv("LLM_CONTEXT_WINDOW") or os.getenv("GPT4ALL_CONTEXT_WINDOW") or "8192")
 DEFAULT_DEVICE = os.getenv("LLM_DEVICE") or os.getenv("GPT4ALL_DEVICE") or "cpu"
 REQUEST_TIMEOUT = int(os.getenv("LLM_TIMEOUT") or "120")
 DEFAULT_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS") or os.getenv("GPT4ALL_MAX_TOKENS") or "320")
@@ -62,8 +62,13 @@ def _bounded_tokens(requested: Optional[int]) -> int:
     except Exception:
         value = DEFAULT_MAX_TOKENS
     value = max(32, value)
-    if DEFAULT_TOKEN_CAP > 0:
-        value = min(value, DEFAULT_TOKEN_CAP)
+    # The agentic workflow explicitly asks for a larger complete JSON/report
+    # response; regular interactive calls keep their configured small cap.
+    cap = DEFAULT_TOKEN_CAP
+    if value >= 1000:
+        cap = max(cap, int(os.getenv("AGENTIC_LLM_TOKEN_CAP") or "4096"))
+    if cap > 0:
+        value = min(value, cap)
     return value
 
 
@@ -256,9 +261,18 @@ class GPT4AllWrapper:
                     composed = self._build_manual_prompt(prompt, system_prompt=system_prompt)
                     text = llm.generate(composed, max_tokens=max_tokens, temp=temperature)
 
+            clean_text = str(text or "").strip()
+            if clean_text.startswith("ERROR:") or clean_text.startswith("Exception:"):
+                return {
+                    "success": False,
+                    "error": clean_text,
+                    "provider": self.provider_name,
+                    "latency_sec": round(time.time() - start, 2),
+                }
+
             return {
                 "success": True,
-                "response": str(text or "").strip(),
+                "response": clean_text,
                 "model": resolved_model,
                 "provider": self.provider_name,
                 "latency_sec": round(time.time() - start, 2),
@@ -271,6 +285,32 @@ class GPT4AllWrapper:
                 "provider": self.provider_name,
                 "latency_sec": round(time.time() - start, 2),
             }
+
+    def stream_generate(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.5,
+        max_tokens: int = 800,
+    ):
+        """Yield generated text chunks as they are produced by llama.cpp."""
+        try:
+            max_tokens = _bounded_tokens(max_tokens)
+            llm, _ = self._ensure_model(model)
+            composed = self._build_manual_prompt(prompt, system_prompt=system_prompt)
+            with self._lock:
+                stream = llm.generate(
+                    composed,
+                    max_tokens=max_tokens,
+                    temp=temperature,
+                    streaming=True,
+                )
+                for chunk in stream:
+                    if chunk:
+                        yield str(chunk)
+        except Exception as exc:
+            raise RuntimeError(str(exc)) from exc
 
     def chat(
         self,

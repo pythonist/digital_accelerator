@@ -1,5 +1,17 @@
 import os
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass
+
 import traceback
 import subprocess
 import time
@@ -9,36 +21,15 @@ from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from security.dotenv_loader import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=False)
-
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_VENV_DIR = os.path.join(_BASE_DIR, ".venv")
-_VENV_PY = (
-    os.path.join(_VENV_DIR, "Scripts", "python.exe")
-    if os.name == "nt"
-    else os.path.join(_VENV_DIR, "bin", "python")
-)
-_REQ = os.path.join(_BASE_DIR, "requirements.txt")
-_AUTO_BOOTSTRAP_VENV = os.getenv("AML_AUTO_BOOTSTRAP_VENV", "1") == "1"
-
-if __name__ == "__main__" and _AUTO_BOOTSTRAP_VENV and os.path.exists(_VENV_PY):
-    exe = os.path.abspath(sys.executable).lower()
-    vexe = os.path.abspath(_VENV_PY).lower()
-    if exe != vexe:
-        os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
-
-if __name__ == "__main__" and _AUTO_BOOTSTRAP_VENV and (not os.path.exists(_VENV_PY)) and os.path.exists(_REQ):
-    subprocess.check_call([sys.executable, "-m", "venv", _VENV_DIR])
-    subprocess.check_call([_VENV_PY, "-m", "pip", "install", "-r", _REQ])
-    os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
 
 from config import CALIBRATION_DB_PATH
 from core.module_registry import REGISTRY
 from core.compat import log_startup_compat
 from config_btsy import configure_btsy_app
+from services.cloud_state_sync import restore_cloud_state, schedule_cloud_state_sync
 
 from api.middleware.tenant_context import tenant_context_middleware
 from security.app_secrets import get_app_secret_key
@@ -73,6 +64,16 @@ def _setup_cors(app: Flask) -> None:
         allow_headers=["Content-Type", "Authorization", "X-Environment-ID"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     )
+
+
+def _setup_frontend_cache_policy(app: Flask) -> None:
+    """Prevent browsers from keeping an outdated SPA entrypoint after a build."""
+    @app.after_request
+    def _frontend_entry_no_cache(response):
+        if request.path == "/" or request.path.endswith("/index.html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
 
 
 def _iter_routes(app: Flask):
@@ -170,7 +171,7 @@ def _register_blueprints(app: Flask, backend_profile: str):
         from api.routes.reports import reports_bp
         from api.routes.typology import typology_bp
         from api.routes.case_facts import case_facts_bp
-        from api.routes.calibration import calibration_bp
+        # from api.routes.calibration import calibration_bp
         from api.tools.btsy.behaviour_reconstruction.routes import behaviour_reconstruction_bp
 
         app.register_blueprint(admin_bp, url_prefix="/api")
@@ -191,6 +192,9 @@ def _register_blueprints(app: Flask, backend_profile: str):
         app.register_blueprint(typology_bp, url_prefix="/api/v2")
         app.register_blueprint(case_facts_bp, url_prefix="/api/v2")
 
+        from api.routes.agentic import agentic_bp
+        app.register_blueprint(agentic_bp)
+
         try:
             from api.routes.mule_detection import mule_bp
 
@@ -207,6 +211,7 @@ def _register_blueprints(app: Flask, backend_profile: str):
 
             app.register_blueprint(btsy_bp, url_prefix="/api/btsy")
             status["btsy"] = True
+
         except Exception as e:
             print("BTSY module import failed:", repr(e))
             traceback.print_exc()
@@ -220,11 +225,12 @@ def _register_blueprints(app: Flask, backend_profile: str):
         except Exception:
             status["connectors"] = False
 
-        if calibration_bp:
-            app.register_blueprint(calibration_bp, url_prefix="/api/v2/calibration")
-            status["calibration"] = True
-        else:
-            status["calibration"] = False
+        # if calibration_bp:
+        #     app.register_blueprint(calibration_bp, url_prefix="/api/v2/calibration")
+        #     status["calibration"] = True
+        # else:
+        #     status["calibration"] = False
+        status["calibration"] = False
 
     try:
         from api.routes.mlops import mlops_bp
@@ -356,6 +362,8 @@ def _register_blueprints(app: Flask, backend_profile: str):
 def create_app() -> Flask:
     backend_profile = _normalize_backend_profile(os.getenv("AML_BACKEND_PROFILE", "full"))
 
+    restore_cloud_state()
+
     app = Flask(__name__, static_folder=DIST_DIR)
     app.secret_key = get_app_secret_key()
     app.config["AML_BACKEND_PROFILE"] = backend_profile
@@ -366,6 +374,7 @@ def create_app() -> Flask:
 
     tenant_context_middleware(app)
     _setup_cors(app)
+    _setup_frontend_cache_policy(app)
 
     from api.service_locator import services
 
@@ -385,6 +394,10 @@ def create_app() -> Flask:
         return jsonify({"error": "Internal Server Error"}), 500
 
     @app.before_request
+    def _set_llm_model_context():
+        g.llm_model = request.headers.get("X-LLM-Model")
+
+    @app.before_request
     def _trace_api_request_start():
         path = str(request.path or "")
         if not any(path.startswith(prefix) for prefix in REQUEST_TRACE_PREFIXES):
@@ -396,6 +409,12 @@ def create_app() -> Flask:
     @app.after_request
     def _trace_api_request_complete(response):
         path = str(request.path or "")
+        if (
+            path.startswith("/api")
+            and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and response.status_code < 400
+        ):
+            schedule_cloud_state_sync(f"{request.method} {path}")
         if not any(path.startswith(prefix) for prefix in REQUEST_TRACE_PREFIXES):
             return response
         started_at = getattr(g, "_request_trace_started_at", None)
@@ -414,7 +433,12 @@ def create_app() -> Flask:
         file_path = os.path.join(app.static_folder, path)
         if path and os.path.exists(file_path):
             return send_from_directory(app.static_folder, path)
-        return send_from_directory(app.static_folder, "index.html")
+        if path and (path.startswith("assets/") or os.path.splitext(path)[1]):
+            return jsonify({"error": "Static asset not found"}), 404
+        response = send_from_directory(app.static_folder, "index.html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        return response
 
     @app.route("/health")
     def health():

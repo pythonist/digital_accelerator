@@ -794,9 +794,10 @@ const Spinner = ({ label }) => (
 
 const Card = ({ children, sx = {}, accent }) => (
   <Paper variant="outlined" sx={{
-    p: 2, borderRadius: 0,
-    borderColor: accent === 'orange' ? T.orange : accent === 'green' ? T.doneBorder
-               : accent === 'red'    ? T.dangerBorder : T.border,
+    p: 2, borderRadius: 2,
+    border: accent === 'orange' ? `1px solid ${T.orange}` : accent === 'green' ? `1px solid ${T.doneBorder}`
+               : accent === 'red'    ? `1px solid ${T.dangerBorder}` : 'none',
+    boxShadow: accent ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
     bgcolor: 'white', ...sx,
   }}>
     {children}
@@ -814,7 +815,7 @@ const SLabel = ({ children, sx = {} }) => (
 
 const OBtn = ({ children, onClick, disabled, icon, variant = 'contained', size = 'small', sx = {} }) => (
   <Button size={size} variant={variant} startIcon={icon} onClick={onClick} disabled={canDisable(disabled)} sx={{
-    textTransform: 'none', fontWeight: 600, borderRadius: 0, boxShadow: 'none',
+    textTransform: 'none', fontWeight: 600, borderRadius: 1.5, boxShadow: 'none',
     ...(variant === 'contained'
       ? { bgcolor: T.orange, color: 'white',
           '&:hover': { bgcolor: T.orangeHov },
@@ -842,7 +843,7 @@ const StepChip = ({ step, idx, total, onRemove, onMove }) => {
     <Box sx={{
       display: 'flex', alignItems: 'center', gap: 1,
       px: 1.5, py: 0.9, borderRadius: 1.5,
-      bgcolor: m.bg, border: `1px solid ${T.border}`,
+      bgcolor: m.bg, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       transition: 'box-shadow 0.1s',
       '&:hover': { boxShadow: '0 2px 6px rgba(0,0,0,0.07)' },
     }}>
@@ -1195,7 +1196,7 @@ const PipelineSidebar = ({
                 <Box key={p.pipeline_id}
                   onClick={() => { handleLoadPipeline(p.pipeline_id); }}
                   sx={{ px: 1.25, py: 0.75, mb: 0.5, bgcolor: 'white', borderRadius: 1.5,
-                         border: `1px solid ${T.border}`, cursor: 'pointer',
+                         border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', cursor: 'pointer',
                          '&:hover': { borderColor: T.orange } }}>
                   <Typography sx={{ fontSize: 12, fontWeight: 600 }}>{p.name}</Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
@@ -1235,7 +1236,43 @@ const StepForm = ({
     degree: '2', pairsRaw: '',
     groupBy: '', groupTarget: '', agg: 'mean',
     ordinalOrder: 'low,medium,high',
+    columnA: '', columnB: '',
   });
+
+  const amlCandidates = useMemo(() => {
+    if (!availableCols || !availableCols.length) return [];
+    const candidates = [];
+    const countCols = availableCols.filter(c => /count|cnt/i.test(c));
+    const amtCols = availableCols.filter(c => /amount|amt|balance/i.test(c));
+    
+    // Find ratios like cash_txn_count / txn_count, offshore_txn_count / txn_count
+    const totalCount = countCols.find(c => /^(total_count|txn_count|count|txns)$/i.test(c)) || countCols.find(c => /count|cnt/i.test(c));
+    if (totalCount) {
+      countCols.forEach(c => {
+        if (c !== totalCount) {
+          candidates.push({ a: c, b: totalCount, label: `Share of ${c.replace(/_count|_cnt/i, '')} txns` });
+        }
+      });
+    }
+
+    const totalAmt = amtCols.find(c => /^(total_amount|txn_amount|amount|volume)$/i.test(c)) || amtCols.find(c => /amount|amt/i.test(c));
+    if (totalAmt) {
+      amtCols.forEach(c => {
+        if (c !== totalAmt) {
+          candidates.push({ a: c, b: totalAmt, label: `Share of ${c.replace(/_amount|_amt/i, '')} value` });
+        }
+      });
+    }
+
+    if (candidates.length === 0) {
+      const nums = availableCols.filter(c => isNumDtype(colTypes[c] || ''));
+      if (nums.length >= 2) {
+        candidates.push({ a: nums[0], b: nums[1], label: `${nums[0]} / ${nums[1]}` });
+      }
+    }
+    
+    return candidates.slice(0, 6);
+  }, [availableCols, colTypes]);
 
   const typesForCat = cat === 'scale' ? SCALE_TYPES : cat === 'feat' ? FEAT_ENG_TYPES : CLEAN_ENCODE_TYPES;
   const numCols = availableCols.filter((c) => isNumDtype(colTypes[c] || ''));
@@ -1329,9 +1366,9 @@ const StepForm = ({
           </Typography>
         </Box>
         <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
-          <Chip label={`Operation: ${guide.title}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.accentBorder}`, color: T.orange, borderRadius: 0 }} />
+          <Chip label={`Operation: ${guide.title}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.accentBorder}`, color: T.orange, borderRadius: 1.5 }} />
           {targetColumn && (
-            <Chip label={`Target in scope: ${targetColumn}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.infoBorder}`, color: T.textPri, borderRadius: 0 }} />
+            <Chip label={`Target in scope: ${targetColumn}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.infoBorder}`, color: T.textPri, borderRadius: 1.5 }} />
           )}
           <OBtn icon={<Add sx={{ fontSize: 14 }} />} onClick={handleAdd} disabled={!canAdd}>
             Add to pipeline
@@ -1339,7 +1376,7 @@ const StepForm = ({
         </Stack>
       </Stack>
 
-      <Alert severity="info" icon={<InfoOutlined />} sx={{ mb: 1.5, borderRadius: 0, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+      <Alert severity="info" icon={<InfoOutlined />} sx={{ mb: 1.5, borderRadius: 1.5, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
         <Typography sx={{ fontSize: 12, color: T.textPri, lineHeight: 1.65 }}>
           This builder is rule-based and statistical. It does not use predictive modelling or generative AI unless that is explicitly enabled somewhere else in the workflow.
         </Typography>
@@ -1368,7 +1405,7 @@ const StepForm = ({
                     fontSize: 12,
                     px: 1.5,
                     py: 0.6,
-                    borderRadius: 0,
+                    borderRadius: 1.5,
                     boxShadow: 'none',
                     ...(isActive
                       ? { bgcolor: T.orange, '&:hover': { bgcolor: T.orangeHov } }
@@ -1409,7 +1446,7 @@ const StepForm = ({
               })}
             </Select>
           </Box>
-          <Box sx={{ p: 1.1, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+          <Box sx={{ p: 1.1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: T.surface }}>
             <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: T.textPri }}>{guide.title}</Typography>
             <Typography sx={{ fontSize: 11.25, color: T.textSec, mt: 0.5, lineHeight: 1.6 }}>
               {guide.what}
@@ -1446,7 +1483,7 @@ const StepForm = ({
                         evt.stopPropagation();
                         focusColumn(value);
                       }}
-                      sx={{ fontFamily: 'monospace', fontSize: 9, height: 20, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }}
+                      sx={{ fontFamily: 'monospace', fontSize: 9, height: 20, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }}
                     />
                   );
                 })}
@@ -1461,7 +1498,7 @@ const StepForm = ({
                     <Typography sx={{ fontFamily: 'monospace', fontSize: 12 }}>{item.name}</Typography>
                     <Typography sx={{ fontSize: 10, color: T.textSec }}>{item.tableLabel}</Typography>
                   </Box>
-                  <Chip label={item.semanticType} size="small" sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                  <Chip label={item.semanticType} size="small" sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
                 </Stack>
               </MenuItem>
             ))}
@@ -1482,7 +1519,7 @@ const StepForm = ({
               <TextField size="small" label="Fill value" value={cfg.constVal} onChange={(e) => set('constVal')(e.target.value)} sx={{ width: 140 }} />
             )}
             {['knn', 'mice'].includes(cfg.strategy) && (
-              <Alert severity="info" sx={{ py: 0.4, fontSize: 10.5, flex: 1, alignSelf: 'center', borderRadius: 0 }}>
+              <Alert severity="info" sx={{ py: 0.4, fontSize: 10.5, flex: 1, alignSelf: 'center', borderRadius: 1.5 }}>
                 {cfg.strategy === 'knn' ? 'Uses a nearest-neighbour approximation on sampled rows.' : 'Uses iterative chained estimation for missing values.'}
               </Alert>
             )}
@@ -1507,19 +1544,132 @@ const StepForm = ({
         )}
 
         {['feature_ratio', 'feature_interaction'].includes(type) && (
-          <Box>
-            <SLabel>Column pairs (A:B)</SLabel>
-            <TextField
-              size="small"
-              fullWidth
-              value={cfg.pairsRaw}
-              onChange={(e) => set('pairsRaw')(e.target.value)}
-              placeholder="cash_txn_count:txn_count, txn_amount:avg_balance"
-              sx={{ '& input': { fontFamily: 'monospace', fontSize: 12 } }}
-            />
-            <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, mt: 0.5, display: 'block' }}>
-              Enter reusable business pairs. Click any selected column chip above to inspect it in the explorer.
+          <Box sx={{ border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', p: 2, bgcolor: '#f8fafc', mb: 1 }}>
+            <Typography sx={{ fontSize: 12, fontWeight: 700, mb: 1.5, color: T.textPri }}>
+              {type === 'feature_ratio' ? 'Interactive Ratio Builder' : 'Interactive Interaction Builder'}
             </Typography>
+            
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems="flex-end" sx={{ mb: 2 }}>
+              <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
+                <InputLabel sx={{ fontSize: 11 }}>{type === 'feature_ratio' ? 'Numerator (Column A)' : 'Column A'}</InputLabel>
+                <Select
+                  label={type === 'feature_ratio' ? 'Numerator (Column A)' : 'Column A'}
+                  value={cfg.columnA || ''}
+                  onChange={(e) => setCfg(prev => ({ ...prev, columnA: e.target.value }))}
+                  sx={{ fontSize: 11.5, bgcolor: 'white' }}
+                >
+                  {availableCols.map(col => (
+                    <MenuItem key={col} value={col} sx={{ fontFamily: 'monospace', fontSize: 11.5 }}>{col}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 40, color: T.textSec }}>
+                {type === 'feature_ratio' ? '/' : 'x'}
+              </Box>
+
+              <FormControl size="small" sx={{ flex: 1, minWidth: 150 }}>
+                <InputLabel sx={{ fontSize: 11 }}>{type === 'feature_ratio' ? 'Denominator (Column B)' : 'Column B'}</InputLabel>
+                <Select
+                  label={type === 'feature_ratio' ? 'Denominator (Column B)' : 'Column B'}
+                  value={cfg.columnB || ''}
+                  onChange={(e) => setCfg(prev => ({ ...prev, columnB: e.target.value }))}
+                  sx={{ fontSize: 11.5, bgcolor: 'white' }}
+                >
+                  {availableCols.map(col => (
+                    <MenuItem key={col} value={col} sx={{ fontFamily: 'monospace', fontSize: 11.5 }}>{col}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => {
+                  if (cfg.columnA && cfg.columnB) {
+                    const newPair = `${cfg.columnA}:${cfg.columnB}`;
+                    const currentPairs = cfg.pairsRaw ? cfg.pairsRaw.split(',').map(p => p.trim()).filter(Boolean) : [];
+                    if (!currentPairs.includes(newPair)) {
+                      setCfg(prev => ({
+                        ...prev,
+                        pairsRaw: currentPairs.concat(newPair).join(', '),
+                        columnA: '',
+                        columnB: ''
+                      }));
+                    }
+                  }
+                }}
+                disabled={!cfg.columnA || !cfg.columnB}
+                sx={{ height: 38, textTransform: 'none', fontSize: 11.5, borderColor: T.orange, color: T.orange, '&:hover': { borderColor: T.orangeHov, bgcolor: '#fff' } }}
+              >
+                + Add Pair
+              </Button>
+            </Stack>
+
+            {/* Display active pairs */}
+            {pairs.length > 0 && (
+              <Box sx={{ mb: 2 }}>
+                <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: T.textSec, mb: 0.75 }}>Configured Pairs:</Typography>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                  {pairs.map((pair, idx) => (
+                    <Chip
+                      key={idx}
+                      label={`${pair.a} ${type === 'feature_ratio' ? '÷' : '×'} ${pair.b}`}
+                      size="small"
+                      onDelete={() => {
+                        const updatedPairs = pairs.filter((_, i) => i !== idx).map(p => `${p.a}:${p.b}`).join(', ');
+                        setCfg(prev => ({ ...prev, pairsRaw: updatedPairs }));
+                      }}
+                      sx={{ fontFamily: 'monospace', fontSize: 10, bgcolor: 'white', border: `1px solid ${T.orange}`, color: T.textPri, borderRadius: '4px' }}
+                    />
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
+            {/* Suggestions Panel */}
+            {type === 'feature_ratio' && amlCandidates.length > 0 && (
+              <Box sx={{ borderTop: `1px dashed ${T.border}`, pt: 1.5 }}>
+                <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: T.textSec, mb: 1 }}>
+                  Auto-suggested AML Ratio Candidates:
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                  {amlCandidates.map((candidate, idx) => {
+                    const isAlreadyAdded = pairs.some(p => p.a === candidate.a && p.b === candidate.b);
+                    return (
+                      <Chip
+                        key={idx}
+                        label={`${candidate.label} (${candidate.a} / ${candidate.b})`}
+                        size="small"
+                        onClick={() => {
+                          if (!isAlreadyAdded) {
+                            const newPair = `${candidate.a}:${candidate.b}`;
+                            const currentPairs = cfg.pairsRaw ? cfg.pairsRaw.split(',').map(p => p.trim()).filter(Boolean) : [];
+                            setCfg(prev => ({
+                              ...prev,
+                              pairsRaw: currentPairs.concat(newPair).join(', ')
+                            }));
+                          }
+                        }}
+                        disabled={isAlreadyAdded}
+                        variant={isAlreadyAdded ? 'outlined' : 'filled'}
+                        sx={{
+                          fontSize: 10.5,
+                          bgcolor: isAlreadyAdded ? 'transparent' : T.orangeLight,
+                          color: isAlreadyAdded ? T.textSec : T.orange,
+                          cursor: isAlreadyAdded ? 'default' : 'pointer',
+                          borderRadius: '4px',
+                          border: isAlreadyAdded ? `1px solid ${T.border}` : 'none',
+                          '&:hover': {
+                            bgcolor: isAlreadyAdded ? 'transparent' : T.orangeLight
+                          }
+                        }}
+                      />
+                    );
+                  })}
+                </Stack>
+              </Box>
+            )}
           </Box>
         )}
 
@@ -1543,7 +1693,7 @@ const StepForm = ({
                 {AGG_OPS.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
               </Select>
             </FormControl>
-            <Box sx={{ px: 1.1, py: 0.9, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+            <Box sx={{ px: 1.1, py: 0.9, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: T.surface }}>
               <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.4 }}>
                 Grouping context
               </Typography>
@@ -1567,30 +1717,30 @@ const StepForm = ({
       </Box>
 
       {validation.errors.map((message) => (
-        <Alert key={message} severity="error" sx={{ mb: 1, borderRadius: 0 }}>
+        <Alert key={message} severity="error" sx={{ mb: 1, borderRadius: 1.5 }}>
           {message}
         </Alert>
       ))}
       {validation.warnings.map((message) => (
-        <Alert key={message} severity="warning" sx={{ mb: 1, borderRadius: 0 }}>
+        <Alert key={message} severity="warning" sx={{ mb: 1, borderRadius: 1.5 }}>
           {message}
         </Alert>
       ))}
 
-      <Box sx={{ p: 1.2, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+      <Box sx={{ p: 1.2, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: T.surface }}>
         <SLabel sx={{ mb: 1 }}>Input → transformation → output</SLabel>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: '1fr auto 1fr auto 1fr' }, gap: 1, alignItems: 'stretch' }}>
-          <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+          <Box sx={{ p: 1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
             <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Input</Typography>
             <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35 }}>{flow.input}</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>→</Box>
-          <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+          <Box sx={{ p: 1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
             <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Transformation</Typography>
             <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35 }}>{flow.transform}</Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.textSec }}>→</Box>
-          <Box sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+          <Box sx={{ p: 1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
             <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.35 }}>Output</Typography>
             <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35, fontFamily: 'monospace' }}>{flow.output}</Typography>
           </Box>
@@ -1619,7 +1769,7 @@ const StepForm = ({
                 label={`${item.name} • ${item.tableLabel}`}
                 size="small"
                 onClick={() => focusColumn(item.name)}
-                sx={{ height: 20, fontSize: 9, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }}
+                sx={{ height: 20, fontSize: 9, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }}
               />
             ))}
           </Stack>
@@ -1639,6 +1789,9 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
   const [scanError, setScanError] = useState('');
   const [scanStats, setScanStats] = useState({ rows: null, columns: null });
   const [applied, setApplied] = useState(new Set());
+  const [groupedDismissed, setGroupedDismissed] = useState(() => {
+    try { return localStorage.getItem('fcc_grouped_dismissed') === '1'; } catch { return false; }
+  });
 
   const rescan = useCallback(async () => {
     if (!masterDataset?.dataset_id) return;
@@ -1657,7 +1810,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
     } catch (e) {
       console.error(e);
       setScanError(e?.message || 'Backend scan failed.');
-      setScanComplete(false);
+      setScanComplete(true);  // mark complete even on error so we don't spin forever
     }
     finally { setLoading(false); }
   }, [masterDataset?.dataset_id]);
@@ -1695,14 +1848,17 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
   const scannedColumnCount = Number(scanStats.columns ?? availableCols.length);
   const hasDataset = Boolean(masterDataset?.dataset_id);
   const hasScanMetadata = hasDataset && (rowCount > 0 || scannedColumnCount > 0);
-  const showScanWaiting = !loading && local.length === 0 && (!scanComplete || !hasScanMetadata);
+  // Only show the "still loading" spinner while the scan hasn't completed yet (loading or not started)
+  const showScanWaiting = !loading && !scanComplete && !scanError && hasDataset;
   const scanSubtitle = loading
     ? `Backend scan running on ${hasScanMetadata ? `${fmt(rowCount)} rows and ${fmt(scannedColumnCount)} columns` : 'the selected master dataset'}...`
     : scanComplete && hasScanMetadata
-      ? `Scanned ${fmt(rowCount)} rows - ${fmt(scannedColumnCount)} columns for nulls, dtypes, cardinality`
-      : hasDataset
-        ? 'Backend scan is preparing dataset metadata. Results will appear here after rows and columns are available.'
-        : 'Waiting for a master dataset before scanning quality issues.';
+      ? `Scanned ${fmt(rowCount)} rows – ${fmt(scannedColumnCount)} columns for nulls, dtypes, cardinality`
+      : scanComplete
+        ? 'Scan complete. No detailed column metadata was returned by the backend.'
+        : hasDataset
+          ? 'Waiting for the scan to start...'
+          : 'Waiting for a master dataset before scanning quality issues.';
   const pendingCount = local.filter((_, i) => !applied.has(i)).length;
 
   return (
@@ -1741,7 +1897,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
           </Alert>
         )}
 
-        {!loading && !showScanWaiting && scanComplete && local.length === 0 && (
+        {!loading && !showScanWaiting && scanComplete && local.length === 0 && !scanError && (
           <Alert severity="success" icon={<CheckCircle />} sx={{ borderRadius: 2 }}>
             <strong>No issues detected.</strong> Dataset looks clean. Use the Builder tab if you still want to add custom cleaning, encoding, scaling, or feature-engineering steps.
           </Alert>
@@ -1770,7 +1926,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
                       <Chip
                         label={`${s.column_count || s.columns?.length || 0} column${(s.column_count || s.columns?.length || 0) === 1 ? '' : 's'}`}
                         size="small"
-                        sx={{ height: 18, fontSize: 9, bgcolor: T.surface, border: `1px solid ${T.border}` }}
+                        sx={{ height: 18, fontSize: 9, bgcolor: T.surface, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
                       />
                       {s.strategy && (
                         <Chip
@@ -1793,7 +1949,7 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
                           key={`${i}-${col}`}
                           label={clip(col, 18)}
                           size="small"
-                          sx={{ height: 18, fontSize: 9, fontFamily: 'monospace', bgcolor: 'white', border: `1px solid ${T.border}` }}
+                          sx={{ height: 18, fontSize: 9, fontFamily: 'monospace', bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
                         />
                       ))}
                       {(s.columns?.length || 0) > 6 && (
@@ -1817,12 +1973,22 @@ const PlanTab = ({ masterDataset, suggestions, steps, onStepsChange }) => {
         )}
       </Card>
 
-      <Alert severity="info" icon={<Build />} sx={{ borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
-        <Typography fontWeight={700} sx={{ fontSize: 13, mb: 0.25 }}>Grouped planning is enabled</Typography>
-        <Typography variant="body2" sx={{ fontSize: 12 }}>
-          Repetitive single-column actions are now collapsed into shared steps. Review the recommended groups here, then move to the Builder tab for custom workbench-style step design{scannedColumnCount ? ` across ${fmt(scannedColumnCount)} available columns.` : ' after column metadata is available.'}
-        </Typography>
-      </Alert>
+      {!groupedDismissed && (
+        <Alert
+          severity="info"
+          icon={<Build />}
+          sx={{ borderRadius: 2, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}
+          onClose={() => {
+            setGroupedDismissed(true);
+            try { localStorage.setItem('fcc_grouped_dismissed', '1'); } catch { /* ignore */ }
+          }}
+        >
+          <Typography fontWeight={700} sx={{ fontSize: 13, mb: 0.25 }}>Grouped planning is enabled</Typography>
+          <Typography variant="body2" sx={{ fontSize: 12 }}>
+            Repetitive single-column actions are now collapsed into shared steps. Review the recommended groups here, then move to the Builder tab for custom workbench-style step design{scannedColumnCount ? ` across ${fmt(scannedColumnCount)} available columns.` : ' after column metadata is available.'}
+          </Typography>
+        </Alert>
+      )}
     </Stack>
   );
 };
@@ -1950,14 +2116,14 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
             </Typography>
           </Box>
           <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', alignSelf: 'flex-start' }}>
-            <Chip label={`Active dataset: ${humanizeTableName(masterDataset?.dataset_type || 'master_dataset')}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
-            <Chip label={`${availableCols.length} columns in scope`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+            <Chip label={`Active dataset: ${humanizeTableName(masterDataset?.dataset_type || 'master_dataset')}`} size="small" sx={{ bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
+            <Chip label={`${availableCols.length} columns in scope`} size="small" sx={{ bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
             {targetColumn && (
-              <Chip label={`Target linked: ${targetColumn}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.infoBorder}`, borderRadius: 0 }} />
+              <Chip label={`Target linked: ${targetColumn}`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.infoBorder}`, borderRadius: 1.5 }} />
             )}
           </Stack>
         </Stack>
-        <Alert severity="info" icon={<Code />} sx={{ mt: 1.25, borderRadius: 0, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+        <Alert severity="info" icon={<Code />} sx={{ mt: 1.25, borderRadius: 1.5, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
           This screen is rule-based and statistics-assisted. It does not use a predictive model or generative AI to create features unless a separate optional mode explicitly says so.
         </Alert>
       </Card>
@@ -1989,8 +2155,8 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
             </OBtn>
           </Stack>
           <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap' }}>
-            <Chip label={`${filteredColumns.length} visible`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
-            <Chip label={`${tableOptions.length} table groups`} size="small" sx={{ bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+            <Chip label={`${filteredColumns.length} visible`} size="small" sx={{ bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
+            <Chip label={`${tableOptions.length} table groups`} size="small" sx={{ bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
           </Stack>
         </Stack>
       </Card>
@@ -2016,19 +2182,19 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                 </Typography>
               </Box>
               {activeMeta && (
-                <Chip label={`${activeMeta.name}`} size="small" sx={{ fontSize: 9, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                <Chip label={`${activeMeta.name}`} size="small" sx={{ fontSize: 9, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
               )}
             </Stack>
 
             {statsLoading && <Spinner label="Loading column metadata..." />}
-            {!statsLoading && statsErr && <Alert severity="error" sx={{ borderRadius: 0 }}>{statsErr}</Alert>}
+            {!statsLoading && statsErr && <Alert severity="error" sx={{ borderRadius: 1.5 }}>{statsErr}</Alert>}
             {!statsLoading && !statsErr && filteredColumns.length === 0 && (
-              <Alert severity="info" sx={{ borderRadius: 0 }}>No columns match the current search and table filter.</Alert>
+              <Alert severity="info" sx={{ borderRadius: 1.5 }}>No columns match the current search and table filter.</Alert>
             )}
 
             {!statsLoading && !statsErr && filteredColumns.length > 0 && (
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', xl: 'minmax(0, 1fr) minmax(360px, 1fr)' }, gap: 1.25 }}>
-                <Box sx={{ maxHeight: 520, overflowY: 'auto', border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                <Box sx={{ maxHeight: 520, overflowY: 'auto', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
                   {groupedColumns.map(([groupLabel, items]) => (
                     <Box key={groupLabel} sx={{ borderBottom: `1px solid ${T.border}` }}>
                       <Box sx={{ px: 1.1, py: 0.75, bgcolor: T.surface, borderBottom: `1px solid ${T.border}` }}>
@@ -2073,7 +2239,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                           <Stack direction="row" spacing={0.45} sx={{ flexWrap: 'wrap', rowGap: 0.45, mt: 0.8 }}>
                             {item.tags.map((tag) => (
                               <Tooltip key={`${item.name}_${tag}`} title={`Lineage tag: ${tag}`}>
-                                <Chip label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                                <Chip label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
                               </Tooltip>
                             ))}
                           </Stack>
@@ -2084,9 +2250,9 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                 </Box>
 
                 {!activeMeta ? (
-                  <Alert severity="info" sx={{ borderRadius: 0 }}>Select a column to inspect its lineage, quality, and sample values.</Alert>
+                  <Alert severity="info" sx={{ borderRadius: 1.5 }}>Select a column to inspect its lineage, quality, and sample values.</Alert>
                 ) : (
-                  <Box sx={{ border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                  <Box sx={{ border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
                     <Box sx={{ px: 1.2, py: 1, borderBottom: `1px solid ${T.border}`, bgcolor: T.surface }}>
                       <Typography sx={{ fontSize: 14, fontWeight: 700, color: T.textPri }}>{activeMeta.name}</Typography>
                       <Typography sx={{ fontSize: 11, color: T.textSec, mt: 0.25 }}>
@@ -2097,7 +2263,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                       <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mb: 1 }}>
                         {activeMeta.tags.map((tag) => (
                           <Tooltip key={`active_${tag}`} title={`Origin or control tag: ${tag}`}>
-                            <Chip label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                            <Chip label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
                           </Tooltip>
                         ))}
                       </Stack>
@@ -2113,7 +2279,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                           ['Distinct values', fmt(activeMeta.distinctCount)],
                           ['Business type', activeMeta.semanticType],
                         ].map(([label, value]) => (
-                          <Box key={label} sx={{ p: 0.9, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+                          <Box key={label} sx={{ p: 0.9, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: T.surface }}>
                             <Typography variant="caption" sx={{ fontSize: 10, color: T.textSec }}>{label}</Typography>
                             <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.25 }}>{value}</Typography>
                           </Box>
@@ -2126,7 +2292,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                       {previewLoading ? (
                         <Spinner label="Loading sample values..." />
                       ) : previewRows.length === 0 ? (
-                        <Alert severity="info" sx={{ borderRadius: 0 }}>No sample rows are available for this column.</Alert>
+                        <Alert severity="info" sx={{ borderRadius: 1.5 }}>No sample rows are available for this column.</Alert>
                       ) : (
                         <Box sx={{ overflowX: 'auto' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
@@ -2161,7 +2327,7 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                               ['Variance', fmtF(activeStats.variance, 5)],
                               ['Dispersion', fmtF(activeStats.dispersion_ratio, 4)],
                             ].map(([label, value]) => (
-                              <Box key={label} sx={{ p: 0.9, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                              <Box key={label} sx={{ p: 0.9, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
                                 <Typography variant="caption" sx={{ fontSize: 10, color: T.textSec }}>{label}</Typography>
                                 <Typography sx={{ fontFamily: 'monospace', fontSize: 11.5, fontWeight: 700 }}>{value}</Typography>
                               </Box>
@@ -2173,11 +2339,11 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                           <Divider sx={{ my: 1.2 }} />
                           <SLabel>Top categories</SLabel>
                           {topCategories.length === 0 ? (
-                            <Alert severity="info" sx={{ borderRadius: 0 }}>No category profile is available for this column yet.</Alert>
+                            <Alert severity="info" sx={{ borderRadius: 1.5 }}>No category profile is available for this column yet.</Alert>
                           ) : (
                             <Stack spacing={0.55}>
                               {topCategories.map((item) => (
-                                <Stack key={`${activeMeta.name}_${item.value}`} direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 0.8, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+                                <Stack key={`${activeMeta.name}_${item.value}`} direction="row" justifyContent="space-between" alignItems="center" sx={{ p: 0.8, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: T.surface }}>
                                   <Typography sx={{ fontFamily: 'monospace', fontSize: 11.5 }}>{clip(item.value, 22)}</Typography>
                                   <Typography variant="caption" sx={{ fontSize: 10.5, color: T.textSec }}>{fmt(item.count)}</Typography>
                                 </Stack>
@@ -2206,17 +2372,17 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                 {activeMeta.businessMeaning}
               </Typography>
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 1 }}>
-                <Box sx={{ p: 1.1, border: `1px solid ${T.border}` }}>
+                <Box sx={{ p: 1.1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                   <Typography variant="caption" sx={{ color: T.textSec }}>Column origin</Typography>
                   <Typography sx={{ fontSize: 12, color: T.textPri, mt: 0.3 }}>
                     {activeMeta.tables.map(humanizeTableName).join(', ')}
                   </Typography>
                 </Box>
-                <Box sx={{ p: 1.1, border: `1px solid ${T.border}` }}>
+                <Box sx={{ p: 1.1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                   <Typography variant="caption" sx={{ color: T.textSec }}>Lineage tags</Typography>
                   <Stack direction="row" spacing={0.5} sx={{ mt: 0.4, flexWrap: 'wrap', rowGap: 0.5 }}>
                     {activeMeta.tags.map((tag) => (
-                      <Chip key={`modal_${tag}`} label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                      <Chip key={`modal_${tag}`} label={tag} size="small" sx={{ height: 18, fontSize: 8.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
                     ))}
                   </Stack>
                 </Box>
@@ -2228,13 +2394,13 @@ const BuilderTab = ({ masterDataset, datasets = [], steps, onStepsChange, target
                   ['Missing', pct(activeMeta.missingPct, 1)],
                   ['Distinct', fmt(activeMeta.distinctCount)],
                 ].map(([label, value]) => (
-                  <Box key={`modal_${label}`} sx={{ p: 1, border: `1px solid ${T.border}`, bgcolor: T.surface }}>
+                  <Box key={`modal_${label}`} sx={{ p: 1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: T.surface }}>
                     <Typography variant="caption" sx={{ color: T.textSec }}>{label}</Typography>
                     <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.25 }}>{value}</Typography>
                   </Box>
                 ))}
               </Box>
-              <Box sx={{ p: 1.1, border: `1px solid ${T.border}` }}>
+              <Box sx={{ p: 1.1, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                 <Typography variant="caption" sx={{ color: T.textSec }}>Sample values</Typography>
                 <Typography sx={{ fontSize: 11.5, color: T.textPri, mt: 0.35, lineHeight: 1.7 }}>
                   {(activeMeta.sampleValues && activeMeta.sampleValues.length ? activeMeta.sampleValues : ['No sampled values available']).join(', ')}
@@ -2384,7 +2550,7 @@ const EngineerTab = ({ masterDataset, steps, onStepsChange, targetColumn, onOpen
           </Stack>
         </Stack>
 
-        <Box sx={{ mb: 1.4, p: 1.15, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
+        <Box sx={{ mb: 1.4, p: 1.15, borderRadius: 1.5, bgcolor: T.surface, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
           <Typography sx={{ fontSize: 11.5, color: T.textSec, lineHeight: 1.7 }}>
             {isMuleVariant
               ? 'Templates are defined from Mule heuristics and simple formulas such as ratios, interactions, aggregations, and date parts. Click the info icon on any template to see what it means, how it is calculated, and why it can help detect mule-like behaviour.'
@@ -3265,7 +3431,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
               { key: 'risk', label: 'Potential leakage / risk', value: summaryCounts.risk, tone: FEATURE_DECISION_STYLES.drop },
               { key: 'weak', label: 'Weak signal', value: summaryCounts.weak, tone: { color: T.textSec, border: T.border, bg: T.surface } },
             ].map((item) => (
-              <Box key={item.key} sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, borderTop: `2px solid ${item.tone.color}`, bgcolor: 'white' }}>
+              <Box key={item.key} sx={{ p: 1.35, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderTop: `2px solid ${item.tone.color}`, bgcolor: 'white' }}>
                 <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>
                   {item.label}
                 </Typography>
@@ -3290,7 +3456,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
               </Typography>
             </Box>
             <Box sx={{ p: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '1.15fr 0.85fr' }, gap: 2 }}>
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.8, mb: 1 }}>
                   Feature leaderboard
                 </Typography>
@@ -3309,7 +3475,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                         formatter={(value, _, payload) => [`${value}%`, payload?.payload?.recommendationLabel || 'Recommendation']}
                         labelFormatter={(label) => label}
                       />
-                      <Bar dataKey="scorePct" radius={[0, 6, 6, 0]} name="Estimated usefulness">
+                      <Bar isAnimationActive={false} dataKey="scorePct" radius={[0, 6, 6, 0]} name="Estimated usefulness">
                         {leaderboardData.map((entry) => (
                           <Cell
                             key={entry.feature}
@@ -3327,7 +3493,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                 </Typography>
               </Box>
 
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ fontSize: 11, fontWeight: 700, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.8, mb: 1 }}>
                   Signal bands
                 </Typography>
@@ -3338,7 +3504,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                       <XAxis dataKey="band" tick={{ fontSize: 10 }} interval={0} angle={-16} textAnchor="end" height={48} />
                       <YAxis tick={{ fontSize: 10.5, fill: '#64748b' }} />
                       <RTooltip />
-                      <Bar dataKey="count" fill="#D04A02" radius={[6, 6, 0, 0]} />
+                      <Bar isAnimationActive={false} dataKey="count" fill="#D04A02" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </Box>
@@ -3354,7 +3520,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                       <YAxis type="number" dataKey="qualityRisk" name="Quality risk" unit="%" tick={{ fontSize: 10 }} />
                       <ZAxis type="number" dataKey="weight" range={[60, 320]} />
                       <RTooltip cursor={{ strokeDasharray: '3 3' }} />
-                      <Scatter data={qualityRiskMatrix}>
+                      <Scatter isAnimationActive={false} data={qualityRiskMatrix}>
                         {qualityRiskMatrix.map((entry) => (
                           <Cell
                             key={entry.feature}
@@ -3386,7 +3552,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                     label={profile.displayName}
                     onClick={() => setSelectedFeature(profile.feature)}
                     sx={{
-                      borderRadius: 0,
+                      borderRadius: 1.5,
                       bgcolor: 'white',
                       color: selectedProfile?.feature === profile.feature ? T.orange : T.textPri,
                       border: `1px solid ${selectedProfile?.feature === profile.feature ? T.orange : T.border}`,
@@ -3416,7 +3582,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                     <Chip label={featureRoleLabel(selectedProfile.role)} size="small" sx={{ bgcolor: T.infoBg, color: '#1d4ed8' }} />
                   </Stack>
 
-                  <Box sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                  <Box sx={{ p: 1.35, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
                     <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>
                       Business meaning
                     </Typography>
@@ -3427,7 +3593,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
 
                   <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1 }}>
                     {selectedFeatureEvidence.map((item) => (
-                      <Box key={item.label} sx={{ p: 1.1, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                      <Box key={item.label} sx={{ p: 1.1, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
                         <Typography sx={{ fontSize: 10, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7 }}>
                           {item.label}
                         </Typography>
@@ -3438,7 +3604,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                     ))}
                   </Box>
 
-                  <Box sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                  <Box sx={{ p: 1.35, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
                     <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7, mb: 0.7 }}>
                       Why this may matter
                     </Typography>
@@ -3463,7 +3629,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                   )}
 
                   {!featureDetailLoading && selectedFeatureBins.length > 0 && (
-                    <Box sx={{ p: 1.35, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+                    <Box sx={{ p: 1.35, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white', minWidth: 0 }}>
                       <Typography sx={{ fontSize: 10.5, color: T.textSec, textTransform: 'uppercase', letterSpacing: 0.7, mb: 0.9 }}>
                         Target separation preview
                       </Typography>
@@ -3479,9 +3645,9 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                               return [fmt(value), name];
                             }} />
                             <Legend />
-                            <Bar yAxisId="count" dataKey="pos" fill="#D04A02" name="Actionable / positive" radius={[4, 4, 0, 0]} />
-                            <Bar yAxisId="count" dataKey="neg" fill="#CBD5E1" name="Likely false positive / negative" radius={[4, 4, 0, 0]} />
-                            <Line yAxisId="rate" type="monotone" dataKey="tp_rate" stroke="#0f172a" strokeWidth={2} name="Target positive rate" />
+                            <Bar isAnimationActive={false} yAxisId="count" dataKey="pos" fill="#D04A02" name="Actionable / positive" radius={[4, 4, 0, 0]} />
+                            <Bar isAnimationActive={false} yAxisId="count" dataKey="neg" fill="#CBD5E1" name="Likely false positive / negative" radius={[4, 4, 0, 0]} />
+                            <Line isAnimationActive={false} yAxisId="rate" type="monotone" dataKey="tp_rate" stroke="#0f172a" strokeWidth={2} name="Target positive rate" />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </Box>
@@ -3513,7 +3679,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
           </Box>
           <Box sx={{ p: 2, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 1.25 }}>
             {bucketGroups.map((group) => (
-              <Box key={group.key} sx={{ p: 1.25, borderRadius: 0, border: `1px solid ${T.border}`, borderTop: `2px solid ${group.tone.color}`, bgcolor: 'white' }}>
+              <Box key={group.key} sx={{ p: 1.25, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderTop: `2px solid ${group.tone.color}`, bgcolor: 'white' }}>
                 <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: group.tone.color }}>
                   {group.title}
                 </Typography>
@@ -3527,7 +3693,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
                       onClick={() => setSelectedFeature(profile.feature)}
                       sx={{
                         p: 0.95,
-                        borderRadius: 0,
+                        borderRadius: 1.5,
                         bgcolor: 'white',
                         border: `1px solid ${selectedProfile?.feature === profile.feature ? T.orange : T.border}`,
                         cursor: 'pointer',
@@ -3552,7 +3718,7 @@ const SelectTab = ({ masterDataset, steps, onStepsChange, targetColumn }) => {
       )}
 
       {viewMode === 'business' && (
-        <Alert severity="info" icon={<Insights />} sx={{ borderRadius: 0 }}>
+        <Alert severity="info" icon={<Insights />} sx={{ borderRadius: 1.5 }}>
           Switch to Technical view if you want to inspect the exact statistical method, thresholds, raw scores, and grouped drop-step controls.
         </Alert>
       )}
@@ -4009,7 +4175,7 @@ const PreviewTab = ({
               { k: 'New features',   v: `+${newCols.length}`,     color: newCols.length > 0 ? T.done : T.textDim },
               { k: 'Dropped',        v: `-${removedCols.length}`, color: removedCols.length > 0 ? T.danger : T.textDim },
             ].map(({ k, v, color }) => (
-              <Box key={k} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.surface, border: `1px solid ${T.border}` }}>
+              <Box key={k} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: T.surface, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>{k}</Typography>
                 <Typography sx={{ fontWeight: 800, fontSize: 22, color, lineHeight: 1.1 }}>{v}</Typography>
               </Box>
@@ -4053,7 +4219,7 @@ const PreviewTab = ({
                       <Chip
                         label={`+${card.items.length - 14} more`}
                         size="small"
-                        sx={{ fontSize: 9.5, bgcolor: 'white', border: `1px solid ${T.border}`, color: T.textSec }}
+                        sx={{ fontSize: 9.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', color: T.textSec }}
                       />
                     )}
                   </Box>
@@ -4475,7 +4641,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
     : (running || !steps.length);
 
   if (!steps.length) return (
-    <Alert severity="warning" icon={<Warning />} sx={{ borderRadius: 0 }}>
+    <Alert severity="warning" icon={<Warning />} sx={{ borderRadius: 1.5 }}>
       No steps added. Add cleaning, engineering, or selection steps before running.
     </Alert>
   );
@@ -4492,24 +4658,24 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
           </Typography>
         </Stack>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 1 }}>
-          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.accentBorder}`, borderTop: `2px solid ${T.orange}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'white', border: `1px solid ${T.accentBorder}`, borderTop: `2px solid ${T.orange}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Total steps</Typography>
             <Typography sx={{ fontWeight: 800, fontSize: 24, color: T.orange, lineHeight: 1.1 }}>{fmt(traceSummary?.total_steps || steps.length)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.doneBorder}`, borderTop: `2px solid ${T.done}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'white', border: `1px solid ${T.doneBorder}`, borderTop: `2px solid ${T.done}` }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Input rows</Typography>
             <Typography sx={{ fontWeight: 800, fontSize: 24, color: T.done, lineHeight: 1.1 }}>{fmt(traceSummary?.input_rows ?? masterDataset?.row_count)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.border}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Input columns</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.input_columns)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.border}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Output columns</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.output_columns)}</Typography>
             <Typography variant="caption" sx={{ color: T.textSec }}>delta {fmtDelta(traceSummary?.column_delta)}</Typography>
           </Box>
-          <Box sx={{ p: 1.5, borderRadius: 0, bgcolor: 'white', border: `1px solid ${T.border}` }}>
+          <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10, display: 'block' }}>Applied steps</Typography>
             <Typography sx={{ fontWeight: 700, fontSize: 22, lineHeight: 1.1 }}>{fmt(traceSummary?.applied_steps)}</Typography>
           </Box>
@@ -4529,14 +4695,14 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
           <Chip
             size="small"
             label={`${fmt(executionLedgerRows.length)} stage${executionLedgerRows.length === 1 ? '' : 's'}`}
-            sx={{ height: 24, fontSize: 10.5, fontWeight: 700, bgcolor: T.surface, border: `1px solid ${T.border}` }}
+            sx={{ height: 24, fontSize: 10.5, fontWeight: 700, bgcolor: T.surface, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           />
         </Stack>
         <Box
           sx={{
             overflowX: 'auto',
-            border: `1px solid ${T.border}`,
-            borderRadius: 0,
+            border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            borderRadius: 1.5,
             bgcolor: '#fff',
           }}
         >
@@ -4568,7 +4734,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                 <tr key={`ledger-${row.index}`} style={{ verticalAlign: 'top' }}>
                   <td style={{ padding: '11px 12px', fontFamily: 'monospace', color: T.textSec, width: 56, borderBottom: `1px solid ${T.border}` }}>{row.index}</td>
                   <td style={{ padding: '11px 12px', width: 150, borderBottom: `1px solid ${T.border}` }}>
-                    <Box sx={{ display: 'inline-flex', px: 1, py: 0.35, borderRadius: 0, bgcolor: '#f8fafc', border: `1px solid ${T.border}` }}>
+                    <Box sx={{ display: 'inline-flex', px: 1, py: 0.35, borderRadius: 1.5, bgcolor: '#f8fafc', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
                       <Typography sx={{ fontSize: 11.25, fontWeight: 800, color: T.text }}>{row.stage}</Typography>
                     </Box>
                   </td>
@@ -4585,7 +4751,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                         fontWeight: 800,
                         bgcolor: row.runtime?.bg || T.surface,
                         color: row.runtime?.color || T.textSec,
-                        border: `1px solid ${T.border}`,
+                        border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                       }}
                     />
                   </td>
@@ -4629,7 +4795,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
             pr: 0.75,
             overscrollBehavior: 'contain',
             '&::-webkit-scrollbar': { width: 8, height: 8 },
-            '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
+            '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 1.5 },
             '&::-webkit-scrollbar-track': { background: '#f8fafc' },
           }}
         >
@@ -4639,7 +4805,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
             gap: 1.25,
             alignItems: 'start',
           }}>
-            <Box sx={{ p: 1.25, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+            <Box sx={{ p: 1.25, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 12, mb: 0.4 }}>Input Dataset</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{masterDataset?.dataset_type || 'master_dataset'}</Typography>
               <Typography variant="caption" sx={{ fontFamily: 'monospace', fontSize: 10.5 }}>
@@ -4660,7 +4826,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                   key={stage.category}
                   sx={{
                     border: `1px solid ${laneMeta[stage.category]?.border || T.border}`,
-                    borderRadius: 0,
+                    borderRadius: 1.5,
                     bgcolor: 'white',
                     p: 1,
                   }}
@@ -4670,7 +4836,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                     <Chip
                       size="small"
                       label={`${stage.steps} step${stage.steps > 1 ? 's' : ''}`}
-                      sx={{ height: 18, fontSize: 9, bgcolor: 'white', border: `1px solid ${T.border}` }}
+                      sx={{ height: 18, fontSize: 9, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
                     />
                   </Stack>
 
@@ -4684,10 +4850,10 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                   {stage.affectedColumns.length > 0 && (
                     <Stack direction="row" spacing={0.4} sx={{ flexWrap: 'wrap', rowGap: 0.4, my: 0.6 }}>
                       {stage.affectedColumns.slice(0, 4).map((col) => (
-                        <Chip key={`${stage.category}-${col}`} size="small" label={clip(col, 14)} sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                        <Chip key={`${stage.category}-${col}`} size="small" label={clip(col, 14)} sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
                       ))}
                       {stage.affectedColumns.length > 4 && (
-                        <Chip size="small" label={`+${stage.affectedColumns.length - 4} more`} sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: `1px solid ${T.border}`, borderRadius: 0 }} />
+                        <Chip size="small" label={`+${stage.affectedColumns.length - 4} more`} sx={{ height: 16, fontSize: 8.5, bgcolor: 'white', border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', borderRadius: 1.5 }} />
                       )}
                     </Stack>
                   )}
@@ -4704,7 +4870,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
               ))}
             </Box>
 
-            <Box sx={{ p: 1.25, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: '#f8fafc' }}>
+            <Box sx={{ p: 1.25, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: '#f8fafc' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 12, mb: 0.4 }}>Output Dataset</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                 {done?.dataset_type || outputName}
@@ -4783,7 +4949,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                               lineHeight: 1.55,
                               pr: 0.5,
                               '&::-webkit-scrollbar': { width: 6 },
-                              '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
+                              '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 1.5 },
                             }}
                           >
                             {affected.slice(0, 8).join(', ') || '-'}{affected.length > 8 ? ` +${affected.length - 8} more` : ''}
@@ -4803,7 +4969,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
         <SLabel>Transformation Impact By Category</SLabel>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 1 }}>
           {categorySummary.map((cat) => (
-            <Box key={cat.category} sx={{ p: 1.2, borderRadius: 0, border: `1px solid ${T.border}`, bgcolor: 'white' }}>
+            <Box key={cat.category} sx={{ p: 1.2, borderRadius: 1.5, border: 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', bgcolor: 'white' }}>
               <Typography sx={{ fontWeight: 700, fontSize: 11.5 }}>{cat.label}</Typography>
               <Typography variant="caption" sx={{ display: 'block', color: T.textSec }}>
                 steps: {fmt(cat.steps)} | applied: {fmt(cat.applied_steps)}
@@ -4851,7 +5017,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
                 fontSize: 15.5,
                 fontWeight: 700,
                 textTransform: 'none',
-                borderRadius: 0,
+                borderRadius: 1.5,
                 boxShadow: 'none',
               }}
             >
@@ -4929,7 +5095,7 @@ const RunTab = ({ masterDataset, steps, targetColumn, preview, onRun, onComplete
         </Card>
       )}
 
-      {err && <Alert severity="error" icon={<Warning />} sx={{ borderRadius: 0 }}>{err}</Alert>}
+      {err && <Alert severity="error" icon={<Warning />} sx={{ borderRadius: 1.5 }}>{err}</Alert>}
     </Stack>
   );
 };
@@ -4956,7 +5122,7 @@ const PreprocessingWorkbench = ({
   const isMuleVariant = String(pipelineVariant || 'fcc').trim().toLowerCase() === 'mule';
   const [tab, setTab] = useState(0);
   const [visitedTabs, setVisitedTabs] = useState(() => new Set([0]));
-
+  const [guideDialogOpen, setGuideDialogOpen] = useState(false);
   useEffect(() => {
     setVisitedTabs((prev) => {
       const next = new Set(prev);
@@ -5015,22 +5181,10 @@ const PreprocessingWorkbench = ({
     <Box sx={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* ── Main content ── */}
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <Box sx={{ px: 2.5, pt: 2.2, pb: 1.6, borderBottom: `1px solid ${T.border}`, bgcolor: 'white', flexShrink: 0 }}>
-          <Typography sx={{ fontSize: 10, color: T.textSec, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-            How this stage works
-          </Typography>
-          <Typography sx={{ fontSize: 12.5, color: T.textSec, mt: 0.45, maxWidth: 920, lineHeight: 1.7 }}>
-            {activeGuide.subtitle}
-          </Typography>
-          <Alert severity="info" icon={<InfoOutlined />} sx={{ mt: 1.2, borderRadius: 0, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
-            <Typography sx={{ fontSize: 12, color: T.textPri, lineHeight: 1.65 }}>
-              {activeGuide.note}
-            </Typography>
-          </Alert>
-        </Box>
+
 
         {/* Tab bar */}
-        <Box sx={{ borderBottom: `1px solid ${T.border}`, bgcolor: 'white', flexShrink: 0 }}>
+        <Box sx={{ borderBottom: `1px solid ${T.border}`, bgcolor: 'white', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', pr: 2 }}>
           <Tabs
             value={tab} onChange={(_, v) => setTab(v)}
             sx={{
@@ -5039,7 +5193,7 @@ const PreprocessingWorkbench = ({
                 px: 2.5, fontWeight: 500, color: T.textSec,
               },
               '& .Mui-selected': { color: `${T.orange} !important`, fontWeight: 700 },
-              '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3, borderRadius: 0 },
+              '& .MuiTabs-indicator': { bgcolor: T.orange, height: 3, borderRadius: 1.5 },
             }}>
             {TAB_DEFS.map((t, i) => {
               const TIcon = t.Icon;
@@ -5053,7 +5207,7 @@ const PreprocessingWorkbench = ({
                         <CheckCircle sx={{ fontSize: 13, color: T.done }} />
                       )}
                       {i === TAB_DEFS.length - 1 && steps.length > 0 && (
-                        <Box sx={{ px: 0.75, py: 0.1, bgcolor: 'white', border: `1px solid ${tab === TAB_DEFS.length - 1 ? T.orange : T.accentBorder}`, borderRadius: 0 }}>
+                        <Box sx={{ px: 0.75, py: 0.1, bgcolor: 'white', border: `1px solid ${tab === TAB_DEFS.length - 1 ? T.orange : T.accentBorder}`, borderRadius: 1.5 }}>
                           <Typography sx={{ fontSize: 9.5, color: T.orange, fontWeight: 700 }}>
                             {steps.length}
                           </Typography>
@@ -5065,7 +5219,31 @@ const PreprocessingWorkbench = ({
               );
             })}
           </Tabs>
+          <Tooltip title="How this stage works" placement="left">
+            <IconButton onClick={() => setGuideDialogOpen(true)} size="small" sx={{ color: T.orange }}>
+              <InfoOutlined sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Tooltip>
         </Box>
+
+        <Dialog open={guideDialogOpen} onClose={() => setGuideDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle sx={{ fontWeight: 800, borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1.5, px: 2.5 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, fontSize: 15, color: T.textPri }}>How this stage works</Typography>
+            <IconButton onClick={() => setGuideDialogOpen(false)} size="small">
+              <Close sx={{ fontSize: 18 }} />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 2.5 }}>
+            <Typography sx={{ fontSize: 13, color: T.textSec, lineHeight: 1.6, mb: 2 }}>
+              {activeGuide.subtitle}
+            </Typography>
+            <Alert severity="info" icon={<InfoOutlined />} sx={{ borderRadius: 1.5, bgcolor: T.infoBg, border: `1px solid ${T.infoBorder}` }}>
+              <Typography sx={{ fontSize: 12.5, color: T.textPri, lineHeight: 1.6 }}>
+                {activeGuide.note}
+              </Typography>
+            </Alert>
+          </DialogContent>
+        </Dialog>
 
         {/* Tab content */}
         <Box
@@ -5075,7 +5253,7 @@ const PreprocessingWorkbench = ({
             p: 2.5,
             pr: 1.75,
             '&::-webkit-scrollbar': { width: 8, height: 8 },
-            '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 0 },
+            '&::-webkit-scrollbar-thumb': { background: '#cbd5e1', borderRadius: 1.5 },
             '&::-webkit-scrollbar-track': { background: '#f8fafc' },
           }}
         >

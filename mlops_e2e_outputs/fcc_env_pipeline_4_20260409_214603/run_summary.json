@@ -1,0 +1,25 @@
+{
+  "env_id": "fcc_env",
+  "pipeline_id": 4,
+  "feature_store_status": "ready",
+  "preprocessing_status": "built",
+  "model_status": "trained",
+  "validation_status": "validated",
+  "typology_classes": [
+    "layering_mule"
+  ],
+  "rings_detected": 1902,
+  "copied_artifacts": {
+    "master_dataset": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_abt_4.csv",
+    "feature_store_selected": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_feature_store_4_selected.csv",
+    "feature_store_full": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_feature_store_final.csv",
+    "feature_catalog": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_feature_catalog_final.csv",
+    "preprocess_dataset": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_feature_studio_4.csv",
+    "model_bundle": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_model_bundle_4.joblib",
+    "model_output": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_model_output_4.csv",
+    "validation_graph": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\artifacts\\mule_validation_graph_4_1.json"
+  },
+  "inference_preview_csv": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\mule_inference_preview.csv",
+  "high_risk_csv": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603\\mule_high_risk_top100.csv",
+  "output_dir": "E:\\VS CODE Backup\\Trae\\AI_AML_tool\\mlops_e2e_outputs\\fcc_env_pipeline_4_20260409_214603"
+}

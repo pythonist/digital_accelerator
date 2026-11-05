@@ -191,10 +191,10 @@ class ServiceContainer:
 
     def _register_lazy_modules(self):
         """Declare all heavy modules as lazy loaders."""
-        # LLM provider (local GPT4All by default; Ollama only when explicitly enabled)
+        # LLM provider (OpenAI only)
         def _load_llm_provider():
-            from modules.ai import load_ollama
-            return load_ollama()
+            from llm.provider_factory import load_llm_provider
+            return load_llm_provider()
         REGISTRY.register("llm_provider", _load_llm_provider, feature_flag_env="ENABLE_AI")
 
         # Documentation RAG (depends on the active LLM provider, optional FAISS)
@@ -230,6 +230,8 @@ class ServiceContainer:
         REGISTRY.register("rag", _load_rag, feature_flag_env="ENABLE_RAG")
 
         # Graph builder
+
+        # Graph builder
         def _load_graph():
             if not self.investigation_db:
                 raise RuntimeError("Investigation DB not available for graph builder")
@@ -238,22 +240,22 @@ class ServiceContainer:
         REGISTRY.register("graph", _load_graph, feature_flag_env="ENABLE_GRAPH")
 
         # Calibration DB and engines
-        def _load_calibration_db():
-            from modules.calibration import load_calibration_db
-            return load_calibration_db(run_migrations)
-        REGISTRY.register("calibration_db", _load_calibration_db, feature_flag_env="ENABLE_CALIBRATION")
+        # def _load_calibration_db():
+        #     from modules.calibration import load_calibration_db
+        #     return load_calibration_db(run_migrations)
+        # REGISTRY.register("calibration_db", _load_calibration_db, feature_flag_env="ENABLE_CALIBRATION")
 
-        def _load_percentile_engine():
-            db = REGISTRY.get("calibration_db")
-            from modules.calibration import load_percentile_engine
-            return load_percentile_engine(db)
-        REGISTRY.register("percentile_engine", _load_percentile_engine, feature_flag_env="ENABLE_CALIBRATION")
+        # def _load_percentile_engine():
+        #     db = REGISTRY.get("calibration_db")
+        #     from modules.calibration import load_percentile_engine
+        #     return load_percentile_engine(db)
+        # REGISTRY.register("percentile_engine", _load_percentile_engine, feature_flag_env="ENABLE_CALIBRATION")
 
-        def _load_threshold_simulator():
-            db = REGISTRY.get("calibration_db")
-            from modules.calibration import load_threshold_simulator
-            return load_threshold_simulator(db)
-        REGISTRY.register("threshold_simulator", _load_threshold_simulator, feature_flag_env="ENABLE_CALIBRATION")
+        # def _load_threshold_simulator():
+        #     db = REGISTRY.get("calibration_db")
+        #     from modules.calibration import load_threshold_simulator
+        #     return load_threshold_simulator(db)
+        # REGISTRY.register("threshold_simulator", _load_threshold_simulator, feature_flag_env="ENABLE_CALIBRATION")
 
     # ---------------------------------------------------
     # STATELESS DB FACTORY (CRITICAL)
@@ -264,10 +266,14 @@ class ServiceContainer:
 
         paths = [
             f"env/{tenant_id}/{env_id}/investigation/investigation.db",
+            f"../env/{tenant_id}/{env_id}/investigation/investigation.db",
             f"backend/env/{tenant_id}/{env_id}/investigation/investigation.db",
             f"data/environments/{env_id}/database.db",
+            f"../data/environments/{env_id}/database.db",
             f"data/environments/{env_id}/investigation.db",
+            f"../data/environments/{env_id}/investigation.db",
             f"data/{tenant_id}/{env_id}/database.db",
+            f"../data/{tenant_id}/{env_id}/database.db",
             f"backend/data/environments/{env_id}/database.db",
         ]
 

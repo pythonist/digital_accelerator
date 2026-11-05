@@ -22,6 +22,12 @@ const getAuthHeaders = () => {
     headers['X-Environment-ID'] = activeEnv;
   }
   
+  // ✅ Inject chosen LLM model
+  const llmModel = localStorage.getItem('llm_model');
+  if (llmModel) {
+    headers['X-LLM-Model'] = llmModel;
+  }
+  
   return headers;
 };
 

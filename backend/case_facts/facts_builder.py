@@ -34,10 +34,14 @@ async def build_case_facts(
     if not db_path:
         possible_paths = [
             f"data/environments/{env_id}/database.db",
+            f"../data/environments/{env_id}/database.db",
             f"data/environments/{env_id}/investigation.db",
+            f"../data/environments/{env_id}/investigation.db",
             f"data/{tenant_id}/{env_id}/database.db",
+            f"../data/{tenant_id}/{env_id}/database.db",
             f"backend/data/environments/{env_id}/database.db",
-            f"data/aml_database.db" 
+            f"data/aml_database.db",
+            f"../data/aml_database.db"
         ]
         for path in possible_paths:
             if os.path.exists(path):
@@ -343,7 +347,7 @@ def _extract_risk_drivers(case_id: str, cursor, case_meta: Dict, patterns: Dict)
             severity=RiskLevel.HIGH if vol_30 > 150000 else RiskLevel.MEDIUM,
             value=vol_30,
             threshold=50000,
-            explanation=f"30-day volume of ${vol_30:,.2f} is significant",
+            explanation=f"30-day volume of {vol_30:,.2f} is significant",
             source="pattern_engine"
         ))
     elif vol_30 > 10000:
@@ -352,7 +356,7 @@ def _extract_risk_drivers(case_id: str, cursor, case_meta: Dict, patterns: Dict)
             severity=RiskLevel.LOW,
             value=vol_30,
             threshold=10000,
-            explanation=f"Active account with ${vol_30:,.2f} volume",
+            explanation=f"Active account with {vol_30:,.2f} volume",
             source="pattern_engine"
         ))
 

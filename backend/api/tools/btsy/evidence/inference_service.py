@@ -22,12 +22,12 @@ class ControlledInferenceService:
         self.run_db_path = run_db_path
         buf = io.StringIO()
         with redirect_stdout(buf), redirect_stderr(buf):
-            from llm.ollama_wrapper import OllamaWrapper
-            self._ollama = OllamaWrapper()
+            from llm.provider_factory import load_llm_provider
+            self._provider = load_llm_provider()
 
     def available(self) -> bool:
         try:
-            return bool(self._ollama.check_connection())
+            return bool(self._provider and self._provider.check_connection())
         except Exception:
             return False
 
@@ -80,7 +80,7 @@ class ControlledInferenceService:
     def generate_inference_text(self, *, step_id: str, inference_type: str, evidence: Dict[str, Any]) -> Optional[str]:
         if not self.available():
             return "Evidence is insufficient to support a defensible interpretation for this section."
-        res = self._ollama.generate(
+        res = self._provider.generate(
             prompt=self._prompt(step_id=step_id, inference_type=inference_type, evidence=evidence),
             system_prompt=self._system_prompt(),
             temperature=0.2,
@@ -92,7 +92,7 @@ class ControlledInferenceService:
         if not txt:
             return None
         if _DIGIT_RE.search(txt):
-            res2 = self._ollama.generate(
+            res2 = self._provider.generate(
                 prompt=self._prompt(step_id=step_id, inference_type=inference_type, evidence=evidence),
                 system_prompt=self._system_prompt() + "\nOutput must contain no digits.",
                 temperature=0.0,

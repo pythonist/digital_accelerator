@@ -7,6 +7,26 @@ from case_pack.case_pack_generator import CasePackGenerator
 
 compare_bp = Blueprint('compare', __name__)
 
+
+def _get_llm_service():
+    service = getattr(services, 'llm_provider', None)
+    if not service:
+        try:
+            from llm.provider_factory import load_llm_provider
+            service = load_llm_provider()
+        except Exception:
+            return None
+    if service:
+        try:
+            checker = getattr(service, 'check_connection', None)
+            if callable(checker) and not checker():
+                return None
+            return service
+        except Exception:
+            return None
+    return None
+
+
 @compare_bp.route('/run-analysis', methods=['POST'])
 def compare_cases():
     """
@@ -47,9 +67,14 @@ def compare_cases():
         # 3. Generate AI Narrative
         ai_insight = "AI Analysis unavailable."
         try:
-            if services.ollama_wrapper:
+            llm_service = _get_llm_service()
+            try:
+                llm_ready = bool(llm_service and llm_service.check_connection())
+            except Exception:
+                llm_ready = False
+            if llm_ready:
                 prompt = f"Compare Case {case_a_id} and {case_b_id}. Case A has {len(pack_a['alerts'])} alerts. Case B has {len(pack_b['alerts'])} alerts. Common links: {common_entities}. Which is riskier?"
-                res = services.ollama_wrapper.generate(prompt)
+                res = llm_service.generate(prompt)
                 if res.get('success'): ai_insight = res['response']
             else:
                 ai_insight = f"Case {case_a_id if pack_a['risk_score'] > pack_b['risk_score'] else case_b_id} has a higher risk score. They share {len(common_entities)} counterparty connections."

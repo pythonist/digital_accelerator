@@ -6,7 +6,7 @@ import {
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useAppContext } from "@context/AppContext";
-import SentinelLogo from '@assets/PwC_2025_Logo.svg';
+import SentinelLogo from '@assets/PwC_2025_logo.svg';
 import { DRAWER_WIDTH, DRAWER_COLLAPSED_WIDTH } from './layout.constants';
 
 // MUI Icons

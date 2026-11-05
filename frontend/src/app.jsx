@@ -1,28 +1,29 @@
 // frontend/src/App.jsx
-import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from "@context/AppContext";
 import { ScaleLoader } from 'react-spinners';
 import { PageTransition } from "./components/LoadingAnimations";
 import { persistLastRoute, readLastRoute } from './utils/navigationPersistence';
+import { lazyWithReload } from './utils/lazyWithReload';
 
-const LoginScreen = lazy(() => import("@screens/auth/LoginScreen"));
-const RegisterScreen = lazy(() => import("@screens/auth/RegisterScreen"));
-const AdminDashboard = lazy(() => import("@screens/admin/AdminDashboard"));
-const EnvironmentSelectScreen = lazy(() => import("@screens/admin/EnvironmentSelectScreen"));
-const EnvironmentModuleTransitionScreen = lazy(() => import("@screens/admin/EnvironmentModuleTransitionScreen"));
-const ToolSelectScreen = lazy(() => import("@screens/admin/ToolSelectScreen"));
+const LoginScreen = lazyWithReload(() => import("@screens/auth/LoginScreen"), 'login');
+const RegisterScreen = lazyWithReload(() => import("@screens/auth/RegisterScreen"), 'register');
+const AdminDashboard = lazyWithReload(() => import("@screens/admin/AdminDashboard"), 'admin');
+const EnvironmentSelectScreen = lazyWithReload(() => import("@screens/admin/EnvironmentSelectScreen"), 'environments');
+const EnvironmentModuleTransitionScreen = lazyWithReload(() => import("@screens/admin/EnvironmentModuleTransitionScreen"), 'tools-transition');
+const ToolSelectScreen = lazyWithReload(() => import("@screens/admin/ToolSelectScreen"), 'tools');
 
-const InvestigationPlatform = lazy(() => import("@tools/investigation/InvestigationPlatform"));
-const CalibrationPlatform = lazy(() => import("@tools/calibration/CalibrationPlatform"));
-const MulePlatform = lazy(() => import("@tools/mule_detection/MulePlatform"));
-const BTSYPlatform = lazy(() => import("@tools/btsy/BTSYPlatform"));
-const MLOpsPlatform = lazy(() => import("@tools/mlops/MLOpsPlatform"));
+const InvestigationPlatform = lazyWithReload(() => import("@tools/investigation/InvestigationPlatform"), 'investigation');
+// const CalibrationPlatform = lazyWithReload(() => import("@tools/calibration/CalibrationPlatform"), 'calibration');
+const MulePlatform = lazyWithReload(() => import("@tools/mule_detection/MulePlatform"), 'mule');
+const BTSYPlatform = lazyWithReload(() => import("@tools/btsy/BTSYPlatform"), 'btsy');
+const MLOpsPlatform = lazyWithReload(() => import("@tools/mlops/MLOpsPlatform"), 'mlops');
 
 const RESTORE_ENTRY_PATHS = new Set(['/', '/environments']);
 const TOOL_ROUTE_PREFIXES = [
   ['/investigation', 'investigation'],
-  ['/calibration', 'calibration'],
+  // ['/calibration', 'calibration'],
   ['/mule', 'mule_detection'],
   ['/btsy', 'btsy'],
   ['/mlops', 'mlops'],
@@ -147,7 +148,6 @@ const MainLayout = () => {
 // --- TOOL LAYOUT (Requires Environment) ---
 const ToolLayout = () => {
   const { activeEnv } = useAppContext();
-  const location = useLocation();
 
   if (!activeEnv) return <Navigate to="/environments" replace />;
 
@@ -155,7 +155,7 @@ const ToolLayout = () => {
     <div className="flex h-screen min-h-0 flex-col overflow-hidden animate-in fade-in duration-700">
       <div className="relative flex-1 min-h-0 overflow-hidden bg-slate-100">
         <PageTransition className="h-full w-full">
-          <Outlet key={location.pathname} />
+          <Outlet />
         </PageTransition>
       </div>
     </div>
@@ -212,7 +212,7 @@ const AppRoutes = () => {
         {/* Tool Platforms */}
         <Route element={<ToolLayout />}>
           <Route path="/investigation/*" element={<RouteSuspense><InvestigationPlatform /></RouteSuspense>} />
-          <Route path="/calibration/*" element={<RouteSuspense><CalibrationPlatform /></RouteSuspense>} />
+          {/* <Route path="/calibration/*" element={<RouteSuspense><CalibrationPlatform /></RouteSuspense>} /> */}
           <Route path="/mule/*" element={<RouteSuspense><MulePlatform /></RouteSuspense>} />
           <Route path="/btsy/*" element={<RouteSuspense><BTSYPlatform /></RouteSuspense>} />
           <Route path="/mlops/*" element={<RouteSuspense><MLOpsPlatform /></RouteSuspense>} />

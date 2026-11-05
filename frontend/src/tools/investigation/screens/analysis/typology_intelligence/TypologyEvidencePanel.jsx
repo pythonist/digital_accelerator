@@ -1,5 +1,5 @@
 import React from 'react';
-import { Chip, Paper, Stack, Typography } from '@mui/material';
+import { Box, Chip, Divider, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
 
 const TypologyEvidencePanel = ({ rows }) => {
   const items = (rows || []).flatMap((row) =>
@@ -7,35 +7,57 @@ const TypologyEvidencePanel = ({ rows }) => {
       ...evidence,
       typology_name: row.typology_name,
       confidence: row.confidence,
-    })),
+    }))
   );
 
   if (!items.length) {
     return (
-      <Paper variant="outlined" sx={{ p: 3, borderRadius: 2.5 }}>
-        <Typography sx={{ fontSize: 13.2, color: '#64748b' }}>
-          No concrete typology evidence has been collected yet for this case.
+      <Box sx={{ py: 6, textAlign: 'center' }}>
+        <Typography sx={{ fontSize: 13.5, color: '#64748b' }}>
+          No concrete typology evidence signals collected for this case.
         </Typography>
-      </Paper>
+      </Box>
     );
   }
 
   return (
-    <Stack spacing={1.4}>
-      {items.map((item, index) => (
-        <Paper key={`${item.typology_name}-${item.signal}-${index}`} variant="outlined" sx={{ p: 1.8, borderRadius: 2.5 }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.6 }}>
-            <Typography sx={{ fontSize: 14.2, fontWeight: 800, color: '#0f172a' }}>{item.signal}</Typography>
-            <Chip size="small" label={item.typology_name} variant="outlined" />
-          </Stack>
-          <Typography sx={{ fontSize: 12.6, color: '#475569' }}>Observed value: {item.observed_value}</Typography>
-          <Typography sx={{ mt: 0.7, fontSize: 12.7, color: '#334155', lineHeight: 1.6 }}>{item.why_it_matters}</Typography>
-          <Typography sx={{ mt: 0.7, fontSize: 11.5, color: '#64748b', textTransform: 'uppercase' }}>
-            Source: {String(item.category || '').replaceAll('_', ' ')}
-          </Typography>
-        </Paper>
-      ))}
-    </Stack>
+    <TableContainer sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ '& th': { bgcolor: '#f8fafc', color: '#475569', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' } }}>
+            <TableCell sx={{ minWidth: 160 }}>Typology & Category</TableCell>
+            <TableCell sx={{ minWidth: 200 }}>Observed Signal</TableCell>
+            <TableCell sx={{ width: 140 }}>Observed Value</TableCell>
+            <TableCell sx={{ minWidth: 260 }}>Investigative Relevance</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {items.map((item, index) => (
+            <TableRow key={index} hover sx={{ '& td': { fontSize: 12.5, py: 1.25 } }}>
+              <TableCell>
+                <Stack spacing={0.3}>
+                  <Typography sx={{ fontWeight: 700, color: '#0f172a' }}>
+                    {item.typology_name}
+                  </Typography>
+                  <Typography sx={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase' }}>
+                    {String(item.category || '').replaceAll('_', ' ')}
+                  </Typography>
+                </Stack>
+              </TableCell>
+              <TableCell sx={{ fontWeight: 600, color: '#1e293b' }}>
+                {item.signal}
+              </TableCell>
+              <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>
+                {item.observed_value}
+              </TableCell>
+              <TableCell sx={{ color: '#475569', lineHeight: 1.5 }}>
+                {item.why_it_matters}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 };
 

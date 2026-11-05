@@ -254,10 +254,21 @@ class CaseVectorIndexService:
                 "index_ready": False,
             }
         component_dimensions = metadata.get("component_dimensions") or {}
+        hybrid_component = (metadata.get("normalized_components") or {}).get("hybrid") or []
+        hybrid_dimension = 0
+        if hybrid_component is not None:
+            try:
+                first = hybrid_component[0] if len(hybrid_component) else None
+                if first is not None and hasattr(first, '__len__'):
+                    hybrid_dimension = len(first)
+                elif first is not None and hasattr(first, 'shape'):
+                    hybrid_dimension = int(first.shape[0]) if first.shape else 0
+            except (TypeError, IndexError, AttributeError):
+                hybrid_dimension = 0
         return {
             "case_count": len(metadata.get("case_ids") or []),
             "component_dimensions": component_dimensions,
-            "hybrid_dimension": len((metadata.get("normalized_components") or {}).get("hybrid") or [[ ]])[0] if (metadata.get("normalized_components") or {}).get("hybrid") else 0,
+            "hybrid_dimension": hybrid_dimension,
             "last_rebuilt_at": metadata.get("last_rebuilt_at"),
             "backend": metadata.get("backend") or ("faiss" if _FAISS_OK else "numpy_fallback"),
             "hybrid_weights": metadata.get("hybrid_weights") or DEFAULT_HYBRID_WEIGHTS,

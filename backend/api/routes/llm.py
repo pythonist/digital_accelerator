@@ -8,13 +8,33 @@ import time
 import json
 import re
 import math
+import os
 from datetime import datetime
 
 llm_bp = Blueprint('llm', __name__)
 
 
 def _get_llm_service():
-    return getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
+    service = getattr(services, 'llm_provider', None)
+    if service:
+        try:
+            checker = getattr(service, 'check_connection', None)
+            if callable(checker) and not checker():
+                return None
+            return service
+        except Exception:
+            return None
+    return None
+
+
+def _default_llm_model(llm_service=None):
+    return os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+
+
+def _resolve_request_model(payload=None, llm_service=None):
+    payload = payload if isinstance(payload, dict) else {}
+    requested = str(payload.get("model") or "").strip()
+    return requested or _default_llm_model(llm_service)
 
 
 def _safe_float(value, default=0.0):
@@ -282,17 +302,43 @@ def is_conversational(msg):
 @llm_bp.route('/llm/models', methods=['GET'])
 def list_models():
     try:
+        from flask import g, request
+        from llm.model_registry import model_catalog
+        catalog = model_catalog()
+        with open("llm_debug.txt", "a") as f:
+            f.write(f"--- new request ---\n")
+            f.write(f"DEBUG: X-LLM-Model from headers: {request.headers.get('X-LLM-Model')}\n")
+            f.write(f"DEBUG: g.llm_model: {getattr(g, 'llm_model', None)}\n")
+            
         llm_service = _get_llm_service()
         if not llm_service:
-            return jsonify({'success': False, 'available': False, 'models': [], 'error': 'AI provider unavailable'}), 200
-        available = bool(llm_service.check_connection())
+            return jsonify({
+                'success': False,
+                'available': False,
+                'models': catalog,
+                'catalog': catalog,
+                'error': 'AI provider unavailable',
+            }), 200
+        
+        catalog = model_catalog()
+        default_model = None
+        if llm_service:
+            try:
+                model_override, _, _ = getattr(llm_service, '_get_context_overrides', lambda: (None, None, None))()
+            except Exception:
+                model_override = None
+            default_model = model_override or getattr(llm_service, 'default_model', None)
+        if not default_model and catalog:
+            default_model = catalog[0].get('id')
+
         return jsonify({
-            'success': available,
-            'available': available,
-            'provider': getattr(llm_service, 'provider_name', 'local_ai'),
-            'default_model': getattr(llm_service, 'default_model', None),
-            'models': llm_service.list_models(),
-            'error': None if available else 'AI provider unavailable',
+            'success': True,
+            'available': True,
+            'provider': getattr(llm_service, 'provider_name', 'unified_ai'),
+            'default_model': default_model,
+            'models': catalog,
+            'catalog': catalog,
+            'error': None,
         }), 200
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -308,12 +354,12 @@ def chat():
     start_time = time.time()
     msg = request.json.get('message', '')
     llm_service = _get_llm_service()
-    model = request.json.get('model') or getattr(llm_service, 'default_model', 'llama3.2:1b')
+    model = _resolve_request_model(request.json, llm_service)
 
     if not llm_service or not llm_service.check_connection():
         return jsonify({
             'success': False,
-            'error': 'AI provider unavailable. Configure GPT4All or another local provider first.'
+            'error': 'OpenAI provider unavailable. Check OPENAI_API_KEY and OPENAI_BASE_URL in .env.'
         }), 503
     
     # --- STEP 1: IDENTIFY ACTIVE CONTEXT ---
@@ -347,10 +393,11 @@ def chat():
     if services.doc_rag_system:
         keywords = ['code', 'function', 'api', 'error', 'class', 'implementation', 'python']
         if any(k in msg.lower() for k in keywords):
-            try: 
+            try:
                 full_docs = services.doc_rag_system.search_docs(msg)
                 tool_context = full_docs[:1000]
-            except: pass
+            except Exception:
+                pass
 
     # --- STEP 4: DECISION & SQL GENERATION AGENT ---
     data_context = ""
@@ -359,7 +406,7 @@ def chat():
 
     # CHEAP HACK: Don't use LLM for "Hi"
     if is_conversational(msg):
-        print("⚡ Skipping SQL Gen for conversational message")
+        print("[LLM] Skipping SQL Gen for conversational message")
         data_context = "User is greeting or asking for general help. No DB query needed."
     else:
         # We ask the LLM: "Given this schema, write the SQL."
@@ -376,7 +423,7 @@ def chat():
         4. Output ONLY the SQL query inside ```sql``` blocks. No explanations.
         """
         
-        print("🤖 Generating SQL Plan...")
+        print("[LLM] Generating SQL Plan...")
         sql_response = llm_service.generate(
             prompt=msg, 
             model=model, 
@@ -384,11 +431,12 @@ def chat():
             temperature=0.1
         )
         
-        generated_sql = clean_sql_output(sql_response['response'])
+        sql_text = (sql_response.get('response') or '') if isinstance(sql_response, dict) else ''
+        generated_sql = clean_sql_output(sql_text)
         
         # --- STEP 5: EXECUTE SQL (If needed) ---
         if "NO_QUERY" not in generated_sql and "SELECT" in generated_sql.upper():
-            print(f"🔍 Executing SQL: {generated_sql}")
+            print(f"[LLM] Executing SQL: {generated_sql}")
             query_executed = True
             
             query_result = services.investigation_db.execute_safe_query(generated_sql, db_path=active_db_path)
@@ -396,17 +444,15 @@ def chat():
             if "error" in query_result:
                 data_context = f"SQL Error: {query_result['error']}"
             else:
-                data_context = json.dumps(query_result['data'], indent=2)
+                data_context = json.dumps(query_result.get('data', []), indent=2)
                 if query_result.get('truncated'):
                     data_context += "\n...(Result truncated to 50 rows)"
-                if query_result['row_count'] == 0:
+                if query_result.get('row_count') == 0:
                     data_context = "Query executed successfully but returned 0 results. The record does not exist."
         else:
             data_context = "No database query was needed."
 
     # --- STEP 6: FINAL NARRATIVE GENERATION ---
-    # CRITICAL FIX: The System Prompt must force the LLM to trust the data.
-    
     final_system_prompt = f"""
     You are a Senior AML Investigator Assistant.
     
@@ -429,7 +475,7 @@ def chat():
     Answer the user professionally based ONLY on the data above.
     """
     
-    print("📝 Generating Final Narrative...")
+    print("[LLM] Generating Final Narrative...")
     final_response = llm_service.chat(
         msg, 
         model=model, 
@@ -437,10 +483,16 @@ def chat():
     )
     
     # Append the internal reasoning for the user to see (Transparency)
-    if query_executed:
-        final_response['response'] += f"\n\n*(Analysis based on query: `{generated_sql}`)*"
+    if isinstance(final_response, dict):
+        if query_executed and final_response.get('response'):
+            final_response['response'] += f"\n\n*(Analysis based on query: `{generated_sql}`)*"
+        return jsonify(final_response)
     
-    return jsonify(final_response)
+    return jsonify({
+        'success': False,
+        'error': 'Invalid response received from LLM service',
+        'response': str(final_response)
+    })
 
 
 # ============================================================================
@@ -475,7 +527,7 @@ def build_case_index():
     try:
         force = request.json.get('force_rebuild', False)
         
-        print("🔨 Starting index build...")
+        print("[RAG] Starting index build...")
         result = services.rag_system.build_case_embeddings(force_rebuild=force)
         
         if result.get('success'):
@@ -493,7 +545,7 @@ def build_case_index():
             }), 500
             
     except Exception as e:
-        print(f"❌ Index build error: {str(e)}")
+        print(f"[RAG] Index build error: {str(e)}")
         return jsonify({
             'success': False,
             'error': f'Index build failed: {str(e)}'
@@ -520,7 +572,7 @@ def similar_cases():
         # Validate top_k range
         top_k = max(1, min(top_k, 50))  # Limit between 1 and 50
         
-        print(f"🔍 Searching for cases similar to: {case_id} (top_k={top_k})")
+        print(f"[RAG] Searching for cases similar to: {case_id} (top_k={top_k})")
         
         results = services.rag_system.search_similar_cases(case_id, top_k=top_k)
         
@@ -532,7 +584,7 @@ def similar_cases():
         }), 200
         
     except Exception as e:
-        print(f"❌ Similar cases error: {str(e)}")
+        print(f"[RAG] Similar cases error: {str(e)}")
         return jsonify({
             'status': 'error',
             'error': str(e),
@@ -553,14 +605,14 @@ def search_text():
     try:
         query = request.json.get('query', '').strip()
         top_k = int(request.json.get('top_k', 5))
-        
+
         if not query:
             return jsonify({'error': 'query is required and cannot be empty'}), 400
         
         # Validate top_k range
         top_k = max(1, min(top_k, 50))
         
-        print(f"🧠 Hypothesis search: '{query[:100]}...' (top_k={top_k})")
+        print(f"[RAG] Hypothesis search: '{query[:100]}...' (top_k={top_k})")
         
         results = services.rag_system.search_by_text(query, top_k=top_k)
         
@@ -572,7 +624,7 @@ def search_text():
         }), 200
         
     except Exception as e:
-        print(f"❌ Text search error: {str(e)}")
+        print(f"[RAG] Text search error: {str(e)}")
         return jsonify({
             'status': 'error',
             'error': str(e),
@@ -602,7 +654,7 @@ def batch_compare():
                 'error': 'Maximum 20 cases allowed in batch comparison'
             }), 400
         
-        print(f"📊 Batch comparing {len(case_ids)} cases...")
+        print(f"[RAG] Batch comparing {len(case_ids)} cases...")
 
         result = None
         methodology = None
@@ -657,7 +709,7 @@ def explain_similarity():
         "case_id_1": "CASE123",
         "case_id_2": "CASE456", 
         "similarity_score": 0.87,
-        "model": "llama3.2:1b"  <-- Optional model override
+        "model": "gpt-4o-mini"  <-- Optional model override
     }
     """
     try:
@@ -669,7 +721,8 @@ def explain_similarity():
             score = float(raw_score)
         except Exception:
             score = 0.0
-        model = request.json.get('model', 'llama3.2:1b') # Use correct default
+        llm_service = _get_llm_service()
+        model = _resolve_request_model(request.json, llm_service)
         
         # Validation
         if not case_id_1 or not case_id_2:
@@ -678,7 +731,6 @@ def explain_similarity():
                 'error': 'Both case_id_1 and case_id_2 are required'
             }), 400
         
-        llm_service = _get_llm_service()
         if not llm_service or not llm_service.check_connection():
             return jsonify({
                 'status': 'error',
@@ -692,7 +744,7 @@ def explain_similarity():
                 'explanation': 'Vector RAG system not initialized.'
             }), 500
         
-        print(f"🤖 Generating explanation for {case_id_1} vs {case_id_2} (score: {score:.2%}) using {model}")
+        print(f"[LLM] Generating explanation for {case_id_1} vs {case_id_2} (score: {score:.2%}) using {model}")
         
         # Use the new explain_similarity method from VectorRAGSystem
         explanation = services.rag_system.explain_similarity(case_id_1, case_id_2, score, model=model)
@@ -707,14 +759,14 @@ def explain_similarity():
         
     except AttributeError as e:
         # Handle case where explain_similarity method doesn't exist yet
-        print(f"⚠️ Method not found: {str(e)}")
+        print(f"[RAG] Method not found: {str(e)}")
         return jsonify({
             'status': 'error',
             'explanation': 'Explanation feature not yet implemented in backend. Please update vector_rag.py with the explain_similarity method.'
         }), 501
         
     except Exception as e:
-        print(f"❌ Explanation error: {str(e)}")
+        print(f"[LLM] Explanation error: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -754,7 +806,7 @@ def index_status():
         }), 200
         
     except Exception as e:
-        print(f"❌ Index status error: {str(e)}")
+        print(f"[RAG] Index status error: {str(e)}")
         return jsonify({
             'status': 'error',
             'error': str(e)
@@ -804,7 +856,7 @@ def rag_health_check():
         return jsonify(health), status_code
         
     except Exception as e:
-        print(f"❌ Health check error: {str(e)}")
+        print(f"[RAG] Health check error: {str(e)}")
         return jsonify({
             'status': 'unhealthy',
             'error': str(e),
@@ -853,7 +905,7 @@ def explain_similarity_legacy():
             }), 400
         
         # Forward to new endpoint
-        print(f"⚠️ Using legacy endpoint. Please update to /rag/explain")
+        print(f"[RAG] Using legacy endpoint. Please update to /rag/explain")
         
         explanation = services.rag_system.explain_similarity(case_id_1, case_id_2, score)
         
@@ -864,7 +916,7 @@ def explain_similarity_legacy():
         }), 200
         
     except Exception as e:
-        print(f"❌ Legacy endpoint error: {str(e)}")
+        print(f"[RAG] Legacy endpoint error: {str(e)}")
         return jsonify({
             'explanation': f'Could not generate explanation. Error: {str(e)}'
         }), 500
@@ -901,43 +953,52 @@ def rag_statistics():
         # Add build metrics if available
         if hasattr(services.rag_system, 'build_metrics') and services.rag_system.build_metrics:
             stats['build_metrics'] = services.rag_system.build_metrics
-        
-        return jsonify(stats), 200
+# Handle case where explain_similarity method doesn't exist yet
+        print(f"[RAG] Method not found: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'explanation': 'Explanation feature not yet implemented in backend. Please update vector_rag.py with the explain_similarity method.'
+        }), 501
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-# backend/api/routes/llm.py (ADD THESE ENDPOINTS)
+        print(f"[LLM] Explanation error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'status': 'error',
+            'explanation': f'Failed to generate explanation: {str(e)}'
+        }), 500
+
+
+# ============================================================================
+# CASE PACK AI INVESTIGATION ENDPOINTS
+# ============================================================================
 
 from case_pack.case_summary_builder import CaseSummaryBuilder
 from llm.explain_case import CaseExplainer
 from llm.review_questions import ReviewQuestionsGenerator
 
-# Initialize helpers (add to existing services initialization)
 case_summary_builder = None
 case_explainer = None
 review_questions_gen = None
 
-def init_case_helpers():
-    """Initialize case pack AI helpers"""
-    global case_summary_builder, case_explainer, review_questions_gen
-    llm_service = _get_llm_service()
-    
-    if not case_summary_builder:
-        case_summary_builder = CaseSummaryBuilder(services.investigation_db)
-    
-    if not case_explainer and llm_service:
-        case_explainer = CaseExplainer(llm_service)
-    
-    if not review_questions_gen and llm_service:
-        review_questions_gen = ReviewQuestionsGenerator(llm_service)
+def _resolve_case_db_manager():
+    env_id = request.args.get('env_id') or request.headers.get('X-Environment-ID') or getattr(services.metadata_manager, 'active_env', None)
+    tenant_id = getattr(request, 'tenant_id', None) or 'default'
+    if env_id:
+        try:
+            return services.get_investigation_db(env_id, tenant_id)
+        except Exception:
+            pass
+    return getattr(services, 'investigation_db', None)
 
 
-# ============================================================================
-# NEW CASE ANALYSIS ENDPOINTS (Fixed Routes)
-# ============================================================================
+def _get_case_summary_builder():
+    db_mgr = _resolve_case_db_manager()
+    return CaseSummaryBuilder(db_mgr) if db_mgr else None
 
-@llm_bp.route('/llm/explain-case', methods=['POST', 'OPTIONS'])  # ✅ ADDED /llm/ prefix
+
+@llm_bp.route('/llm/explain-case', methods=['POST', 'OPTIONS'])
 @handle_errors
 def explain_case_endpoint():
     """
@@ -947,38 +1008,38 @@ def explain_case_endpoint():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
 
-    init_case_helpers()
-    
-    case_id = request.json.get('case_id')
-    model = request.json.get('model', 'llama3.2:1b')
+    data = request.json or {}
+    case_id = data.get('case_id')
+    llm_service = _get_llm_service()
+    model = _resolve_request_model(data, llm_service)
     
     if not case_id:
         return jsonify({'error': 'case_id required'}), 400
     
-    if not case_summary_builder or not case_explainer:
-        return jsonify({'error': 'AI services not initialized'}), 503
+    builder = _get_case_summary_builder()
+    if not builder:
+        return jsonify({'error': 'Investigation database not initialized for active environment'}), 503
     
     try:
-        # Step 1: Build deterministic summary
-        summary = case_summary_builder.build_case_summary(case_id)
-        
+        summary = builder.build_case_summary(case_id)
         if "error" in summary:
             return jsonify({'success': False, 'error': summary['error']}), 500
         
-        # Step 2: Generate explanation
-        explanation = case_explainer.explain_case(summary, model=model)
-        
+        explainer = CaseExplainer(llm_service) if llm_service else None
+        if not explainer:
+            return jsonify({'error': 'AI provider unavailable'}), 503
+
+        explanation = explainer.explain_case(summary, model=model)
         return jsonify({
             'success': True,
             'case_id': case_id,
             'explanation': explanation
         })
-    
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@llm_bp.route('/llm/review-questions', methods=['POST', 'OPTIONS']) # ✅ ADDED /llm/ prefix
+@llm_bp.route('/llm/review-questions', methods=['POST', 'OPTIONS'])
 @handle_errors
 def review_questions_endpoint():
     """
@@ -988,32 +1049,104 @@ def review_questions_endpoint():
     if request.method == 'OPTIONS':
         return jsonify({'status': 'ok'}), 200
 
-    init_case_helpers()
-    
-    case_id = request.json.get('case_id')
-    model = request.json.get('model', 'llama3.2:1b')
+    data = request.json or {}
+    case_id = data.get('case_id')
+    llm_service = _get_llm_service()
+    model = _resolve_request_model(data, llm_service)
     
     if not case_id:
         return jsonify({'error': 'case_id required'}), 400
     
-    if not review_questions_gen:
-        return jsonify({'error': 'AI services not initialized'}), 503
+    builder = _get_case_summary_builder()
+    if not builder:
+        return jsonify({'error': 'Investigation database not initialized for active environment'}), 503
     
     try:
-        # Step 1: Build deterministic summary
-        summary = case_summary_builder.build_case_summary(case_id)
-        
-        if "error" in summary:
+        summary = builder.build_case_summary(case_id)
+        if isinstance(summary, dict) and "error" in summary:
             return jsonify({'success': False, 'error': summary['error']}), 500
         
-        # Step 2: Generate questions
-        questions = review_questions_gen.generate_review_questions(summary, model=model)
-        
+        gen = ReviewQuestionsGenerator(llm_service) if llm_service else None
+        if not gen:
+            return jsonify({'error': 'AI provider unavailable'}), 503
+
+        questions = gen.generate_review_questions(summary, model=model)
         return jsonify({
             'success': True,
             'case_id': case_id,
             'questions': questions
         })
-    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@llm_bp.route('/llm/case-chat', methods=['POST', 'OPTIONS'])
+@handle_errors
+def case_chat_endpoint():
+    """
+    Interactive AML Case Copilot for analysis & evidence Q&A.
+    Adheres strictly to "AI for Analysis, Human for Decision".
+    Matches Frontend URL: /api/v2/llm/case-chat
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+
+    data = request.json or {}
+    case_id = data.get('case_id')
+    message = data.get('message', '').strip()
+    history = data.get('history', [])
+    llm_service = _get_llm_service()
+    model = _resolve_request_model(data, llm_service)
+
+    if not case_id or not message:
+        return jsonify({'error': 'case_id and message are required'}), 400
+
+    try:
+        builder = _get_case_summary_builder()
+        summary = builder.build_case_summary(case_id) if builder else {}
+
+        case_context_str = json.dumps(summary, indent=2, default=str) if summary else f"Case ID: {case_id}"
+
+        system_prompt = f"""You are an expert AML Compliance & Financial Intelligence Analyst Copilot.
+You are assisting an AML investigator with deep-dive evidence analysis of Case: {case_id}.
+
+CORE REGULATORY GUARDRAILS:
+1. Ground every response in the SPECIFIC telemetry provided below (exact counts, volumes, dates, and counterparties).
+2. Do NOT invent facts or hallucinate that there are 0 transactions when metrics are clearly provided.
+3. Do NOT use dollar signs ($). Format numbers as exact numeric values (e.g. 271,586.91).
+4. You are an ANALYTICAL COPILOT, NOT the final decision-maker. Frame conclusions as: "The evidence highlights [pattern] which requires analyst determination on [risk factor]."
+
+GROUND TRUTH CASE EVIDENCE & SUMMARY DATA:
+{case_context_str}
+
+CONVERSATION GUIDELINES:
+- Answer the investigator's inquiry concisely, objectively, and factually based on the case data.
+- Use structured markdown formatting (bullet points, bold key figures).
+- Highlight potential structuring, rapid velocity, pass-through flows, or entity concentration if relevant.
+"""
+
+        if not llm_service or not llm_service.check_connection():
+            resp_text = f"**[Offline Analysis for {case_id}]**\n\nBased on available case data:\n- Total Volume: {summary.get('key_metrics', {}).get('total_volume', 'N/A')}\n- Triggered Alerts: {summary.get('key_metrics', {}).get('alert_count', 0)}\n- Counterparties: {len(summary.get('top_counterparties', []))}\n\n*Please ensure your LLM provider is active for real-time natural language copilot responses.*"
+            return jsonify({
+                'success': True,
+                'response': resp_text,
+                'case_id': case_id,
+                'model': 'deterministic-fallback'
+            })
+
+        response_payload = llm_service.chat(
+            message,
+            model=model,
+            system_prompt=system_prompt
+        )
+
+        return jsonify({
+            'success': True,
+            'case_id': case_id,
+            'response': response_payload.get('response', ''),
+            'model': response_payload.get('model', model),
+            'execution_time': response_payload.get('execution_time', 0)
+        })
+
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

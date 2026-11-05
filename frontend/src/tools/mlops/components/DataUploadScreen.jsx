@@ -20,6 +20,7 @@ import {
   BubbleChart, Notifications, AccountTree, Add,
   FolderOpen, PlayArrow, MoreVert, Circle,
   CheckCircleOutline, RadioButtonUnchecked,
+  Visibility, VisibilityOutlined, Search,
 } from '@mui/icons-material';
 import mlopsApi from '../services/mlopsApi';
 import { ALLOW_INCOMPLETE_ACTIONS } from '../utils/uiFlags';
@@ -84,6 +85,7 @@ const ALL_PRESET_TYPES = [
   PRESET_TYPES[PRESET_TYPES.length - 1],
 ];
 const TYPE_META = Object.fromEntries(ALL_PRESET_TYPES.map(t => [t.value, t]));
+const datasetTypeLookup = (type) => TYPE_META[type] || { desc: 'Source table', bizHint: 'Source table', description: 'Source table' };
 
 // Type badge colors — muted, catalog-style
 const TYPE_BADGE = {
@@ -232,11 +234,11 @@ const buildPreviewColumns = (previewRows, variant = 'inline') => {
   const isDialog = variant === 'dialog';
   const keys = Array.from(new Set(previewRows.flatMap((row) => (
     row && typeof row === 'object' ? Object.keys(row) : []
-  )))).slice(0, isDialog ? 40 : 30);
+  )))).slice(0, isDialog ? 60 : 30);
   return keys.map((key) => ({
     field: key, headerName: key, minWidth: isDialog ? 160 : 110, flex: 1,
     renderCell: ({ value }) => (
-      <Typography sx={{ fontSize: isDialog ? 11.5 : 10, color: PwC.mist, fontFamily: 'monospace', lineHeight: 1.5 }} noWrap>
+      <Typography sx={{ fontSize: isDialog ? 12.5 : 10, color: '#0f172a', fontWeight: 500, fontFamily: 'inherit', lineHeight: 1.5 }} noWrap>
         {value == null ? '' : String(value)}
       </Typography>
     ),
@@ -282,6 +284,91 @@ const buildNarrative = (dataset, profile, allDatasets) => {
 };
 
 // ─── Shared UI Atoms ──────────────────────────────────────────────────────────
+
+const QueueItemCard = ({
+  item,
+  activePipelineId,
+  pipelineType,
+  onTypeChange,
+  onCustomNameChange,
+  onUpload,
+  onRemove,
+}) => {
+  const isDone = item.status === 'done';
+  const isUploading = item.status === 'uploading';
+  const isError = item.status === 'error';
+
+  return (
+    <Box
+      sx={{
+        p: 1.25,
+        border: `1px solid ${isError ? PwC.rose : isDone ? PwC.emerald : PwC.border}`,
+        borderRadius: '6px',
+        bgcolor: isDone ? PwC.emeraldLight : isError ? PwC.roseLight : '#ffffff',
+      }}
+    >
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+          <FilePresent sx={{ fontSize: 18, color: isDone ? PwC.emerald : PwC.tangerine }} />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#0f172a' }} noWrap>
+              {item.file?.name || item.name || 'Dataset file'}
+            </Typography>
+            <Typography sx={{ fontSize: 10, color: PwC.mist }}>
+              {fmtBytes(item.file?.size || 0)}
+            </Typography>
+          </Box>
+        </Stack>
+
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <Select
+            value={item.type || 'transactions'}
+            onChange={(e) => onTypeChange(e.target.value)}
+            disabled={isDone || isUploading}
+            sx={{ fontSize: 11, height: 26 }}
+          >
+            {ALL_PRESET_TYPES.map((t) => (
+              <MenuItem key={t.value} value={t.value} sx={{ fontSize: 11 }}>
+                {t.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          {!isDone && (
+            <Button
+              size="small"
+              variant="contained"
+              disabled={isUploading}
+              onClick={onUpload}
+              sx={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                py: 0.2,
+                px: 1,
+                minWidth: 0,
+                bgcolor: PwC.tangerine,
+                '&:hover': { bgcolor: PwC.midnight },
+                textTransform: 'none',
+              }}
+            >
+              {isUploading ? <CircularProgress size={12} sx={{ color: '#fff' }} /> : 'Upload'}
+            </Button>
+          )}
+          <IconButton size="small" onClick={onRemove} sx={{ p: 0.25, color: PwC.mist }}>
+            <Close sx={{ fontSize: 14 }} />
+          </IconButton>
+        </Stack>
+      </Stack>
+      {isError && (
+        <Typography sx={{ fontSize: 10.5, color: PwC.rose, mt: 0.5 }}>
+          {item.error || 'Upload failed'}
+        </Typography>
+      )}
+    </Box>
+  );
+};
 
 // Enterprise metric tile — tighter, more Redshift-console feel
 const MetricTile = ({ label, value, sub, accent = PwC.tangerine, icon: Icon }) => (
@@ -1014,21 +1101,26 @@ const RegisteredDatasetCard = ({ dataset, persona, schema, profile, onOpenViewer
 
 // ─── Dataset Viewer Dialog ─────────────────────────────────────────────────────
 const DatasetViewerDialog = ({
-  open, dataset, persona, schema, profile, allDatasets,
-  loadingSchema, loadingProfile, duplicateCount, onClose, onDelete,
+  open, dataset, schema, profile, allDatasets,
+  loadingSchema, loadingProfile, onClose, onDelete,
 }) => {
   const d = dataset || null;
   const badge = typeBadge(d?.dataset_type);
   const detailsErr = schema?.error || profile?.error;
   const isLoading = Boolean(loadingSchema || loadingProfile);
-  const schemaRows = useMemo(() => (d ? buildColumnRows(d, schema, profile) : []), [d, schema, profile]);
-  const idRows = schemaRows.filter((row) => row.is_identifier);
-  const issueRows = schemaRows.filter((row) => (ratio(row.null_pct) || 0) >= 0.2 || row.issue_flags.length > 0);
-  const qualityScore = Number(profile?.quality_score ?? schema?.quality_score);
-  const qualitySafe = Number.isFinite(qualityScore) ? qualityScore
-    : schemaRows.length
-      ? Math.max(0, Math.round(100 - (schemaRows.reduce((sum, row) => sum + ((ratio(row.null_pct) || 0) * 100), 0) / schemaRows.length)))
-      : null;
+  const [filterText, setFilterText] = useState('');
+
+  const rawPreviewRows = useMemo(() => getPreviewRows(schema), [schema]);
+  const filteredRows = useMemo(() => {
+    if (!filterText.trim()) return rawPreviewRows;
+    const q = filterText.toLowerCase().trim();
+    return rawPreviewRows.filter((row) => {
+      if (!row || typeof row !== 'object') return false;
+      return Object.values(row).some((val) => val != null && String(val).toLowerCase().includes(q));
+    });
+  }, [rawPreviewRows, filterText]);
+
+  const previewCols = useMemo(() => buildPreviewColumns(rawPreviewRows, 'dialog'), [rawPreviewRows]);
 
   return (
     <Dialog
@@ -1039,88 +1131,108 @@ const DatasetViewerDialog = ({
       PaperProps={{
         sx: {
           width: { xs: 'calc(100vw - 24px)', md: 'min(1480px, calc(100vw - 48px))' },
-          height: { xs: 'calc(100vh - 24px)', md: 'calc(100vh - 48px)' },
-          maxHeight: 'none',
+          height: '80vh',
+          maxHeight: '82vh',
           borderRadius: '8px',
           border: `1px solid ${PwC.border}`,
           overflow: 'hidden',
-          boxShadow: '0 20px 60px rgba(15,23,42,0.18)',
+          boxShadow: '0 20px 60px rgba(15,23,42,0.22)',
+          display: 'flex',
+          flexDirection: 'column',
         },
       }}
     >
-      {/* Dialog chrome header */}
+      {/* Sleek SaaS Modal Header */}
       <Box sx={{
-        px: 3, py: 0,
+        px: 2.5, py: 1.25,
         borderBottom: `1px solid ${PwC.border}`,
         bgcolor: PwC.midnight,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        minHeight: 52,
+        flexWrap: 'wrap',
+        gap: 1.5,
       }}>
-        <Stack direction="row" spacing={2} alignItems="center">
-          {/* Type badge */}
+        <Stack direction="row" spacing={1.5} alignItems="center">
           <Box sx={{
-            px: 1.25, py: 0.4,
+            px: 1, py: 0.3,
             bgcolor: badge.bg, borderRadius: '4px',
           }}>
-            <Typography sx={{ fontSize: 10, fontWeight: 800, color: badge.fg, letterSpacing: 0.6 }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 800, color: badge.fg, letterSpacing: 0.5 }}>
               {badge.label}
             </Typography>
           </Box>
 
-          <Typography sx={{ fontSize: 15, fontWeight: 700, color: PwC.white, letterSpacing: '-0.2px' }}>
+          <Typography sx={{ fontSize: 15, fontWeight: 700, color: '#ffffff', letterSpacing: '-0.01em' }}>
             {d?.dataset_type || 'Dataset'}
           </Typography>
-          <Typography sx={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
+
+          <Typography sx={{ fontSize: 12, color: '#94a3b8', fontFamily: 'monospace' }}>
             {d?.filename || 'Uploaded source table'}
           </Typography>
 
-          {/* Stat chips */}
-          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-            {[
-              { label: `${fmtNum(d?.row_count)} rows` },
-              { label: `${d?.columns?.length ?? 0} cols` },
-              qualitySafe != null ? { label: `Quality ${Math.round(qualitySafe)}%`, color: qualityColor(qualitySafe) } : null,
-              idRows.length > 0 ? { label: `${idRows.length} keys` } : null,
-              issueRows.length > 0 ? { label: `${issueRows.length} issues`, warn: true } : null,
-              persona === 'technical' && duplicateCount != null
-                ? { label: `${fmtNum(duplicateCount)} dupes`, warn: duplicateCount > 0 } : null,
-            ].filter(Boolean).map((chip, i) => (
-              <Box key={i} sx={{
-                px: 1, py: 0.25,
-                bgcolor: chip.warn ? 'rgba(224,48,30,0.15)' : 'rgba(255,255,255,0.08)',
-                borderRadius: '3px',
-              }}>
-                <Typography sx={{
-                  fontSize: 10.5, fontWeight: 600,
-                  color: chip.warn ? '#FCA5A5' : chip.color ? chip.color : 'rgba(255,255,255,0.7)',
-                }}>
-                  {chip.label}
-                </Typography>
-              </Box>
-            ))}
-          </Stack>
+          <Box sx={{ px: 1, py: 0.25, bgcolor: 'rgba(255,255,255,0.08)', borderRadius: '4px' }}>
+            <Typography sx={{ fontSize: 11, fontWeight: 600, color: '#cbd5e1' }}>
+              {fmtNum(d?.row_count)} rows · {d?.columns?.length ?? 0} cols
+            </Typography>
+          </Box>
         </Stack>
 
-        <Stack direction="row" spacing={0.75} alignItems="center">
+        <Stack direction="row" spacing={1.25} alignItems="center">
+          <TextField
+            size="small"
+            placeholder="Filter preview data..."
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            InputProps={{
+              startAdornment: <Search sx={{ fontSize: 15, color: '#94a3b8', mr: 0.5 }} />,
+            }}
+            sx={{
+              width: 220,
+              '& .MuiInputBase-root': {
+                bgcolor: 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                fontSize: 12,
+                borderRadius: '6px',
+                height: 32,
+              },
+              '& .MuiOutlinedInput-notchedOutline': {
+                borderColor: 'rgba(255, 255, 255, 0.15)',
+              },
+              '&:hover .MuiOutlinedInput-notchedOutline': {
+                borderColor: 'rgba(255, 255, 255, 0.3)',
+              },
+              '& .MuiInputBase-input::placeholder': {
+                color: '#94a3b8',
+                opacity: 1,
+              },
+            }}
+          />
+
           <Button
-            size="small" variant="outlined" color="error"
+            size="small"
+            variant="outlined"
+            color="error"
             startIcon={<Delete sx={{ fontSize: 13 }} />}
             onClick={onDelete}
             sx={{
-              textTransform: 'none', borderRadius: '5px', fontSize: 11,
-              borderColor: 'rgba(224,48,30,0.4)', color: '#FCA5A5',
+              textTransform: 'none',
+              borderRadius: '5px',
+              fontSize: 11,
+              height: 32,
+              borderColor: 'rgba(224,48,30,0.4)',
+              color: '#FCA5A5',
               '&:hover': { borderColor: PwC.red, bgcolor: 'rgba(224,48,30,0.1)' },
             }}
           >
             Remove
           </Button>
-          <IconButton onClick={onClose} sx={{ color: 'rgba(255,255,255,0.5)', p: 0.5, '&:hover': { color: PwC.white } }}>
+
+          <IconButton onClick={onClose} sx={{ color: 'rgba(255,255,255,0.7)', p: 0.5, '&:hover': { color: '#ffffff' } }}>
             <Close sx={{ fontSize: 18 }} />
           </IconButton>
         </Stack>
       </Box>
 
-      {/* Progress bar */}
+      {/* Loading Progress bar */}
       {isLoading && (
         <LinearProgress sx={{
           height: 2, bgcolor: 'transparent',
@@ -1128,24 +1240,64 @@ const DatasetViewerDialog = ({
         }} />
       )}
 
-      <DialogContent sx={{ p: { xs: 2, md: 3 }, bgcolor: PwC.surface, overflowY: 'auto' }}>
+      {/* Main Table Preview Content */}
+      <Box sx={{ flex: 1, minHeight: 0, p: 2, bgcolor: '#ffffff', display: 'flex', flexDirection: 'column' }}>
         {detailsErr && (
-          <Alert severity="warning" sx={{ mb: 2, borderRadius: '5px' }}>{detailsErr}</Alert>
+          <Alert severity="warning" sx={{ mb: 1.5, py: 0.5, borderRadius: '5px' }}>{detailsErr}</Alert>
         )}
 
-        {!d ? null : persona === 'business' ? (
-          <Stack spacing={2.5}>
-            <BusinessPanel dataset={d} profile={profile} allDatasets={allDatasets} variant="dialog" />
-            <Box sx={{ p: 2.5, bgcolor: PwC.white, border: `1px solid ${PwC.border}`, borderRadius: '6px' }}>
-              <SamplePreviewPanel schema={schema} variant="dialog" />
-            </Box>
-          </Stack>
+        {filteredRows.length > 0 && previewCols.length > 0 ? (
+          <Box sx={{ flex: 1, minHeight: 0, width: '100%' }}>
+            <DataGrid
+              rows={filteredRows.map((row, index) => ({ id: index, ...row }))}
+              columns={previewCols}
+              density="standard"
+              disableColumnMenu
+              disableRowSelectionOnClick
+              pageSizeOptions={[10, 25, 50, 100]}
+              initialState={{ pagination: { paginationModel: { pageSize: 25, page: 0 } } }}
+              sx={{
+                border: `1px solid ${PwC.border}`,
+                borderRadius: '6px',
+                bgcolor: '#ffffff',
+                fontSize: 12.5,
+                color: '#0f172a',
+                '& .MuiDataGrid-columnHeaders': {
+                  bgcolor: '#f1f5f9',
+                  minHeight: '40px !important',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: '#0f172a',
+                  borderBottom: `2px solid ${PwC.border}`,
+                },
+                '& .MuiDataGrid-columnHeaderTitle': {
+                  fontWeight: 700,
+                  color: '#0f172a',
+                },
+                '& .MuiDataGrid-cell': {
+                  borderColor: '#f1f5f9',
+                  py: 1,
+                  color: '#0f172a',
+                  fontWeight: 500,
+                },
+                '& .MuiDataGrid-row:hover': {
+                  bgcolor: '#fff7ed',
+                },
+                '& .MuiDataGrid-footerContainer': {
+                  borderTop: `1px solid ${PwC.border}`,
+                  bgcolor: '#f8fafc',
+                },
+              }}
+            />
+          </Box>
         ) : (
-          <Box sx={{ p: 2.5, bgcolor: PwC.white, border: `1px solid ${PwC.border}`, borderRadius: '6px' }}>
-            <TechnicalPanel dataset={d} schema={schema} profile={profile} allDatasets={allDatasets} variant="dialog" />
+          <Box sx={{ py: 8, textAlign: 'center' }}>
+            <Typography sx={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>
+              {filterText ? 'No matching rows found for the filter.' : 'No preview rows available for this dataset.'}
+            </Typography>
           </Box>
         )}
-      </DialogContent>
+      </Box>
     </Dialog>
   );
 };
@@ -1186,12 +1338,14 @@ const DataUploadScreen = ({
   const [selectedRunId, setSelectedRunId]       = useState('');
   const [pipelineName, setPipelineName]         = useState(activePipelineName || 'Experiment 1');
   const [pipelineType, setPipelineType]         = useState(activePipelineType || 'fcc');
+  const [showUploadZone, setShowUploadZone]     = useState(false);
   const fileInputRef = useRef();
   const screenStateSaveSignatureRef = useRef('');
   const screenStateSaveInFlightRef = useRef(false);
   const hasActivePipeline = Number(activePipelineId || 0) > 0;
   const hasUploadedData = datasets.length > 0;
   const isMulePipeline = pipelineType === 'mule';
+  const shouldShowUpload = datasets.length === 0 || showUploadZone;
 
   useEffect(() => {
     setPipelineType(String(activePipelineType || 'fcc').trim().toLowerCase() === 'mule' ? 'mule' : 'fcc');
@@ -1557,32 +1711,13 @@ const DataUploadScreen = ({
     } finally { setOpeningRun(false); }
   }, [onPipelineActivated, onResumePipeline, savedRuns, selectedRunId]);
 
-  // ── Readiness checks ─────────────────────────────────────────────────────────
-  const readinessChecks = isMulePipeline
-    ? [
-        { label: 'Accounts', ok: datasets.some((d) => ['accounts', 'account'].includes(safe(d.dataset_type))) },
-        { label: 'Customers', ok: datasets.some((d) => ['customers', 'customer'].includes(safe(d.dataset_type))) },
-        { label: 'Transactions', ok: datasets.some((d) => ['transactions', 'txn', 'transaction'].includes(safe(d.dataset_type))) },
-        { label: 'Enrichment / network', ok: muleEnrichmentLoaded || Boolean(muleOutcomeDataset) },
-      ]
-    : [
-        { label: 'Transaction data', ok: datasets.some((d) => ['transactions','txn'].includes(safe(d.dataset_type))) },
-        { label: 'Customer / Account', ok: datasets.some((d) => ['accounts','customers'].includes(safe(d.dataset_type))) },
-        { label: 'Alert / Case data', ok: datasets.some((d) => ['alerts','cases'].includes(safe(d.dataset_type))) },
-        { label: 'STR labels', ok: Boolean(strDataset) },
-      ];
-  const readinessScore = readinessChecks.filter((c) => c.ok).length;
-  const canAdvanceToMaster = hasActivePipeline && hasUploadedData;
-
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
-      
-      {/* ── Main 3-column body ─────────────────────────────────────────────── */}
       <Box sx={{
-        flex: 1, minHeight: 0,
+        height: 'calc(100vh - 160px)', minHeight: '500px',
         display: 'grid',
-        gridTemplateColumns: { xs: '1fr', lg: '280px 340px 1fr' },
+        gridTemplateColumns: { xs: '1fr', lg: shouldShowUpload ? '280px 340px 1fr' : '280px 1fr' },
         gap: 0,
         overflow: 'hidden',
       }}>
@@ -1616,211 +1751,204 @@ const DataUploadScreen = ({
         </Box>
 
         {/* ── COL 2: Upload zone + queue ─────────────────────────────────── */}
-        <Box sx={{
-          borderRight: `1px solid ${PwC.border}`,
-          overflowY: 'auto',
-          p: 2,
-          bgcolor: PwC.white,
-          display: 'flex', flexDirection: 'column', gap: 1.75,
-        }}>
-          {/* Section label */}
-          <Box>
-            <Typography sx={{ fontSize: 11, fontWeight: 700, color: PwC.midnight, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-              {isMulePipeline
-                ? 'Upload Mule source tables'
-                : (persona === 'business' ? 'Load source tables' : 'Upload data tables')}
-            </Typography>
-            <Typography sx={{ fontSize: 11.5, color: PwC.mist, mt: 0.3, lineHeight: 1.55 }}>
-              {hasActivePipeline
-                ? (isMulePipeline
-                  ? 'Drop CSV or Parquet files for the Mule run. Accounts, customers, transactions, graph, device, external signals, and outcome tables are supported.'
-                  : 'Drop CSV or Parquet files. Auto-type detection enabled.')
-                : 'Create or open a pipeline run first to unlock upload.'}
-            </Typography>
-          </Box>
-
-          {/* Alerts */}
-          {uiError && (
-            <Alert severity="error" onClose={() => setUiError('')}
-              sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
-              {uiError}
-            </Alert>
-          )}
-          {uiInfo && (
-            <Alert severity="success" onClose={() => setUiInfo('')}
-              sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
-              {uiInfo}
-            </Alert>
-          )}
-          {isMulePipeline && (
-            <Alert severity="info"
-              sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
-              This run is building a Mule Account Detection model. After upload, the next step is to build the account-level analytical dataset.
-            </Alert>
-          )}
-          {!hasActivePipeline && (
-            <Alert severity="warning"
-              sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
-              Upload locked. Create or open a run in the left panel.
-            </Alert>
-          )}
-
-          <input ref={fileInputRef} type="file" multiple hidden accept=".csv,.parquet"
-            onChange={(e) => { addToQueue(e.target.files); e.target.value = ''; }} />
-
-          {/* Drop zone */}
-          <Box
-            onDrop={onDrop}
-            onDragOver={(e) => { e.preventDefault(); if (hasActivePipeline) setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onClick={() => { if (!requireActivePipeline()) return; fileInputRef.current?.click(); }}
-            sx={{
-              border: `2px dashed ${dragOver && hasActivePipeline ? PwC.tangerine : PwC.border}`,
-              borderRadius: '6px',
-              bgcolor: dragOver && hasActivePipeline ? PwC.tangerineLight
-                : hasActivePipeline ? PwC.white : PwC.surface,
-              py: showCompactUpload ? 2 : 3.5,
-              px: 2,
-              cursor: hasActivePipeline ? 'pointer' : 'not-allowed',
-              transition: 'border-color 0.15s, background-color 0.15s',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
-              opacity: hasActivePipeline ? 1 : 0.65,
-              '&:hover': hasActivePipeline ? { borderColor: PwC.tangerine, bgcolor: PwC.tangerineLight } : {},
-            }}
-          >
-            <Box sx={{
-              width: showCompactUpload ? 36 : 44, height: showCompactUpload ? 36 : 44,
-              borderRadius: '50%',
-              bgcolor: dragOver && hasActivePipeline ? PwC.tangerine : PwC.surface,
-              border: `1px solid ${dragOver && hasActivePipeline ? PwC.tangerine : PwC.border}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'all 0.15s',
-            }}>
-              <CloudUpload sx={{
-                fontSize: showCompactUpload ? 18 : 22,
-                color: dragOver && hasActivePipeline ? PwC.white : PwC.tangerine,
-              }} />
-            </Box>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography sx={{ fontSize: 13, fontWeight: 700, color: PwC.midnight }}>
-                {!hasActivePipeline ? 'Unlock by creating a run'
-                  : dragOver ? 'Release to add files'
-                  : showCompactUpload ? 'Drop more files or click to browse'
-                  : 'Drop files here or click to browse'}
-              </Typography>
-              {!showCompactUpload && (
-                <Typography sx={{ fontSize: 11, color: PwC.mist, mt: 0.3 }}>
-                  CSV · Parquet · Max 500 MB per file · Auto-type detection
-                </Typography>
-              )}
-            </Box>
-            {showCompactUpload && (
-              <Typography sx={{ fontSize: 10, color: PwC.mist }}>
-                CSV · Parquet · Max 500 MB
-              </Typography>
-            )}
-          </Box>
-
-          {/* Upload queue */}
-          {queue.length > 0 && (
-            <Box>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.85}>
-                <Typography sx={{ fontSize: 10, fontWeight: 700, color: PwC.ash, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  {completedQueueOnly ? 'Uploaded' : 'Queue'} ({queue.length})
-                </Typography>
-                <Stack direction="row" spacing={0.5} alignItems="center">
-                  {completedQueueOnly && (
-                    <Button size="small" variant="text"
-                      onClick={() => setQueueExpanded((p) => !p)}
-                      sx={{ textTransform: 'none', fontSize: 11, color: PwC.mist, fontWeight: 600, px: 0.75 }}>
-                      {queueExpanded ? 'Hide' : 'Show'}
-                    </Button>
-                  )}
-                  {pendingCount > 1 && (
-                    <Button size="small" variant="contained" onClick={uploadAll} disabled={!hasActivePipeline || uploadingAll}
-                      sx={{
-                        bgcolor: PwC.tangerine, '&:hover': { bgcolor: PwC.midnight },
-                        fontSize: 11, py: 0.35, height: 26,
-                        textTransform: 'none', borderRadius: '4px', boxShadow: 'none',
-                      }}>
-                      {uploadingAll ? `Uploading... (${pendingCount})` : `Upload all (${pendingCount})`}
-                    </Button>
-                  )}
-                </Stack>
-              </Stack>
-              {(!completedQueueOnly || queueExpanded) && (
-                <Stack spacing={0.75}>
-                  {queue.map((item) => (
-                    <QueueItem key={item.id} item={item} persona={persona}
-                      uploadDisabled={!hasActivePipeline}
-                      onTypeChange={(v) => updateItem(item.id, { type: v })}
-                      onCustomNameChange={(v) => updateItem(item.id, { customName: v })}
-                      onUpload={() => uploadItem(item)}
-                      onRemove={() => removeFromQueue(item.id)} />
-                  ))}
-                </Stack>
-              )}
-            </Box>
-          )}
-        </Box>
-
-        {/* ── COL 3: Dataset catalog ─────────────────────────────────────── */}
-        <Box sx={{
-          overflowY: 'auto',
-          bgcolor: PwC.surface,
-          display: 'flex', flexDirection: 'column',
-        }}>
-          {/* Catalog header bar */}
+        {shouldShowUpload && (
           <Box sx={{
-            px: 2.5, py: 1.25,
+            borderRight: `1px solid ${PwC.border}`,
+            overflowY: 'auto',
+            p: 2,
             bgcolor: PwC.white,
-            borderBottom: `1px solid ${PwC.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            position: 'sticky', top: 0, zIndex: 2,
+            display: 'flex', flexDirection: 'column', gap: 1.75,
           }}>
-            <Stack direction="row" alignItems="center" spacing={1.5}>
-              <Typography sx={{ fontSize: 10, fontWeight: 700, color: PwC.ash, textTransform: 'uppercase', letterSpacing: 0.9 }}>
-                {persona === 'business' ? 'Data Catalog' : 'Registered Tables'}
-              </Typography>
-              <Box sx={{
-                px: 0.9, py: 0.15,
-                bgcolor: datasets.length > 0 ? PwC.tangerineLight : PwC.smoke,
-                borderRadius: '10px',
-              }}>
-                <Typography sx={{ fontSize: 10, fontWeight: 800, color: datasets.length > 0 ? PwC.tangerine : PwC.mist }}>
-                  {datasets.length}
+            {/* Section label */}
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Box>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: PwC.midnight, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                  {isMulePipeline
+                    ? 'Upload Mule source tables'
+                    : (persona === 'business' ? 'Load source tables' : 'Upload data tables')}
+                </Typography>
+                <Typography sx={{ fontSize: 11.5, color: PwC.mist, mt: 0.3, lineHeight: 1.55 }}>
+                  {hasActivePipeline
+                    ? (isMulePipeline
+                      ? 'Drop CSV or Parquet files for the Mule run.'
+                      : 'Drop CSV or Parquet files. Auto-type detection enabled.')
+                    : 'Create or open a pipeline run first to unlock upload.'}
                 </Typography>
               </Box>
-              {/* ── ADD THESE KPIs here instead ── */}
               {datasets.length > 0 && (
-                <Stack direction="row" spacing={2} alignItems="center" sx={{ ml: 1 }}>
-                  {[
-                    { label: 'Rows', value: fmtNum(totalRows) },
-                    { label: 'Cols', value: fmtNum(totalCols) },
-                    { label: 'Quality', value: avgQuality == null ? 'N/A' : `${avgQuality.toFixed(0)}%`,
-                      color: avgQuality == null ? PwC.mist : qualityColor(avgQuality) },
-                  ].map((k) => (
-                    <Box key={k.label}>
-                      <Typography sx={{ fontSize: 8.5, fontWeight: 700, color: PwC.mist, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                        {k.label}
-                      </Typography>
-                      <Typography sx={{ fontSize: 13, fontWeight: 800, color: k.color || PwC.midnight, lineHeight: 1, letterSpacing: '-0.3px' }}>
-                        {k.value}
-                      </Typography>
-                    </Box>
-                  ))}
-                </Stack>
+                <IconButton size="small" onClick={() => setShowUploadZone(false)} sx={{ color: PwC.mist }}>
+                  <Close sx={{ fontSize: 16 }} />
+                </IconButton>
               )}
             </Stack>
 
-            {/* STR status + action buttons */}
-            <Stack direction="row" alignItems="center" spacing={1}>
+            {/* Alerts */}
+            {uiError && (
+              <Alert severity="error" onClose={() => setUiError('')}
+                sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
+                {uiError}
+              </Alert>
+            )}
+            {uiInfo && (
+              <Alert severity="success" onClose={() => setUiInfo('')}
+                sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
+                {uiInfo}
+              </Alert>
+            )}
+            {isMulePipeline && (
+              <Alert severity="info"
+                sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
+                This run is building a Mule Account Detection model. After upload, the next step is to build the account-level analytical dataset.
+              </Alert>
+            )}
+            {!hasActivePipeline && (
+              <Alert severity="warning"
+                sx={{ borderRadius: '5px', py: 0.4, '& .MuiAlert-message': { fontSize: 12 } }}>
+                Upload locked. Create or open a run in the left panel.
+              </Alert>
+            )}
+
+            <input ref={fileInputRef} type="file" multiple hidden accept=".csv,.parquet"
+              onChange={(e) => { addToQueue(e.target.files); e.target.value = ''; }} />
+
+            {/* Drop zone */}
+            <Box
+              onDrop={onDrop}
+              onDragOver={(e) => { e.preventDefault(); if (hasActivePipeline) setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onClick={() => { if (!requireActivePipeline()) return; fileInputRef.current?.click(); }}
+              sx={{
+                border: `2px dashed ${dragOver && hasActivePipeline ? PwC.tangerine : PwC.border}`,
+                borderRadius: '6px',
+                bgcolor: dragOver && hasActivePipeline ? PwC.tangerineLight
+                  : hasActivePipeline ? PwC.white : PwC.surface,
+                py: showCompactUpload ? 2 : 3.5,
+                px: 2,
+                cursor: hasActivePipeline ? 'pointer' : 'not-allowed',
+                transition: 'border-color 0.15s, background-color 0.15s',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+                opacity: hasActivePipeline ? 1 : 0.65,
+                '&:hover': hasActivePipeline ? { borderColor: PwC.tangerine, bgcolor: PwC.tangerineLight } : {},
+              }}
+            >
               <Box sx={{
-                display: 'flex', alignItems: 'center', gap: 0.75,
-                px: 1.1, py: 0.45,
+                width: showCompactUpload ? 36 : 44, height: showCompactUpload ? 36 : 44,
+                borderRadius: '50%',
+                bgcolor: dragOver && hasActivePipeline ? PwC.tangerine : PwC.surface,
+                border: `1px solid ${dragOver && hasActivePipeline ? PwC.tangerine : PwC.border}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s',
+              }}>
+                <CloudUpload sx={{
+                  fontSize: showCompactUpload ? 18 : 22,
+                  color: dragOver && hasActivePipeline ? PwC.white : PwC.tangerine,
+                }} />
+              </Box>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: PwC.midnight }}>
+                  {!hasActivePipeline ? 'Unlock by creating a run'
+                    : dragOver ? 'Release to add files'
+                    : showCompactUpload ? 'Drop more files or click to browse'
+                    : 'Drop files here or click to browse'}
+                </Typography>
+                {!showCompactUpload && (
+                  <Typography sx={{ fontSize: 11, color: PwC.mist, mt: 0.3 }}>
+                    CSV · Parquet · Max 500 MB per file · Auto-type detection
+                  </Typography>
+                )}
+              </Box>
+              {showCompactUpload && (
+                <Typography sx={{ fontSize: 10, color: PwC.mist }}>
+                  CSV · Parquet · Max 500 MB
+                </Typography>
+              )}
+            </Box>
+
+            {/* Upload queue */}
+            {queue.length > 0 && (
+              <Box>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.85}>
+                  <Typography sx={{ fontSize: 10, fontWeight: 700, color: PwC.ash, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                    {completedQueueOnly ? 'Uploaded' : 'Queue'} ({queue.length})
+                  </Typography>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    {completedQueueOnly && (
+                      <Button size="small" variant="text"
+                        onClick={() => setQueueExpanded((p) => !p)}
+                        sx={{ textTransform: 'none', fontSize: 11, color: PwC.mist, fontWeight: 600, px: 0.75 }}>
+                        {queueExpanded ? 'Hide' : 'Show'}
+                      </Button>
+                    )}
+                    {pendingCount > 1 && (
+                      <Button size="small" variant="contained" onClick={uploadAll} disabled={!hasActivePipeline || uploadingAll}
+                        sx={{
+                          bgcolor: PwC.tangerine, '&:hover': { bgcolor: PwC.midnight },
+                          fontSize: 11, py: 0.35, height: 26,
+                          textTransform: 'none', borderRadius: '4px', boxShadow: 'none',
+                        }}>
+                        {uploadingAll ? `Uploading... (${pendingCount})` : `Upload all (${pendingCount})`}
+                      </Button>
+                    )}
+                  </Stack>
+                </Stack>
+                {(!completedQueueOnly || queueExpanded) && (
+                  <Stack spacing={0.75}>
+                    {queue.map((item) => (
+                      <QueueItemCard
+                        key={item.id}
+                        item={item}
+                        activePipelineId={activePipelineId}
+                        pipelineType={pipelineType}
+                        onTypeChange={(t) => updateQueueItem(item.id, { type: t })}
+                        onCustomNameChange={(n) => updateQueueItem(item.id, { customName: n })}
+                        onUpload={() => uploadItem(item)}
+                        onRemove={() => removeFromQueue(item.id)}
+                      />
+                    ))}
+                  </Stack>
+                )}
+              </Box>
+            )}
+          </Box>
+        )}
+
+        {/* ── COL 3: Data Catalog ────────────────────────────────────────── */}
+        <Box sx={{
+          overflowY: 'auto',
+          display: 'flex', flexDirection: 'column',
+          bgcolor: PwC.surface,
+        }}>
+          {/* Header */}
+          <Box sx={{
+            p: 2, px: 2.5,
+            borderBottom: `1px solid ${PwC.border}`,
+            bgcolor: PwC.white,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            flexWrap: 'wrap', gap: 1,
+          }}>
+            <Stack direction="row" spacing={1.25} alignItems="center">
+              <Typography sx={{ fontSize: 13, fontWeight: 800, color: PwC.midnight, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                {persona === 'business' ? 'Source Data Catalog' : 'Data Catalog'}
+              </Typography>
+              <Chip
+                size="small"
+                label={`${datasets.length} Dataset${datasets.length !== 1 ? 's' : ''}`}
+                sx={{
+                  height: 20, fontSize: 10.5, fontWeight: 700,
+                  bgcolor: datasets.length ? PwC.tangerineLight : PwC.smoke,
+                  color: datasets.length ? PwC.tangerine : PwC.mist,
+                  borderRadius: '4px',
+                }}
+              />
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Box sx={{
+                display: 'inline-flex', alignItems: 'center', gap: 0.6,
+                px: 1, py: 0.35,
                 bgcolor: isMulePipeline
-                  ? ((muleEnrichmentLoaded || muleOutcomeDataset) ? PwC.emeraldLight : PwC.amberLight)
-                  : (strDataset ? PwC.emeraldLight : PwC.amberLight),
+                  ? ((muleEnrichmentLoaded || muleOutcomeDataset) ? '#ECFDF5' : '#FFFBEB')
+                  : (strDataset ? '#ECFDF5' : '#FFFBEB'),
                 borderRadius: '4px',
                 border: `1px solid ${isMulePipeline
                   ? ((muleEnrichmentLoaded || muleOutcomeDataset) ? '#A7F3D0' : '#FDE68A')
@@ -1835,7 +1963,34 @@ const DataUploadScreen = ({
                 </Typography>
               </Box>
 
-              {/* ── Refresh + Start Fresh moved here ── */}
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<CloudUpload sx={{ fontSize: 13 }} />}
+                onClick={() => {
+                  setShowUploadZone(true);
+                  if (fileInputRef.current) {
+                    fileInputRef.current.click();
+                  }
+                }}
+                sx={{
+                  textTransform: 'none',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  borderColor: PwC.tangerine,
+                  color: PwC.tangerine,
+                  px: 1.25,
+                  py: 0.25,
+                  '&:hover': {
+                    borderColor: PwC.midnight,
+                    bgcolor: PwC.tangerineLight,
+                    color: PwC.midnight,
+                  },
+                }}
+              >
+                + Add Data
+              </Button>
+
               <Tooltip title="Refresh">
                 <IconButton size="small" onClick={onDatasetsRefresh} sx={{ p: 0.5, color: PwC.mist }}>
                   <Refresh sx={{ fontSize: 14 }} />
@@ -1850,25 +2005,8 @@ const DataUploadScreen = ({
             </Stack>
           </Box>
 
-          {/* Table header row */}
-          {datasets.length > 0 && (
-            <Box sx={{
-              px: 2.5, py: 0.6,
-              display: 'grid',
-              gridTemplateColumns: '56px 1fr 60px 20px 110px',
-              bgcolor: PwC.surface,
-              borderBottom: `1px solid ${PwC.border}`,
-            }}>
-              {['Type', 'Dataset', 'Quality', '', 'Actions'].map((h) => (
-                <Typography key={h} sx={{ fontSize: 9, fontWeight: 700, color: PwC.mist, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  {h}
-                </Typography>
-              ))}
-            </Box>
-          )}
-
-          {/* Dataset rows */}
-          <Box sx={{ flex: 1, px: 2, py: datasets.length > 0 ? 1.25 : 0 }}>
+          {/* Dataset Table View */}
+          <Box sx={{ flex: 1, px: 2.5, py: 2 }}>
             {datasets.length === 0 ? (
               <Box sx={{ py: 6, textAlign: 'center' }}>
                 <CloudUpload sx={{ fontSize: 28, color: PwC.smoke, mb: 1 }} />
@@ -1879,85 +2017,101 @@ const DataUploadScreen = ({
                 </Typography>
               </Box>
             ) : (
-              <Stack spacing={0.6}>
-                {datasets.map((d) => (
-                  <RegisteredDatasetCard
-                    key={d.dataset_id}
-                    dataset={d}
-                    persona={persona}
-                    schema={schemaMap[d.dataset_id] || null}
-                    profile={profileMap[d.dataset_id] || null}
-                    onOpenViewer={() => openDatasetViewer(d)}
-                    onDelete={() => deleteDataset(d)}
-                  />
-                ))}
-              </Stack>
+              <Box sx={{ overflowX: 'auto', border: `1px solid ${PwC.border}`, borderRadius: '6px', bgcolor: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: `1px solid ${PwC.border}` }}>
+                      <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>Dataset Name</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>Contains</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>Rows</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>Columns</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>Null %</th>
+                      <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {datasets.map((d, idx) => {
+                      const dtType = datasetTypeLookup(d.dataset_type);
+                      const schema = schemaMap[d.dataset_id];
+                      const rowCount = d.row_count ?? schema?.row_count ?? null;
+                      const colCount = d.column_count ?? schema?.column_count ?? (Array.isArray(d.columns) ? d.columns.length : null) ?? (Array.isArray(schema?.columns) ? schema.columns.length : null);
+                      const nullPct = d.null_percentage ?? d.null_pct ?? (typeof schema?.null_percentage === 'number' ? schema.null_percentage : null);
+                      return (
+                        <tr
+                          key={d.dataset_id}
+                          style={{
+                            borderBottom: idx < datasets.length - 1 ? `1px solid ${PwC.border}` : 'none',
+                            background: idx % 2 === 0 ? '#ffffff' : '#fafafa',
+                          }}
+                        >
+                          <td style={{ padding: '10px 14px' }}>
+                            <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a' }}>
+                              {d.dataset_name || d.name || `Dataset #${d.dataset_id}`}
+                            </Typography>
+                            {d.filename && (
+                              <Typography sx={{ fontSize: 10.5, color: '#64748b' }}>
+                                {d.filename}
+                              </Typography>
+                            )}
+                          </td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <Typography sx={{ fontSize: 11.5, color: '#334155' }}>
+                              {dtType?.description || d.description || 'Source table'}
+                            </Typography>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                            <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#0f172a' }}>
+                              {rowCount !== null && rowCount !== undefined ? fmtNum(rowCount) : '-'}
+                            </Typography>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                            <Typography sx={{ fontSize: 12, fontWeight: 600, color: '#0f172a' }}>
+                              {colCount !== null && colCount !== undefined ? fmtNum(colCount) : '-'}
+                            </Typography>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                            <Typography sx={{ fontSize: 12, fontWeight: 600, color: nullPct && nullPct > 20 ? '#d97706' : '#16a34a' }}>
+                              {nullPct !== null && nullPct !== undefined ? `${Number(nullPct).toFixed(1)}%` : '0.0%'}
+                            </Typography>
+                          </td>
+                          <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                            <Stack direction="row" spacing={0.75} justifyContent="center" alignItems="center">
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<Visibility sx={{ fontSize: 14 }} />}
+                                onClick={() => openDatasetViewer(d)}
+                                sx={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  textTransform: 'none',
+                                  py: 0.25,
+                                  px: 1,
+                                  minWidth: 0,
+                                  borderColor: PwC.border,
+                                  color: '#334155',
+                                  '&:hover': { borderColor: PwC.tangerine, bgcolor: PwC.tangerineLight, color: PwC.tangerine },
+                                }}
+                              >
+                                View
+                              </Button>
+                              <IconButton
+                                size="small"
+                                onClick={() => deleteDataset(d)}
+                                sx={{ color: '#94a3b8', '&:hover': { color: '#ef4444', bgcolor: '#fef2f2' }, p: 0.5 }}
+                              >
+                                <Delete sx={{ fontSize: 15 }} />
+                              </IconButton>
+                            </Stack>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </Box>
             )}
           </Box>
-
-          {/* Pipeline readiness footer */}
-          {datasets.length >= 2 && (
-            <Box sx={{
-              mt: 'auto',
-              px: 2.5, py: 1.75,
-              borderTop: `1px solid ${PwC.border}`,
-              bgcolor: PwC.white,
-            }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
-                <Typography sx={{ fontSize: 9.5, fontWeight: 700, color: PwC.ash, textTransform: 'uppercase', letterSpacing: 0.9 }}>
-                  Pipeline Readiness
-                </Typography>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Typography sx={{ fontSize: 11, fontWeight: 800, color: readinessScore === 4 ? PwC.emerald : PwC.amber }}>
-                    {readinessScore}/4
-                  </Typography>
-                  <Box sx={{ width: 52, height: 4, bgcolor: PwC.smoke, borderRadius: 2, overflow: 'hidden' }}>
-                    <Box sx={{
-                      width: `${(readinessScore / 4) * 100}%`, height: '100%',
-                      bgcolor: readinessScore === 4 ? PwC.emerald : PwC.amber,
-                      borderRadius: 2, transition: 'width 0.5s ease',
-                    }} />
-                  </Box>
-                </Box>
-              </Stack>
-              <Stack direction="row" flexWrap="wrap" gap={1}>
-                {readinessChecks.map(({ label, ok }) => (
-                  <Stack key={label} direction="row" spacing={0.6} alignItems="center">
-                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: ok ? PwC.emerald : PwC.smoke, flexShrink: 0 }} />
-                    <Typography sx={{ fontSize: 10.5, color: ok ? PwC.slate : PwC.mist, fontWeight: ok ? 600 : 400 }}>
-                      {label}
-                    </Typography>
-                  </Stack>
-                ))}
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mt: 1.5 }}>
-                <Typography sx={{ fontSize: 11, color: canAdvanceToMaster ? PwC.slate : PwC.mist }}>
-                  {canAdvanceToMaster
-                    ? (isMulePipeline
-                      ? 'Data upload is complete. Continue to Analytical Dataset to build the account-level Mule modeling table.'
-                      : 'Data upload is complete. Continue to Master Dataset to join and shape the source tables.')
-                    : 'Upload at least one source dataset to unlock the next step.'}
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<PlayArrow sx={{ fontSize: 16 }} />}
-                  disabled={!canAdvanceToMaster}
-                  onClick={() => onStepAdvance?.('master')}
-                  sx={{
-                    alignSelf: { xs: 'stretch', sm: 'center' },
-                    textTransform: 'none',
-                    bgcolor: PwC.tangerine,
-                    '&:hover': { bgcolor: PwC.midnight },
-                    borderRadius: '5px',
-                    boxShadow: 'none',
-                    fontWeight: 700,
-                  }}
-                >
-                  {isMulePipeline ? 'Continue to Analytical Dataset' : 'Continue to Master Dataset'}
-                </Button>
-              </Stack>
-            </Box>
-          )}
         </Box>
       </Box>
 

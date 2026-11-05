@@ -2178,6 +2178,40 @@ class MLOpsWorkbenchService:
             return f"read_csv_auto('{p}', sample_size={int(sample_size)})"
         return f"read_csv_auto('{p}')"
 
+    def _fallback_file_metadata(self, file_path: Path) -> Tuple[int, List[str], Dict[str, str]]:
+        resolved_path = self._resolve_file_path(file_path)
+        ext = resolved_path.suffix.lower()
+        if ext in (".parquet", ".pq"):
+            df = pd.read_parquet(resolved_path)
+        else:
+            candidates = [
+                {"sep": ",", "engine": "python"},
+                {"sep": None, "engine": "python"},
+                {"sep": ";", "engine": "python"},
+                {"sep": "|", "engine": "python"},
+                {"sep": "\t", "engine": "python"},
+            ]
+            last_exc: Optional[Exception] = None
+            df = None
+            for opts in candidates:
+                try:
+                    df = pd.read_csv(
+                        resolved_path,
+                        on_bad_lines="skip",
+                        encoding="utf-8-sig",
+                        **opts,
+                    )
+                    if len(df.columns):
+                        break
+                except Exception as exc:
+                    last_exc = exc
+                    df = None
+            if df is None:
+                raise last_exc or ValueError(f"Could not read uploaded file {resolved_path}")
+        column_names = [str(c) for c in df.columns]
+        column_types = {str(c): str(t) for c, t in df.dtypes.items()}
+        return int(len(df.index)), column_names, column_types
+
     def _resolve_file_path(self, file_path: Path) -> Path:
         env_root = Path(self.db_path).resolve().parents[2]
         return resolve_data_file_path(file_path, env_root=env_root)
@@ -2837,13 +2871,16 @@ class MLOpsWorkbenchService:
             for col in column_names:
                 column_types.setdefault(col, "UNKNOWN")
         else:
-            rel = self._relation_expr(file_path, sample_size=20000)
-            with duckdb.connect() as meta_conn:
-                row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
-                columns = meta_conn.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()
+            try:
+                rel = self._relation_expr(file_path, sample_size=20000)
+                with duckdb.connect() as meta_conn:
+                    row_count = meta_conn.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0]
+                    columns = meta_conn.execute(f"DESCRIBE SELECT * FROM {rel}").fetchall()
 
-            column_names = [c[0] for c in columns]
-            column_types = {c[0]: c[1] for c in columns}
+                column_names = [c[0] for c in columns]
+                column_types = {c[0]: c[1] for c in columns}
+            except Exception:
+                row_count, column_names, column_types = self._fallback_file_metadata(file_path)
         columns_json = json.dumps(column_names, default=str)
         column_types_json = json.dumps(column_types, default=str)
 
@@ -3130,6 +3167,7 @@ class MLOpsWorkbenchService:
         data_dir: Path,
         force: bool = False,
         pipeline_type: str = "fcc",
+        pipeline_id: Optional[int] = None,
     ) -> List[Dict]:
         """
         Register CSV/Parquet files discovered in an env data folder.
@@ -3142,36 +3180,75 @@ class MLOpsWorkbenchService:
         if not data_dir.exists():
             return datasets
 
+        def _scope_from_path(path: Path) -> Tuple[Optional[int], str]:
+            parent = str(path.parent.name or "").strip().lower()
+            if parent.startswith("pipeline_"):
+                try:
+                    return int(parent.split("_", 1)[1]), _normalize_pipeline_type(pipeline_type)
+                except Exception:
+                    return None, _normalize_pipeline_type(pipeline_type)
+            if parent.startswith("shared_"):
+                return None, _normalize_pipeline_type(parent.split("_", 1)[1] or pipeline_type)
+            return None, _normalize_pipeline_type(pipeline_type)
+
         existing = {
-            str(d.get("dataset_type") or "").strip().lower(): d
+            (
+                int(d.get("pipeline_id") or 0) if d.get("pipeline_id") not in (None, "", 0) else None,
+                _normalize_pipeline_type(d.get("pipeline_type")),
+                str(d.get("dataset_type") or "").strip().lower(),
+            ): d
             for d in self.list_datasets(tenant_id, env_id)
-            if d.get("dataset_type") and _normalize_pipeline_type(d.get("pipeline_type")) == _normalize_pipeline_type(pipeline_type)
+            if d.get("dataset_type")
         }
 
         files: List[Path] = []
-        files.extend(sorted(data_dir.glob("*.csv")))
-        files.extend(sorted(data_dir.glob("*.parquet")))
+        files.extend(sorted(data_dir.rglob("*.csv")))
+        files.extend(sorted(data_dir.rglob("*.parquet")))
 
         for file_path in files:
             dataset_type = str(file_path.stem or "").strip().lower()
             if not dataset_type:
                 continue
+            scoped_pipeline_id, scoped_pipeline_type = _scope_from_path(file_path)
+            if pipeline_id not in (None, "", [], {}) and scoped_pipeline_id not in (None, int(pipeline_id)):
+                continue
 
-            cached = existing.get(dataset_type)
+            cache_key = (scoped_pipeline_id, scoped_pipeline_type, dataset_type)
+            cached = existing.get(cache_key)
             if cached and not force:
                 datasets.append(cached)
                 continue
 
-            dataset = self.register_dataset(
-                tenant_id=tenant_id,
-                env_id=env_id,
-                pipeline_type=pipeline_type,
-                dataset_type=dataset_type,
-                filename=file_path.name,
-                file_path=file_path,
-            )
+            try:
+                dataset = self.register_dataset(
+                    tenant_id=tenant_id,
+                    env_id=env_id,
+                    pipeline_type=scoped_pipeline_type,
+                    pipeline_id=scoped_pipeline_id,
+                    dataset_type=dataset_type,
+                    filename=file_path.name,
+                    file_path=file_path,
+                )
+            except Exception as exc:
+                print(f"[MLOpsSync] Skipping unreadable dataset file {file_path}: {exc}", flush=True)
+                continue
             datasets.append(dataset)
-            existing[dataset_type] = dataset
+            existing[cache_key] = dataset
+            if scoped_pipeline_id:
+                try:
+                    self.attach_pipeline_asset(
+                        tenant_id,
+                        env_id,
+                        int(scoped_pipeline_id),
+                        asset_kind="dataset",
+                        asset_id=dataset.get("dataset_id"),
+                        stage="data_upload",
+                        relation="synced_source",
+                        metadata={"dataset_type": dataset.get("dataset_type")},
+                        numeric=True,
+                    )
+                except Exception:
+                    pass
 
         return datasets
 
@@ -5766,7 +5843,7 @@ class MLOpsWorkbenchService:
         with get_connection(self.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT pipeline_id
+                SELECT pipeline_id, dataset_ids_json, dataset_id
                 FROM mlops_pipelines
                 WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
                 """,
@@ -5786,6 +5863,37 @@ class MLOpsWorkbenchService:
                 metadata=metadata or {},
                 numeric=numeric,
             )
+            if (
+                _normalize_text(asset_kind).lower() == "dataset"
+                and _normalize_text(stage).lower() == "data_upload"
+            ):
+                dataset_id_text = self._normalize_pipeline_asset_id(asset_id, numeric=True)
+                if dataset_id_text:
+                    try:
+                        existing_ids = _safe_json_loads(row[1], []) if row and row[1] else []
+                        merged_ids = sorted({
+                            int(value)
+                            for value in [*existing_ids, int(dataset_id_text)]
+                            if _coerce_int(value) is not None and int(value) > 0
+                        })
+                        primary_dataset_id = int(row[2]) if row and row[2] is not None else (merged_ids[0] if merged_ids else None)
+                        conn.execute(
+                            """
+                            UPDATE mlops_pipelines
+                            SET dataset_ids_json = ?, dataset_id = COALESCE(?, dataset_id),
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE pipeline_id = ? AND tenant_id = ? AND env_id = ?
+                            """,
+                            [
+                                json.dumps(merged_ids, default=str),
+                                primary_dataset_id,
+                                int(pipeline_id),
+                                tenant_id,
+                                env_id,
+                            ],
+                        )
+                    except Exception:
+                        pass
 
     def list_pipeline_versions(self, tenant_id: str, env_id: str, pipeline_id: int) -> List[Dict]:
         """Return all saved version snapshots for one pipeline."""
@@ -6640,14 +6748,13 @@ class MLOpsWorkbenchService:
             normalized_pipeline_id = None
 
         query = """
-                SELECT dataset_id, pipeline_id, pipeline_type, dataset_type, filename, file_path, row_count, columns_json, column_types_json, created_at, updated_at
+                SELECT dataset_id, pipeline_id, dataset_type, filename, file_path, row_count, columns_json, column_types_json, created_at, updated_at
                 FROM mlops_dataset_registry
                 WHERE tenant_id = ? AND env_id = ?
                 """
         params: List[Any] = [tenant_id, env_id]
         with get_connection(self.db_path) as conn:
             if normalized_pipeline_id:
-                self._backfill_pipeline_asset_links(conn, tenant_id, env_id, [int(normalized_pipeline_id)])
                 linked_rows = conn.execute(
                     """
                     SELECT DISTINCT CAST(asset_id AS INTEGER)
@@ -6662,34 +6769,35 @@ class MLOpsWorkbenchService:
                     for row in (linked_rows or [])
                     if row and row[0] is not None
                 })
-                query += " AND (pipeline_id = ?"
+                filter_clauses = [
+                    "pipeline_id = ?",
+                    "pipeline_id IS NULL",
+                    "dataset_type NOT IN ('master_dataset', 'preprocessed_dataset', 'feature_store')",
+                ]
                 params.append(int(normalized_pipeline_id))
                 if linked_ids:
-                    query += f" OR dataset_id IN ({', '.join(['?'] * len(linked_ids))})"
+                    filter_clauses.append(f"dataset_id IN ({', '.join(['?'] * len(linked_ids))})")
                     params.extend(linked_ids)
-                query += ")"
-            if normalized_pipeline_type:
-                query += " AND pipeline_type = ?"
-                params.append(normalized_pipeline_type)
+                query += f" AND ({' OR '.join(filter_clauses)})"
             query += " ORDER BY updated_at DESC"
             rows = conn.execute(query, params).fetchall()
 
         results = []
         for r in rows:
-            resolved_file_path = self._resolve_file_path(Path(r[5]))
+            resolved_file_path = self._resolve_file_path(Path(r[4]))
             results.append(
                 {
                     "dataset_id": int(r[0]),
                     "pipeline_id": int(r[1]) if r[1] is not None else None,
-                    "pipeline_type": _normalize_text(r[2]).lower() or "fcc",
-                    "dataset_type": r[3],
-                    "filename": r[4],
-                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[5]),
-                    "row_count": int(r[6] or 0),
-                    "columns": json.loads(r[7] or "[]"),
-                    "column_types": json.loads(r[8] or "{}"),
-                    "created_at": r[9].isoformat() if hasattr(r[9], "isoformat") else r[9],
-                    "updated_at": r[10].isoformat() if hasattr(r[10], "isoformat") else r[10],
+                    "pipeline_type": normalized_pipeline_type or "fcc",
+                    "dataset_type": r[2],
+                    "filename": r[3],
+                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[4]),
+                    "row_count": int(r[5] or 0),
+                    "columns": json.loads(r[6] or "[]"),
+                    "column_types": json.loads(r[7] or "{}"),
+                    "created_at": r[8].isoformat() if hasattr(r[8], "isoformat") else r[8],
+                    "updated_at": r[9].isoformat() if hasattr(r[9], "isoformat") else r[9],
                 }
             )
         return results
@@ -7028,7 +7136,7 @@ class MLOpsWorkbenchService:
         if delete_files:
             data_dir = self._data_dir()
             if data_dir.exists():
-                for file_path in data_dir.glob("*"):
+                for file_path in data_dir.rglob("*"):
                     if not file_path.is_file():
                         continue
                     if file_path.suffix.lower() not in {".csv", ".parquet", ".pq"}:
@@ -7036,6 +7144,15 @@ class MLOpsWorkbenchService:
                     try:
                         file_path.unlink()
                         deleted_files.append(str(file_path))
+                    except Exception:
+                        continue
+                for child_dir in sorted(
+                    [p for p in data_dir.rglob("*") if p.is_dir()],
+                    key=lambda p: len(p.parts),
+                    reverse=True,
+                ):
+                    try:
+                        child_dir.rmdir()
                     except Exception:
                         continue
 
@@ -10022,6 +10139,396 @@ class MLOpsWorkbenchService:
             preview_rows=preview_rows,
             master_mode=master_mode,
         )
+
+    def inspect_master_dataset_intelligence(
+        self,
+        tenant_id: str,
+        env_id: str,
+        datasets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Inspect uploaded datasets in workspace to derive candidate keys, relationships,
+        cardinality, fan-out impact, leakage risks, and join plan recommendations.
+        """
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        engine = MasterDatasetIntelligenceEngine()
+        report = engine.inspect_workspace(tables)
+        return report.to_dict()
+
+    def plan_master_dataset(
+        self,
+        tenant_id: str,
+        env_id: str,
+        datasets: Optional[List[Dict]] = None,
+        custom_overrides: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
+        """
+        Synthesize a complete, validated MasterDatasetPlan from workspace datasets.
+        """
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        engine = MasterDatasetIntelligenceEngine()
+        report = engine.inspect_workspace(tables)
+
+        planner = MasterDatasetPlanner()
+        plan = planner.create_plan(
+            report=report,
+            plan_name="AML Alert Suppression Master Dataset Plan",
+            custom_overrides=custom_overrides,
+        )
+        return plan.to_dict()
+
+    def preview_master_dataset_plan(
+        self,
+        tenant_id: str,
+        env_id: str,
+        plan: Optional[Dict[str, Any]] = None,
+        datasets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Execute preview dry-run according to a MasterDatasetPlan and return execution trace.
+        """
+        from api.tools.mlops.master_dataset_preview_engine import MasterDatasetPreviewEngine
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        if not tables:
+            raise ValueError("No source datasets found in the workspace to preview. Please upload datasets first.")
+
+        # Synthesize default plan if none provided
+        if not plan:
+            engine = MasterDatasetIntelligenceEngine()
+            report = engine.inspect_workspace(tables)
+            planner = MasterDatasetPlanner()
+            plan_obj = planner.create_plan(report)
+            plan = plan_obj.to_dict()
+
+        preview_engine = MasterDatasetPreviewEngine()
+        result = preview_engine.execute_preview(plan, tables)
+        return result.to_dict()
+
+    def validate_master_dataset_plan(
+        self,
+        tenant_id: str,
+        env_id: str,
+        plan: Optional[Dict[str, Any]] = None,
+        datasets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Validate a MasterDatasetPlan against the 15-point Master Dataset Contract.
+        """
+        from api.tools.mlops.master_dataset_validator import MasterDatasetValidator
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        if not plan:
+            engine = MasterDatasetIntelligenceEngine()
+            report = engine.inspect_workspace(tables)
+            planner = MasterDatasetPlanner()
+            plan_obj = planner.create_plan(report)
+            plan = plan_obj.to_dict()
+
+        validator = MasterDatasetValidator()
+        result = validator.validate_plan(plan, tables)
+        return result.to_dict()
+
+    def build_master_dataset_from_plan(
+        self,
+        tenant_id: str,
+        env_id: str,
+        plan: Optional[Dict[str, Any]] = None,
+        datasets: Optional[List[Dict]] = None,
+        output_name: str = "master_dataset",
+        version_tag: Optional[str] = None,
+    ) -> Dict:
+        """
+        Execute deterministic production Master Dataset build according to a MasterDatasetPlan.
+        """
+        from api.tools.mlops.master_dataset_build_engine import MasterDatasetBuildEngine
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        source_paths: Dict[str, str] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+                    if ds.get("file_path"):
+                        source_paths[role] = str(ds.get("file_path"))
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        if not tables:
+            raise ValueError("No source datasets found in the workspace to build master dataset. Please upload datasets first.")
+
+        if not plan:
+            engine = MasterDatasetIntelligenceEngine()
+            report = engine.inspect_workspace(tables)
+            planner = MasterDatasetPlanner()
+            plan_obj = planner.create_plan(report)
+            plan = plan_obj.to_dict()
+
+        build_engine = MasterDatasetBuildEngine(output_directory=self._data_dir())
+        build_result = build_engine.execute_build(
+            plan=plan,
+            tables=tables,
+            output_name=output_name,
+            version_tag=version_tag,
+            source_paths=source_paths,
+        )
+
+        # Register generated dataset in database catalog
+        registered_ds = self.register_dataset(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_type=output_name,
+            filename=build_result.output_filename,
+            file_path=Path(build_result.output_path),
+        )
+        ds_id = registered_ds.get("dataset_id") if registered_ds else None
+        build_result.master_dataset_id = ds_id
+
+        # Register immutable version record & lineage
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        ver_record = version_mgr.register_version(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            build_result_dict=build_result.to_dict(),
+            plan_dict=plan,
+            dataset_id=ds_id,
+        )
+
+        res_dict = build_result.to_dict()
+        res_dict["dataset"] = registered_ds
+        res_dict["version_record"] = ver_record.to_dict()
+        res_dict["dataset_version_id"] = ver_record.dataset_version_id
+        return res_dict
+
+    def list_master_dataset_versions(
+        self,
+        tenant_id: str,
+        env_id: str,
+        output_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List all immutable Master Dataset versions."""
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        return version_mgr.list_versions(tenant_id, env_id, output_name)
+
+    def get_master_dataset_version(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Get complete metadata, plan snapshot, and lineage manifest for a specific version ID."""
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        return version_mgr.get_version(tenant_id, env_id, dataset_version_id)
+
+    def get_master_dataset_version_rows(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Fetch paginated rows from a specific immutable version ID."""
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        df = version_mgr.get_version_dataframe(tenant_id, env_id, dataset_version_id)
+        if df is None or df.empty:
+            return {"rows": [], "total_count": 0, "columns": []}
+
+        total_count = len(df)
+        paged_df = df.iloc[offset : offset + limit]
+        return {
+            "rows": paged_df.fillna("").to_dict(orient="records"),
+            "total_count": total_count,
+            "columns": list(df.columns),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def get_master_dataset_version_schema(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch exact schema and column types for a specific immutable version ID."""
+        ver = self.get_master_dataset_version(tenant_id, env_id, dataset_version_id)
+        if not ver:
+            return None
+        return {
+            "dataset_version_id": ver.get("dataset_version_id"),
+            "version_tag": ver.get("version_tag"),
+            "row_count": ver.get("row_count"),
+            "column_count": ver.get("column_count"),
+            "primary_key": ver.get("primary_key"),
+            "grain": ver.get("grain"),
+            "schema": ver.get("schema"),
+            "sha256_checksum": ver.get("sha256_checksum"),
+        }
+
+    def check_master_dataset_version_freshness(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+        current_datasets: Optional[List[Dict[str, Any]]] = None,
+        current_plan: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Verify if an immutable Master Dataset Version is still fresh or has become outdated
+        due to source dataset modifications (SHA256 changes) or MasterDatasetPlan alterations.
+        """
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        ds_list = current_datasets or self.list_datasets(tenant_id, env_id)
+        return version_mgr.check_version_freshness(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_version_id=dataset_version_id,
+            current_datasets=ds_list,
+            current_plan=current_plan,
+        )
+
+    def validate_downstream_can_execute(
+        self,
+        tenant_id: str,
+        env_id: str,
+        stage_name: str,
+        dataset_version_id: Optional[str] = None,
+        pipeline_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Validates whether a downstream stage (target, eda, preprocess, model, validation, registry, ready)
+        can safely execute. Checks persisted Master Dataset Version metadata and prevents execution if
+        the master version is missing or outdated.
+        """
+        if not dataset_version_id:
+            if pipeline_id:
+                try:
+                    pipeline = self.load_pipeline(tenant_id, env_id, int(pipeline_id))
+                    runtime = pipeline.get("runtime_state") or {}
+                    dataset_version_id = runtime.get("master_dataset_version_id")
+                except Exception:
+                    dataset_version_id = None
+
+        if not dataset_version_id:
+            versions = self.list_master_dataset_versions(tenant_id, env_id)
+            if versions:
+                dataset_version_id = versions[0].get("dataset_version_id")
+
+        if not dataset_version_id:
+            return {
+                "can_execute": False,
+                "error_code": "NO_MASTER_DATASET_VERSION",
+                "message": f"Cannot execute stage '{stage_name}': No Master Dataset Version has been published. Build a Master Dataset Version first.",
+            }
+
+        freshness = self.check_master_dataset_version_freshness(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_version_id=dataset_version_id,
+        )
+
+        if freshness.get("is_outdated"):
+            reasons = "; ".join(freshness.get("stale_reasons", []))
+            return {
+                "can_execute": False,
+                "error_code": "STALE_MASTER_VERSION",
+                "dataset_version_id": dataset_version_id,
+                "message": f"Cannot execute stage '{stage_name}': Master Dataset Version '{dataset_version_id}' is outdated. Reasons: {reasons}. A new Master Dataset Version must be built.",
+                "stale_reasons": freshness.get("stale_reasons", []),
+                "impacted_stages": freshness.get("impacted_stages", []),
+            }
+
+        return {
+            "can_execute": True,
+            "dataset_version_id": dataset_version_id,
+            "version_tag": freshness.get("version_tag"),
+            "row_count": freshness.get("row_count"),
+            "column_count": freshness.get("column_count"),
+        }
 
     # Compatibility wrappers for route layer
     def variable_stats(self, dataset: Dict, sample_rows: int = 5000) -> Dict:

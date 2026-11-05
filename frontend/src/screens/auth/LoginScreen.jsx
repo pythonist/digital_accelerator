@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from "../../context/AppContext";
 import { useNavigate } from 'react-router-dom';
-import SentinelLogo from '../../assets/PwC_2025_Logo.svg';
+import SentinelLogo from '../../assets/PwC_2025_logo.svg';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FadeIn, ScaleIn } from "@components/MotionWrappers/MotionWrappers";
 

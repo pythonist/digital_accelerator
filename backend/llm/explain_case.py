@@ -4,13 +4,13 @@ import json
 class CaseExplainer:
     """
     LLM helper for generating analyst-style explanations.
-    STRICT RULES: Uses only provided data, no decisions.
+    STRICT RULES: Uses grounded empirical case telemetry, no decisions.
     """
     
-    def __init__(self, ollama_wrapper):
-        self.ollama = ollama_wrapper
+    def __init__(self, llm_provider):
+        self.ollama = llm_provider
     
-    def explain_case(self, case_summary, model="llama3.2:1b"):
+    def explain_case(self, case_summary, model="gpt-4o-mini"):
         """
         Generate analyst-style explanation from case summary.
         
@@ -21,11 +21,9 @@ class CaseExplainer:
         Returns:
             str: Analyst-style explanation text
         """
-        
         if not self.ollama or not self.ollama.check_connection():
-            return "AI service unavailable. Configure the local AI provider first."
+            return "AI service unavailable. Please ensure your LLM provider is active."
         
-        # Validate input
         if "error" in case_summary:
             return f"Cannot explain case: {case_summary['error']}"
         
@@ -34,44 +32,59 @@ class CaseExplainer:
         metrics = case_summary.get("key_metrics", {})
         reasons = case_summary.get("why_triggered", [])
         recommendation = case_summary.get("system_recommendation", "REVIEW_REQUIRED")
+        cust = case_summary.get("customer_profile", {})
+        counterparties = case_summary.get("top_counterparties", [])
+        typologies = case_summary.get("typology_signals", [])
+
+        vol = float(metrics.get('total_volume') or 0)
+        max_txn = float(metrics.get('max_transaction') or 0)
+        base_avg = float(metrics.get('baseline_avg') or 0)
+        inflow = float(metrics.get('inflow_credits') or 0)
+        outflow = float(metrics.get('outflow_debits') or 0)
         
-        # Build structured prompt
-        system_prompt = """You are a Senior AML Investigator Assistant.
+        system_prompt = """You are a Senior AML Compliance & Forensic Financial Intelligence Analyst.
 
 CRITICAL RULES:
-1. Use ONLY the provided case data
-2. Do NOT invent facts or numbers
-3. Do NOT suggest compliance decisions
-4. Do NOT override system recommendations
-5. Write in professional, analytical tone
-6. Focus on WHAT the data shows, not WHAT TO DO
+1. Ground every statement in the PROVIDED case data. Cite exact transaction counts, total amounts, counterparties, and timestamps.
+2. Do NOT invent facts or hallucinate zero values if metrics are provided.
+3. Do NOT use currency signs ($). Format all numbers as exact numeric values (e.g. 271,586.91).
+4. Do NOT dictate final regulatory filing decisions (e.g. "You must file a SAR"). Frame findings objectively: "The evidence highlights [pattern] which requires analyst determination on [risk factor]."
+5. Write in structured markdown with headings, bold key figures, and bullet points. Focus on:
+   - Case Snapshot & Alert Genesis
+   - Transaction Flow & Velocity Breakdown (Credits vs Debits, Peak Amounts)
+   - Counterparty & Typology Exposure
+   - Objective Assessment & Audit Defensibility"""
 
-Your role: Explain the case facts in clear, analyst-appropriate language."""
+        cp_text = "\n".join([f"- Counterparty {cp.get('name')}: Volume {cp.get('volume', 0):,.2f}" for cp in counterparties[:5]]) if counterparties else "- No significant external counterparty concentration recorded."
+        typo_text = ", ".join(typologies) if typologies else "No active automated typology triggers"
 
-        user_prompt = f"""Analyze this AML case and provide a professional explanation.
+        user_prompt = f"""Analyze this AML case and generate an exhaustive, professional investigative narrative.
 
-**Case ID:** {case_id}
-**Alert Type:** {alert_type}
-**System Recommendation:** {recommendation}
+**CASE TELEMETRY DATA:**
+- **Case ID:** {case_id}
+- **Primary Alert Typology:** {alert_type}
+- **Customer Entity:** {cust.get('customer_name', 'N/A')} ({cust.get('segment', 'Commercial')} | Country: {cust.get('country', 'N/A')} | KYC Completeness: {cust.get('kyc_completeness_pct', '100')}%)
+- **System Recommendation:** {recommendation}
 
-**Why Flagged:**
+**TRIGGER FACTORS:**
 {chr(10).join(f'- {r}' for r in reasons)}
 
-**Key Metrics:**
-- Alert Count: {metrics.get('alert_count', 0)}
-- Critical Alerts: {metrics.get('critical_alerts', 0)}
-- Transaction Count: {metrics.get('transaction_count', 0)}
-- Total Volume: ${metrics.get('total_volume', 0):,.2f}
-- Max Transaction: ${metrics.get('max_transaction', 0):,.2f}
-- Alert Day Average: ${metrics.get('alert_day_avg', 0):,.2f}
-- Baseline Average: ${metrics.get('baseline_avg', 0):,.2f}
+**EMPIRICAL KEY METRICS:**
+- Alert Count: {metrics.get('alert_count', 0)} ({metrics.get('critical_alerts', 0)} High/Critical)
+- Total Transaction Count: {metrics.get('transaction_count', 0)}
+- Aggregate Volume: {vol:,.2f}
+- Peak Single Transaction: {max_txn:,.2f}
+- Baseline Average Transaction: {base_avg:,.2f}
+- Total Inflow (Credits): {inflow:,.2f}
+- Total Outflow (Debits): {outflow:,.2f}
 
-Write a concise 2-3 paragraph explanation of what the data shows. Focus on:
-1. What patterns are present
-2. Why the system flagged this
-3. What the metrics indicate
+**COUNTERPARTY CONCENTRATION:**
+{cp_text}
 
-Do NOT suggest actions or decisions."""
+**ACTIVE TYPOLOGY SIGNALS:**
+{typo_text}
+
+Synthesize these exact facts into a clean 3-4 section markdown report with subheadings (###). Cite the real metrics above without truncation."""
 
         try:
             response = self.ollama.generate(
@@ -79,7 +92,7 @@ Do NOT suggest actions or decisions."""
                 model=model,
                 system_prompt=system_prompt,
                 temperature=0.3,
-                max_tokens=260,
+                max_tokens=900,
             )
             
             return response.get('response', 'Failed to generate explanation.')

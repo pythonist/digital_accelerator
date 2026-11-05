@@ -1,6 +1,6 @@
 // frontend/src/tools/btsy/layout/Sidebar.jsx
 import React, { useState } from 'react';
-import SentinelLogo from '@assets/PwC_2025_Logo.svg';
+import SentinelLogo from '@assets/PwC_2025_logo.svg';
 import {
   Drawer, List, ListItem, ListItemButton, ListItemText,
   Divider, Box, Typography, IconButton, Tooltip, Collapse, alpha

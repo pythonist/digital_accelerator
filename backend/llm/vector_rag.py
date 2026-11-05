@@ -14,6 +14,10 @@ import sqlite3
 
 faiss, _FAISS_OK = safe_import("faiss")
 
+
+def _ollama_http_enabled() -> bool:
+    return False
+
 class VectorRAGSystem:
     """
     Enhanced offline vector search system for case retrieval using Cosine Similarity.
@@ -35,7 +39,8 @@ class VectorRAGSystem:
         self.embedding_model = (
             embedding_model
             or getattr(llm_provider, "embedding_model", None)
-            or 'nomic-embed-text'
+            or os.getenv("OPENAI_EMBED_MODEL")
+            or 'text-embedding-3-small'
         )
         
         self.index = None
@@ -85,6 +90,9 @@ class VectorRAGSystem:
                 except Exception as exc:
                     print(f"    Warning: local embedding failed for item {idx}: {exc}")
             return all_embeddings if all_embeddings else None
+
+        if not _ollama_http_enabled():
+            return None
         
         all_embeddings = []
         total_batches = (len(texts) + batch_size - 1) // batch_size
@@ -149,6 +157,8 @@ class VectorRAGSystem:
                     return np.array(emb, dtype=np.float32)
             except Exception as exc:
                 print(f"  Warning: local embedding failed: {exc}")
+        if not _ollama_http_enabled():
+            return None
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -453,7 +463,7 @@ class VectorRAGSystem:
         
         return results
 
-    def explain_similarity(self, case_id_1: str, case_id_2: str, similarity_score: float, model: str = 'llama3.2:1b') -> str:
+    def explain_similarity(self, case_id_1: str, case_id_2: str, similarity_score: float, model: str = 'gpt-4o-mini') -> str:
         """
         Generate natural language explanation of why two cases are similar using LLM.
         """
@@ -486,6 +496,9 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
                     explanation = str(result.get('response') or '').strip()
                     return explanation if explanation else "Unable to generate explanation."
                 return f"LLM Error: {result.get('error', 'Unknown error')}"
+
+            if not _ollama_http_enabled():
+                return "AI explanation is unavailable because no configured provider is ready."
 
             response = requests.post(
                 f"{self.ollama_base_url}/api/generate",
