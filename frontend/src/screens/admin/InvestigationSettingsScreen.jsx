@@ -1,11 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   Alert,
   Box,
   Button,
+  Chip,
+  CircularProgress,
   FormControl,
   FormControlLabel,
+  IconButton,
   InputLabel,
+  LinearProgress,
   MenuItem,
   Paper,
   Select,
@@ -13,16 +17,30 @@ import {
   Stack,
   Switch,
   Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
+  AccountBalanceWallet as WalletIcon,
+  BarChart as BarChartIcon,
+  CheckCircle as CheckCircleIcon,
+  Refresh as RefreshIcon,
   RestartAlt as ResetIcon,
   Save as SaveIcon,
   Settings as SettingsIcon,
+  Speed as SpeedIcon,
+  Token as TokenIcon,
   Tune as TuneIcon,
 } from '@mui/icons-material';
+import apiClient from '@services/api';
 
 import { useAppContext } from '@context/AppContext';
 import PageContainer from '@investigation-layout/PageContainer';
@@ -71,6 +89,26 @@ const InvestigationSettingsScreen = () => {
   const [activeTab, setActiveTab] = useState('global');
   const [settings, setSettings] = useState(() => readInvestigationSettings());
   const [notice, setNotice] = useState('');
+  const [tokenUsage, setTokenUsage] = useState(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
+
+  const fetchTokenUsage = useCallback(async () => {
+    try {
+      setLoadingUsage(true);
+      const data = await apiClient.get('/api/v2/agentic/token-usage');
+      setTokenUsage(data);
+    } catch (err) {
+      console.error('Failed to load token usage stats', err);
+    } finally {
+      setLoadingUsage(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'token_usage') {
+      fetchTokenUsage();
+    }
+  }, [activeTab, fetchTokenUsage]);
 
   const availableModels = useMemo(() => {
     const items = (ollamaModels || [])
@@ -157,6 +195,7 @@ const InvestigationSettingsScreen = () => {
             <Tab value="resolution" label="Case Resolution" />
             <Tab value="queue" label="Case Queue" />
             <Tab value="assistant" label="AI Assistant" />
+            <Tab value="token_usage" label="Token Usage & Budget" />
           </Tabs>
         </Paper>
 
@@ -434,6 +473,308 @@ const InvestigationSettingsScreen = () => {
               label="Keep chat history between screen visits"
             />
           </SectionCard>
+        ) : null}
+
+        {activeTab === 'token_usage' ? (
+          <Stack spacing={2.5}>
+            {/* Header info & Refresh */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2.5,
+                borderRadius: 2,
+                bgcolor: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 2,
+              }}
+            >
+              <Box>
+                <Stack direction="row" spacing={1.5} alignItems="center">
+                  <Box
+                    sx={{
+                      width: 38,
+                      height: 38,
+                      bgcolor: '#fff7ed',
+                      borderRadius: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#ea580c',
+                      border: '1px solid #fed7aa',
+                    }}
+                  >
+                    <TokenIcon />
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
+                      Token Consumption & API Budget Tracking
+                    </Typography>
+                    <Typography sx={{ fontSize: '0.78rem', color: '#64748b' }}>
+                      Empirical token metrics across all Sentinel agent workflows, copilot interactions, and background tasks.
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Box>
+
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Chip
+                  label="Configured Model: gpt-5.6-luna"
+                  size="small"
+                  sx={{ bgcolor: '#eff6ff', color: '#1d4ed8', fontWeight: 700, border: '1px solid #bfdbfe' }}
+                />
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={loadingUsage ? <CircularProgress size={14} /> : <RefreshIcon />}
+                  onClick={fetchTokenUsage}
+                  disabled={loadingUsage}
+                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                >
+                  Refresh Stats
+                </Button>
+              </Stack>
+            </Paper>
+
+            {/* KPI Cards Row */}
+            <Box
+              sx={{
+                display: 'grid',
+                gap: 2,
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1fr 1fr' },
+              }}
+            >
+              {/* Card 1: Today's Tokens */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, bgcolor: '#ffffff' }}>
+                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Tokens Used Today
+                </Typography>
+                <Typography sx={{ fontSize: '1.6rem', fontWeight: 900, color: '#0f172a', mt: 0.5, lineHeight: 1.1 }}>
+                  {Number(tokenUsage?.tokens_today || 0).toLocaleString()}
+                </Typography>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1.5, pt: 1, borderTop: '1px solid #f1f5f9' }}>
+                  <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    Cost: <strong>${Number(tokenUsage?.cost_today || 0).toFixed(4)}</strong>
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                    {tokenUsage?.calls_today || 0} calls
+                  </Typography>
+                </Stack>
+              </Paper>
+
+              {/* Card 2: Lifetime Tokens */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, bgcolor: '#ffffff' }}>
+                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Lifetime Tokens
+                </Typography>
+                <Typography sx={{ fontSize: '1.6rem', fontWeight: 900, color: '#0f172a', mt: 0.5, lineHeight: 1.1 }}>
+                  {Number(tokenUsage?.tokens_lifetime || 0).toLocaleString()}
+                </Typography>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1.5, pt: 1, borderTop: '1px solid #f1f5f9' }}>
+                  <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    Total Cost: <strong>${Number(tokenUsage?.cost_lifetime || 0).toFixed(4)}</strong>
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                    {tokenUsage?.calls_lifetime || 0} calls
+                  </Typography>
+                </Stack>
+              </Paper>
+
+              {/* Card 3: $2 Credit Budget Limit */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, bgcolor: '#ffffff' }}>
+                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Budget ($2.00 Limit)
+                </Typography>
+                <Typography sx={{ fontSize: '1.6rem', fontWeight: 900, color: '#16a34a', mt: 0.5, lineHeight: 1.1 }}>
+                  ${Number(tokenUsage?.remaining_budget ?? 2.0).toFixed(4)}
+                </Typography>
+                <Box sx={{ mt: 1 }}>
+                  <LinearProgress
+                    variant="determinate"
+                    value={Math.min(100, Number(tokenUsage?.budget_used_percent || 0))}
+                    sx={{
+                      height: 6,
+                      borderRadius: 3,
+                      bgcolor: '#f1f5f9',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: (tokenUsage?.budget_used_percent || 0) > 80 ? '#dc2626' : (tokenUsage?.budget_used_percent || 0) > 50 ? '#f59e0b' : '#16a34a',
+                      },
+                    }}
+                  />
+                </Box>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
+                  <Typography sx={{ fontSize: '0.7rem', color: '#64748b' }}>
+                    {Number(tokenUsage?.budget_used_percent || 0).toFixed(2)}% consumed
+                  </Typography>
+                  <Chip
+                    label={Number(tokenUsage?.budget_used_percent || 0) > 85 ? 'Depleting' : 'Healthy'}
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: '0.62rem',
+                      fontWeight: 700,
+                      bgcolor: Number(tokenUsage?.budget_used_percent || 0) > 85 ? '#fef2f2' : '#f0fdf4',
+                      color: Number(tokenUsage?.budget_used_percent || 0) > 85 ? '#dc2626' : '#16a34a',
+                    }}
+                  />
+                </Stack>
+              </Paper>
+
+              {/* Card 4: Token Efficiency */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, bgcolor: '#ffffff' }}>
+                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Token Split (Prompt / Compl)
+                </Typography>
+                <Typography sx={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', mt: 0.5, lineHeight: 1.4 }}>
+                  {Number(tokenUsage?.prompt_tokens_lifetime || 0).toLocaleString()} <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>/</span> {Number(tokenUsage?.completion_tokens_lifetime || 0).toLocaleString()}
+                </Typography>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1.5, pt: 1, borderTop: '1px solid #f1f5f9' }}>
+                  <Typography sx={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    Avg prompt/call: <strong>{tokenUsage?.calls_lifetime ? Math.round(tokenUsage.prompt_tokens_lifetime / tokenUsage.calls_lifetime) : 0} tok</strong>
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 700 }}>
+                    Quota Active
+                  </Typography>
+                </Stack>
+              </Paper>
+            </Box>
+
+            {/* Daily Usage History Bar Chart */}
+            <SectionCard
+              title="Daily Token Consumption"
+              subtitle="Daily breakdown of prompt and completion token volume over the past 14 days."
+            >
+              {tokenUsage?.daily_history && tokenUsage.daily_history.length > 0 ? (
+                <Box sx={{ mt: 1 }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-end',
+                      gap: { xs: 1, md: 2 },
+                      height: 180,
+                      pt: 2,
+                      pb: 1,
+                      px: 2,
+                      bgcolor: '#f8fafc',
+                      borderRadius: 2,
+                      border: '1px solid #e2e8f0',
+                      overflowX: 'auto',
+                    }}
+                  >
+                    {(() => {
+                      const maxDaily = Math.max(...tokenUsage.daily_history.map((d) => d.total_tokens || 1), 50);
+                      return [...tokenUsage.daily_history].reverse().map((d) => {
+                        const totalPct = Math.max(8, Math.round(((d.total_tokens || 0) / maxDaily) * 100));
+                        return (
+                          <Tooltip
+                            key={d.day}
+                            title={`${d.day}: ${d.total_tokens.toLocaleString()} tokens (${d.prompt_tokens} prompt, ${d.completion_tokens} completion) • $${d.cost_usd} • ${d.call_count} calls`}
+                            arrow
+                          >
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                minWidth: 48,
+                                flex: 1,
+                                height: '100%',
+                                justifyContent: 'flex-end',
+                              }}
+                            >
+                              <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, color: '#64748b', mb: 0.5 }}>
+                                {d.total_tokens > 999 ? `${(d.total_tokens / 1000).toFixed(1)}k` : d.total_tokens}
+                              </Typography>
+                              <Box
+                                sx={{
+                                  width: '100%',
+                                  maxWidth: 36,
+                                  height: `${totalPct}%`,
+                                  bgcolor: '#ea580c',
+                                  borderRadius: '4px 4px 0 0',
+                                  transition: 'height 0.3s ease',
+                                  '&:hover': { bgcolor: '#c2410c' },
+                                }}
+                              />
+                              <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8', mt: 0.75, whiteSpace: 'nowrap' }}>
+                                {d.day.slice(5)}
+                              </Typography>
+                            </Box>
+                          </Tooltip>
+                        );
+                      });
+                    })()}
+                  </Box>
+                </Box>
+              ) : (
+                <Typography sx={{ color: '#64748b', fontSize: '0.85rem', py: 2 }}>
+                  No historical usage logged yet. Invocations will automatically graph here.
+                </Typography>
+              )}
+            </SectionCard>
+
+            {/* Recent Invocations Table */}
+            <SectionCard
+              title="Recent LLM Invocations"
+              subtitle="Audit log of the latest 30 requests processed through the OpenAI gateway."
+            >
+              <TableContainer sx={{ maxHeight: 360 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Timestamp</TableCell>
+                      <TableCell sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Stage / Action</TableCell>
+                      <TableCell sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Model</TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Prompt Tok</TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Compl Tok</TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Total Tok</TableCell>
+                      <TableCell align="right" sx={{ fontSize: '0.72rem', fontWeight: 700 }}>Cost ($)</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(tokenUsage?.recent_calls || []).map((row) => (
+                      <TableRow key={row.id} hover>
+                        <TableCell sx={{ fontSize: '0.72rem', color: '#64748b', fontFamily: 'monospace' }}>
+                          {row.timestamp ? new Date(row.timestamp).toLocaleTimeString() : '-'}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.72rem', fontWeight: 600 }}>
+                          <Chip
+                            label={row.stage || 'general'}
+                            size="small"
+                            sx={{ height: 20, fontSize: '0.65rem', textTransform: 'capitalize' }}
+                          />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.72rem', fontFamily: 'monospace', color: '#334155' }}>
+                          {row.model || 'gpt-5.6-luna'}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.72rem', color: '#64748b' }}>
+                          {row.prompt_tokens?.toLocaleString() || 0}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.72rem', color: '#64748b' }}>
+                          {row.completion_tokens?.toLocaleString() || 0}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#0f172a' }}>
+                          {row.total_tokens?.toLocaleString() || 0}
+                        </TableCell>
+                        <TableCell align="right" sx={{ fontSize: '0.72rem', color: '#059669', fontWeight: 600 }}>
+                          ${Number(row.cost_usd || 0).toFixed(5)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {(!tokenUsage?.recent_calls || tokenUsage.recent_calls.length === 0) && (
+                      <TableRow>
+                        <TableCell colSpan={7} align="center" sx={{ py: 3, color: '#94a3b8', fontSize: '0.8rem' }}>
+                          No recent LLM invocations recorded yet.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </SectionCard>
+          </Stack>
         ) : null}
       </Stack>
     </PageContainer>

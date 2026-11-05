@@ -267,3 +267,10 @@ def stream_activities(case_id):
             time.sleep(1)
             
     return Response(generate(), mimetype='text/event-stream')
+
+
+@agentic_bp.route('/api/v2/agentic/token-usage', methods=['GET'])
+def get_token_usage():
+    from api.agent_db import get_token_usage_stats
+    stats = get_token_usage_stats()
+    return jsonify(stats), 200

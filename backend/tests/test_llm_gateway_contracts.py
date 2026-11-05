@@ -49,7 +49,7 @@ class TestOpenAIPayloadContract(unittest.TestCase):
 
         # Strictly only model and messages in the chat payload
         self.assertEqual(set(payload.keys()), {"model", "messages"})
-        self.assertEqual(payload["model"], "openai.gpt-5.6-luna")
+        self.assertEqual(payload["model"], "gpt-5.6-luna")
         self.assertEqual(len(payload["messages"]), 2)
         self.assertEqual(payload["messages"][0], {"role": "system", "content": "You are a fraud detector."})
         self.assertEqual(payload["messages"][1], {"role": "user", "content": "Analyze account 9999"})
@@ -59,12 +59,12 @@ class TestOpenAIPayloadContract(unittest.TestCase):
         self.assertNotIn("extra_param", payload)
 
     def test_strip_openai_prefix_from_model(self):
-        """Ensure openai: prefix is stripped from model parameter."""
+        """Ensure both openai: and openai. prefixes are stripped from model parameter to prevent HTTP 404."""
         payload = self.wrapper._chat_payload(
             prompt="Hello",
             model="openai:openai.gpt-5.6-luna",
         )
-        self.assertEqual(payload["model"], "openai.gpt-5.6-luna")
+        self.assertEqual(payload["model"], "gpt-5.6-luna")
 
     def test_streaming_payload_only_adds_stream_flag(self):
         """Streaming flag is permitted when stream=True, but temperature remains excluded."""
@@ -134,7 +134,7 @@ class TestOpenAIGenerateParsing(unittest.TestCase):
         self.assertTrue(res["success"])
         self.assertEqual(res["response"], "Transaction indicates potential structuring.")
         self.assertEqual(res["text"], "Transaction indicates potential structuring.")
-        self.assertEqual(res["model"], "openai.gpt-5.6-luna")
+        self.assertEqual(res["model"], "gpt-5.6-luna")
         self.assertEqual(res["provider"], "openai")
         self.assertEqual(res["finish_reason"], "stop")
 
