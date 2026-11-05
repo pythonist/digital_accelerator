@@ -79,6 +79,7 @@ def get_status(case_id):
     findings = get_findings(session_id)
     tool_logs = get_tool_execution_log(session_id)
     llm_logs = get_llm_interactions(session_id)
+    activities = get_activities(session_id, limit=500)
     expected_documents = {
         "Executive Summary",
         "Full Investigation Report",
@@ -108,6 +109,7 @@ def get_status(case_id):
         "session": session,
         "plan": plan,
         "memory": memory,
+        "activities": activities,
         "documents": [] if legacy_or_incomplete else documents,
         "legacy_documents": documents if legacy_or_incomplete else [],
         "findings": None if legacy_or_incomplete else findings,

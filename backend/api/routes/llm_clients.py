@@ -77,6 +77,9 @@ def _run_unified(provider: str, system: str, user: str, **kwargs: Any) -> str:
     )
     if not isinstance(result, dict) or not result.get("success"):
         err = (result or {}).get("error") if isinstance(result, dict) else "Unknown failure"
+        err_lower = str(err).lower()
+        if any(term in err_lower for term in ["quota", "insufficient_quota", "credit", "429", "rate limit", "balance"]):
+            raise LLMError(f"OpenAI API credit limit reached or rate limited ($2 credit limit). Gateway message: {err}")
         raise LLMError(f"OpenAI provider failed: {err}")
     response = str(result.get("response") or result.get("text") or "").strip()
     if not response:
