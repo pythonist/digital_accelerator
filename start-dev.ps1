@@ -16,8 +16,20 @@ $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 if ($systemPath -or $userPath) {
     $env:Path = "$systemPath;$userPath;$env:Path"
 }
-if (-not (Get-Command npm -ErrorAction SilentlyContinue) -and (Test-Path "C:\Program Files\nodejs")) {
-    $env:Path = "C:\Program Files\nodejs;$env:Path"
+if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    if (Test-Path "C:\Program Files\nodejs") {
+        $env:Path = "C:\Program Files\nodejs;$env:Path"
+    } else {
+        $wingetNode = Get-ChildItem -Path "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Filter "node.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($wingetNode) {
+            $env:Path = "$($wingetNode.DirectoryName);$env:Path"
+        }
+    }
+}
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    if (Test-Path "$env:LOCALAPPDATA\Programs\Python\Python312") {
+        $env:Path = "$env:LOCALAPPDATA\Programs\Python\Python312;$env:LOCALAPPDATA\Programs\Python\Python312\Scripts;$env:Path"
+    }
 }
 
 function Stop-DevProcess {
