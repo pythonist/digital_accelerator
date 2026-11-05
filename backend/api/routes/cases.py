@@ -229,7 +229,7 @@ def _get_case_resolution_llm_candidates():
     return [service] if service else []
 
 
-def _generate_case_resolution_llm_response(prompt, model=None, system_prompt=None, temperature=0.1, max_tokens=360):
+def _generate_case_resolution_llm_response(prompt, model=None, system_prompt=None, **kwargs):
     errors = []
     for candidate in _get_case_resolution_llm_candidates():
         try:
@@ -242,8 +242,6 @@ def _generate_case_resolution_llm_response(prompt, model=None, system_prompt=Non
                 prompt=prompt,
                 model=requested_model,
                 system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
             )
             resp_str = str((result or {}).get("response") or "").strip()
             if isinstance(result, dict) and result.get("success") and resp_str and not resp_str.startswith("ERROR:") and not resp_str.startswith("Exception:"):
@@ -1837,8 +1835,6 @@ def generate_case_resolution_investigation_summary(case_id):
                 "You are not the source of truth. "
                 "All statements must be grounded in the supplied evidence."
             ),
-            temperature=0.1,
-            max_tokens=360,
         )
         if result.get("success"):
             parsed = _extract_json_object(result.get("response"))
@@ -2007,8 +2003,6 @@ def generate_case_resolution_sar_draft(case_id):
                 "You organize evidence-backed facts into regulator-friendly prose. "
                 "Use only supplied facts. Always include exact transaction figures and counterparties in transaction sections. Never fabricate support. Do not include dollar signs ($)."
             ),
-            temperature=0.1,
-            max_tokens=950,
         )
         raw_response = str(result.get("response") or "").strip()
         if result.get("success"):

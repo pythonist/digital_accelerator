@@ -70,8 +70,6 @@ Return 5 numbered questions that challenge the compliance investigator's rationa
                 prompt=user_prompt,
                 model=chosen_model,
                 system_prompt=system_prompt,
-                temperature=0.4,
-                max_tokens=500,
             )
 
             if not isinstance(response, dict) or not response.get("success"):

@@ -531,8 +531,6 @@ def _maybe_upgrade_validation_explanation(body: Dict[str, Any], fallback: Dict[s
     response = wrapper.generate(
         prompt=json.dumps(prompt_payload, default=str),
         system_prompt=system_prompt,
-        temperature=0.2,
-        max_tokens=420,
     )
     if not response or not response.get("success"):
         return fallback
@@ -659,8 +657,6 @@ def _maybe_upgrade_release_summary(body: Dict[str, Any], fallback: Dict[str, Any
     response = wrapper.generate(
         prompt=json.dumps(prompt_payload, default=str),
         system_prompt=system_prompt,
-        temperature=0.2,
-        max_tokens=420,
     )
     if not response or not response.get("success"):
         return fallback

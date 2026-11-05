@@ -115,9 +115,9 @@ def _parse_llm_json(raw) -> dict:
     return value
 
 
-def _chat_json(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.1, max_tokens: int = 1800) -> dict:
+def _chat_json(session_id: str, provider: str, stage: str, system: str, user: str, **kwargs) -> dict:
     prompt = f"SYSTEM:\n{system}\n\nUSER:\n{user}"
-    raw = run_llm_json(provider, system, user, temperature=temperature, max_tokens=max_tokens)
+    raw = run_llm_json(provider, system, user)
     _save_last_llm(session_id, stage, prompt, raw)
     try:
         return _parse_llm_json(raw)
@@ -127,7 +127,7 @@ def _chat_json(session_id: str, provider: str, stage: str, system: str, user: st
             f"{system}\n\nYour previous response was incomplete or invalid. Return one COMPLETE, "
             "compact JSON object only. Do not use markdown fences. Keep arrays concise."
         )
-        retry_raw = run_llm_json(provider, retry_system, user, temperature=temperature, max_tokens=max_tokens)
+        retry_raw = run_llm_json(provider, retry_system, user)
         _save_last_llm(session_id, f"{stage}:retry", f"SYSTEM:\n{retry_system}\n\nUSER:\n{user}", retry_raw)
         try:
             return _parse_llm_json(retry_raw)
@@ -135,8 +135,8 @@ def _chat_json(session_id: str, provider: str, stage: str, system: str, user: st
             raise LLMError(f"{provider} returned incomplete JSON for {stage}; findings/documents were not fabricated.") from exc
 
 
-def _chat_text(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.2, max_tokens: int = 1800) -> str:
-    response = run_llm_text(provider, system, user, temperature=temperature, max_tokens=max_tokens)
+def _chat_text(session_id: str, provider: str, stage: str, system: str, user: str, **kwargs) -> str:
+    response = run_llm_text(provider, system, user)
     _save_last_llm(session_id, stage, f"SYSTEM:\n{system}\n\nUSER:\n{user}", response)
     return response
 
@@ -169,7 +169,7 @@ def _summarize_tool(
         "Update the investigation memory from this tool output."
     )
     depth_tokens = {"fast": 350, "standard": 450, "deep": 650}.get(str(evidence_depth), 450)
-    return _chat_text(session_id, provider, f"summarize:{tool_name}", system, user, temperature=0.1, max_tokens=depth_tokens)
+    return _chat_text(session_id, provider, f"summarize:{tool_name}", system, user)
 
 
 def _current_memory(session_id: str) -> str:
@@ -243,7 +243,7 @@ def plan_investigation(session_id: str, case_id: str, context: dict, prior_memor
         f"Prior memory if this is a follow-up loop:\n{prior_memory[-3000:] or 'None'}\n\n"
         "Create the investigation plan."
     )
-    result = _chat_json(session_id, provider, "planner", system, user, max_tokens=1000)
+    result = _chat_json(session_id, provider, "planner", system, user)
     steps = result.get("steps") or []
     valid = [step for step in steps if step.get("tool") in TOOL_REGISTRY]
     if not valid:
@@ -362,7 +362,7 @@ def synthesize_risk(session_id: str, case_id: str, memory_text: str, provider: s
         '"risk_evolution":[{"stage":"...","score":0,"reason":"..."}]}.'
     )
     user = f"Case ID: {case_id}\n\nAccumulated memory:\n{memory_text[-6000:]}"
-    return _chat_json(session_id, provider, "risk_agent", system, user, temperature=0.1, max_tokens=800)
+    return _chat_json(session_id, provider, "risk_agent", system, user)
 
 
 def qa_review(session_id: str, case_id: str, memory_text: str, risk_result: dict, provider: str) -> dict:
@@ -376,7 +376,7 @@ def qa_review(session_id: str, case_id: str, memory_text: str, risk_result: dict
         f"Case ID: {case_id}\n\nMemory:\n{memory_text[-5000:]}\n\n"
         f"Risk assessment:\n{json.dumps(risk_result, indent=2, default=str)}"
     )
-    return _chat_json(session_id, provider, "qa_reflection", system, user, temperature=0.1, max_tokens=600)
+    return _chat_json(session_id, provider, "qa_reflection", system, user)
 
 
 def extract_findings(session_id: str, case_id: str, tool_log: list[dict], risk_result: dict, provider: str) -> dict:
@@ -406,7 +406,7 @@ def extract_findings(session_id: str, case_id: str, tool_log: list[dict], risk_r
         f"Risk result:\n{json.dumps(risk_result, indent=2, default=str)}\n\n"
         f"Full tool evidence summaries:\n{evidence_blocks[:7000]}"
     )
-    data = _chat_json(session_id, provider, "findings_agent", system, user, temperature=0.12, max_tokens=1500)
+    data = _chat_json(session_id, provider, "findings_agent", system, user)
     for key in ("findings", "evidence_items", "risk_drivers", "recommendations", "timeline", "open_questions"):
         if not isinstance(data.get(key), list):
             data[key] = []
@@ -427,7 +427,7 @@ def generate_document(session_id: str, case_id: str, doc_type: str, findings_dat
         "Write the document with clear section headings, evidence references, "
         "recommendations where relevant, and enough detail for senior analyst review."
     )
-    return _chat_text(session_id, provider, f"document:{doc_type}", system, user, temperature=0.18, max_tokens=1500)
+    return _chat_text(session_id, provider, f"document:{doc_type}", system, user)
 
 
 def generate_reports(session_id: str, case_id: str, risk_result: dict, provider: str) -> dict:

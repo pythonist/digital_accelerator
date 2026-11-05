@@ -425,10 +425,9 @@ def chat():
         
         print("[LLM] Generating SQL Plan...")
         sql_response = llm_service.generate(
-            prompt=msg, 
-            model=model, 
+            prompt=msg,
+            model=model,
             system_prompt=sql_system_prompt,
-            temperature=0.1
         )
         
         sql_text = (sql_response.get('response') or '') if isinstance(sql_response, dict) else ''

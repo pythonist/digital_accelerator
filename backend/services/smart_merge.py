@@ -178,7 +178,7 @@ class SmartMergeService:
         """
         
         try:
-            result = self.ollama.generate(prompt, model=None, temperature=0.1)
+            result = self.ollama.generate(prompt, model=None)
             if not result['success']: return []
 
             # Robust JSON Parsing

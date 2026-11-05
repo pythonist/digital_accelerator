@@ -63,7 +63,7 @@ def last_call_metadata() -> dict | None:
     return dict(_last_call) if isinstance(_last_call, dict) else None
 
 
-def _run_unified(provider: str, system: str, user: str, temperature: float = 0.2, max_tokens: int | None = None) -> str:
+def _run_unified(provider: str, system: str, user: str, **kwargs: Any) -> str:
     """Run the OpenAI model via UnifiedLLMProvider and retain audit metadata for the session."""
     global _last_call
     from llm.unified_provider import UnifiedLLMProvider
@@ -74,8 +74,6 @@ def _run_unified(provider: str, system: str, user: str, temperature: float = 0.2
         prompt=user,
         model=model_name,
         system_prompt=system,
-        temperature=temperature,
-        max_tokens=max_tokens or AGENTIC_LLM_MAX_TOKENS,
     )
     if not isinstance(result, dict) or not result.get("success"):
         err = (result or {}).get("error") if isinstance(result, dict) else "Unknown failure"
@@ -96,12 +94,12 @@ def _run_unified(provider: str, system: str, user: str, temperature: float = 0.2
     return response
 
 
-def chatgpt_complete(system: str, user: str, temperature: float = 0.2) -> str:
-    return _run_unified(f"openai:{OPENAI_MODEL}", system, user, temperature, max_tokens=1800)
+def chatgpt_complete(system: str, user: str, **kwargs: Any) -> str:
+    return _run_unified(f"openai:{OPENAI_MODEL}", system, user)
 
 
-def chatgpt_complete_json(system: str, user: str, temperature: float = 0.1) -> dict:
-    raw = _run_unified(f"openai:{OPENAI_MODEL}", system, user, temperature, max_tokens=1800)
+def chatgpt_complete_json(system: str, user: str, **kwargs: Any) -> dict:
+    raw = _run_unified(f"openai:{OPENAI_MODEL}", system, user)
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -123,14 +121,18 @@ def nemotron_summarize(tool_name: str, raw_output: str, current_memory: str = ""
         f"Raw tool output:\n{raw_output[:30000]}\n\n"
         "Update the investigation memory from this tool output."
     )
-    return _run_unified(f"openai:{OPENAI_MODEL}", system, user, temperature=0.1, max_tokens=1200)
+    return _run_unified(f"openai:{OPENAI_MODEL}", system, user)
 
 
-def run_llm_text(provider: str, system: str, user: str, temperature: float = 0.2, max_tokens: int | None = None) -> str:
+def run_llm_text(provider: str, system: str, user: str, **kwargs: Any) -> str:
     """Compatibility entry point used by the agentic workflow."""
-    return _run_unified(f"openai:{OPENAI_MODEL}", system, user, temperature, max_tokens)
+    return _run_unified(f"openai:{OPENAI_MODEL}", system, user)
 
 
-def run_llm_json(provider: str, system: str, user: str, temperature: float = 0.1, max_tokens: int | None = None) -> str:
+def run_llm_json(provider: str, system: str, user: str, **kwargs: Any) -> dict:
     """Compatibility entry point for JSON-formatted LLM responses."""
-    return _run_unified(f"openai:{OPENAI_MODEL}", system, user, temperature, max_tokens)
+    raw = _run_unified(f"openai:{OPENAI_MODEL}", system, user)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LLMError(f"OpenAI did not return valid JSON: {raw[:300]}") from exc

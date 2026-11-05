@@ -388,3 +388,4 @@ const RebuildIndexModal = ({ open, onClose, onIndexRebuilt, existingIndexStatus 
 };
 
 export default RebuildIndexModal;
+

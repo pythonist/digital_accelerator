@@ -106,8 +106,6 @@ Synthesize these exact facts into a clean 3-4 section markdown report with subhe
                 prompt=user_prompt,
                 model=chosen_model,
                 system_prompt=system_prompt,
-                temperature=0.3,
-                max_tokens=900,
             )
 
             if isinstance(response, dict) and response.get("success"):

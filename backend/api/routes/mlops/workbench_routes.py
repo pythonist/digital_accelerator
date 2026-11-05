@@ -303,8 +303,6 @@ def _maybe_upgrade_brief_with_llm(brief_payload: dict) -> dict:
     response = wrapper.generate(
         prompt=json.dumps(prompt_payload, default=str),
         system_prompt=system_prompt,
-        temperature=0.2,
-        max_tokens=400,
     )
     if not response or not response.get("success"):
         return brief_payload

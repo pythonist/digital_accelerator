@@ -414,8 +414,6 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
                 result = self.llm_provider.generate(
                     prompt=prompt,
                     model=model,
-                    temperature=0.7,
-                    max_tokens=150,
                 )
                 if result.get('success'):
                     explanation = str(result.get('response') or '').strip()

@@ -304,7 +304,7 @@ class FCCWorkbenchNarrativeService:
         context: Dict[str, Any],
         fallback: str,
         audience: str = "business",
-        max_tokens: int = 260,
+        **kwargs: Any,
     ) -> str:
         cache_key = f"{audience}:{section_key}"
         if cache_key in self._cache:
@@ -328,8 +328,6 @@ class FCCWorkbenchNarrativeService:
                 result = self.ollama.generate(
                     prompt=prompt,
                     model=self.model,
-                    temperature=0.2,
-                    max_tokens=max_tokens,
                 )
                 candidate = _safe_text((result or {}).get("response"), "").replace("*", "")
                 if candidate:
@@ -478,7 +476,6 @@ class FCCWorkbenchReportPDFGenerator:
                 f"{_to_int(bi.get('sars_missed'), 0):,} remain the miss-risk to govern."
             ),
             audience=audience,
-            max_tokens=300,
         )
         workbench_story = self.narratives.build(
             "workbench_overview",

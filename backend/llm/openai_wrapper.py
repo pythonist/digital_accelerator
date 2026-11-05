@@ -134,8 +134,6 @@ class OpenAIWrapper:
         system_prompt: Optional[str] = None,
         history: Optional[List[Dict[str, Any]]] = None,
         stream: bool = False,
-        temperature: Optional[float] = None,  # accepted for caller compatibility, never transmitted
-        max_tokens: Optional[int] = None,      # accepted for caller compatibility, never transmitted
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Construct the minimal chat payload required by the gateway.
@@ -170,8 +168,6 @@ class OpenAIWrapper:
         prompt: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Execute a completion request and return standardized success/response or error."""
@@ -191,8 +187,6 @@ class OpenAIWrapper:
                 prompt,
                 model=model,
                 system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
                 **kwargs,
             )
             chat_url = self._chat_url()
@@ -282,8 +276,6 @@ class OpenAIWrapper:
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
         use_history: bool = True,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Multi-turn chat helper that maintains conversation history."""
@@ -398,8 +390,6 @@ class OpenAIWrapper:
         prompt: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> Iterator[str]:
         """Streaming generator that yields tokens from the OpenAI SSE stream."""
@@ -412,8 +402,6 @@ class OpenAIWrapper:
             prompt,
             model=model,
             system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
             stream=True,
             **kwargs,
         )

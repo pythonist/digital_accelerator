@@ -269,7 +269,7 @@ class TestLLMClientsRouting(unittest.TestCase):
         self.assertEqual(text_res, '{"status": "ok"}')
 
         json_res = run_llm_json("gpt-4o", "sys", "usr")
-        self.assertEqual(json_res, '{"status": "ok"}')
+        self.assertEqual(json_res, {"status": "ok"})
 
 
 class TestFlaskEndpointsErrorHandling(unittest.TestCase):

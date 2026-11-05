@@ -280,8 +280,6 @@ def _maybe_upgrade_eda_ai_explanation(body: dict, dataset: dict, fallback: dict)
     response = wrapper.generate(
         prompt=json.dumps(prompt_payload, default=str),
         system_prompt=system_prompt,
-        temperature=0.2,
-        max_tokens=380,
     )
     if not response or not response.get("success"):
         return fallback

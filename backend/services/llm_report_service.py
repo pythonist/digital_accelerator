@@ -19,7 +19,7 @@ class LLMReportService:
             candidates.append(service_provider)
         return candidates
 
-    def _generate(self, prompt, *, system_prompt, model=None, temperature=0.1, max_tokens=700):
+    def _generate(self, prompt, *, system_prompt, model=None, **kwargs):
         for candidate in self._candidates():
             try:
                 if hasattr(candidate, "check_connection") and not candidate.check_connection():
@@ -28,8 +28,6 @@ class LLMReportService:
                     prompt=prompt,
                     model=model or getattr(candidate, "default_model", None),
                     system_prompt=system_prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
                 )
                 if isinstance(result, dict) and result.get("success") and result.get("response"):
                     return str(result.get("response")).strip()
@@ -49,7 +47,6 @@ class LLMReportService:
             prompt,
             system_prompt="You write audit-ready AML investigation report summaries using only supplied facts.",
             model=model,
-            max_tokens=450,
         )
         if text:
             return text
@@ -73,7 +70,6 @@ class LLMReportService:
             prompt,
             system_prompt="You explain investigation evidence without adding unsupported conclusions.",
             model=model,
-            max_tokens=450,
         )
         if text:
             return text
@@ -95,7 +91,6 @@ class LLMReportService:
             prompt,
             system_prompt="You write reviewer questions based only on supplied case facts and missing evidence.",
             model=model,
-            max_tokens=300,
         )
         if text:
             return [line.strip("- ").strip() for line in text.splitlines() if line.strip()]
@@ -119,7 +114,6 @@ class LLMReportService:
             prompt,
             system_prompt="You summarize case comparison findings using only supplied structured comparison data.",
             model=model,
-            max_tokens=400,
         )
         if text:
             return text
