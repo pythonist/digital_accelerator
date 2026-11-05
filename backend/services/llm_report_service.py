@@ -14,24 +14,10 @@ class LLMReportService:
                 candidates.append(provider)
         except Exception:
             pass
-        for item in (
-            getattr(services, "llm_provider", None),
-            getattr(services, "_gpt4all_wrapper", None),
-        ):
-            if item:
-                candidates.append(item)
-        deduped = []
-        seen = set()
-        for item in candidates:
-            key = (
-                str(getattr(item, "provider_name", "") or item.__class__.__name__).lower(),
-                str(getattr(item, "default_model", "") or "").lower(),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(item)
-        return deduped
+        service_provider = getattr(services, "llm_provider", None)
+        if service_provider and service_provider not in candidates:
+            candidates.append(service_provider)
+        return candidates
 
     def _generate(self, prompt, *, system_prompt, model=None, temperature=0.1, max_tokens=700):
         for candidate in self._candidates():

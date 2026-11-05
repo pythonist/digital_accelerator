@@ -1,4 +1,4 @@
-﻿/**
+/**
  * DeploymentDashboard.jsx
  * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  * Post-deployment monitoring dashboard for the AML MLOps Workbench.
@@ -2572,7 +2572,6 @@ const DeploymentDashboard = ({
           : `Opened Sentinel with ${fmt(handoffPayload?.imported_case_count)} retained ${grainLabel.toLowerCase()} records from FCC package ${String(handoffPayload?.publish_id || '').slice(0, 12)}.`,
       });
 
-      setActiveTool('investigation');
       navigate('/investigation');
     } catch (err) {
       setPublishNotice({
@@ -2602,12 +2601,11 @@ const DeploymentDashboard = ({
     simConfig.scenario,
     simResult,
     simThresholdApplied,
-    setActiveTool,
     simConfig.batch_size,
     threshold,
   ]);
 
-  // â”€â”€ Download report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Download report -------------------------------------------------------
   const downloadReport = async () => {
     if (!runId) return;
     try {
@@ -2620,7 +2618,7 @@ const DeploymentDashboard = ({
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${(activePipelineName || 'fcc_workbench').replace(/[^a-zA-Z0-9_-]+/g, '_')}_fcc_report.pdf`;
+      link.download = `${(activePipelineName || "fcc_workbench").replace(/[^a-zA-Z0-9_-]+/g, "_")}_fcc_report.pdf`;
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {

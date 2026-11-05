@@ -191,10 +191,10 @@ class ServiceContainer:
 
     def _register_lazy_modules(self):
         """Declare all heavy modules as lazy loaders."""
-        # LLM provider (local GPT4All by default; Ollama only when explicitly enabled)
+        # LLM provider (OpenAI only)
         def _load_llm_provider():
-            from modules.ai import load_ollama
-            return load_ollama()
+            from llm.provider_factory import load_llm_provider
+            return load_llm_provider()
         REGISTRY.register("llm_provider", _load_llm_provider, feature_flag_env="ENABLE_AI")
 
         # Documentation RAG (depends on the active LLM provider, optional FAISS)

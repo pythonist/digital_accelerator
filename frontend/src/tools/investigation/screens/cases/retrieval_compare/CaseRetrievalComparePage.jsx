@@ -18,7 +18,7 @@ import {
 
 import apiClient from '@services/api';
 import PageContainer from '@investigation-layout/PageContainer';
-import ModuleGuideDrawer from './ModuleGuideDrawer';
+import CaseRetrievalManual from '@investigation/components/guide/CaseRetrievalManual';
 import SimilarCasesTab from './SimilarCasesTab';
 import CaseComparisonTab from './CaseComparisonTab';
 import {
@@ -290,7 +290,7 @@ const CaseRetrievalComparePage = () => {
         )}
       </Stack>
 
-      <ModuleGuideDrawer open={guideOpen} onClose={() => setGuideOpen(false)} guide={guide} />
+      <CaseRetrievalManual open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <Snackbar open={feedback.open} autoHideDuration={4000} onClose={() => setFeedback((previous) => ({ ...previous, open: false }))}>
         <Alert severity={feedback.severity} onClose={() => setFeedback((previous) => ({ ...previous, open: false }))}>

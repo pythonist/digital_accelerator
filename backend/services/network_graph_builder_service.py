@@ -253,6 +253,7 @@ class NetworkGraphBuilderService:
                 "relationship_type": "transacted_with",
                 "amount": _safe_float(txn.get("amount")),
                 "volume": _safe_float(txn.get("amount")),
+                "direction": str(txn.get("direction") or "debit").strip().lower(),
                 "timestamp": _to_iso(ts),
                 "txn_type": txn.get("txn_type"),
                 "channel": txn.get("channel"),

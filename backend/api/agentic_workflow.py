@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from api.agent_db import (
     update_session_status,
 )
 from api.routes.agent_tools import TOOL_REGISTRY, get_case_context, raw_to_json_text, run_tool
+from api.agents import resolve_workflow_nodes
 from api.routes.llm_clients import (
     LLMError,
     run_llm_text,
@@ -60,48 +63,113 @@ def _save_last_llm(session_id: str, stage: str, prompt: str, response) -> None:
     )
 
 
-def _chat_json(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.1) -> dict:
-    raw = run_llm_json(provider, system, user, temperature=temperature)
-    _save_last_llm(session_id, stage, f"SYSTEM:\n{system}\n\nUSER:\n{user}", raw)
-    
+def _parse_llm_json(raw) -> dict:
     if isinstance(raw, dict):
         return raw
-        
+    cleaned = str(raw).strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else ""
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    start = cleaned.find("{")
+    if start < 0:
+        raise json.JSONDecodeError("No JSON object found", cleaned, 0)
+    target = cleaned[start:].strip()
     try:
-        # Some models return JSON enclosed in markdown
-        cleaned = str(raw).strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        return json.loads(cleaned.strip())
-    except json.JSONDecodeError as exc:
-        raise LLMError(f"{provider} did not return valid JSON: {str(raw)[:500]}") from exc
+        value, _ = json.JSONDecoder().raw_decode(target)
+        if isinstance(value, dict):
+            return value
+    except json.JSONDecodeError:
+        pass
+
+    # Robust suffix repair for trailing truncated JSON
+    for suffix in ["}", "]}", "]}}", "\"]}", "\"]}}", "\"}]}}", "\"}]"]:
+        try:
+            val = json.loads(target + suffix)
+            if isinstance(val, dict):
+                return val
+        except Exception:
+            pass
+
+    # Item recovery for truncated findings output
+    try:
+        import re
+        repaired = {}
+        for key in ["findings", "evidence_items", "risk_drivers", "recommendations", "timeline", "open_questions"]:
+            m = re.search(rf'"{key}"\s*:\s*(\[[^\]]*\])', target)
+            if m:
+                try:
+                    repaired[key] = json.loads(m.group(1))
+                except Exception:
+                    repaired[key] = []
+            else:
+                repaired[key] = []
+        if any(repaired.values()):
+            return repaired
+    except Exception:
+        pass
+
+    value, _ = json.JSONDecoder().raw_decode(target)
+    if not isinstance(value, dict):
+        raise json.JSONDecodeError("Expected a JSON object", cleaned, start)
+    return value
 
 
-def _chat_text(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.2) -> str:
-    response = run_llm_text(provider, system, user, temperature=temperature)
+def _chat_json(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.1, max_tokens: int = 1800) -> dict:
+    prompt = f"SYSTEM:\n{system}\n\nUSER:\n{user}"
+    raw = run_llm_json(provider, system, user, temperature=temperature, max_tokens=max_tokens)
+    _save_last_llm(session_id, stage, prompt, raw)
+    try:
+        return _parse_llm_json(raw)
+    except json.JSONDecodeError:
+        # A real retry is preferable to publishing incomplete LLM output as findings.
+        retry_system = (
+            f"{system}\n\nYour previous response was incomplete or invalid. Return one COMPLETE, "
+            "compact JSON object only. Do not use markdown fences. Keep arrays concise."
+        )
+        retry_raw = run_llm_json(provider, retry_system, user, temperature=temperature, max_tokens=max_tokens)
+        _save_last_llm(session_id, f"{stage}:retry", f"SYSTEM:\n{retry_system}\n\nUSER:\n{user}", retry_raw)
+        try:
+            return _parse_llm_json(retry_raw)
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"{provider} returned incomplete JSON for {stage}; findings/documents were not fabricated.") from exc
+
+
+def _chat_text(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.2, max_tokens: int = 1800) -> str:
+    response = run_llm_text(provider, system, user, temperature=temperature, max_tokens=max_tokens)
     _save_last_llm(session_id, stage, f"SYSTEM:\n{system}\n\nUSER:\n{user}", response)
     return response
 
 
-def _summarize_tool(session_id: str, provider: str, tool_name: str, raw_output: str, current_memory: str = "") -> str:
+def _summarize_tool(
+    session_id: str,
+    provider: str,
+    tool_name: str,
+    raw_output: str,
+    current_memory: str = "",
+    agent_instructions: str = "",
+    agent_config: dict | None = None,
+) -> str:
+    agent_config = agent_config or {}
+    evidence_depth = agent_config.get("evidence_depth", "standard")
+    max_evidence = agent_config.get("max_evidence", 6)
     system = (
         f"You are {provider} acting as the memory and compression agent for a "
         "financial crime investigation. Summarize only the supplied tool output. "
-        "Do not invent facts. Return concise markdown with these headings: "
-        "Current Facts, Evidence, Findings, Missing Information, Outstanding "
-        "Questions, Current Risk."
+        "Do not invent facts. Return concise bullet-point markdown covering: "
+        "Key Facts, Specific Metrics/Entities, Triggered Flags, and Provisional Risk. "
+        "Keep the summary under 180 words. Do not repeat facts from prior tools."
     )
     user = (
         f"Tool: {tool_name}\n\n"
-        f"Existing investigation memory:\n{current_memory[-6000:] or 'None yet.'}\n\n"
-        f"Raw tool output:\n{raw_output[:30000]}\n\n"
+        f"Existing investigation context:\n{current_memory[-1500:] or 'None yet.'}\n\n"
+        f"Raw tool output:\n{raw_output[:5000]}\n\n"
+        f"Agent-specific instructions:\n{agent_instructions or 'Use the standard investigation scope.'}\n\n"
+        f"Evidence depth: {evidence_depth}. Include no more than {max_evidence} key evidence items.\n\n"
         "Update the investigation memory from this tool output."
     )
-    return _chat_text(session_id, provider, f"summarize:{tool_name}", system, user, temperature=0.1)
+    depth_tokens = {"fast": 350, "standard": 450, "deep": 650}.get(str(evidence_depth), 450)
+    return _chat_text(session_id, provider, f"summarize:{tool_name}", system, user, temperature=0.1, max_tokens=depth_tokens)
 
 
 def _current_memory(session_id: str) -> str:
@@ -122,17 +190,19 @@ def _insert_plan_steps(session_id: str, steps: list[dict], start_index: int = 0)
             c.execute(
                 """
                 INSERT INTO investigation_plan
-                    (id, session_id, step_number, action_name, description, status, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, session_id, step_number, action_name, description, status, timestamp, agent_id, agent_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     step_id,
                     session_id,
                     start_index + index + 1,
-                    str(tool_name or "").replace("_", " ").title(),
+                    step.get("agent_name") or str(tool_name or "").replace("_", " ").title(),
                     step.get("reason") or tool_meta.get("description", ""),
                     "pending",
                     datetime.now().isoformat(),
+                    step.get("agent_id"),
+                    step.get("agent_type"),
                 ),
             )
         conn.commit()
@@ -145,6 +215,18 @@ def plan_investigation(session_id: str, case_id: str, context: dict, prior_memor
     case_context = get_case_context(case_id, context)
     tool_list = "\n".join(f"- {name}: {meta['description']}" for name, meta in TOOL_REGISTRY.items())
     provider = context.get("selected_model", "chatgpt")
+    
+    # Compact high-signal case profile
+    core_case = {
+        "case_id": case_context.get("case_id") or case_id,
+        "customer_id": case_context.get("customer_id"),
+        "account_id": case_context.get("account_id"),
+        "risk_score": case_context.get("risk_score"),
+        "status": case_context.get("status"),
+        "alerts": case_context.get("alerts") or [],
+        "case_type": case_context.get("case_type"),
+    }
+    
     system = (
         f"You are {provider} acting as the Planner Agent for a senior AML investigation. "
         "Use the supplied case data and available tools to produce a dynamic plan. "
@@ -157,11 +239,11 @@ def plan_investigation(session_id: str, case_id: str, context: dict, prior_memor
     user = (
         f"Case ID: {case_id}\n\n"
         f"Available tools:\n{tool_list}\n\n"
-        f"Case data:\n{json.dumps(case_context, indent=2, default=str)[:45000]}\n\n"
-        f"Prior memory if this is a follow-up loop:\n{prior_memory[-12000:] or 'None'}\n\n"
+        f"Case data summary:\n{json.dumps(core_case, indent=2, default=str)}\n\n"
+        f"Prior memory if this is a follow-up loop:\n{prior_memory[-3000:] or 'None'}\n\n"
         "Create the investigation plan."
     )
-    result = _chat_json(session_id, provider, "planner", system, user)
+    result = _chat_json(session_id, provider, "planner", system, user, max_tokens=1000)
     steps = result.get("steps") or []
     valid = [step for step in steps if step.get("tool") in TOOL_REGISTRY]
     if not valid:
@@ -169,9 +251,12 @@ def plan_investigation(session_id: str, case_id: str, context: dict, prior_memor
     return valid
 
 
-def execute_step(session_id: str, case_id: str, tool_name: str, step_db_id: str, context: dict) -> None:
-    log_activity(session_id, f"Executing tool: {tool_name}", "running")
-    update_session_status(session_id, "running", current_step=tool_name)
+def execute_step(session_id: str, case_id: str, tool_name: str, step_db_id: str, context: dict, agent: dict | None = None) -> None:
+    agent = agent or {}
+    agent_name = agent.get("name") or tool_name.replace("_", " ").title()
+    agent_config = agent.get("config") if isinstance(agent.get("config"), dict) else {}
+    log_activity(session_id, f"Agent started: {agent_name}", "running")
+    update_session_status(session_id, "running", current_step=agent_name)
 
     conn = get_db_connection()
     c = conn.cursor()
@@ -215,8 +300,29 @@ def execute_step(session_id: str, case_id: str, tool_name: str, step_db_id: str,
             update_memory(session_id, memory_text + f"\n\n[{tool_name}]\nFAILED: {summary}")
             return
 
-        provider = context.get("selected_model", "chatgpt")
-        summary = _summarize_tool(session_id, provider, tool_name, raw_output, current_memory=memory_text)
+        configured_model = str(agent_config.get("model") or "inherit")
+        selected_model = context.get("selected_model", "chatgpt")
+        tool_provider = configured_model if configured_model != "inherit" else selected_model
+        
+        # For worker tool summaries, use gpt-4o-mini when OpenAI is selected to reserve TPM quota for lead synthesis
+        worker_provider = tool_provider
+        if str(tool_provider).startswith("openai:") and tool_provider != "openai:gpt-4o-mini":
+            worker_provider = "openai:gpt-4o-mini"
+
+        log_activity(
+            session_id,
+            f"{agent_name} summarizing with {tool_provider} ({agent_config.get('evidence_depth', 'standard')} evidence depth).",
+            "info",
+        )
+        summary = _summarize_tool(
+            session_id,
+            worker_provider,
+            tool_name,
+            raw_output,
+            current_memory=memory_text,
+            agent_instructions=str(agent.get("instructions") or ""),
+            agent_config=agent_config,
+        )
 
         c.execute(
             """
@@ -242,7 +348,8 @@ def execute_step(session_id: str, case_id: str, tool_name: str, step_db_id: str,
         )
         conn.commit()
         update_memory(session_id, memory_text + f"\n\n[{tool_name}]\n{summary}")
-        log_activity(session_id, f"Completed tool: {tool_name}", "success")
+        log_activity(session_id, f"Agent completed: {agent_name}", "success")
+        time.sleep(1.0)
     finally:
         conn.close()
 
@@ -254,8 +361,8 @@ def synthesize_risk(session_id: str, case_id: str, memory_text: str, provider: s
         '{"risk_score":0-100,"confidence":0-100,"key_drivers":["..."],'
         '"risk_evolution":[{"stage":"...","score":0,"reason":"..."}]}.'
     )
-    user = f"Case ID: {case_id}\n\nAccumulated memory:\n{memory_text[-30000:]}"
-    return _chat_json(session_id, provider, "risk_agent", system, user, temperature=0.1)
+    user = f"Case ID: {case_id}\n\nAccumulated memory:\n{memory_text[-6000:]}"
+    return _chat_json(session_id, provider, "risk_agent", system, user, temperature=0.1, max_tokens=800)
 
 
 def qa_review(session_id: str, case_id: str, memory_text: str, risk_result: dict, provider: str) -> dict:
@@ -266,20 +373,20 @@ def qa_review(session_id: str, case_id: str, memory_text: str, risk_result: dict
         '{"sufficient":true,"reasoning":"...","missing":["..."],"additional_focus":["..."]}.'
     )
     user = (
-        f"Case ID: {case_id}\n\nMemory:\n{memory_text[-30000:]}\n\n"
+        f"Case ID: {case_id}\n\nMemory:\n{memory_text[-5000:]}\n\n"
         f"Risk assessment:\n{json.dumps(risk_result, indent=2, default=str)}"
     )
-    return _chat_json(session_id, provider, "qa_reflection", system, user, temperature=0.1)
+    return _chat_json(session_id, provider, "qa_reflection", system, user, temperature=0.1, max_tokens=600)
 
 
 def extract_findings(session_id: str, case_id: str, tool_log: list[dict], risk_result: dict, provider: str) -> dict:
     evidence_blocks = "\n\n".join(
-        f"=== {row.get('tool_name')} ({row.get('status')}) ===\n{row.get('output_data') or row.get('summary') or ''}"
+        f"=== {row.get('tool_name')} ===\n{row.get('summary') or ''}"
         for row in tool_log
     )
     system = (
         f"You are {provider} acting as the lead AML Findings Agent. Analyze the full "
-        "raw evidence trail and produce structured, audit-ready findings. Every "
+        "evidence trail and produce structured, audit-ready findings. Every "
         "finding, evidence item, risk driver, and recommendation must cite actual "
         "data from a tool output. Do not create placeholder findings. Respond only "
         "with JSON in this shape: "
@@ -290,14 +397,16 @@ def extract_findings(session_id: str, case_id: str, tool_log: list[dict], risk_r
         '"risk_drivers":[{"driver":"...","explanation":"...","source_tool":"...","evidence":"..."}],'
         '"recommendations":[{"action":"...","owner":"...","priority":"high|medium|low","rationale":"..."}],'
         '"timeline":[{"timestamp":"...","event":"...","source_tool":"...","evidence":"..."}],'
-        '"open_questions":[{"question":"...","why_it_matters":"..."}]}.'
+        '"open_questions":[{"question":"...","why_it_matters":"..."}]}. '
+        "Limit output to 3 findings, 5 evidence items, 3 risk drivers, 3 recommendations, "
+        "5 timeline entries, and 3 open questions so the JSON is complete."
     )
     user = (
         f"Case ID: {case_id}\n"
         f"Risk result:\n{json.dumps(risk_result, indent=2, default=str)}\n\n"
-        f"Full tool evidence:\n{evidence_blocks[:70000]}"
+        f"Full tool evidence summaries:\n{evidence_blocks[:7000]}"
     )
-    data = _chat_json(session_id, provider, "findings_agent", system, user, temperature=0.12)
+    data = _chat_json(session_id, provider, "findings_agent", system, user, temperature=0.12, max_tokens=1500)
     for key in ("findings", "evidence_items", "risk_drivers", "recommendations", "timeline", "open_questions"):
         if not isinstance(data.get(key), list):
             data[key] = []
@@ -313,19 +422,23 @@ def generate_document(session_id: str, case_id: str, doc_type: str, findings_dat
     user = (
         f"Document type: {doc_type}\nCase ID: {case_id}\n\n"
         f"Risk result:\n{json.dumps(risk_result, indent=2, default=str)}\n\n"
-        f"Structured findings:\n{json.dumps(findings_data, indent=2, default=str)[:45000]}\n\n"
-        f"Tool summaries:\n{json.dumps([{k: row.get(k) for k in ('tool_name', 'summary', 'status')} for row in tool_log], indent=2, default=str)}\n\n"
+        f"Structured findings:\n{json.dumps(findings_data, indent=2, default=str)[:8000]}\n\n"
+        f"Tool summaries:\n{json.dumps([{k: row.get(k) for k in ('tool_name', 'summary', 'status')} for row in tool_log], indent=2, default=str)[:6000]}\n\n"
         "Write the document with clear section headings, evidence references, "
         "recommendations where relevant, and enough detail for senior analyst review."
     )
-    return _chat_text(session_id, provider, f"document:{doc_type}", system, user, temperature=0.18)
+    return _chat_text(session_id, provider, f"document:{doc_type}", system, user, temperature=0.18, max_tokens=1500)
 
 
 def generate_reports(session_id: str, case_id: str, risk_result: dict, provider: str) -> dict:
-    tool_log = get_tool_execution_log(session_id)
+    tool_log = [row for row in get_tool_execution_log(session_id) if row.get("status") == "success"]
+    if not tool_log:
+        raise RuntimeError("No successful evidence tool output is available for report generation.")
+    time.sleep(1.0)
     findings_data = extract_findings(session_id, case_id, tool_log, risk_result, provider)
     save_findings(session_id, findings_data)
     for doc_type in DOCUMENT_TYPES:
+        time.sleep(1.0)
         content = generate_document(session_id, case_id, doc_type, findings_data, risk_result, tool_log, provider)
         save_document(session_id, doc_type, content)
     return findings_data
@@ -361,13 +474,46 @@ def run_agentic_investigation(case_id: str, session_id: str, context: dict | Non
         )
         update_memory(session_id, f"Case ID: {case_id}\nInvestigation initialized at {datetime.utcnow().isoformat()}Z.")
 
-        log_activity(session_id, f"Planner Agent analyzing live case data with {provider}.", "running")
-        steps = plan_investigation(session_id, case_id, context)
+        workflow_agents = resolve_workflow_nodes(context.get("workflow_nodes"))
+        if workflow_agents:
+            log_activity(session_id, f"Canvas workflow loaded with {len(workflow_agents)} configured agents.", "success")
+            steps = [
+                {
+                    "tool": agent["tool_name"],
+                    "reason": agent.get("description") or f"Configured {agent['name']} agent.",
+                    "agent_id": agent.get("node_id") or agent["id"],
+                    "agent_type": agent["agent_type"],
+                    "agent_name": agent["name"],
+                    "agent": agent,
+                }
+                for agent in workflow_agents
+            ]
+        else:
+            log_activity(session_id, f"Planner Agent analyzing live case data with {provider}.", "running")
+            steps = plan_investigation(session_id, case_id, context)
         step_ids = _insert_plan_steps(session_id, steps)
-        log_activity(session_id, f"{provider} generated {len(steps)} investigation steps.", "success")
+        log_activity(session_id, f"{provider} prepared {len(steps)} investigation agents.", "success")
 
-        for step, step_id in zip(steps, step_ids):
-            execute_step(session_id, case_id, step["tool"], step_id, context)
+        if workflow_agents:
+            workers = min(4, len(steps))
+            log_activity(session_id, f"Spawning {workers} parallel investigation agents.", "running")
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="agentic") as executor:
+                futures = [
+                    executor.submit(execute_step, session_id, case_id, step["tool"], step_id, context, step.get("agent"))
+                    for step, step_id in zip(steps, step_ids)
+                ]
+                for future in as_completed(futures):
+                    future.result()
+            log_activity(session_id, "Parallel agent execution completed.", "success")
+        else:
+            for step, step_id in zip(steps, step_ids):
+                execute_step(session_id, case_id, step["tool"], step_id, context)
+
+        successful_tools = [row for row in get_tool_execution_log(session_id) if row.get("status") == "success"]
+        if not successful_tools:
+            raise RuntimeError("No evidence tools completed successfully; findings and documents were not generated.")
+        if len(successful_tools) < len(steps):
+            log_activity(session_id, f"Continuing with {len(successful_tools)}/{len(steps)} successful evidence agents.", "info")
 
         risk_result = {}
         for loop_index in range(MAX_QA_LOOPS + 1):
@@ -376,11 +522,13 @@ def run_agentic_investigation(case_id: str, session_id: str, context: dict | Non
             risk_result = synthesize_risk(session_id, case_id, memory_text, provider)
             _finalize_risk(session_id, risk_result)
             log_activity(session_id, "Risk synthesis complete.", "success")
+            time.sleep(1.0)
 
             log_activity(session_id, f"QA Reflection Agent reviewing evidence sufficiency with {provider}.", "running")
             qa_result = qa_review(session_id, case_id, memory_text, risk_result, provider)
             if qa_result.get("sufficient") or loop_index == MAX_QA_LOOPS:
                 log_activity(session_id, f"QA review complete: {qa_result.get('reasoning')}", "success")
+                time.sleep(1.0)
                 break
 
             log_activity(session_id, f"QA requested more evidence: {', '.join(qa_result.get('missing') or [])}", "info")

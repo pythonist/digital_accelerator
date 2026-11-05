@@ -21,6 +21,7 @@ from api.agent_db import (
     get_all_latest_sessions,
 )
 from api.agentic_workflow import WORKFLOW_FILE, WORKFLOW_LOADED_AT, WORKFLOW_VERSION, start_investigation_async
+from api.agents import create_agent, list_agents
 import json
 import time
 
@@ -34,13 +35,31 @@ def start_investigation():
         return jsonify({"error": "case_id is required"}), 400
 
     context = {
-        "env_id": data.get("env_id") or request.args.get("env_id") or request.headers.get("X-Environment-ID"),
+        "env_id": data.get("env_id") or request.args.get("env_id") or request.headers.get("X-Environment-ID") or getattr(request, "env_id", None),
         "tenant_id": getattr(request, "tenant_id", None),
         "username": getattr(request, "username", None),
         "selected_model": data.get("selected_model", "chatgpt"),
+        "investigation_type": data.get("investigation_type", "general_aml"),
+        "workflow_nodes": data.get("workflow_nodes") or [],
     }
+    if not context["env_id"]:
+        return jsonify({"error": "Select an active environment before running an agentic investigation."}), 400
     session_id = start_investigation_async(case_id, context=context)
     return jsonify({"session_id": session_id, "status": "running"}), 200
+
+
+@agentic_bp.route('/api/v2/agentic/agents', methods=['GET'])
+def get_agents():
+    return jsonify({"agents": list_agents()}), 200
+
+
+@agentic_bp.route('/api/v2/agentic/agents', methods=['POST'])
+def add_agent():
+    try:
+        agent = create_agent(request.get_json(silent=True) or {})
+        return jsonify({"agent": agent}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 @agentic_bp.route('/api/v2/agentic/sessions', methods=['GET'])
 def list_sessions():

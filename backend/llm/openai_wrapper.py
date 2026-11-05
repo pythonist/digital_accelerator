@@ -21,22 +21,35 @@ from typing import Dict, List, Optional
 import requests
 
 
-DEFAULT_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+_raw_base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+if _raw_base.endswith("/chat/completions"):
+    _raw_base = _raw_base[:-len("/chat/completions")].rstrip("/")
+DEFAULT_BASE_URL = _raw_base
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "gpt-4o-mini"
 DEFAULT_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL") or os.getenv("LLM_EMBED_MODEL") or "text-embedding-3-small"
-REQUEST_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT") or os.getenv("LLM_TIMEOUT") or "45")
-DEFAULT_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS") or os.getenv("OPENAI_MAX_TOKENS") or "320")
-DEFAULT_TOKEN_CAP = int(os.getenv("LLM_TOKEN_CAP") or os.getenv("OPENAI_TOKEN_CAP") or str(DEFAULT_MAX_TOKENS))
+REQUEST_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT") or os.getenv("LLM_TIMEOUT") or "180")
+DEFAULT_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS") or os.getenv("OPENAI_MAX_TOKENS") or "800")
+DEFAULT_TOKEN_CAP = int(os.getenv("LLM_TOKEN_CAP") or os.getenv("OPENAI_TOKEN_CAP") or "4096")
 
 
-def _bounded_tokens(requested: Optional[int]) -> int:
+def _verify_ssl() -> bool:
+    val = os.getenv("OPENAI_VERIFY_SSL", "true").strip().lower()
+    return val not in {"0", "false", "no", "off"}
+
+
+def _bounded_tokens(requested: Optional[int], is_reasoning: bool = False) -> int:
     try:
         value = int(requested if requested is not None else DEFAULT_MAX_TOKENS)
     except Exception:
         value = DEFAULT_MAX_TOKENS
     value = max(32, value)
-    if DEFAULT_TOKEN_CAP > 0:
-        value = min(value, DEFAULT_TOKEN_CAP)
+    if is_reasoning:
+        value = max(value, 2048)
+        cap = int(os.getenv("AGENTIC_REASONING_TOKEN_CAP") or "4096")
+    else:
+        cap = int(os.getenv("AGENTIC_LLM_TOKEN_CAP") or "2048")
+    if cap > 0:
+        value = min(value, cap)
     return value
 
 
@@ -52,7 +65,10 @@ class OpenAIWrapper:
     ):
         raw_api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
         self.api_key = str(raw_api_key or "").strip().strip('"').strip("'")
-        self.base_url = str(base_url or DEFAULT_BASE_URL).rstrip("/")
+        cleaned_url = str(base_url or DEFAULT_BASE_URL).rstrip("/")
+        if cleaned_url.endswith("/chat/completions"):
+            cleaned_url = cleaned_url[:-len("/chat/completions")].rstrip("/")
+        self.base_url = cleaned_url
         self.default_model = default_model
         self.embedding_model = embedding_model
         self.conversation_history: List[Dict] = []
@@ -63,27 +79,17 @@ class OpenAIWrapper:
         model = self.default_model
         base_url = self.base_url
         api_key = self.api_key
-        try:
-            from flask import has_request_context, g
-            if has_request_context():
-                req_model = getattr(g, "llm_model", None)
-                if req_model == "nemotron":
-                    model = "nvidia/nemotron-3-ultra-550b-a55b"
-                    base_url = "https://openrouter.ai/api/v1"
-                    api_key = os.getenv("OPENROUTER_API_KEY") or api_key
-                elif req_model == "chatgpt":
-                    # explicitly requested chatgpt
-                    pass
-        except ImportError:
-            pass
         return model, base_url, api_key
 
     def _headers(self) -> Dict[str, str]:
         _, _, api_key = self._get_context_overrides()
-        return {
+        headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
+        if api_key:
+            headers["api-key"] = api_key
+        return headers
 
     def check_connection(self) -> bool:
         if not self.api_key:
@@ -96,9 +102,16 @@ class OpenAIWrapper:
             response = requests.get(
                 f"{self.base_url}/models",
                 headers=self._headers(),
-                timeout=min(REQUEST_TIMEOUT, 10),
+                timeout=min(REQUEST_TIMEOUT, 6),
+                verify=_verify_ssl(),
             )
-            self._connection_ok = response.status_code == 200
+            if response.status_code == 200:
+                self._connection_ok = True
+            elif response.status_code in {404, 405} and self.base_url != "https://api.openai.com/v1":
+                # Org GenAI proxy/gateway often only exposes /chat/completions and returns 404/405 for /models
+                self._connection_ok = True
+            else:
+                self._connection_ok = False
         except Exception:
             self._connection_ok = False
         self._connection_checked = True
@@ -113,6 +126,7 @@ class OpenAIWrapper:
                 f"{base_url}/models",
                 headers=self._headers(),
                 timeout=min(REQUEST_TIMEOUT, 15),
+                verify=_verify_ssl(),
             )
             if response.status_code != 200:
                 return [model]
@@ -145,28 +159,42 @@ class OpenAIWrapper:
 
         dyn_model, _, _ = self._get_context_overrides()
         
-        # Override with global setting if frontend specifically chose it
-        try:
-            from flask import has_request_context, g
-            if has_request_context() and getattr(g, "llm_model", None) in {"nemotron", "chatgpt"}:
-                model = dyn_model
-        except ImportError:
-            pass
+        chosen_model = model or dyn_model or "gpt-4o-mini"
+        if chosen_model.startswith("openai:"):
+            chosen_model = chosen_model[7:]
 
-        return {
-            "model": model or dyn_model,
+        is_reasoning_model = any(
+            chosen_model.startswith(prefix)
+            for prefix in ("o1", "o3", "o4", "gpt-5", "gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5.1")
+        )
+
+        body = {
+            "model": chosen_model,
             "messages": messages,
-            "temperature": float(temperature),
-            token_key: _bounded_tokens(max_tokens),
         }
 
-    def _post_chat(self, payload: Dict) -> requests.Response:
+        # Reasoning models reject custom temperatures (only accept 1.0 or omitted)
+        if not is_reasoning_model and temperature is not None:
+            body["temperature"] = float(temperature)
+
+        # Reasoning models use max_completion_tokens instead of max_tokens
+        final_token_key = "max_completion_tokens" if is_reasoning_model else token_key
+        body[final_token_key] = _bounded_tokens(max_tokens, is_reasoning=is_reasoning_model)
+        return body
+
+    def _post_chat(self, payload: Dict, timeout: Optional[int] = None) -> requests.Response:
         _, base_url, _ = self._get_context_overrides()
+        effective_timeout = timeout or REQUEST_TIMEOUT
+        # For large completions or reasoning models, ensure sufficient timeout
+        token_count = int(payload.get("max_completion_tokens") or payload.get("max_tokens") or 0)
+        if token_count >= 1500:
+            effective_timeout = max(effective_timeout, 180)
         return requests.post(
             f"{base_url}/chat/completions",
             headers=self._headers(),
             json=payload,
-            timeout=REQUEST_TIMEOUT,
+            timeout=effective_timeout,
+            verify=_verify_ssl(),
         )
 
     def generate(
@@ -190,16 +218,51 @@ class OpenAIWrapper:
                 max_tokens=max_tokens,
             )
             response = self._post_chat(payload)
-            if response.status_code == 400 and "max_tokens" in response.text:
-                payload = self._chat_payload(
-                    prompt,
-                    model=model,
-                    system_prompt=system_prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    token_key="max_completion_tokens",
-                )
+
+            # Auto-retry 1: temperature not supported
+            if response.status_code == 400 and "temperature" in response.text:
+                payload.pop("temperature", None)
                 response = self._post_chat(payload)
+
+            # Auto-retry 2: max_tokens vs max_completion_tokens
+            if response.status_code == 400 and "max_tokens" in response.text:
+                val = payload.pop("max_tokens", None)
+                if val is not None:
+                    payload["max_completion_tokens"] = val
+                response = self._post_chat(payload)
+
+            # Auto-retry 3: 429 Rate limit backoff (TPM/RPM rate limit exceeded)
+            retry_count = 0
+            while response.status_code == 429 and retry_count < 4:
+                retry_count += 1
+                wait_sec = 8.0
+                try:
+                    import re
+                    match = re.search(r"try again in ([\d\.]+)s", response.text)
+                    if match:
+                        wait_sec = float(match.group(1)) + 1.5
+                    elif "Retry-After" in response.headers:
+                        wait_sec = float(response.headers["Retry-After"]) + 1.0
+                    else:
+                        wait_sec = 6.0 * retry_count
+                except Exception:
+                    wait_sec = 8.0
+                
+                # Dynamically trim token budget on rate limit to fit within TPM recovery
+                for k in ("max_tokens", "max_completion_tokens"):
+                    if k in payload and payload[k] > 600:
+                        payload[k] = max(350, int(payload[k] * 0.7))
+
+                time.sleep(min(wait_sec, 20.0))
+                response = self._post_chat(payload)
+                
+                # If tier 1 quota on heavy model is persistently throttled, seamlessly fallback to gpt-4o-mini
+                if response.status_code == 429 and retry_count >= 2:
+                    current_model = str(payload.get("model", "")).lower()
+                    if "mini" not in current_model:
+                        payload["model"] = "gpt-4o-mini"
+                        response = self._post_chat(payload)
+
             if response.status_code != 200:
                 return {
                     "success": False,
@@ -208,12 +271,14 @@ class OpenAIWrapper:
                     "latency_sec": round(time.time() - start, 2),
                 }
             data = response.json()
-            text = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+            choice = (data.get("choices") or [{}])[0]
+            text = ((choice.get("message") or {}).get("content") or "").strip()
             return {
                 "success": bool(text),
                 "response": text,
                 "model": payload.get("model"),
                 "provider": self.provider_name,
+                "finish_reason": choice.get("finish_reason"),
                 "latency_sec": round(time.time() - start, 2),
                 "timestamp": datetime.utcnow().isoformat(),
             }
@@ -253,6 +318,7 @@ class OpenAIWrapper:
                 headers=self._headers(),
                 json={"model": model or self.embedding_model, "input": str(text or "")},
                 timeout=REQUEST_TIMEOUT,
+                verify=_verify_ssl(),
             )
             if response.status_code != 200:
                 return None

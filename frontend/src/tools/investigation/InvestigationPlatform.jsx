@@ -328,7 +328,7 @@ const InvestigationPlatform = () => {
         </Button>
       )}
     >
-      {handoff && (
+      {handoff && activeTab === 'runs' && (
         <Box sx={{ px: 3, pt: 2 }}>
           <Alert
             severity="info"

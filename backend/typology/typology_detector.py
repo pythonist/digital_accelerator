@@ -130,8 +130,8 @@ class TypologyService:
 
             # [Typology 2] Mule/Velocity
             try:
-                credits = df[df['dir'].str.contains('cr|dep|in', na=False)]['val'].sum()
-                debits = df[df['dir'].str.contains('dr|wit|out', na=False)]['val'].sum()
+                credits = df[df['dir'].str.contains('cr|dep|in|rec|recv', case=False, na=False)]['val'].sum()
+                debits = df[df['dir'].str.contains('dr|deb|wit|out|pay|send', case=False, na=False)]['val'].sum()
                 
                 # Fallback logic if 'type' column is vague or missing (assume negative values are debits)
                 if credits == 0 and debits == 0 and df['val'].min() < 0:

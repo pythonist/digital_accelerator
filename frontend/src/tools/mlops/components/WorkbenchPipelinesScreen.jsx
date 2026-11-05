@@ -1,13 +1,15 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -23,10 +25,13 @@ import {
   AccountTree,
   Add,
   ArchiveOutlined,
+  ArrowForward,
   ContentCopy,
   DeleteForever,
   DragIndicator,
   DriveFileRenameOutline,
+  ExpandLess,
+  ExpandMore,
   PlayArrow,
   Refresh,
   Restore,
@@ -339,6 +344,7 @@ const WorkbenchPipelinesScreen = ({
   const [scopeFilter, setScopeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [familyFilter, setFamilyFilter] = useState('all');
+  const [dagExpanded, setDagExpanded] = useState(false);
 
   const selected = useMemo(() => {
     if (!selectedPipelineId) return null;
@@ -1146,61 +1152,34 @@ const WorkbenchPipelinesScreen = ({
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, height: '100%', minHeight: 0 }}>
-      <Paper variant="outlined" sx={{ borderColor: tone.border, borderRadius: 0, overflow: 'hidden' }}>
-        <Box sx={{ px: 1.75, py: 1.4, borderBottom: `1px solid ${tone.border}`, bgcolor: tone.bg }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.2} flexWrap="wrap">
-            <Box>
-              <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
-                <AccountTree sx={{ fontSize: 16, color: tone.orange }} />
-                <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text }}>
-                  Pipeline History & Resume
-                </Typography>
-                <Chip
-                  size="small"
-                  label={activeEnvironmentName ? `Env ${activeEnvironmentName}` : 'Env not set'}
-                  sx={{
-                    height: 20,
-                    fontSize: 10,
-                    bgcolor: '#ffffff',
-                    color: tone.muted,
-                    border: `1px solid ${tone.border}`,
-                    borderRadius: 0,
-                  }}
-                />
-                <Chip
-                  size="small"
-                  label={`${pipelines.length} tracked run${pipelines.length === 1 ? '' : 's'}`}
-                  sx={{
-                    height: 20,
-                    fontSize: 10,
-                    bgcolor: '#ffffff',
-                    color: tone.muted,
-                    border: `1px solid ${tone.border}`,
-                    borderRadius: 0,
-                  }}
-                />
-              </Stack>
-              <Typography sx={{ fontSize: 11, color: tone.muted, mt: 0.45 }}>
-                Create, track, resume, and manage FCC and Mule pipeline runs without losing step progress after restart.
+      <Paper variant="outlined" sx={{ borderColor: tone.border, borderRadius: 2, overflow: 'hidden', bgcolor: '#ffffff', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}>
+        <Box sx={{ px: 2.5, py: 1.75, borderBottom: '1px solid #fed7aa', bgcolor: '#fff7ed' }}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5} flexWrap="wrap">
+            <Stack direction="row" spacing={1.2} alignItems="center" flexWrap="wrap">
+              <Box sx={{ bgcolor: tone.orange, color: '#ffffff', p: 0.6, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AccountTree sx={{ fontSize: 18 }} />
+              </Box>
+              <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#c2410c', letterSpacing: '-0.01em' }}>
+                Pipeline History & Resume
               </Typography>
-            </Box>
+            </Stack>
             <Stack direction="row" spacing={1}>
               <Button
                 size="small"
                 variant="contained"
-                startIcon={<Add sx={{ fontSize: 14 }} />}
+                startIcon={<Add sx={{ fontSize: 15 }} />}
                 onClick={onCreateNewPipeline}
-                sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' }, borderRadius: 0 }}
+                sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' }, borderRadius: '6px', fontWeight: 600, px: 2 }}
               >
                 New Run
               </Button>
               <Button
                 size="small"
                 variant="outlined"
-                startIcon={<Refresh sx={{ fontSize: 14 }} />}
+                startIcon={<Refresh sx={{ fontSize: 15 }} />}
                 onClick={loadPipelines}
                 disabled={loading}
-                sx={{ textTransform: 'none', borderRadius: 0 }}
+                sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text, bgcolor: '#ffffff' }}
               >
                 Refresh
               </Button>
@@ -1208,35 +1187,25 @@ const WorkbenchPipelinesScreen = ({
           </Stack>
         </Box>
 
-        <Box sx={{ p: 1.5 }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 1, mb: 1.5 }}>
-            {summaryCards.map((card) => (
-              <Box key={card.key} sx={{ border: `1px solid ${tone.border}`, bgcolor: '#ffffff', px: 1.25, py: 1.15 }}>
-                <Typography sx={{ fontSize: 10.5, color: tone.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.55 }}>
-                  {card.label}
-                </Typography>
-                <Typography sx={{ fontSize: 24, fontWeight: 800, color: tone.text, mt: 0.3 }}>
-                  {card.value}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
+        <Box sx={{ p: 2.5 }}>
           {selectionNotice && (
-            <Alert severity="warning" sx={{ mb: 1.2, py: 0.5, borderRadius: 0 }}>
+            <Alert severity="warning" sx={{ mb: 2, py: 0.5, borderRadius: '6px' }}>
               {selectionNotice}
             </Alert>
           )}
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.1fr 0.8fr 0.8fr 0.9fr' }, gap: 1, mb: 1.5 }}>
+
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.2fr 0.8fr 0.8fr 0.8fr' }, gap: 1.5, mb: 2 }}>
             <TextField
               size="small"
               label="Search runs"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search by pipeline, run ID, owner, or step"
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
             />
             <FormControl size="small">
               <InputLabel>Scope</InputLabel>
-              <Select value={scopeFilter} label="Scope" onChange={(e) => setScopeFilter(String(e.target.value))}>
+              <Select value={scopeFilter} label="Scope" onChange={(e) => setScopeFilter(String(e.target.value))} sx={{ borderRadius: '6px' }}>
                 <MenuItem value="all">All runs</MenuItem>
                 <MenuItem value="mine">My runs</MenuItem>
                 <MenuItem value="team">Team runs</MenuItem>
@@ -1244,7 +1213,7 @@ const WorkbenchPipelinesScreen = ({
             </FormControl>
             <FormControl size="small">
               <InputLabel>Family</InputLabel>
-              <Select value={familyFilter} label="Family" onChange={(e) => setFamilyFilter(String(e.target.value))}>
+              <Select value={familyFilter} label="Family" onChange={(e) => setFamilyFilter(String(e.target.value))} sx={{ borderRadius: '6px' }}>
                 <MenuItem value="all">All families</MenuItem>
                 <MenuItem value="fcc">FCC</MenuItem>
                 <MenuItem value="mule">Mule</MenuItem>
@@ -1252,7 +1221,7 @@ const WorkbenchPipelinesScreen = ({
             </FormControl>
             <FormControl size="small">
               <InputLabel>Status</InputLabel>
-              <Select value={statusFilter} label="Status" onChange={(e) => setStatusFilter(String(e.target.value))}>
+              <Select value={statusFilter} label="Status" onChange={(e) => setStatusFilter(String(e.target.value))} sx={{ borderRadius: '6px' }}>
                 <MenuItem value="active">Active</MenuItem>
                 <MenuItem value="completed">Completed</MenuItem>
                 <MenuItem value="failed">Failed</MenuItem>
@@ -1262,27 +1231,29 @@ const WorkbenchPipelinesScreen = ({
               </Select>
             </FormControl>
           </Box>
+
           {pipelines.length === 0 ? (
-            <Alert severity="info" sx={{ py: 0.5 }}>
+            <Alert severity="info" sx={{ py: 0.5, borderRadius: '6px' }}>
               {activeEnvironmentName
                 ? `No saved pipeline runs were found in environment "${activeEnvironmentName}".`
                 : 'No saved pipeline runs were found for the current environment.'}
             </Alert>
           ) : (
-              <Box sx={{ overflowX: 'auto' }}>
+              <Box sx={{ overflowX: 'auto', border: `1px solid ${tone.border}`, borderRadius: '6px' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1120 }}>
                 <thead>
-                  <tr style={{ background: '#faf7f4' }}>
+                  <tr style={{ background: '#f8fafc' }}>
                     {['Pipeline Name', 'Family', 'Run ID', 'Created By', 'Owner', 'Created On', 'Last Updated', 'Current Step', 'Progress %', 'Status', 'Last Completed Step', 'Next Pending Step', 'Environment', 'Actions'].map((label) => (
                       <th
                         key={label}
                         style={{
-                          padding: '10px 12px',
+                          padding: '10px 14px',
                           textAlign: 'left',
-                          fontSize: 10.5,
-                          letterSpacing: 0.5,
+                          fontSize: 11,
+                          letterSpacing: 0.3,
                           textTransform: 'uppercase',
-                          color: '#6b7280',
+                          fontWeight: 600,
+                          color: '#64748b',
                           borderBottom: `1px solid ${tone.border}`,
                           whiteSpace: 'nowrap',
                         }}
@@ -1304,59 +1275,62 @@ const WorkbenchPipelinesScreen = ({
                           cursor: 'pointer',
                           background: isSelected ? '#fff7ed' : '#ffffff',
                           borderBottom: `1px solid ${tone.border}`,
+                          transition: 'background 0.12s ease',
                         }}
                       >
-                        <td style={{ padding: '10px 12px', verticalAlign: 'top' }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#111827' }}>{pipeline.name}</div>
-                          <div style={{ fontSize: 10.5, color: '#6b7280', marginTop: 3 }}>{pipeline.pipeline_id != null ? `Pipeline ${pipeline.pipeline_id}` : 'Draft workflow session'}</div>
+                        <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{pipeline.name}</div>
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{pipeline.pipeline_id != null ? `Pipeline ${pipeline.pipeline_id}` : 'Draft workflow session'}</div>
                         </td>
-                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                           <span
                             style={{
                               display: 'inline-block',
-                              padding: '3px 8px',
-                              border: `1px solid ${pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.border}`,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              border: `1px solid ${pipelineFamilyKey(pipeline) === 'mule' ? '#fdba74' : tone.border}`,
                               color: pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.text,
-                              background: '#fff',
-                              fontSize: 10.5,
-                              fontWeight: 700,
+                              background: pipelineFamilyKey(pipeline) === 'mule' ? '#fff7ed' : '#f8fafc',
+                              fontSize: 11,
+                              fontWeight: 600,
                             }}
                           >
                             {pipelineFamilyShort(pipeline)}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{pipelineRunRef(pipeline) || pipeline.run_id || '-'}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{pipeline.created_by_label || pipeline.created_by_persona || '-'}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{ownerLabel(pipeline)}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{formatDateTime(pipeline.created_at)}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{formatDateTime(pipeline.last_active_at || pipeline.updated_at)}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827' }}>{pipeline.workspace_step_label || pipeline.current_step_label || '-'}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{progressNumber(pipeline)}%</td>
-                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#334155', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>{pipelineRunRef(pipeline) || pipeline.run_id || '-'}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#334155', whiteSpace: 'nowrap' }}>{pipeline.created_by_label || pipeline.created_by_persona || '-'}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#334155', whiteSpace: 'nowrap' }}>{ownerLabel(pipeline)}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>{formatDateTime(pipeline.created_at)}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>{formatDateTime(pipeline.last_active_at || pipeline.updated_at)}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#0f172a', fontWeight: 500 }}>{pipeline.workspace_step_label || pipeline.current_step_label || '-'}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#0f172a', fontWeight: 600, whiteSpace: 'nowrap' }}>{progressNumber(pipeline)}%</td>
+                        <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                           <span
                             style={{
                               display: 'inline-block',
-                              padding: '3px 8px',
-                              border: `1px solid ${st.color}`,
+                              padding: '3px 10px',
+                              borderRadius: '9999px',
+                              border: `1px solid ${st.color}40`,
                               color: st.color,
-                              fontSize: 10.5,
-                              fontWeight: 700,
-                              background: '#ffffff',
+                              fontSize: 11,
+                              fontWeight: 600,
+                              background: st.bg,
                             }}
                           >
                             {st.label}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827' }}>{lastCompletedStepLabel(pipeline)}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827' }}>{nextPendingStepLabel(pipeline)}</td>
-                        <td style={{ padding: '10px 12px', fontSize: 11.5, color: '#111827', whiteSpace: 'nowrap' }}>{activeEnvironmentName || '-'}</td>
-                        <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                          <Stack direction="row" spacing={0.6}>
-                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleViewPipeline(pipeline); }} sx={{ minWidth: 0, px: 0.5, textTransform: 'none' }}>View</Button>
-                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleResume(pipeline); }} sx={{ minWidth: 0, px: 0.5, textTransform: 'none' }}>Resume</Button>
-                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); openRenameDialog(pipeline); }} sx={{ minWidth: 0, px: 0.5, textTransform: 'none' }}>Rename</Button>
-                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleClonePipeline(pipeline); }} sx={{ minWidth: 0, px: 0.5, textTransform: 'none' }}>Clone</Button>
-                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleArchivePipeline(pipeline); }} sx={{ minWidth: 0, px: 0.5, textTransform: 'none' }}>Archive</Button>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#64748b' }}>{lastCompletedStepLabel(pipeline)}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#64748b' }}>{nextPendingStepLabel(pipeline)}</td>
+                        <td style={{ padding: '12px 14px', fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>{activeEnvironmentName || '-'}</td>
+                        <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                          <Stack direction="row" spacing={0.5}>
+                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleViewPipeline(pipeline); }} sx={{ minWidth: 0, px: 1, textTransform: 'none', borderRadius: '4px', fontSize: 11.5 }}>View</Button>
+                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleResume(pipeline); }} sx={{ minWidth: 0, px: 1, textTransform: 'none', color: tone.orange, fontWeight: 600, borderRadius: '4px', fontSize: 11.5 }}>Resume</Button>
+                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); openRenameDialog(pipeline); }} sx={{ minWidth: 0, px: 1, textTransform: 'none', borderRadius: '4px', fontSize: 11.5 }}>Rename</Button>
+                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleClonePipeline(pipeline); }} sx={{ minWidth: 0, px: 1, textTransform: 'none', borderRadius: '4px', fontSize: 11.5 }}>Clone</Button>
+                            <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); handleArchivePipeline(pipeline); }} sx={{ minWidth: 0, px: 1, textTransform: 'none', borderRadius: '4px', fontSize: 11.5 }}>Archive</Button>
                           </Stack>
                         </td>
                       </tr>
@@ -1364,7 +1338,7 @@ const WorkbenchPipelinesScreen = ({
                   })}
                   {!filteredPipelines.length && (
                     <tr>
-                      <td colSpan={13} style={{ padding: '14px 12px', fontSize: 12, color: '#6b7280' }}>
+                      <td colSpan={14} style={{ padding: '24px 14px', fontSize: 13, color: '#94a3b8', textAlign: 'center' }}>
                         No pipeline runs match the current filters.
                       </td>
                     </tr>
@@ -1377,40 +1351,40 @@ const WorkbenchPipelinesScreen = ({
       </Paper>
 
       <Box sx={{ display: 'flex', gap: 2, flex: 1, minHeight: 0 }}>
+        {/* Run Details Drawer */}
         <Paper
           variant="outlined"
-            sx={{
-              width: { xs: '100%', xl: 320 },
-              minWidth: { xs: 0, xl: 320 },
-              borderColor: tone.border,
-              borderRadius: 0,
-              display: 'flex',
+          sx={{
+            width: { xs: '100%', xl: 320 },
+            minWidth: { xs: 0, xl: 320 },
+            borderColor: tone.border,
+            borderRadius: 2,
+            display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            bgcolor: '#ffffff',
+            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)',
           }}
         >
-          <Box sx={{ px: 1.75, py: 1.4, borderBottom: `1px solid ${tone.border}`, bgcolor: tone.bg }}>
-            <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text }}>
+          <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid #fed7aa', bgcolor: '#fff7ed', display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tone.orange }} />
+            <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#c2410c', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Run Details Drawer
-            </Typography>
-            <Typography sx={{ fontSize: 11, color: tone.muted, mt: 0.4 }}>
-              Review the selected run metadata, last checkpoint, and resume point before reopening the pipeline.
             </Typography>
           </Box>
 
           <Box sx={{ flex: 1, overflowY: 'auto', px: 1.5, py: 1.5 }}>
             {pipelines.length === 0 ? (
-              <Alert severity="info" sx={{ py: 0.5 }}>
+              <Alert severity="info" sx={{ py: 0.5, borderRadius: '6px' }}>
                 Select or create a run to view pipeline details.
               </Alert>
             ) : (
-              <Stack spacing={0.8}>
+              <Stack spacing={1}>
                 {pipelines.map((pipeline) => {
                   if (!filteredPipelines.some((row) => runKey(row) === runKey(pipeline))) return null;
                   const isSelected = runKey(pipeline) === String(selectedPipelineId);
                   const savedState = deriveFccSavedRunState(pipeline);
                   const st = statusTone(savedState?.runStatus || pipeline.run_status || pipeline.workflow_status || pipeline.status);
-                  const staleCount = savedState?.staleCount ?? (Array.isArray(pipeline.stale_steps) ? pipeline.stale_steps.length : 0);
                   const stepsDisplay = savedState
                     ? `${savedState.doneCount}/${savedState.totalCount}`
                     : (pipeline.steps_completed_display || `${pipeline.completed_steps || 0}/${pipeline.total_steps || 0}`);
@@ -1419,48 +1393,36 @@ const WorkbenchPipelinesScreen = ({
                       key={pipeline.manager_key || pipeline.pipeline_id || pipeline.workflow_session_id || pipeline.run_ref || pipeline.name}
                       onClick={() => handleSelect(pipeline)}
                       sx={{
-                        p: 1.1,
-                        borderRadius: 0,
-                        border: `1px solid ${isSelected ? tone.orange : staleCount ? T.warningBorder : tone.border}`,
-                        bgcolor: '#ffffff',
+                        p: 1.5,
+                        borderRadius: '8px',
+                        border: `1px solid ${isSelected ? tone.orange : '#e2e8f0'}`,
+                        borderLeft: isSelected ? `5px solid ${tone.orange}` : '1px solid #e2e8f0',
+                        bgcolor: isSelected ? '#fff7ed' : '#ffffff',
                         cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        position: 'relative',
+                        '&:hover': {
+                          bgcolor: isSelected ? '#fff7ed' : '#f8fafc',
+                          borderColor: isSelected ? tone.orange : '#cbd5e1',
+                        },
                       }}
                     >
-                      <Stack direction="row" justifyContent="space-between" spacing={1} alignItems="center">
-                        <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
-                          <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text }}>
-                            {pipeline.name}
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={pipelineFamilyShort(pipeline)}
-                            sx={{
-                              fontSize: 10,
-                              bgcolor: '#ffffff',
-                              color: pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.text,
-                              fontWeight: 700,
-                              border: `1px solid ${pipelineFamilyKey(pipeline) === 'mule' ? tone.orange : tone.border}`,
-                              borderRadius: 0,
-                            }}
-                          />
-                        </Stack>
-                        <Chip
-                          size="small"
-                          label={st.label}
-                          sx={{ fontSize: 10, bgcolor: st.bg, color: st.color, fontWeight: 700, border: `1px solid ${st.color}`, borderRadius: 0 }}
-                        />
-                      </Stack>
-                      <Typography sx={{ mt: 0.35, fontSize: 10.5, color: tone.muted }}>
-                        {pipelineRunRef(pipeline)} - {stepsDisplay} steps
-                      </Typography>
-                      <Typography sx={{ mt: 0.15, fontSize: 10.5, color: tone.muted }}>
-                        {pipelineWorkspaceLabel(pipeline)} - {pipeline.workspace_step_label || pipeline.current_step_label || 'Load Data'}
-                      </Typography>
-                      {staleCount > 0 && (
-                        <Typography sx={{ mt: 0.45, fontSize: 10.25, color: tone.warn, fontWeight: 600 }}>
-                          {staleCount} saved stage{staleCount === 1 ? '' : 's'} need rerun
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography sx={{ fontSize: 13.5, fontWeight: isSelected ? 800 : 700, color: isSelected ? '#c2410c' : tone.text }}>
+                          {pipeline.name}
                         </Typography>
-                      )}
+                        {isSelected && (
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <Typography sx={{ fontSize: 11, fontWeight: 700, color: tone.orange }}>
+                              Selected
+                            </Typography>
+                            <ArrowForward sx={{ fontSize: 14, color: tone.orange }} />
+                          </Stack>
+                        )}
+                      </Stack>
+                      <Typography sx={{ mt: 0.5, fontSize: 11.5, color: '#64748b' }}>
+                        {pipelineFamilyShort(pipeline)} · {st.label} · {stepsDisplay} steps
+                      </Typography>
                     </Box>
                   );
                 })}
@@ -1470,469 +1432,412 @@ const WorkbenchPipelinesScreen = ({
         </Paper>
 
         <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto' }}>
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
-            <Box>
-              <Typography sx={{ fontSize: 16, fontWeight: 700, color: tone.text }}>
-                {selected?.name || activePipelineName || 'No run selected'}
-              </Typography>
-              <Typography sx={{ mt: 0.45, fontSize: 12, color: tone.muted }}>
-                {persona === 'business'
-                  ? 'Review the outcome of this run, resume where it stopped, or finish pending stages.'
-                  : 'Inspect saved step artefacts, exact run progress, stage order, and scheduler.'}
-              </Typography>
-              {selected && (
-                <Typography sx={{ mt: 0.45, fontSize: 11, color: tone.muted }}>
-                  {pipelineRunRef(selected)}
-                  {selected.current_step_label ? ` - ${selected.current_step_label}` : ''}
-                  {selected.current_substep_label ? ` > ${selected.current_substep_label}` : ''}
-                  {savedPipelineState
-                    ? ` - ${Math.round((savedPipelineState.doneCount / Math.max(savedPipelineState.totalCount, 1)) * 100)}% complete`
-                    : (selected.completion_pct != null ? ` - ${selected.completion_pct}% complete` : '')}
+          {/* Main Action Bar */}
+          <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, borderColor: tone.border, bgcolor: '#ffffff', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} flexWrap="wrap">
+              <Stack direction="row" spacing={1.5} alignItems="center">
+                <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: selected ? tone.orange : '#94a3b8' }} />
+                <Typography sx={{ fontSize: 17, fontWeight: 800, color: tone.text, letterSpacing: '-0.01em' }}>
+                  {selected?.name || activePipelineName || 'No run selected'}
                 </Typography>
-              )}
-            </Box>
-            {selected && (
-              <Stack direction="row" spacing={0.8}>
-                <Chip
-                  size="small"
-                  label={pipelineFamilyShort(selected)}
-                  sx={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    bgcolor: '#ffffff',
-                    color: pipelineFamilyKey(selected) === 'mule' ? tone.orange : tone.text,
-                    border: `1px solid ${pipelineFamilyKey(selected) === 'mule' ? tone.orange : tone.border}`,
-                    borderRadius: 0,
-                  }}
-                />
-                <Chip
-                  size="small"
-                  label={currentStatus.label}
-                  sx={{ fontSize: 11, fontWeight: 700, bgcolor: currentStatus.bg, color: currentStatus.color, border: `1px solid ${currentStatus.color}`, borderRadius: 0 }}
-                />
-              </Stack>
-            )}
-          </Stack>
-
-          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<Restore sx={{ fontSize: 14 }} />}
-              onClick={handleResume}
-              disabled={!selected}
-              sx={{ textTransform: 'none', bgcolor: tone.orange, '&:hover': { bgcolor: '#b83d00' }, borderRadius: 0 }}
-            >
-              Resume Run
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={handleFinishPipeline}
-              disabled={!selected}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              {firstIncompleteStage ? 'Finish Pending Stages' : 'Run / Schedule'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<PlayArrow sx={{ fontSize: 14 }} />}
-              onClick={handleRun}
-              disabled={!selected || running}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              {running ? 'Running...' : 'Re-Run DAG'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<DriveFileRenameOutline sx={{ fontSize: 14 }} />}
-              onClick={() => openRenameDialog()}
-              disabled={!selected}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              Rename Run
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<ContentCopy sx={{ fontSize: 14 }} />}
-              onClick={() => handleClonePipeline()}
-              disabled={!selected || cloningPipeline}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              {cloningPipeline ? 'Cloning...' : 'Clone Run'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<ArchiveOutlined sx={{ fontSize: 14 }} />}
-              onClick={() => handleArchivePipeline()}
-              disabled={!selected || archivingPipeline}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              {archivingPipeline ? 'Archiving...' : 'Archive'}
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<VisibilityOutlined sx={{ fontSize: 14 }} />}
-              onClick={() => handleViewPipeline()}
-              disabled={!selected}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              Open Read Only
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<DeleteForever sx={{ fontSize: 14 }} />}
-              onClick={openDeleteDialog}
-              disabled={!selected || deletingPipeline || running}
-              sx={{
-                textTransform: 'none',
-                color: tone.bad,
-                borderColor: T.errorBorder,
-                '&:hover': { borderColor: tone.bad, bgcolor: tone.badBg },
-                borderRadius: 0,
-              }}
-            >
-              {deletingPipeline ? 'Deleting...' : 'Delete Pipeline'}
-            </Button>
-          </Stack>
-          {latestChange?.message && (
-            <Alert severity="warning" sx={{ mt: 1.5, borderRadius: 0 }}>
-              <Typography sx={{ fontSize: 11.5, color: tone.text, fontWeight: 600 }}>
-                Change impact
-              </Typography>
-              <Typography sx={{ fontSize: 11.5, color: tone.text, mt: 0.4 }}>
-              {latestChange.message}
-              </Typography>
-              {impactedStepLabels.length > 0 && (
-                <Stack direction="row" spacing={0.6} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-                  {impactedStepLabels.map((label) => (
-                    <Chip
-                      key={label}
-                      size="small"
-                      label={label}
-                      sx={{ fontSize: 10, bgcolor: '#fff', color: tone.warn, fontWeight: 700, border: `1px solid ${tone.warn}`, borderRadius: 0 }}
-                    />
-                  ))}
-                </Stack>
-              )}
-            </Alert>
-          )}
-          {manifestInconsistencies.length > 0 && (
-            <Alert severity="error" sx={{ mt: 1.5, borderRadius: 0 }}>
-              <Typography sx={{ fontSize: 11.5, color: tone.text, fontWeight: 600 }}>
-                Run consistency issue
-              </Typography>
-              <Typography sx={{ fontSize: 11.5, color: tone.text, mt: 0.4 }}>
-                {manifestInconsistencies[0]?.reason || 'This run has contradictory checkpoint state and should be repaired before resume.'}
-              </Typography>
-            </Alert>
-          )}
-        </Paper>
-
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1 }}>
-            Run Trace & Resume Context
-          </Typography>
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, gap: 1, mb: 1.5 }}>
-            {[
-              ['Created by', selected ? ownerLabel(selected) : '-'],
-              ['Last completed step', selected ? lastCompletedStepLabel(savedPipelineState?.complete ? { ...selected, run_status: 'completed' } : selected) : '-'],
-              ['Next pending step', selected ? (savedPipelineState?.complete ? '-' : nextPendingStepLabel(selected)) : '-'],
-              ['Resume ready', selected ? (isArchived(selected) ? 'No - archived' : savedPipelineState?.complete ? 'Yes' : workflowManifest?.resume_ready === false ? 'No - inconsistent' : 'Yes') : '-'],
-            ].map(([label, value]) => (
-              <Box key={label} sx={{ border: `1px solid ${tone.border}`, bgcolor: '#ffffff', px: 1.1, py: 0.95 }}>
-                <Typography sx={{ fontSize: 10.25, color: tone.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.55 }}>
-                  {label}
-                </Typography>
-                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text, mt: 0.3 }}>
-                  {value}
-                </Typography>
-              </Box>
-            ))}
-          </Box>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1.1 }}>
-            DAG View (Saved Steps)
-          </Typography>
-          {loadingDetail && (
-            <Typography sx={{ fontSize: 11.5, color: tone.muted }}>
-              Loading pipeline details...
-            </Typography>
-          )}
-          {!loadingDetail && (
-            <Box sx={{ overflowX: 'auto', pb: 0.5 }}>
-              <Stack direction="row" spacing={1.2} alignItems="center" sx={{ minWidth: { xs: 860, lg: 1120 } }}>
-                {stageOrder.map((key, idx) => {
-                  const stage = stageCatalog[key];
-                  if (!stage) return null;
-                  const visualState = stageVisualStates[key] || 'pending';
-                  const done = visualState === 'done';
-                  const stale = visualState === 'stale';
-                  const blocked = visualState === 'blocked';
-                  const failed = visualState === 'failed';
-                  const running = visualState === 'in_progress';
-                  const manifestStep = getManifestStepState(effectivePipeline || {}, stage.stepId);
-                  const stepMessage = manifestStep?.invalidated_reason || manifestInconsistencies[0]?.reason || '';
-                  return (
-                    <React.Fragment key={key}>
-                      <Paper
-                        variant="outlined"
-                          sx={{
-                            width: { xs: 188, lg: 220 },
-                            p: 1.2,
-                            borderRadius: 0,
-                          borderColor: failed ? tone.bad : stale ? T.warningBorder : done ? T.successBorder : blocked ? tone.warn : tone.border,
-                          bgcolor: '#ffffff',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.4 }}>
-                          <Typography sx={{ fontSize: 12, fontWeight: 700, color: tone.text }}>
-                            {stage.label}
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={failed ? 'Failed' : stale ? 'Needs rerun' : done ? 'Done' : blocked ? 'Blocked' : running ? 'In progress' : 'Pending'}
-                            sx={{
-                              height: 16,
-                              fontSize: 9,
-                              fontWeight: 700,
-                              bgcolor: '#fff',
-                              color: failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.muted,
-                              border: `1px solid ${failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.border}`,
-                              borderRadius: 0,
-                            }}
-                          />
-                        </Stack>
-                        <Typography sx={{ fontSize: 10.5, color: tone.muted, minHeight: 32 }}>
-                          {stageDetails[key]?.summary || 'No saved details yet'}
-                        </Typography>
-                        {(stale || blocked || failed) && (
-                          <Typography sx={{ mt: 0.45, fontSize: 10.25, color: failed ? tone.bad : tone.warn, minHeight: 28 }}>
-                            {stepMessage || (stale
-                              ? 'Outdated after an upstream change. Open this step and rerun it.'
-                              : blocked
-                                ? 'Blocked until required upstream steps are completed.'
-                                : 'This step failed and needs attention before the run can continue.')}
-                          </Typography>
-                        )}
-                        <Button
-                          size="small"
-                          variant="text"
-                          onClick={() => onOpenStep?.(stage.stepId, selected || effectivePipeline || null)}
-                          sx={{ mt: 0.5, px: 0, minWidth: 0, textTransform: 'none', fontSize: 10.5 }}
-                        >
-                          Open Step
-                        </Button>
-                      </Paper>
-                      {idx < stageOrder.length - 1 && (
-                        <Typography sx={{ color: tone.muted, fontSize: 16, fontWeight: 700 }}>-&gt;</Typography>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </Stack>
-            </Box>
-          )}
-        </Paper>
-
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text }}>
-              Run Order (Drag to Reorder)
-            </Typography>
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<Save sx={{ fontSize: 14 }} />}
-              onClick={saveStageOrder}
-              disabled={!selected || !orderDirty || savingOrder}
-              sx={{ textTransform: 'none', borderRadius: 0 }}
-            >
-              {savingOrder ? 'Saving...' : 'Save Order'}
-            </Button>
-          </Stack>
-          <Stack spacing={0.6}>
-            {stageOrder.map((key) => {
-              const stage = stageCatalog[key];
-              if (!stage) return null;
-              const visualState = stageVisualStates[key] || 'pending';
-              const done = visualState === 'done';
-              const stale = visualState === 'stale';
-              const blocked = visualState === 'blocked';
-              const failed = visualState === 'failed';
-              const running = visualState === 'in_progress';
-              return (
-                <Box
-                  key={`order_${key}`}
-                  draggable
-                  onDragStart={() => handleDragStart(key)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleDrop(key)}
-                  sx={{
-                    px: 1.1,
-                    py: 0.8,
-                    borderRadius: 0,
-                    border: `1px solid ${dragStageKey === key ? tone.orange : tone.border}`,
-                    bgcolor: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    cursor: 'grab',
-                  }}
-                >
-                    <DragIndicator sx={{ fontSize: 16, color: tone.muted }} />
-                  <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: tone.text, flex: 1 }}>
-                    {stage.label}
+                {selected && (
+                  <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600, bgcolor: '#f8fafc', px: 1, py: 0.3, borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                    Active Configuration
                   </Typography>
-                  <Chip
-                    size="small"
-                    label={failed ? 'Failed' : stale ? 'Needs rerun' : done ? 'Completed' : blocked ? 'Blocked' : running ? 'In progress' : 'Pending'}
-                    sx={{
-                      height: 18,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      bgcolor: '#ffffff',
-                      color: failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.muted,
-                      border: `1px solid ${failed ? tone.bad : stale ? tone.warn : done ? tone.good : blocked ? tone.warn : running ? tone.orange : tone.border}`,
-                      borderRadius: 0,
-                    }}
-                  />
-                </Box>
-              );
-            })}
-          </Stack>
-        </Paper>
+                )}
+              </Stack>
 
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1 }}>
-            Scheduler (Airflow Style)
-          </Typography>
-          <Stack spacing={1.1}>
-            <FormControlLabel
-              control={(
-                <Switch
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Button
                   size="small"
-                  checked={scheduleDraft.enabled}
-                  onChange={(e) => setScheduleDraft((prev) => ({ ...prev, enabled: e.target.checked }))}
-                />
-              )}
-              label="Enable schedule"
-            />
-
-            <Stack direction="row" spacing={1}>
-              <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel>Frequency</InputLabel>
-                <Select
-                  value={scheduleDraft.frequency}
-                  label="Frequency"
-                  onChange={(e) => setScheduleDraft((prev) => ({ ...prev, frequency: String(e.target.value) }))}
+                  variant="contained"
+                  startIcon={<Restore sx={{ fontSize: 16 }} />}
+                  onClick={handleResume}
+                  disabled={!selected}
+                  sx={{
+                    textTransform: 'none',
+                    bgcolor: tone.orange,
+                    '&:hover': { bgcolor: '#b83d00' },
+                    borderRadius: '6px',
+                    fontWeight: 700,
+                    px: 2.5,
+                    py: 0.8,
+                    fontSize: 13,
+                    boxShadow: '0 2px 4px rgba(234, 88, 12, 0.25)',
+                  }}
                 >
-                  <MenuItem value="daily">Daily</MenuItem>
-                  <MenuItem value="weekly">Weekly</MenuItem>
-                  <MenuItem value="cron">Cron</MenuItem>
-                </Select>
-              </FormControl>
-
-              {scheduleDraft.frequency !== 'cron' && (
-                <TextField
+                  Resume Run
+                </Button>
+                <Button
                   size="small"
-                  type="time"
-                  label="Time"
-                  value={scheduleDraft.time}
-                  onChange={(e) => setScheduleDraft((prev) => ({ ...prev, time: e.target.value }))}
-                  InputLabelProps={{ shrink: true }}
-                />
-              )}
-
-              {scheduleDraft.frequency === 'weekly' && (
-                <FormControl size="small" sx={{ minWidth: 140 }}>
-                  <InputLabel>Day</InputLabel>
-                  <Select
-                    value={scheduleDraft.day}
-                    label="Day"
-                    onChange={(e) => setScheduleDraft((prev) => ({ ...prev, day: String(e.target.value) }))}
-                  >
-                    <MenuItem value="monday">Monday</MenuItem>
-                    <MenuItem value="tuesday">Tuesday</MenuItem>
-                    <MenuItem value="wednesday">Wednesday</MenuItem>
-                    <MenuItem value="thursday">Thursday</MenuItem>
-                    <MenuItem value="friday">Friday</MenuItem>
-                    <MenuItem value="saturday">Saturday</MenuItem>
-                    <MenuItem value="sunday">Sunday</MenuItem>
-                  </Select>
-                </FormControl>
-              )}
+                  variant="outlined"
+                  startIcon={<AccountTree sx={{ fontSize: 15 }} />}
+                  endIcon={dagExpanded ? <ExpandLess sx={{ fontSize: 16 }} /> : <ExpandMore sx={{ fontSize: 16 }} />}
+                  onClick={() => setDagExpanded(!dagExpanded)}
+                  disabled={!selected}
+                  sx={{
+                    textTransform: 'none',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    borderColor: dagExpanded ? tone.orange : tone.border,
+                    color: dagExpanded ? tone.orange : tone.text,
+                    bgcolor: dagExpanded ? '#fff7ed' : '#ffffff',
+                  }}
+                >
+                  {dagExpanded ? 'Hide DAG & Workflow' : 'Show DAG & Execution Workflow'}
+                </Button>
+              </Stack>
             </Stack>
 
-            {scheduleDraft.frequency === 'cron' && (
-              <TextField
+            <Divider sx={{ my: 2, borderColor: '#f1f5f9' }} />
+
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+              <Typography sx={{ fontSize: 11.5, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, mr: 0.5 }}>
+                Run Options:
+              </Typography>
+              <Button
                 size="small"
-                label="Cron expression"
-                value={scheduleDraft.cron}
-                onChange={(e) => setScheduleDraft((prev) => ({ ...prev, cron: e.target.value }))}
-                placeholder="0 9 * * 1-5"
-              />
-            )}
+                variant="outlined"
+                startIcon={<DriveFileRenameOutline sx={{ fontSize: 14 }} />}
+                onClick={() => openRenameDialog()}
+                disabled={!selected}
+                sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text, fontSize: 12 }}
+              >
+                Rename
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ContentCopy sx={{ fontSize: 14 }} />}
+                onClick={() => handleClonePipeline()}
+                disabled={!selected || cloningPipeline}
+                sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text, fontSize: 12 }}
+              >
+                {cloningPipeline ? 'Cloning...' : 'Clone'}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ArchiveOutlined sx={{ fontSize: 14 }} />}
+                onClick={() => handleArchivePipeline()}
+                disabled={!selected || archivingPipeline}
+                sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text, fontSize: 12 }}
+              >
+                {archivingPipeline ? 'Archiving...' : 'Archive'}
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<VisibilityOutlined sx={{ fontSize: 14 }} />}
+                onClick={() => handleViewPipeline()}
+                disabled={!selected}
+                sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text, fontSize: 12 }}
+              >
+                View
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DeleteForever sx={{ fontSize: 14 }} />}
+                onClick={openDeleteDialog}
+                disabled={!selected || deletingPipeline || running}
+                sx={{
+                  textTransform: 'none',
+                  color: tone.bad,
+                  borderColor: '#fecaca',
+                  '&:hover': { borderColor: tone.bad, bgcolor: '#fef2f2' },
+                  borderRadius: '6px',
+                  fontWeight: 500,
+                  fontSize: 12,
+                }}
+              >
+                {deletingPipeline ? 'Deleting...' : 'Delete'}
+              </Button>
+            </Stack>
 
-            <FormControlLabel
-              control={(
-                <Switch
-                  size="small"
-                  checked={scheduleDraft.trigger_on_upload}
-                  onChange={(e) => setScheduleDraft((prev) => ({ ...prev, trigger_on_upload: e.target.checked }))}
-                />
-              )}
-              label="Trigger when new data is uploaded"
-            />
-
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<Save sx={{ fontSize: 14 }} />}
-              onClick={saveSchedule}
-              disabled={!selected || savingSchedule}
-              sx={{ alignSelf: 'flex-start', textTransform: 'none', borderRadius: 0 }}
-            >
-              {savingSchedule ? 'Saving...' : 'Save Scheduler'}
-            </Button>
-          </Stack>
-        </Paper>
-
-        {runState && (
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 0, borderColor: tone.border }}>
-            <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 0.6 }}>
-              Last Run Status
-            </Typography>
-            <Typography sx={{ fontSize: 11.5, color: tone.muted }}>
-              Run ID: {runState.run_id || '-'} · Status: {String(runState.status || '-').toUpperCase()}
-            </Typography>
-            {runState.error && (
-              <Alert severity="error" sx={{ mt: 1 }}>
-                {runState.error}
+            {manifestInconsistencies.length > 0 && (
+              <Alert severity="error" sx={{ mt: 2, borderRadius: '6px' }}>
+                <Typography sx={{ fontSize: 12, color: tone.text, fontWeight: 600 }}>
+                  Run consistency issue
+                </Typography>
+                <Typography sx={{ fontSize: 12, color: tone.text, mt: 0.3 }}>
+                  {manifestInconsistencies[0]?.reason || 'This run has contradictory checkpoint state and should be repaired before resume.'}
+                </Typography>
               </Alert>
             )}
-            {Array.isArray(runState.log) && runState.log.length > 0 && (
-              <Box sx={{ mt: 1, maxHeight: 200, overflowY: 'auto', p: 1.2, bgcolor: '#0f172a', borderRadius: 0 }}>
-                {runState.log.slice(-12).map((line, idx) => (
-                  <Typography key={`${idx}_${line}`} sx={{ fontFamily: 'monospace', fontSize: 10.5, color: '#cbd5e1' }}>
-                    {line}
-                  </Typography>
-                ))}
-              </Box>
-            )}
           </Paper>
-        )}
 
-        {message && <Alert severity="success" sx={{ borderRadius: 0 }}>{message}</Alert>}
-        {error && <Alert severity="error" sx={{ borderRadius: 0 }}>{error}</Alert>}
-      </Box>
+          {/* Expandable DAG & Execution Workflow section */}
+          <Collapse in={dagExpanded}>
+            <Stack spacing={2}>
+              {/* DAG View */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, borderColor: tone.border, bgcolor: '#ffffff', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1.5 }}>
+                  DAG View (Saved Steps)
+                </Typography>
+                {loadingDetail && (
+                  <Typography sx={{ fontSize: 12, color: tone.muted }}>
+                    Loading pipeline details...
+                  </Typography>
+                )}
+                {!loadingDetail && (
+                  <Box sx={{ overflowX: 'auto', pb: 1 }}>
+                    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: { xs: 860, lg: 1120 } }}>
+                      {stageOrder.map((key, idx) => {
+                        const stage = stageCatalog[key];
+                        if (!stage) return null;
+                        const visualState = stageVisualStates[key] || 'pending';
+                        const done = visualState === 'done';
+                        const stale = visualState === 'stale';
+                        const blocked = visualState === 'blocked';
+                        const failed = visualState === 'failed';
+                        const running = visualState === 'in_progress';
+                        return (
+                          <React.Fragment key={key}>
+                            <Paper
+                              variant="outlined"
+                              sx={{
+                                width: { xs: 180, lg: 200 },
+                                p: 1.5,
+                                borderRadius: '8px',
+                                borderColor: failed ? '#fca5a5' : stale ? '#fde68a' : done ? '#bbf7d0' : tone.border,
+                                bgcolor: done ? '#f0fdf4' : stale ? '#fffbeb' : '#ffffff',
+                                flexShrink: 0,
+                                boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03)',
+                              }}
+                            >
+                              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
+                                <Typography sx={{ fontSize: 12.5, fontWeight: 700, color: tone.text }}>
+                                  {stage.label}
+                                </Typography>
+                                <Typography sx={{
+                                  fontSize: 10,
+                                  fontWeight: 600,
+                                  color: failed ? tone.bad : stale ? tone.warn : done ? tone.good : tone.muted,
+                                }}>
+                                  {failed ? 'Failed' : stale ? 'Needs rerun' : done ? 'Done' : blocked ? 'Blocked' : running ? 'In progress' : 'Pending'}
+                                </Typography>
+                              </Stack>
+                              <Typography sx={{ fontSize: 11, color: tone.muted, minHeight: 28, lineHeight: 1.3 }}>
+                                {stageDetails[key]?.summary || 'No saved details yet'}
+                              </Typography>
+                              <Button
+                                size="small"
+                                variant="text"
+                                onClick={() => onOpenStep?.(stage.stepId, selected || effectivePipeline || null)}
+                                sx={{ mt: 0.75, px: 0, minWidth: 0, textTransform: 'none', fontSize: 11, fontWeight: 600, color: tone.orange }}
+                              >
+                                Open Step &rarr;
+                              </Button>
+                            </Paper>
+                            {idx < stageOrder.length - 1 && (
+                              <Typography sx={{ color: '#cbd5e1', fontSize: 16, fontWeight: 700 }}>&rarr;</Typography>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </Stack>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* Run Order */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, borderColor: tone.border, bgcolor: '#ffffff', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                  <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text }}>
+                    Run Order (Drag to Reorder)
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Save sx={{ fontSize: 14 }} />}
+                    onClick={saveStageOrder}
+                    disabled={!selected || !orderDirty || savingOrder}
+                    sx={{ textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text }}
+                  >
+                    {savingOrder ? 'Saving...' : 'Save Order'}
+                  </Button>
+                </Stack>
+                <Stack spacing={0.8}>
+                  {stageOrder.map((key) => {
+                    const stage = stageCatalog[key];
+                    if (!stage) return null;
+                    const visualState = stageVisualStates[key] || 'pending';
+                    const done = visualState === 'done';
+                    const stale = visualState === 'stale';
+                    const blocked = visualState === 'blocked';
+                    const failed = visualState === 'failed';
+                    const running = visualState === 'in_progress';
+                    return (
+                      <Box
+                        key={`order_${key}`}
+                        draggable
+                        onDragStart={() => handleDragStart(key)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => handleDrop(key)}
+                        sx={{
+                          px: 1.5,
+                          py: 1,
+                          borderRadius: '6px',
+                          border: `1px solid ${dragStageKey === key ? tone.orange : tone.border}`,
+                          bgcolor: dragStageKey === key ? '#fff7ed' : '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1.25,
+                          cursor: 'grab',
+                          transition: 'all 0.12s ease',
+                          '&:hover': {
+                            bgcolor: '#f8fafc',
+                          },
+                        }}
+                      >
+                        <DragIndicator sx={{ fontSize: 16, color: '#94a3b8' }} />
+                        <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: tone.text, flex: 1 }}>
+                          {stage.label}
+                        </Typography>
+                        <Typography sx={{
+                          fontSize: 10.5,
+                          fontWeight: 600,
+                          color: failed ? tone.bad : stale ? tone.warn : done ? tone.good : tone.muted,
+                        }}>
+                          {failed ? 'Failed' : stale ? 'Needs rerun' : done ? 'Completed' : blocked ? 'Blocked' : running ? 'In progress' : 'Pending'}
+                        </Typography>
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              </Paper>
+
+              {/* Scheduler */}
+              <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, borderColor: tone.border, bgcolor: '#ffffff', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}>
+                <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 1.5 }}>
+                  Scheduler (Automated Triggers)
+                </Typography>
+                <Stack spacing={1.5}>
+                  <FormControlLabel
+                    control={(
+                      <Switch
+                        size="small"
+                        checked={scheduleDraft.enabled}
+                        onChange={(e) => setScheduleDraft((prev) => ({ ...prev, enabled: e.target.checked }))}
+                      />
+                    )}
+                    label={<Typography sx={{ fontSize: 13, fontWeight: 500 }}>Enable schedule</Typography>}
+                  />
+
+                  <Stack direction="row" spacing={1.5}>
+                    <FormControl size="small" sx={{ minWidth: 140 }}>
+                      <InputLabel>Frequency</InputLabel>
+                      <Select
+                        value={scheduleDraft.frequency}
+                        label="Frequency"
+                        onChange={(e) => setScheduleDraft((prev) => ({ ...prev, frequency: String(e.target.value) }))}
+                        sx={{ borderRadius: '6px' }}
+                      >
+                        <MenuItem value="daily">Daily</MenuItem>
+                        <MenuItem value="weekly">Weekly</MenuItem>
+                        <MenuItem value="cron">Cron</MenuItem>
+                      </Select>
+                    </FormControl>
+
+                    {scheduleDraft.frequency !== 'cron' && (
+                      <TextField
+                        size="small"
+                        type="time"
+                        label="Time"
+                        value={scheduleDraft.time}
+                        onChange={(e) => setScheduleDraft((prev) => ({ ...prev, time: e.target.value }))}
+                        InputLabelProps={{ shrink: true }}
+                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
+                      />
+                    )}
+
+                    {scheduleDraft.frequency === 'weekly' && (
+                      <FormControl size="small" sx={{ minWidth: 140 }}>
+                        <InputLabel>Day</InputLabel>
+                        <Select
+                          value={scheduleDraft.day}
+                          label="Day"
+                          onChange={(e) => setScheduleDraft((prev) => ({ ...prev, day: String(e.target.value) }))}
+                          sx={{ borderRadius: '6px' }}
+                        >
+                          <MenuItem value="monday">Monday</MenuItem>
+                          <MenuItem value="tuesday">Tuesday</MenuItem>
+                          <MenuItem value="wednesday">Wednesday</MenuItem>
+                          <MenuItem value="thursday">Thursday</MenuItem>
+                          <MenuItem value="friday">Friday</MenuItem>
+                          <MenuItem value="saturday">Saturday</MenuItem>
+                          <MenuItem value="sunday">Sunday</MenuItem>
+                        </Select>
+                      </FormControl>
+                    )}
+                  </Stack>
+
+                  {scheduleDraft.frequency === 'cron' && (
+                    <TextField
+                      size="small"
+                      label="Cron expression"
+                      value={scheduleDraft.cron}
+                      onChange={(e) => setScheduleDraft((prev) => ({ ...prev, cron: e.target.value }))}
+                      placeholder="0 9 * * 1-5"
+                      sx={{ '& .MuiOutlinedInput-root': { borderRadius: '6px' } }}
+                    />
+                  )}
+
+                  <FormControlLabel
+                    control={(
+                      <Switch
+                        size="small"
+                        checked={scheduleDraft.trigger_on_upload}
+                        onChange={(e) => setScheduleDraft((prev) => ({ ...prev, trigger_on_upload: e.target.checked }))}
+                      />
+                    )}
+                    label={<Typography sx={{ fontSize: 13, fontWeight: 500 }}>Trigger when new data is uploaded</Typography>}
+                  />
+
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<Save sx={{ fontSize: 14 }} />}
+                    onClick={saveSchedule}
+                    disabled={!selected || savingSchedule}
+                    sx={{ alignSelf: 'flex-start', textTransform: 'none', borderRadius: '6px', fontWeight: 500, borderColor: tone.border, color: tone.text }}
+                  >
+                    {savingSchedule ? 'Saving...' : 'Save Scheduler'}
+                  </Button>
+                </Stack>
+              </Paper>
+            </Stack>
+          </Collapse>
+
+          {runState && (
+            <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2, borderColor: tone.border, bgcolor: '#ffffff', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.04)' }}>
+              <Typography sx={{ fontSize: 13, fontWeight: 700, color: tone.text, mb: 0.6 }}>
+                Last Run Status
+              </Typography>
+              <Typography sx={{ fontSize: 12, color: tone.muted }}>
+                Run ID: {runState.run_id || '-'} · Status: {String(runState.status || '-').toUpperCase()}
+              </Typography>
+              {runState.error && (
+                <Alert severity="error" sx={{ mt: 1, borderRadius: '6px' }}>
+                  {runState.error}
+                </Alert>
+              )}
+              {Array.isArray(runState.log) && runState.log.length > 0 && (
+                <Box sx={{ mt: 1, maxHeight: 200, overflowY: 'auto', p: 1.5, bgcolor: '#0f172a', borderRadius: '6px' }}>
+                  {runState.log.slice(-12).map((line, idx) => (
+                    <Typography key={`${idx}_${line}`} sx={{ fontFamily: 'monospace', fontSize: 11, color: '#cbd5e1' }}>
+                      {line}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
+            </Paper>
+          )}
+
+          {message && <Alert severity="success" sx={{ borderRadius: '6px' }}>{message}</Alert>}
+          {error && <Alert severity="error" sx={{ borderRadius: '6px' }}>{error}</Alert>}
+        </Box>
       </Box>
       <Dialog
         open={renameDialog.open}

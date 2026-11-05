@@ -347,7 +347,7 @@ def _extract_risk_drivers(case_id: str, cursor, case_meta: Dict, patterns: Dict)
             severity=RiskLevel.HIGH if vol_30 > 150000 else RiskLevel.MEDIUM,
             value=vol_30,
             threshold=50000,
-            explanation=f"30-day volume of ${vol_30:,.2f} is significant",
+            explanation=f"30-day volume of {vol_30:,.2f} is significant",
             source="pattern_engine"
         ))
     elif vol_30 > 10000:
@@ -356,7 +356,7 @@ def _extract_risk_drivers(case_id: str, cursor, case_meta: Dict, patterns: Dict)
             severity=RiskLevel.LOW,
             value=vol_30,
             threshold=10000,
-            explanation=f"Active account with ${vol_30:,.2f} volume",
+            explanation=f"Active account with {vol_30:,.2f} volume",
             source="pattern_engine"
         ))
 

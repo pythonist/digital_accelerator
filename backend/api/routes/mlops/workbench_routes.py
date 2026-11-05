@@ -269,7 +269,7 @@ def _build_business_brief_payload(profile_rows, target_column: str, goal: str) -
 
 
 def _maybe_upgrade_brief_with_llm(brief_payload: dict) -> dict:
-    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    wrapper = getattr(services, "llm_provider", None)
     if not wrapper:
         return brief_payload
     try:
@@ -1636,6 +1636,381 @@ def mlops_master_preview():
         return jsonify({"success": True, "data": _json_safe(result)}), 200
     except ValueError as ve:
         return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/inspect", methods=["POST", "GET"])
+@mlops_workbench_bp.route("/preprocess/master-intelligence", methods=["POST", "GET"])
+def mlops_master_dataset_inspect():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        report = mlops_svc.inspect_master_dataset_intelligence(tenant_id, env_id, datasets)
+        return jsonify({"success": True, "data": _json_safe(report)}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/plan", methods=["POST", "GET"])
+@mlops_workbench_bp.route("/preprocess/master-plan", methods=["POST", "GET"])
+def mlops_master_dataset_plan():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        custom_overrides = body.get("overrides") or body.get("options") or {}
+        plan = mlops_svc.plan_master_dataset(tenant_id, env_id, datasets, custom_overrides)
+        return jsonify({"success": True, "data": _json_safe(plan)}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/preview", methods=["POST", "GET"])
+@mlops_workbench_bp.route("/preprocess/master-preview-v2", methods=["POST", "GET"])
+def mlops_master_dataset_preview():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        plan = body.get("plan")
+        result = mlops_svc.preview_master_dataset_plan(tenant_id, env_id, plan, datasets)
+        return jsonify({"success": True, "data": _json_safe(result)}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/validate", methods=["POST", "GET"])
+@mlops_workbench_bp.route("/preprocess/master-validate", methods=["POST", "GET"])
+def mlops_master_dataset_validate():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        plan = body.get("plan")
+        result = mlops_svc.validate_master_dataset_plan(tenant_id, env_id, plan, datasets)
+        return jsonify({"success": True, "data": _json_safe(result)}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/build", methods=["POST"])
+@mlops_workbench_bp.route("/preprocess/master-build-v2", methods=["POST"])
+def mlops_master_dataset_build_v2():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        plan = body.get("plan")
+        output_name = body.get("output_name") or "master_dataset"
+        version_tag = body.get("version_tag")
+        result = mlops_svc.build_master_dataset_from_plan(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            plan=plan,
+            datasets=datasets,
+            output_name=output_name,
+            version_tag=version_tag,
+        )
+        return jsonify({"success": True, "data": _json_safe(result)}), 200
+    except ValueError as ve:
+        return jsonify({"success": False, "error": str(ve), "error_code": "VALIDATION_ERROR"}), 400
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/analyze", methods=["POST", "GET"])
+def mlops_master_dataset_analyze():
+    return mlops_master_dataset_inspect()
+
+
+@mlops_workbench_bp.route("/master-dataset/relationships", methods=["POST", "GET"])
+def mlops_master_dataset_relationships():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        report = mlops_svc.inspect_master_dataset_intelligence(tenant_id, env_id, datasets)
+        return jsonify({
+            "success": True,
+            "data": {
+                "candidate_relationships": report.get("candidate_relationships", []),
+                "recommended_anchor": report.get("recommended_anchor"),
+                "leakage_risks": report.get("leakage_risks", []),
+            }
+        }), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/plan/sources", methods=["POST"])
+def mlops_master_dataset_plan_add_source():
+    try:
+        body = request.get_json(silent=True) or {}
+        plan = body.get("plan") or {}
+        new_source = body.get("source") or {}
+        if not new_source.get("table_name"):
+            return jsonify({"success": False, "error": "source.table_name is required", "error_code": "VALIDATION_ERROR"}), 400
+
+        sources = plan.get("sources", [])
+        # Append or update source
+        updated_sources = [s for s in sources if s.get("table_name") != new_source.get("table_name")]
+        updated_sources.append(new_source)
+        plan["sources"] = updated_sources
+        return jsonify({"success": True, "data": _json_safe(plan)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/plan/sources/<source_name>", methods=["DELETE"])
+def mlops_master_dataset_plan_remove_source(source_name: str):
+    try:
+        body = request.get_json(silent=True) or {}
+        plan = body.get("plan") or {}
+        sources = plan.get("sources", [])
+        norm_target = source_name.strip().lower()
+        plan["sources"] = [s for s in sources if s.get("table_name", "").lower() != norm_target]
+        # Clean associated relationships
+        plan["relationships"] = [
+            r for r in plan.get("relationships", [])
+            if r.get("left_source", "").lower() != norm_target and r.get("right_source", "").lower() != norm_target
+        ]
+        return jsonify({"success": True, "data": _json_safe(plan)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/plan/recommendations/apply", methods=["POST"])
+def mlops_master_dataset_apply_recommendations():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        dataset_ids = body.get("dataset_ids") or []
+        datasets    = [
+            mlops_svc.get_dataset(tenant_id, env_id, int(did))
+            for did in dataset_ids if did
+        ]
+        datasets = [d for d in datasets if d]
+        plan = mlops_svc.plan_master_dataset(tenant_id, env_id, datasets, body.get("overrides"))
+        return jsonify({"success": True, "data": _json_safe(plan)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/plan/aggregation", methods=["PUT", "POST"])
+def mlops_master_dataset_plan_configure_aggregation():
+    try:
+        body = request.get_json(silent=True) or {}
+        plan = body.get("plan") or {}
+        agg_config = body.get("transaction_aggregation") or body.get("aggregation") or {}
+        plan["transaction_aggregation"] = agg_config
+        return jsonify({"success": True, "data": _json_safe(plan)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions", methods=["GET"])
+def mlops_master_dataset_list_versions():
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        output_name = request.args.get("output_name")
+        versions = mlops_svc.list_master_dataset_versions(tenant_id, env_id, output_name)
+        return jsonify({"success": True, "data": _json_safe(versions)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions/<dataset_version_id>", methods=["GET"])
+def mlops_master_dataset_get_version(dataset_version_id: str):
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        version_meta = mlops_svc.get_master_dataset_version(tenant_id, env_id, dataset_version_id)
+        if not version_meta:
+            return jsonify({"success": False, "error": "Dataset version not found", "error_code": "NOT_FOUND"}), 404
+        return jsonify({"success": True, "data": _json_safe(version_meta)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions/<dataset_version_id>/rows", methods=["GET"])
+def mlops_master_dataset_get_version_rows(dataset_version_id: str):
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        limit = int(request.args.get("limit") or 100)
+        offset = int(request.args.get("offset") or 0)
+        rows_data = mlops_svc.get_master_dataset_version_rows(tenant_id, env_id, dataset_version_id, limit, offset)
+        return jsonify({"success": True, "data": _json_safe(rows_data)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions/<dataset_version_id>/schema", methods=["GET"])
+def mlops_master_dataset_get_version_schema(dataset_version_id: str):
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        schema_data = mlops_svc.get_master_dataset_version_schema(tenant_id, env_id, dataset_version_id)
+        if not schema_data:
+            return jsonify({"success": False, "error": "Dataset version not found", "error_code": "NOT_FOUND"}), 404
+        return jsonify({"success": True, "data": _json_safe(schema_data)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions/<dataset_version_id>/lineage", methods=["GET"])
+def mlops_master_dataset_get_version_lineage(dataset_version_id: str):
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        ver = mlops_svc.get_master_dataset_version(tenant_id, env_id, dataset_version_id)
+        if not ver:
+            return jsonify({"success": False, "error": "Dataset version not found", "error_code": "NOT_FOUND"}), 404
+        return jsonify({
+            "success": True,
+            "data": {
+                "dataset_version_id": ver.get("dataset_version_id"),
+                "version_tag": ver.get("version_tag"),
+                "sha256_checksum": ver.get("sha256_checksum"),
+                "lineage": ver.get("lineage"),
+                "source_dataset_versions": ver.get("source_dataset_versions"),
+                "execution_id": ver.get("execution_id"),
+                "created_at": ver.get("created_at"),
+            }
+        }), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions/<dataset_version_id>/validation", methods=["GET"])
+def mlops_master_dataset_get_version_validation(dataset_version_id: str):
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        ver = mlops_svc.get_master_dataset_version(tenant_id, env_id, dataset_version_id)
+        if not ver:
+            return jsonify({"success": False, "error": "Dataset version not found", "error_code": "NOT_FOUND"}), 404
+        return jsonify({
+            "success": True,
+            "data": {
+                "dataset_version_id": ver.get("dataset_version_id"),
+                "validation_results": ver.get("validation_results"),
+            }
+        }), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/versions/<dataset_version_id>/freshness", methods=["GET"])
+def mlops_master_dataset_get_version_freshness(dataset_version_id: str):
+    try:
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        freshness = mlops_svc.check_master_dataset_version_freshness(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_version_id=dataset_version_id,
+        )
+        return jsonify({"success": True, "data": _json_safe(freshness)}), 200
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
+
+
+@mlops_workbench_bp.route("/master-dataset/validate-downstream", methods=["POST"])
+def mlops_master_dataset_validate_downstream():
+    try:
+        body = request.get_json(silent=True) or {}
+        tenant_id, env_id = _get_env_ids()
+        env_root    = _resolve_env_path(env_id, tenant_id)
+        mlops_svc   = _get_mlops_service(env_root)
+        stage_name  = body.get("stage") or body.get("step") or "target"
+        version_id  = body.get("dataset_version_id") or body.get("master_dataset_version_id")
+        pipeline_id = body.get("pipeline_id")
+
+        check = mlops_svc.validate_downstream_can_execute(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            stage_name=stage_name,
+            dataset_version_id=version_id,
+            pipeline_id=int(pipeline_id) if pipeline_id else None,
+        )
+
+        if not check.get("can_execute"):
+            return jsonify({
+                "success": False,
+                "can_execute": False,
+                "error": check.get("message"),
+                "error_code": check.get("error_code", "STALE_MASTER_VERSION"),
+                "data": _json_safe(check),
+            }), 409
+
+        return jsonify({
+            "success": True,
+            "can_execute": True,
+            "data": _json_safe(check),
+        }), 200
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc), "error_code": "SERVER_ERROR"}), 500
 

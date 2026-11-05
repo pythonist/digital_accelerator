@@ -9,27 +9,21 @@ compare_bp = Blueprint('compare', __name__)
 
 
 def _get_llm_service():
-    try:
-        from llm.provider_factory import load_llm_provider
-
-        provider = load_llm_provider()
-        if provider is not None:
-            return provider
-    except Exception:
-        pass
-    for candidate in (
-        getattr(services, 'llm_provider', None),
-        getattr(services, '_gpt4all_wrapper', None),
-    ):
-        if not candidate:
-            continue
+    service = getattr(services, 'llm_provider', None)
+    if not service:
         try:
-            checker = getattr(candidate, 'check_connection', None)
-            if callable(checker) and not checker():
-                continue
-            return candidate
+            from llm.provider_factory import load_llm_provider
+            service = load_llm_provider()
         except Exception:
-            continue
+            return None
+    if service:
+        try:
+            checker = getattr(service, 'check_connection', None)
+            if callable(checker) and not checker():
+                return None
+            return service
+        except Exception:
+            return None
     return None
 
 

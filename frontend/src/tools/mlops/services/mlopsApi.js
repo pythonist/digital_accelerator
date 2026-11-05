@@ -153,6 +153,59 @@ const mlopsApi = {
     return apiClient.post('/api/mlops/business/brief', payload);
   },
 
+  // ── Master Dataset Domain APIs (Intent -> Recommend -> Plan -> Validate -> Preview -> Build) ──
+  analyzeMasterDatasets: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/analyze', payload);
+  },
+  getMasterDatasetRelationships: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/relationships', payload);
+  },
+  planMasterDataset: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/plan', payload);
+  },
+  addMasterDatasetSource: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/plan/sources', payload);
+  },
+  removeMasterDatasetSource: async (sourceName, payload = {}) => {
+    return apiClient.delete(`/api/mlops/master-dataset/plan/sources/${encodeURIComponent(String(sourceName))}`, payload);
+  },
+  applyMasterDatasetRecommendations: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/plan/recommendations/apply', payload);
+  },
+  configureMasterDatasetAggregation: async (payload = {}) => {
+    return apiClient.put('/api/mlops/master-dataset/plan/aggregation', payload);
+  },
+  previewMasterDatasetPlan: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/preview', payload);
+  },
+  validateMasterDatasetPlan: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/validate', payload);
+  },
+  buildMasterDatasetFromPlan: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/build', payload);
+  },
+  listMasterDatasetVersions: async (params = {}) => {
+    return apiClient.get('/api/mlops/master-dataset/versions', params);
+  },
+  getMasterDatasetVersion: async (versionId) => {
+    return apiClient.get(`/api/mlops/master-dataset/versions/${encodeURIComponent(String(versionId))}`);
+  },
+  getMasterDatasetVersionSchema: async (versionId) => {
+    return apiClient.get(`/api/mlops/master-dataset/versions/${encodeURIComponent(String(versionId))}/schema`);
+  },
+  getMasterDatasetVersionLineage: async (versionId) => {
+    return apiClient.get(`/api/mlops/master-dataset/versions/${encodeURIComponent(String(versionId))}/lineage`);
+  },
+  getMasterDatasetVersionRows: async (versionId, params = {}) => {
+    return apiClient.get(`/api/mlops/master-dataset/versions/${encodeURIComponent(String(versionId))}/rows`, params);
+  },
+  checkMasterDatasetVersionFreshness: async (versionId) => {
+    return apiClient.get(`/api/mlops/master-dataset/versions/${encodeURIComponent(String(versionId))}/freshness`);
+  },
+  validateDownstreamStage: async (payload = {}) => {
+    return apiClient.post('/api/mlops/master-dataset/validate-downstream', payload);
+  },
+
   // ── EDA Advanced ─────────────────────────────────────────────────────────────
   edaOverview: async (payload) => {
     return apiClient.post('/api/eda/overview', payload);

@@ -249,7 +249,7 @@ def _build_eda_ai_fallback(body: dict, dataset: dict) -> dict:
 
 
 def _maybe_upgrade_eda_ai_explanation(body: dict, dataset: dict, fallback: dict) -> dict:
-    wrapper = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+    wrapper = getattr(services, "llm_provider", None)
     if not wrapper:
         return fallback
     try:

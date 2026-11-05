@@ -45,6 +45,7 @@ const WorkbenchRouteShell = ({ datasets, masterDataset, routeGlobalView = '' }) 
 
   return (
     <MLOpsWorkbench
+      key={`${routeRunId || 'current'}:${routeStepId || 'data'}`}
       routeRunId={routeRunId}
       routeStepId={routeStepId}
       routeGlobalView={routeGlobalView}

@@ -579,14 +579,23 @@ class CasePackGenerator:
             except: pass
 
         # Flow Ratio
-        type_col = self._get_col_name(df, ['type', 'dr_cr', 'direction'])
+        type_col = self._get_col_name(df, ['type', 'dr_cr', 'direction', 'txn_type', 'flow_type'])
         credit = 0
         debit = 0
         if type_col:
-            credit = df[df[type_col].astype(str).str.lower().str.contains('cr|dep|in')][amt_col].sum()
-            debit = df[df[type_col].astype(str).str.lower().str.contains('dr|with|out')][amt_col].sum()
+            is_credit = df[type_col].astype(str).str.lower().str.contains('cr|dep|in|rec|recv')
+            is_debit = df[type_col].astype(str).str.lower().str.contains('dr|deb|wit|out|pay|send')
+            credit = df[is_credit][amt_col].sum()
+            debit = df[is_debit][amt_col].sum()
+            if credit == 0 and debit == 0 and (df[amt_col] < 0).any():
+                credit = df[df[amt_col] > 0][amt_col].sum()
+                debit = abs(df[df[amt_col] < 0][amt_col].sum())
         else:
-            debit = df[amt_col].sum() # Default
+            if (df[amt_col] < 0).any():
+                credit = df[df[amt_col] > 0][amt_col].sum()
+                debit = abs(df[df[amt_col] < 0][amt_col].sum())
+            else:
+                debit = df[amt_col].sum() # Default
 
         return {
             "total_volume": float(df[amt_col].sum()),

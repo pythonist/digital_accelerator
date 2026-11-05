@@ -290,9 +290,9 @@ KEY RISK DRIVERS:
 {chr(10).join(f"• {d.factor}: {d.explanation}" for d in case_facts.risk_drivers[:5])}
 
 TRANSACTION ACTIVITY (30 Days):
-- Total Volume: ${case_facts.patterns_30d.total_volume:,.2f}
+- Total Volume: {case_facts.patterns_30d.total_volume:,.2f}
 - Transaction Count: {case_facts.patterns_30d.total_count}
-- Average Amount: ${case_facts.patterns_30d.avg_amount:,.2f}
+- Average Amount: {case_facts.patterns_30d.avg_amount:,.2f}
 - Cash Ratio: {case_facts.patterns_30d.cash_ratio:.1%}
 
 NETWORK ANALYSIS:
@@ -309,11 +309,11 @@ INVESTIGATOR QUESTION: {question}
 
 Provide a clear, professional response based ONLY on these facts. Be concise and actionable."""
 
-        llm_service = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+        llm_service = getattr(services, "llm_provider", None)
         if not llm_service or not llm_service.check_connection():
             return jsonify({
                 "success": False,
-                "error": "LLM service not available. Configure GPT4All or another local provider first."
+                "error": "OpenAI service not available. Check OPENAI_API_KEY in .env."
             }), 500
         
         result = llm_service.generate(
@@ -387,9 +387,9 @@ KEY RISK DRIVERS:
 {chr(10).join(f"• {d.factor}: {d.explanation}" for d in case_facts.risk_drivers[:5])}
 
 TRANSACTION ACTIVITY (30 Days):
-- Total Volume: ${case_facts.patterns_30d.total_volume:,.2f}
+- Total Volume: {case_facts.patterns_30d.total_volume:,.2f}
 - Transaction Count: {case_facts.patterns_30d.total_count}
-- Average Amount: ${case_facts.patterns_30d.avg_amount:,.2f}
+- Average Amount: {case_facts.patterns_30d.avg_amount:,.2f}
 - Cash Ratio: {case_facts.patterns_30d.cash_ratio:.1%}
 
 NETWORK ANALYSIS:
@@ -406,7 +406,7 @@ INVESTIGATOR QUESTION: {question}
 
 Provide a clear, professional response based ONLY on these facts. Be concise and actionable."""
 
-            llm_service = getattr(services, "llm_provider", None) or getattr(services, "ollama_wrapper", None)
+            llm_service = getattr(services, "llm_provider", None)
             if not llm_service or not llm_service.check_connection():
                 yield emit("error", {"error": "LLM service is not available."})
                 return

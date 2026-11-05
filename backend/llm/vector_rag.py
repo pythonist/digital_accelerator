@@ -16,9 +16,7 @@ faiss, _FAISS_OK = safe_import("faiss")
 
 
 def _ollama_http_enabled() -> bool:
-    provider = str(os.getenv("LLM_PROVIDER") or "").strip().lower()
-    enabled = str(os.getenv("LLM_ENABLE_OLLAMA_FALLBACK") or "").strip().lower()
-    return provider == "ollama" or enabled in {"1", "true", "yes", "on"}
+    return False
 
 class VectorRAGSystem:
     """
@@ -41,7 +39,8 @@ class VectorRAGSystem:
         self.embedding_model = (
             embedding_model
             or getattr(llm_provider, "embedding_model", None)
-            or 'nomic-embed-text'
+            or os.getenv("OPENAI_EMBED_MODEL")
+            or 'text-embedding-3-small'
         )
         
         self.index = None

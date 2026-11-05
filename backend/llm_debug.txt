@@ -283,3 +283,1149 @@ DEBUG: X-LLM-Model from headers: chatgpt
 DEBUG: g.llm_model: chatgpt
 DEBUG: provider_name: openai
 DEBUG: models list returned: ['babbage-002', 'chat-latest', 'chatgpt-image-latest', 'davinci-002', 'gpt-3.5-turbo', 'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k', 'gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct-0914', 'gpt-4', 'gpt-4-0613', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09', 'gpt-4.1', 'gpt-4.1-2025-04-14', 'gpt-4.1-mini', 'gpt-4.1-mini-2025-04-14', 'gpt-4.1-nano', 'gpt-4.1-nano-2025-04-14', 'gpt-4o', 'gpt-4o-2024-05-13', 'gpt-4o-2024-08-06', 'gpt-4o-2024-11-20', 'gpt-4o-mini', 'gpt-4o-mini-2024-07-18', 'gpt-4o-mini-search-preview', 'gpt-4o-mini-search-preview-2025-03-11', 'gpt-4o-mini-transcribe', 'gpt-4o-mini-transcribe-2025-03-20', 'gpt-4o-mini-transcribe-2025-12-15', 'gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-03-20', 'gpt-4o-mini-tts-2025-12-15', 'gpt-4o-search-preview', 'gpt-4o-search-preview-2025-03-11', 'gpt-4o-transcribe', 'gpt-4o-transcribe-diarize', 'gpt-5', 'gpt-5-2025-08-07', 'gpt-5-chat-latest', 'gpt-5-codex', 'gpt-5-mini', 'gpt-5-mini-2025-08-07', 'gpt-5-nano', 'gpt-5-nano-2025-08-07', 'gpt-5-pro', 'gpt-5-pro-2025-10-06', 'gpt-5-search-api', 'gpt-5-search-api-2025-10-14', 'gpt-5.1', 'gpt-5.1-2025-11-13', 'gpt-5.1-chat-latest', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest', 'gpt-5.2-codex', 'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11', 'gpt-5.3-chat-latest', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.4-2026-03-05', 'gpt-5.4-mini', 'gpt-5.4-mini-2026-03-17', 'gpt-5.4-nano', 'gpt-5.4-nano-2026-03-17', 'gpt-5.4-pro', 'gpt-5.4-pro-2026-03-05', 'gpt-5.5', 'gpt-5.5-2026-04-23', 'gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23', 'gpt-audio', 'gpt-audio-1.5', 'gpt-audio-2025-08-28', 'gpt-audio-mini', 'gpt-audio-mini-2025-10-06', 'gpt-audio-mini-2025-12-15', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21', 'gpt-realtime', 'gpt-realtime-1.5', 'gpt-realtime-2', 'gpt-realtime-2025-08-28', 'gpt-realtime-mini', 'gpt-realtime-mini-2025-10-06', 'gpt-realtime-mini-2025-12-15', 'gpt-realtime-translate', 'gpt-realtime-whisper', 'o1', 'o1-2024-12-17', 'o1-pro', 'o1-pro-2025-03-19']
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: openai
+DEBUG: models list returned: ['babbage-002', 'chat-latest', 'chatgpt-image-latest', 'davinci-002', 'gpt-3.5-turbo', 'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k', 'gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct-0914', 'gpt-4', 'gpt-4-0613', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09', 'gpt-4.1', 'gpt-4.1-2025-04-14', 'gpt-4.1-mini', 'gpt-4.1-mini-2025-04-14', 'gpt-4.1-nano', 'gpt-4.1-nano-2025-04-14', 'gpt-4o', 'gpt-4o-2024-05-13', 'gpt-4o-2024-08-06', 'gpt-4o-2024-11-20', 'gpt-4o-mini', 'gpt-4o-mini-2024-07-18', 'gpt-4o-mini-search-preview', 'gpt-4o-mini-search-preview-2025-03-11', 'gpt-4o-mini-transcribe', 'gpt-4o-mini-transcribe-2025-03-20', 'gpt-4o-mini-transcribe-2025-12-15', 'gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-03-20', 'gpt-4o-mini-tts-2025-12-15', 'gpt-4o-search-preview', 'gpt-4o-search-preview-2025-03-11', 'gpt-4o-transcribe', 'gpt-4o-transcribe-diarize', 'gpt-5', 'gpt-5-2025-08-07', 'gpt-5-chat-latest', 'gpt-5-codex', 'gpt-5-mini', 'gpt-5-mini-2025-08-07', 'gpt-5-nano', 'gpt-5-nano-2025-08-07', 'gpt-5-pro', 'gpt-5-pro-2025-10-06', 'gpt-5-search-api', 'gpt-5-search-api-2025-10-14', 'gpt-5.1', 'gpt-5.1-2025-11-13', 'gpt-5.1-chat-latest', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest', 'gpt-5.2-codex', 'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11', 'gpt-5.3-chat-latest', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.4-2026-03-05', 'gpt-5.4-mini', 'gpt-5.4-mini-2026-03-17', 'gpt-5.4-nano', 'gpt-5.4-nano-2026-03-17', 'gpt-5.4-pro', 'gpt-5.4-pro-2026-03-05', 'gpt-5.5', 'gpt-5.5-2026-04-23', 'gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-audio', 'gpt-audio-1.5', 'gpt-audio-2025-08-28', 'gpt-audio-mini', 'gpt-audio-mini-2025-10-06', 'gpt-audio-mini-2025-12-15', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21', 'gpt-live-transcribe', 'gpt-realtime', 'gpt-realtime-1.5', 'gpt-realtime-2', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini', 'gpt-realtime-2025-08-28', 'gpt-realtime-mini', 'gpt-realtime-mini-2025-12-15', 'gpt-realtime-translate']
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: openai
+DEBUG: models list returned: ['babbage-002', 'chat-latest', 'chatgpt-image-latest', 'davinci-002', 'gpt-3.5-turbo', 'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k', 'gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct-0914', 'gpt-4', 'gpt-4-0613', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09', 'gpt-4.1', 'gpt-4.1-2025-04-14', 'gpt-4.1-mini', 'gpt-4.1-mini-2025-04-14', 'gpt-4.1-nano', 'gpt-4.1-nano-2025-04-14', 'gpt-4o', 'gpt-4o-2024-05-13', 'gpt-4o-2024-08-06', 'gpt-4o-2024-11-20', 'gpt-4o-mini', 'gpt-4o-mini-2024-07-18', 'gpt-4o-mini-search-preview', 'gpt-4o-mini-search-preview-2025-03-11', 'gpt-4o-mini-transcribe', 'gpt-4o-mini-transcribe-2025-03-20', 'gpt-4o-mini-transcribe-2025-12-15', 'gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-03-20', 'gpt-4o-mini-tts-2025-12-15', 'gpt-4o-search-preview', 'gpt-4o-search-preview-2025-03-11', 'gpt-4o-transcribe', 'gpt-4o-transcribe-diarize', 'gpt-5', 'gpt-5-2025-08-07', 'gpt-5-chat-latest', 'gpt-5-codex', 'gpt-5-mini', 'gpt-5-mini-2025-08-07', 'gpt-5-nano', 'gpt-5-nano-2025-08-07', 'gpt-5-pro', 'gpt-5-pro-2025-10-06', 'gpt-5-search-api', 'gpt-5-search-api-2025-10-14', 'gpt-5.1', 'gpt-5.1-2025-11-13', 'gpt-5.1-chat-latest', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest', 'gpt-5.2-codex', 'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11', 'gpt-5.3-chat-latest', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.4-2026-03-05', 'gpt-5.4-mini', 'gpt-5.4-mini-2026-03-17', 'gpt-5.4-nano', 'gpt-5.4-nano-2026-03-17', 'gpt-5.4-pro', 'gpt-5.4-pro-2026-03-05', 'gpt-5.5', 'gpt-5.5-2026-04-23', 'gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-audio', 'gpt-audio-1.5', 'gpt-audio-2025-08-28', 'gpt-audio-mini', 'gpt-audio-mini-2025-10-06', 'gpt-audio-mini-2025-12-15', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21', 'gpt-live-transcribe', 'gpt-realtime', 'gpt-realtime-1.5', 'gpt-realtime-2', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini', 'gpt-realtime-2025-08-28', 'gpt-realtime-mini', 'gpt-realtime-mini-2025-12-15', 'gpt-realtime-translate']
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: openai
+DEBUG: models list returned: ['gpt-4o-mini']
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: openai
+DEBUG: models list returned: ['babbage-002', 'chat-latest', 'chatgpt-image-latest', 'davinci-002', 'gpt-3.5-turbo', 'gpt-3.5-turbo-0125', 'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k', 'gpt-3.5-turbo-instruct', 'gpt-3.5-turbo-instruct-0914', 'gpt-4', 'gpt-4-0613', 'gpt-4-turbo', 'gpt-4-turbo-2024-04-09', 'gpt-4.1', 'gpt-4.1-2025-04-14', 'gpt-4.1-mini', 'gpt-4.1-mini-2025-04-14', 'gpt-4.1-nano', 'gpt-4.1-nano-2025-04-14', 'gpt-4o', 'gpt-4o-2024-05-13', 'gpt-4o-2024-08-06', 'gpt-4o-2024-11-20', 'gpt-4o-mini', 'gpt-4o-mini-2024-07-18', 'gpt-4o-mini-search-preview', 'gpt-4o-mini-search-preview-2025-03-11', 'gpt-4o-mini-transcribe', 'gpt-4o-mini-transcribe-2025-03-20', 'gpt-4o-mini-transcribe-2025-12-15', 'gpt-4o-mini-tts', 'gpt-4o-mini-tts-2025-03-20', 'gpt-4o-mini-tts-2025-12-15', 'gpt-4o-search-preview', 'gpt-4o-search-preview-2025-03-11', 'gpt-4o-transcribe', 'gpt-4o-transcribe-diarize', 'gpt-5', 'gpt-5-2025-08-07', 'gpt-5-chat-latest', 'gpt-5-codex', 'gpt-5-mini', 'gpt-5-mini-2025-08-07', 'gpt-5-nano', 'gpt-5-nano-2025-08-07', 'gpt-5-pro', 'gpt-5-pro-2025-10-06', 'gpt-5-search-api', 'gpt-5-search-api-2025-10-14', 'gpt-5.1', 'gpt-5.1-2025-11-13', 'gpt-5.1-chat-latest', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest', 'gpt-5.2-codex', 'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11', 'gpt-5.3-chat-latest', 'gpt-5.3-codex', 'gpt-5.4', 'gpt-5.4-2026-03-05', 'gpt-5.4-mini', 'gpt-5.4-mini-2026-03-17', 'gpt-5.4-nano', 'gpt-5.4-nano-2026-03-17', 'gpt-5.4-pro', 'gpt-5.4-pro-2026-03-05', 'gpt-5.5', 'gpt-5.5-2026-04-23', 'gpt-5.5-pro', 'gpt-5.5-pro-2026-04-23', 'gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-audio', 'gpt-audio-1.5', 'gpt-audio-2025-08-28', 'gpt-audio-mini', 'gpt-audio-mini-2025-10-06', 'gpt-audio-mini-2025-12-15', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21', 'gpt-live-transcribe', 'gpt-realtime', 'gpt-realtime-1.5', 'gpt-realtime-2', 'gpt-realtime-2.1', 'gpt-realtime-2.1-mini', 'gpt-realtime-2025-08-28', 'gpt-realtime-mini', 'gpt-realtime-mini-2025-12-15', 'gpt-realtime-translate']
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: g.llm_model: local:qwen2.5-3b-instruct-q2_k.gguf
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+DEBUG: provider_name: unified
+DEBUG: models list returned: [{'id': 'local:Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'provider': 'local', 'name': 'Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'label': 'Local · Meta-Llama-3.1-8B-Instruct-Q5_K_M', 'path': 'H:\\OllamaModels\\Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf', 'offline': True, 'available': True}, {'id': 'local:qwen2.5-3b-instruct-q2_k.gguf', 'provider': 'local', 'name': 'qwen2.5-3b-instruct-q2_k.gguf', 'label': 'Local · qwen2.5-3b-instruct-q2_k', 'path': 'H:\\OllamaModels\\qwen2.5-3b-instruct-q2_k.gguf', 'offline': True, 'available': True}, {'id': 'local:Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'provider': 'local', 'name': 'Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'label': 'Local · Meta-Llama-3-8B-Instruct.Q4_0', 'path': 'E:\\VS CODE Backup\\Trae\\AI_AML_tool\\backend\\data\\local_models\\Meta-Llama-3-8B-Instruct.Q4_0.gguf', 'offline': True, 'available': True}, {'id': 'openai:gpt-4o-mini', 'provider': 'openai', 'name': 'gpt-4o-mini', 'label': 'OpenAI · GPT-4o mini (Fast & Cost-Efficient)', 'offline': False, 'available': True}, {'id': 'openai:gpt-4o', 'provider': 'openai', 'name': 'gpt-4o', 'label': 'OpenAI · GPT-4o (High Performance)', 'offline': False, 'available': True}, {'id': 'openai:gpt-3.5-turbo', 'provider': 'openai', 'name': 'gpt-3.5-turbo', 'label': 'OpenAI · GPT-3.5 Turbo (Fast)', 'offline': False, 'available': True}, {'id': 'openrouter:google/gemini-2.0-flash-exp:free', 'provider': 'openrouter', 'name': 'google/gemini-2.0-flash-exp:free', 'label': 'OpenRouter · Gemini 2.0 Flash (Fastest / Free)', 'offline': False, 'available': True}, {'id': 'openrouter:meta-llama/llama-3.3-70b-instruct', 'provider': 'openrouter', 'name': 'meta-llama/llama-3.3-70b-instruct', 'label': 'OpenRouter · Llama 3.3 70B (Fast & Cheap)', 'offline': False, 'available': True}, {'id': 'openrouter:nvidia/nemotron-3-ultra-550b-a55b', 'provider': 'openrouter', 'name': 'nvidia/nemotron-3-ultra-550b-a55b', 'label': 'OpenRouter · Nemotron 3 Ultra', 'offline': False, 'available': True}, {'id': 'openrouter:mistralai/mistral-7b-instruct:free', 'provider': 'openrouter', 'name': 'mistralai/mistral-7b-instruct:free', 'label': 'OpenRouter · Mistral 7B (Free & Fast)', 'offline': False, 'available': True}, {'id': 'ollama:llama3.2:1b', 'provider': 'ollama', 'name': 'llama3.2:1b', 'label': 'Ollama · llama3.2:1b', 'offline': True, 'available': True}]
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-5.6-luna
+DEBUG: g.llm_model: openai:gpt-5.6-luna
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-5.6-luna
+DEBUG: g.llm_model: openai:gpt-5.6-luna
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+DEBUG: g.llm_model: openrouter:nvidia/nemotron-3-ultra-550b-a55b
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: chatgpt
+DEBUG: g.llm_model: chatgpt
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4.1-mini
+DEBUG: g.llm_model: openai:gpt-4.1-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: openai:gpt-4o-mini
+DEBUG: g.llm_model: openai:gpt-4o-mini
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None
+--- new request ---
+DEBUG: X-LLM-Model from headers: None
+DEBUG: g.llm_model: None

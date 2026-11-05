@@ -186,7 +186,7 @@ def check_ai_status(run_id):
     GET /api/v2/calibration/report/{run_id}/ai-status
     """
     try:
-        llm_service = getattr(services, 'llm_provider', None) or getattr(services, 'ollama_wrapper', None)
+        llm_service = getattr(services, 'llm_provider', None)
         
         if llm_service:
             is_connected = llm_service.check_connection()

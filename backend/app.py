@@ -1,5 +1,17 @@
 import os
 import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except Exception:
+        pass
+
 import traceback
 import subprocess
 import time
@@ -9,31 +21,9 @@ from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from security.dotenv_loader import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=False)
-
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-_VENV_DIR = os.path.join(_BASE_DIR, ".venv")
-_VENV_PY = (
-    os.path.join(_VENV_DIR, "Scripts", "python.exe")
-    if os.name == "nt"
-    else os.path.join(_VENV_DIR, "bin", "python")
-)
-_REQ = os.path.join(_BASE_DIR, "requirements.txt")
-_AUTO_BOOTSTRAP_VENV = os.getenv("AML_AUTO_BOOTSTRAP_VENV", "1") == "1"
-
-if __name__ == "__main__" and _AUTO_BOOTSTRAP_VENV and os.path.exists(_VENV_PY):
-    exe = os.path.abspath(sys.executable).lower()
-    vexe = os.path.abspath(_VENV_PY).lower()
-    if exe != vexe:
-        os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
-
-if __name__ == "__main__" and _AUTO_BOOTSTRAP_VENV and (not os.path.exists(_VENV_PY)) and os.path.exists(_REQ):
-    subprocess.check_call([sys.executable, "-m", "venv", _VENV_DIR])
-    subprocess.check_call([_VENV_PY, "-m", "pip", "install", "-r", _REQ])
-    os.execv(_VENV_PY, [_VENV_PY] + sys.argv)
 
 from config import CALIBRATION_DB_PATH
 from core.module_registry import REGISTRY

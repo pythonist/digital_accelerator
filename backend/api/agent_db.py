@@ -1,5 +1,5 @@
-import sqlite3
 import os
+import sqlite3
 import json
 import uuid
 from datetime import datetime
@@ -40,6 +40,32 @@ def init_db():
             timestamp DATETIME
         )
     ''')
+
+    # Store the configurable agent definitions used by the visual workflow canvas.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS agent_definitions (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            agent_type TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            description TEXT,
+            instructions TEXT,
+            config_json TEXT,
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+    ''')
+
+    # Lightweight migration for sessions created before canvas agents existed.
+    plan_columns = {row["name"] for row in c.execute("PRAGMA table_info(investigation_plan)").fetchall()}
+    if "agent_id" not in plan_columns:
+        c.execute("ALTER TABLE investigation_plan ADD COLUMN agent_id TEXT")
+    if "agent_type" not in plan_columns:
+        c.execute("ALTER TABLE investigation_plan ADD COLUMN agent_type TEXT")
+
+    agent_columns = {row["name"] for row in c.execute("PRAGMA table_info(agent_definitions)").fetchall()}
+    if "description" not in agent_columns:
+        c.execute("ALTER TABLE agent_definitions ADD COLUMN description TEXT")
 
     c.execute('''
         CREATE TABLE IF NOT EXISTS investigation_memory (
@@ -196,6 +222,63 @@ def get_plan(session_id: str):
     rows = c.fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_agent_definitions():
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM agent_definitions ORDER BY created_at ASC")
+    rows = c.fetchall()
+    conn.close()
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["config"] = json.loads(item.pop("config_json") or "{}")
+        result.append(item)
+    return result
+
+
+def save_agent_definition(agent: dict):
+    now = datetime.now().isoformat()
+    agent_id = str(agent.get("id") or uuid.uuid4())
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO agent_definitions (id, name, agent_type, tool_name, description, instructions, config_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name,
+            agent_type=excluded.agent_type,
+            tool_name=excluded.tool_name,
+            description=excluded.description,
+            instructions=excluded.instructions,
+            config_json=excluded.config_json,
+            updated_at=excluded.updated_at
+        """,
+        (
+            agent_id,
+            str(agent.get("name") or "Custom Investigation Agent"),
+            str(agent.get("agent_type") or "custom"),
+            str(agent.get("tool_name") or ""),
+            str(agent.get("description") or ""),
+            str(agent.get("instructions") or ""),
+            json.dumps(agent.get("config") or {}),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return agent_id
+
+
+def delete_agent_definition(agent_id: str):
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM agent_definitions WHERE id = ?", (agent_id,))
+    conn.commit()
+    conn.close()
 
 def get_memory(session_id: str):
     conn = get_db_connection()

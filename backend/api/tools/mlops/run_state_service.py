@@ -11,6 +11,11 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from api.tools.mlops.duckdb_manager import get_connection
 
+try:
+    from services.supabase_manager import supabase_manager
+except Exception:
+    supabase_manager = None
+
 
 RUN_STATE_STATUSES = {"not_started", "running", "completed", "stale", "failed"}
 
@@ -622,6 +627,11 @@ class RunStateService:
         self._invalidate_cache(tenant_id, env_id, run_id_text)
         run_state = self.get_run_state(tenant_id, env_id, run_id_text)
         run_state.setdefault("created_at", now)
+        if supabase_manager and supabase_manager.is_connected:
+            try:
+                supabase_manager.upsert_run_state(run_state)
+            except Exception:
+                pass
         return run_state
 
     def get_run_state(self, tenant_id: str, env_id: str, run_id: str, *, use_cache: bool = True) -> Dict[str, Any]:
@@ -643,6 +653,11 @@ class RunStateService:
                 [run_id_text, tenant_id, env_id],
             ).fetchone()
         if not row:
+            if supabase_manager and supabase_manager.is_connected:
+                supa_state = supabase_manager.get_run_state_by_id(tenant_id, env_id, run_id_text)
+                if supa_state:
+                    self._set_cache(supa_state)
+                    return supa_state
             raise ValueError(f"RUN_STATE {run_id_text} not found")
         raw_steps = _safe_json_loads(row[9], {})
         run_state = self._row_to_state(row)
@@ -942,7 +957,13 @@ class RunStateService:
                 ],
             )
         self._invalidate_cache(tenant_id, env_id, run_id)
-        return self.get_run_state(tenant_id, env_id, run_id, use_cache=False)
+        updated_state = self.get_run_state(tenant_id, env_id, run_id, use_cache=False)
+        if supabase_manager and supabase_manager.is_connected:
+            try:
+                supabase_manager.upsert_run_state(updated_state)
+            except Exception:
+                pass
+        return updated_state
 
     def _derive_run_status(self, steps: Dict[str, Any]) -> str:
         normalized_steps = _normalize_steps_json(steps)

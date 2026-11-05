@@ -15,7 +15,7 @@ class DocRAGSystem:
 
         self.index_path = "data/faiss_docs_index.bin"
         self.metadata_path = "data/faiss_docs_metadata.pkl"
-        self.embed_model = "nomic-embed-text"
+        self.embed_model = os.getenv("OPENAI_EMBED_MODEL") or "text-embedding-3-small"
 
         self.index = None
         self.metadata = {}

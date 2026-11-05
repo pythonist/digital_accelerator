@@ -6748,14 +6748,13 @@ class MLOpsWorkbenchService:
             normalized_pipeline_id = None
 
         query = """
-                SELECT dataset_id, pipeline_id, pipeline_type, dataset_type, filename, file_path, row_count, columns_json, column_types_json, created_at, updated_at
+                SELECT dataset_id, pipeline_id, dataset_type, filename, file_path, row_count, columns_json, column_types_json, created_at, updated_at
                 FROM mlops_dataset_registry
                 WHERE tenant_id = ? AND env_id = ?
                 """
         params: List[Any] = [tenant_id, env_id]
         with get_connection(self.db_path) as conn:
             if normalized_pipeline_id:
-                self._backfill_pipeline_asset_links(conn, tenant_id, env_id, [int(normalized_pipeline_id)])
                 linked_rows = conn.execute(
                     """
                     SELECT DISTINCT CAST(asset_id AS INTEGER)
@@ -6770,34 +6769,35 @@ class MLOpsWorkbenchService:
                     for row in (linked_rows or [])
                     if row and row[0] is not None
                 })
-                query += " AND (pipeline_id = ?"
+                filter_clauses = [
+                    "pipeline_id = ?",
+                    "pipeline_id IS NULL",
+                    "dataset_type NOT IN ('master_dataset', 'preprocessed_dataset', 'feature_store')",
+                ]
                 params.append(int(normalized_pipeline_id))
                 if linked_ids:
-                    query += f" OR dataset_id IN ({', '.join(['?'] * len(linked_ids))})"
+                    filter_clauses.append(f"dataset_id IN ({', '.join(['?'] * len(linked_ids))})")
                     params.extend(linked_ids)
-                query += ")"
-            if normalized_pipeline_type:
-                query += " AND pipeline_type = ?"
-                params.append(normalized_pipeline_type)
+                query += f" AND ({' OR '.join(filter_clauses)})"
             query += " ORDER BY updated_at DESC"
             rows = conn.execute(query, params).fetchall()
 
         results = []
         for r in rows:
-            resolved_file_path = self._resolve_file_path(Path(r[5]))
+            resolved_file_path = self._resolve_file_path(Path(r[4]))
             results.append(
                 {
                     "dataset_id": int(r[0]),
                     "pipeline_id": int(r[1]) if r[1] is not None else None,
-                    "pipeline_type": _normalize_text(r[2]).lower() or "fcc",
-                    "dataset_type": r[3],
-                    "filename": r[4],
-                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[5]),
-                    "row_count": int(r[6] or 0),
-                    "columns": json.loads(r[7] or "[]"),
-                    "column_types": json.loads(r[8] or "{}"),
-                    "created_at": r[9].isoformat() if hasattr(r[9], "isoformat") else r[9],
-                    "updated_at": r[10].isoformat() if hasattr(r[10], "isoformat") else r[10],
+                    "pipeline_type": normalized_pipeline_type or "fcc",
+                    "dataset_type": r[2],
+                    "filename": r[3],
+                    "file_path": str(resolved_file_path if resolved_file_path.exists() else r[4]),
+                    "row_count": int(r[5] or 0),
+                    "columns": json.loads(r[6] or "[]"),
+                    "column_types": json.loads(r[7] or "{}"),
+                    "created_at": r[8].isoformat() if hasattr(r[8], "isoformat") else r[8],
+                    "updated_at": r[9].isoformat() if hasattr(r[9], "isoformat") else r[9],
                 }
             )
         return results
@@ -10139,6 +10139,396 @@ class MLOpsWorkbenchService:
             preview_rows=preview_rows,
             master_mode=master_mode,
         )
+
+    def inspect_master_dataset_intelligence(
+        self,
+        tenant_id: str,
+        env_id: str,
+        datasets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Inspect uploaded datasets in workspace to derive candidate keys, relationships,
+        cardinality, fan-out impact, leakage risks, and join plan recommendations.
+        """
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        engine = MasterDatasetIntelligenceEngine()
+        report = engine.inspect_workspace(tables)
+        return report.to_dict()
+
+    def plan_master_dataset(
+        self,
+        tenant_id: str,
+        env_id: str,
+        datasets: Optional[List[Dict]] = None,
+        custom_overrides: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
+        """
+        Synthesize a complete, validated MasterDatasetPlan from workspace datasets.
+        """
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        engine = MasterDatasetIntelligenceEngine()
+        report = engine.inspect_workspace(tables)
+
+        planner = MasterDatasetPlanner()
+        plan = planner.create_plan(
+            report=report,
+            plan_name="AML Alert Suppression Master Dataset Plan",
+            custom_overrides=custom_overrides,
+        )
+        return plan.to_dict()
+
+    def preview_master_dataset_plan(
+        self,
+        tenant_id: str,
+        env_id: str,
+        plan: Optional[Dict[str, Any]] = None,
+        datasets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Execute preview dry-run according to a MasterDatasetPlan and return execution trace.
+        """
+        from api.tools.mlops.master_dataset_preview_engine import MasterDatasetPreviewEngine
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        if not tables:
+            raise ValueError("No source datasets found in the workspace to preview. Please upload datasets first.")
+
+        # Synthesize default plan if none provided
+        if not plan:
+            engine = MasterDatasetIntelligenceEngine()
+            report = engine.inspect_workspace(tables)
+            planner = MasterDatasetPlanner()
+            plan_obj = planner.create_plan(report)
+            plan = plan_obj.to_dict()
+
+        preview_engine = MasterDatasetPreviewEngine()
+        result = preview_engine.execute_preview(plan, tables)
+        return result.to_dict()
+
+    def validate_master_dataset_plan(
+        self,
+        tenant_id: str,
+        env_id: str,
+        plan: Optional[Dict[str, Any]] = None,
+        datasets: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Validate a MasterDatasetPlan against the 15-point Master Dataset Contract.
+        """
+        from api.tools.mlops.master_dataset_validator import MasterDatasetValidator
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        if not plan:
+            engine = MasterDatasetIntelligenceEngine()
+            report = engine.inspect_workspace(tables)
+            planner = MasterDatasetPlanner()
+            plan_obj = planner.create_plan(report)
+            plan = plan_obj.to_dict()
+
+        validator = MasterDatasetValidator()
+        result = validator.validate_plan(plan, tables)
+        return result.to_dict()
+
+    def build_master_dataset_from_plan(
+        self,
+        tenant_id: str,
+        env_id: str,
+        plan: Optional[Dict[str, Any]] = None,
+        datasets: Optional[List[Dict]] = None,
+        output_name: str = "master_dataset",
+        version_tag: Optional[str] = None,
+    ) -> Dict:
+        """
+        Execute deterministic production Master Dataset build according to a MasterDatasetPlan.
+        """
+        from api.tools.mlops.master_dataset_build_engine import MasterDatasetBuildEngine
+        from api.tools.mlops.master_dataset_planner import MasterDatasetPlanner
+        from api.tools.mlops.master_dataset_intelligence import MasterDatasetIntelligenceEngine
+
+        tables: Dict[str, pd.DataFrame] = {}
+        source_paths: Dict[str, str] = {}
+        ds_list = list(datasets or [])
+        if not ds_list:
+            ds_list = self.list_datasets(tenant_id, env_id)
+
+        for ds in ds_list:
+            role = str(ds.get("dataset_type") or ds.get("name") or "").strip().lower()
+            if not role:
+                continue
+            try:
+                df = self._load_dataset_frame(ds)
+                if df is not None and not df.empty:
+                    tables[role] = df
+                    if ds.get("file_path"):
+                        source_paths[role] = str(ds.get("file_path"))
+            except Exception as e:
+                logger.warning("Could not load frame for dataset %s: %s", role, e)
+
+        if not tables:
+            raise ValueError("No source datasets found in the workspace to build master dataset. Please upload datasets first.")
+
+        if not plan:
+            engine = MasterDatasetIntelligenceEngine()
+            report = engine.inspect_workspace(tables)
+            planner = MasterDatasetPlanner()
+            plan_obj = planner.create_plan(report)
+            plan = plan_obj.to_dict()
+
+        build_engine = MasterDatasetBuildEngine(output_directory=self._data_dir())
+        build_result = build_engine.execute_build(
+            plan=plan,
+            tables=tables,
+            output_name=output_name,
+            version_tag=version_tag,
+            source_paths=source_paths,
+        )
+
+        # Register generated dataset in database catalog
+        registered_ds = self.register_dataset(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_type=output_name,
+            filename=build_result.output_filename,
+            file_path=Path(build_result.output_path),
+        )
+        ds_id = registered_ds.get("dataset_id") if registered_ds else None
+        build_result.master_dataset_id = ds_id
+
+        # Register immutable version record & lineage
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        ver_record = version_mgr.register_version(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            build_result_dict=build_result.to_dict(),
+            plan_dict=plan,
+            dataset_id=ds_id,
+        )
+
+        res_dict = build_result.to_dict()
+        res_dict["dataset"] = registered_ds
+        res_dict["version_record"] = ver_record.to_dict()
+        res_dict["dataset_version_id"] = ver_record.dataset_version_id
+        return res_dict
+
+    def list_master_dataset_versions(
+        self,
+        tenant_id: str,
+        env_id: str,
+        output_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List all immutable Master Dataset versions."""
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        return version_mgr.list_versions(tenant_id, env_id, output_name)
+
+    def get_master_dataset_version(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Get complete metadata, plan snapshot, and lineage manifest for a specific version ID."""
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        return version_mgr.get_version(tenant_id, env_id, dataset_version_id)
+
+    def get_master_dataset_version_rows(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Fetch paginated rows from a specific immutable version ID."""
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        df = version_mgr.get_version_dataframe(tenant_id, env_id, dataset_version_id)
+        if df is None or df.empty:
+            return {"rows": [], "total_count": 0, "columns": []}
+
+        total_count = len(df)
+        paged_df = df.iloc[offset : offset + limit]
+        return {
+            "rows": paged_df.fillna("").to_dict(orient="records"),
+            "total_count": total_count,
+            "columns": list(df.columns),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def get_master_dataset_version_schema(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch exact schema and column types for a specific immutable version ID."""
+        ver = self.get_master_dataset_version(tenant_id, env_id, dataset_version_id)
+        if not ver:
+            return None
+        return {
+            "dataset_version_id": ver.get("dataset_version_id"),
+            "version_tag": ver.get("version_tag"),
+            "row_count": ver.get("row_count"),
+            "column_count": ver.get("column_count"),
+            "primary_key": ver.get("primary_key"),
+            "grain": ver.get("grain"),
+            "schema": ver.get("schema"),
+            "sha256_checksum": ver.get("sha256_checksum"),
+        }
+
+    def check_master_dataset_version_freshness(
+        self,
+        tenant_id: str,
+        env_id: str,
+        dataset_version_id: str,
+        current_datasets: Optional[List[Dict[str, Any]]] = None,
+        current_plan: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Verify if an immutable Master Dataset Version is still fresh or has become outdated
+        due to source dataset modifications (SHA256 changes) or MasterDatasetPlan alterations.
+        """
+        from api.tools.mlops.master_dataset_version_manager import MasterDatasetVersionManager
+        version_mgr = MasterDatasetVersionManager(db_path=self.db_path, env_root=self._env_root())
+        ds_list = current_datasets or self.list_datasets(tenant_id, env_id)
+        return version_mgr.check_version_freshness(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_version_id=dataset_version_id,
+            current_datasets=ds_list,
+            current_plan=current_plan,
+        )
+
+    def validate_downstream_can_execute(
+        self,
+        tenant_id: str,
+        env_id: str,
+        stage_name: str,
+        dataset_version_id: Optional[str] = None,
+        pipeline_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Validates whether a downstream stage (target, eda, preprocess, model, validation, registry, ready)
+        can safely execute. Checks persisted Master Dataset Version metadata and prevents execution if
+        the master version is missing or outdated.
+        """
+        if not dataset_version_id:
+            if pipeline_id:
+                try:
+                    pipeline = self.load_pipeline(tenant_id, env_id, int(pipeline_id))
+                    runtime = pipeline.get("runtime_state") or {}
+                    dataset_version_id = runtime.get("master_dataset_version_id")
+                except Exception:
+                    dataset_version_id = None
+
+        if not dataset_version_id:
+            versions = self.list_master_dataset_versions(tenant_id, env_id)
+            if versions:
+                dataset_version_id = versions[0].get("dataset_version_id")
+
+        if not dataset_version_id:
+            return {
+                "can_execute": False,
+                "error_code": "NO_MASTER_DATASET_VERSION",
+                "message": f"Cannot execute stage '{stage_name}': No Master Dataset Version has been published. Build a Master Dataset Version first.",
+            }
+
+        freshness = self.check_master_dataset_version_freshness(
+            tenant_id=tenant_id,
+            env_id=env_id,
+            dataset_version_id=dataset_version_id,
+        )
+
+        if freshness.get("is_outdated"):
+            reasons = "; ".join(freshness.get("stale_reasons", []))
+            return {
+                "can_execute": False,
+                "error_code": "STALE_MASTER_VERSION",
+                "dataset_version_id": dataset_version_id,
+                "message": f"Cannot execute stage '{stage_name}': Master Dataset Version '{dataset_version_id}' is outdated. Reasons: {reasons}. A new Master Dataset Version must be built.",
+                "stale_reasons": freshness.get("stale_reasons", []),
+                "impacted_stages": freshness.get("impacted_stages", []),
+            }
+
+        return {
+            "can_execute": True,
+            "dataset_version_id": dataset_version_id,
+            "version_tag": freshness.get("version_tag"),
+            "row_count": freshness.get("row_count"),
+            "column_count": freshness.get("column_count"),
+        }
 
     # Compatibility wrappers for route layer
     def variable_stats(self, dataset: Dict, sample_rows: int = 5000) -> Dict:

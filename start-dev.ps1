@@ -3,11 +3,22 @@ param(
     [switch]$MlopsOnly,
     [switch]$StopOnly,
     [switch]$DevFrontend,
+    [Alias('l')]
+    [switch]$Local,
     [int]$BackendPort = 5173,
     [int]$FrontendPort = 5173
 )
 
 $ErrorActionPreference = "Stop"
+
+$systemPath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+$userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+if ($systemPath -or $userPath) {
+    $env:Path = "$systemPath;$userPath;$env:Path"
+}
+if (-not (Get-Command npm -ErrorAction SilentlyContinue) -and (Test-Path "C:\Program Files\nodejs")) {
+    $env:Path = "C:\Program Files\nodejs;$env:Path"
+}
 
 function Stop-DevProcess {
     param(
@@ -434,14 +445,15 @@ $frontendDirLiteral = Convert-ToSingleQuotedLiteral -PathValue $frontendDir
 $pythonLaunchSpec = Ensure-BackendPython -RepoRoot $repoRoot -BackendDir $backendDir
 $pythonExecutable = $pythonLaunchSpec.Executable
 $pythonExecutableLiteral = Convert-ToSingleQuotedLiteral -PathValue $pythonExecutable
-$pythonArgLiteral = @($pythonLaunchSpec.Arguments | ForEach-Object {
+$pythonArgsList = @($pythonLaunchSpec.Arguments | Where-Object { $_ } | ForEach-Object {
     "'$(Convert-ToSingleQuotedLiteral -PathValue $_)'"
-}) -join " "
+})
+$pythonArgsSection = if ($pythonArgsList.Count -gt 0) { ($pythonArgsList -join " ") + " " } else { "" }
 $backendAppPath = Join-Path $backendDir "app.py"
 $backendAppPathLiteral = Convert-ToSingleQuotedLiteral -PathValue $backendAppPath
 $backendProfileValue = if ($MlopsOnly) { "mlops" } else { "full" }
 
-$backendCommand = "Set-Location -LiteralPath '$backendDirLiteral'; `$env:APP_PORT='$BackendPort'; `$env:PORT='$BackendPort'; `$env:AML_BACKEND_PROFILE='$backendProfileValue'; & '$pythonExecutableLiteral' $pythonArgLiteral '$backendAppPathLiteral'"
+$backendCommand = "[System.Environment]::SetEnvironmentVariable('APP_PORT', '$BackendPort', 'Process'); [System.Environment]::SetEnvironmentVariable('PORT', '$BackendPort', 'Process'); [System.Environment]::SetEnvironmentVariable('AML_BACKEND_PROFILE', '$backendProfileValue', 'Process'); Set-Location -LiteralPath '$backendDirLiteral'; & '$pythonExecutableLiteral' -u $pythonArgsSection'$backendAppPathLiteral'"
 $frontendCommand = "Set-Location -LiteralPath '$frontendDirLiteral'; npm run dev -- --host 0.0.0.0 --port $FrontendPort"
 
 Start-Process -FilePath "powershell.exe" -ArgumentList @(
@@ -460,6 +472,22 @@ if ($DevFrontend) {
     ) | Out-Null
 }
 
+$cloudflaredCmd = Get-Command "cloudflared" -ErrorAction SilentlyContinue
+if ($cloudflaredCmd) {
+    # Always stop any old running cloudflared tunnel process
+    Get-Process -Name "cloudflared" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    
+    if (-not $Local) {
+        $tunnelCommand = "cloudflared tunnel --cred-file 'C:\Users\kriss\.cloudflared\2dd27d86-9029-40fe-8a27-65d29bcf7ce6.json' run 2dd27d86-9029-40fe-8a27-65d29bcf7ce6"
+        Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-WindowStyle", "Hidden",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-Command", $tunnelCommand
+        ) | Out-Null
+    }
+}
+
 $pythonLaunchSummaryParts = @($pythonExecutable)
 if ($pythonLaunchSpec.Arguments) {
     $pythonLaunchSummaryParts += $pythonLaunchSpec.Arguments
@@ -476,3 +504,11 @@ if ($DevFrontend) {
 } else {
     Write-Host "Frontend: http://127.0.0.1:${BackendPort} (production build)" -ForegroundColor Green
 }
+if ($Local) {
+    Write-Host "Mode:     Local Only (Cloudflare Tunnel Disabled)" -ForegroundColor Yellow
+    Write-Host "Open:     http://localhost:${BackendPort}" -ForegroundColor White
+    Start-Process "http://localhost:${BackendPort}"
+} elseif ($cloudflaredCmd) {
+    Write-Host "Public:   https://fccanalytics.online (Cloudflare Tunnel Live)" -ForegroundColor Cyan
+}
+

@@ -285,7 +285,7 @@ class FCCWorkbenchNarrativeService:
         try:
             from api.service_locator import services
 
-            service_provider = getattr(services, "llm_provider", None) or getattr(services, "_gpt4all_wrapper", None)
+            service_provider = getattr(services, "llm_provider", None)
             if service_provider is not None:
                 yield service_provider
         except Exception:

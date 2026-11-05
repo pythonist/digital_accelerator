@@ -148,7 +148,6 @@ const MainLayout = () => {
 // --- TOOL LAYOUT (Requires Environment) ---
 const ToolLayout = () => {
   const { activeEnv } = useAppContext();
-  const location = useLocation();
 
   if (!activeEnv) return <Navigate to="/environments" replace />;
 
@@ -156,7 +155,7 @@ const ToolLayout = () => {
     <div className="flex h-screen min-h-0 flex-col overflow-hidden animate-in fade-in duration-700">
       <div className="relative flex-1 min-h-0 overflow-hidden bg-slate-100">
         <PageTransition className="h-full w-full">
-          <Outlet key={location.pathname} />
+          <Outlet />
         </PageTransition>
       </div>
     </div>

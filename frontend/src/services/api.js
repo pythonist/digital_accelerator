@@ -254,6 +254,50 @@ class APIClient {
     return this.get(`/api/v2/case/${caseId}/facts`);
   }
 
+  async getCasePack(caseId) {
+    return this.get(`/api/v2/case-pack/${encodeURIComponent(caseId)}`);
+  }
+
+  async getBaselineComparison(caseId) {
+    try {
+      return await this.post('/api/v2/analysis/baseline/detect-deviations', { case_id: caseId });
+    } catch {
+      return null;
+    }
+  }
+
+  async getNetworkIntelligence(caseId) {
+    try {
+      return await this.get(`/api/v2/analysis/network-intelligence/${encodeURIComponent(caseId)}`);
+    } catch {
+      return null;
+    }
+  }
+
+  async getEvidenceLineageTree(caseId) {
+    try {
+      return await this.post('/api/v2/explorer/tree-data', { id: caseId });
+    } catch {
+      return null;
+    }
+  }
+
+  async explainCase(caseId, context = {}) {
+    try {
+      return await this.post('/api/v2/llm/explain-case', { case_id: caseId, ...context });
+    } catch {
+      return null;
+    }
+  }
+
+  async reviewCaseQuestions(caseId) {
+    try {
+      return await this.post('/api/v2/llm/review-questions', { case_id: caseId });
+    } catch {
+      return null;
+    }
+  }
+
   async getCaseResolutionSupportFile(caseId) {
     return this.get(`/api/v2/case-resolution/${encodeURIComponent(caseId)}/support-file`);
   }
