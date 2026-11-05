@@ -294,28 +294,7 @@ class FCCWorkbenchNarrativeService:
     def _resolve_model(self, ollama: Any) -> Optional[str]:
         if not ollama:
             return None
-        try:
-            available = [str(model or "").strip() for model in ollama.list_models()]
-        except Exception:
-            available = []
-
-        preferred = [
-            "gpt-4o-mini",
-            "qwen2.5:1.5b",
-            "qwen2.5:0.5b",
-            "phi3:mini",
-            "gemma2:2b",
-            "tinyllama",
-        ]
-        lowered = {name.lower(): name for name in available if name}
-        for wanted in preferred:
-            exact = lowered.get(wanted.lower())
-            if exact:
-                return exact
-            for name in available:
-                if str(name).lower().startswith(wanted.lower()):
-                    return name
-        return getattr(ollama, "default_model", None)
+        return getattr(ollama, 'default_model', None) or os.getenv('OPENAI_MODEL')
 
     def build(
         self,

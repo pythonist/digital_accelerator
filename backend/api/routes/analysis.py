@@ -1011,12 +1011,22 @@ Provide a risk assessment based on alerts, volume, and typologies.
         llm_ready = False
     if not llm_ready:
         return jsonify({
+            'success': False,
+            'error': 'OpenAI service unavailable',
             'analysis': 'AI analysis is unavailable because no configured provider is ready.'
-        })
+        }), 503
     res = llm_service.generate(prompt, model=model)
+    if not isinstance(res, dict) or not res.get('success'):
+        err = (res or {}).get('error') if isinstance(res, dict) else 'AI analysis failed'
+        return jsonify({
+            'success': False,
+            'error': err,
+            'analysis': f'AI analysis failed: {err}'
+        }), 502
     return jsonify({
-        'analysis': res.get('response', 'AI analysis unavailable')
-    })
+        'success': True,
+        'analysis': res.get('response', '')
+    }), 200
 
 
 # ============================================================================

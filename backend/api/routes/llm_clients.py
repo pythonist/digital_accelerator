@@ -3,18 +3,18 @@ LLM client layer for the agentic investigation workflow.
 
 Strict single-provider architecture: OpenAI only.
 All planning, reasoning, summarizing, and reporting route directly to OpenAI
-using credentials and models configured in .env.
+via OpenAIWrapper using credentials and models configured in .env.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-
-from openai import OpenAI
+from typing import Any, Dict, Optional
 
 try:
     from security.dotenv_loader import load_dotenv
@@ -23,8 +23,9 @@ try:
 except Exception:
     pass
 
+logger = logging.getLogger("aml.llm.clients")
 
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip().strip('"').strip("'")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "openai.gpt-5.6-luna").strip().strip('"').strip("'")
 _raw_openai_base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 if _raw_openai_base.endswith("/chat/completions"):
     _raw_openai_base = _raw_openai_base[:-len("/chat/completions")].rstrip("/")
@@ -32,8 +33,7 @@ OPENAI_BASE_URL = _raw_openai_base
 LLM_TIMEOUT = float(os.environ.get("AGENTIC_LLM_TIMEOUT", os.environ.get("LLM_TIMEOUT", "180")) or 180)
 AGENTIC_LLM_MAX_TOKENS = int(os.environ.get("AGENTIC_LLM_MAX_TOKENS", "4096") or 4096)
 
-_openai_client = None
-_last_call = None
+_last_call: Optional[Dict[str, Any]] = None
 
 
 class LLMError(Exception):
@@ -42,23 +42,6 @@ class LLMError(Exception):
 
 def _secret(name: str) -> str:
     return str(os.environ.get(name) or "").strip().strip('"').strip("'")
-
-
-def _client() -> OpenAI:
-    global _openai_client
-
-    api_key = _secret("OPENAI_API_KEY")
-    if not api_key:
-        raise LLMError("OPENAI_API_KEY is not configured.")
-    if _openai_client is None:
-        default_headers = {"api-key": api_key} if api_key else None
-        _openai_client = OpenAI(
-            api_key=api_key,
-            base_url=OPENAI_BASE_URL,
-            timeout=LLM_TIMEOUT,
-            default_headers=default_headers,
-        )
-    return _openai_client
 
 
 def provider_status() -> dict:
@@ -80,8 +63,8 @@ def last_call_metadata() -> dict | None:
     return dict(_last_call) if isinstance(_last_call, dict) else None
 
 
-def _run_unified(provider: str, system: str, user: str, temperature: float, max_tokens: int | None) -> str:
-    """Run the OpenAI model and retain audit metadata for the session."""
+def _run_unified(provider: str, system: str, user: str, temperature: float = 0.2, max_tokens: int | None = None) -> str:
+    """Run the OpenAI model via UnifiedLLMProvider and retain audit metadata for the session."""
     global _last_call
     from llm.unified_provider import UnifiedLLMProvider
 
@@ -94,11 +77,13 @@ def _run_unified(provider: str, system: str, user: str, temperature: float, max_
         temperature=temperature,
         max_tokens=max_tokens or AGENTIC_LLM_MAX_TOKENS,
     )
-    if not result.get("success"):
-        raise LLMError(result.get("error") or "OpenAI provider failed.")
-    response = str(result.get("response") or "")
+    if not isinstance(result, dict) or not result.get("success"):
+        err = (result or {}).get("error") if isinstance(result, dict) else "Unknown failure"
+        raise LLMError(f"OpenAI provider failed: {err}")
+    response = str(result.get("response") or result.get("text") or "").strip()
     if not response:
         raise LLMError("OpenAI returned an empty response.")
+
     _last_call = {
         "provider": "openai",
         "model": model_name,
@@ -106,7 +91,7 @@ def _run_unified(provider: str, system: str, user: str, temperature: float, max_
         "prompt_chars": len(system or "") + len(user or ""),
         "response_chars": len(response),
         "finish_reason": result.get("finish_reason"),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
     }
     return response
 
@@ -120,7 +105,7 @@ def chatgpt_complete_json(system: str, user: str, temperature: float = 0.1) -> d
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise LLMError(f"OpenAI did not return valid JSON: {raw[:500]}") from exc
+        raise LLMError(f"OpenAI did not return valid JSON: {raw[:300]}") from exc
 
 
 def nemotron_summarize(tool_name: str, raw_output: str, current_memory: str = "") -> str:

@@ -1661,12 +1661,15 @@ def generate_narrative():
     try:
         prompt = request.json.get('prompt', '')
         llm_service = _get_llm_service()
-        if llm_service:
-            res = llm_service.generate(prompt)
-            if res.get('success'):
-                return jsonify(res)
-        return jsonify({'success': True, 'response': "**Narrative Template**\nPending AI generation."})
-    except Exception as e: return jsonify({'success': False, 'error': str(e)})
+        if not llm_service or not llm_service.check_connection():
+            return jsonify({'success': False, 'error': 'OpenAI service unavailable'}), 503
+        res = llm_service.generate(prompt)
+        if isinstance(res, dict) and res.get('success'):
+            return jsonify(res), 200
+        err = (res or {}).get('error') if isinstance(res, dict) else 'Narrative generation failed'
+        return jsonify({'success': False, 'error': err}), 502
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @cases_bp.route('/case-pack/<case_id>', methods=['GET'])
