@@ -1,14 +1,28 @@
 import os
 import pickle
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from core.optional_imports import safe_import
 from services.case_profile_builder import CaseProfileBuilder
 
 np, _NUMPY_OK = safe_import("numpy")
 faiss, _FAISS_OK = safe_import("faiss")
+
+_PROGRESS_LOCK = threading.Lock()
+_INDEX_PROGRESS: Dict[str, Any] = {
+    "status": "idle",
+    "total": 0,
+    "current": 0,
+    "current_case_id": "",
+    "percentage": 0,
+    "message": "Index ready",
+    "error": None,
+    "started_at": None,
+    "completed_at": None,
+}
 
 
 DEFAULT_HYBRID_WEIGHTS = {
@@ -34,6 +48,23 @@ class CaseVectorIndexService:
         }
         self._metadata = None
         self._indexes = {}
+
+    @classmethod
+    def get_progress(cls) -> Dict[str, Any]:
+        with _PROGRESS_LOCK:
+            return dict(_INDEX_PROGRESS)
+
+    @classmethod
+    def update_progress(cls, **kwargs: Any) -> None:
+        with _PROGRESS_LOCK:
+            _INDEX_PROGRESS.update(kwargs)
+
+    def count_cases_to_index(self) -> int:
+        try:
+            case_rows = self.profile_builder.list_case_rows()
+            return len([row for row in case_rows if row.get("case_id")])
+        except Exception:
+            return 0
 
     def _resolve_store_path(self) -> str:
         db_path = getattr(self.db_manager, "db_path", None) or "data/aml_database.db"
@@ -95,27 +126,69 @@ class CaseVectorIndexService:
             else:
                 self._indexes["hybrid"] = hybrid
 
-    def build_index(self, force_rebuild: bool = False) -> Dict:
+    def build_index(self, force_rebuild: bool = False, progress_callback: Optional[Callable[[int, int, str], None]] = None) -> Dict:
         if not _NUMPY_OK:
             raise RuntimeError("NumPy is required for case retrieval indexing.")
         if self._metadata is not None and not force_rebuild:
             return self._metadata
 
         case_rows = self.profile_builder.list_case_rows()
-        profiles = [self.profile_builder.build_case_profile(str(row.get("case_id")), row) for row in case_rows if row.get("case_id")]
-        if not profiles:
+        valid_rows = [row for row in case_rows if row.get("case_id")]
+        total = len(valid_rows)
+
+        self.update_progress(
+            status="building",
+            total=total,
+            current=0,
+            current_case_id="",
+            percentage=0,
+            message=f"Starting index build for {total} cases...",
+            started_at=datetime.now(timezone.utc).isoformat(),
+            completed_at=None,
+            error=None,
+        )
+
+        if not valid_rows:
             metadata = {
                 "case_ids": [],
                 "profiles": {},
                 "component_dimensions": {},
                 "normalized_components": {},
-                "last_rebuilt_at": datetime.utcnow().isoformat() + "Z",
+                "last_rebuilt_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
                 "backend": "faiss" if _FAISS_OK else "numpy_fallback",
                 "hybrid_weights": DEFAULT_HYBRID_WEIGHTS,
             }
             self._metadata = metadata
             self._build_indexes(metadata)
+            self.update_progress(
+                status="completed",
+                total=0,
+                current=0,
+                percentage=100,
+                message="No cases found in current scope to index.",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+            )
             return metadata
+
+        profiles = []
+        for idx, row in enumerate(valid_rows):
+            cid = str(row.get("case_id"))
+            current_num = idx + 1
+            pct = int((current_num / max(1, total)) * 85)
+            self.update_progress(
+                current=current_num,
+                current_case_id=cid,
+                percentage=pct,
+                message=f"Indexing case {current_num} of {total} ({cid})...",
+            )
+            if progress_callback:
+                progress_callback(current_num, total, cid)
+            profiles.append(self.profile_builder.build_case_profile(cid, row))
+
+        self.update_progress(
+            percentage=90,
+            message="Calculating multi-vector matrices & FAISS index...",
+        )
 
         component_names = ("behavioral", "typology", "network", "alert")
         component_matrices = {}
@@ -129,6 +202,7 @@ class CaseVectorIndexService:
 
         hybrid_matrix = self._l2_normalize(self._weighted_hybrid_matrix(component_matrices, DEFAULT_HYBRID_WEIGHTS).astype(np.float32))
 
+        now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         metadata = {
             "case_ids": [profile["case_id"] for profile in profiles],
             "profiles": {profile["case_id"]: profile for profile in profiles},
@@ -138,7 +212,7 @@ class CaseVectorIndexService:
                 **{name: component_matrices[name] for name in component_names},
                 "hybrid": hybrid_matrix,
             },
-            "last_rebuilt_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            "last_rebuilt_at": now_iso,
             "backend": "faiss" if _FAISS_OK else "numpy_fallback",
             "hybrid_weights": DEFAULT_HYBRID_WEIGHTS,
         }
@@ -160,7 +234,34 @@ class CaseVectorIndexService:
 
         self._metadata = serializable
         self._build_indexes(serializable)
+
+        self.update_progress(
+            status="completed",
+            total=total,
+            current=total,
+            percentage=100,
+            message=f"Vector index successfully built for {total} cases.",
+            completed_at=now_iso,
+            last_rebuilt_at=now_iso,
+            case_count=total,
+            error=None,
+        )
         return serializable
+
+    def start_async_build(self, force_rebuild: bool = True) -> threading.Thread:
+        def _run():
+            try:
+                self.build_index(force_rebuild=force_rebuild)
+            except Exception as exc:
+                self.update_progress(
+                    status="error",
+                    error=str(exc),
+                    message=f"Index rebuild failed: {exc}",
+                )
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        return thread
 
     def _load_from_disk(self) -> Optional[Dict]:
         if not os.path.exists(self.metadata_path):

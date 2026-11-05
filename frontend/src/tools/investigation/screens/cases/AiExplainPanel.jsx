@@ -150,7 +150,7 @@ const AiExplainPanel = ({ caseId }) => {
       {/* ============================================================ */}
       {/* 2. MAIN DUAL-PANE WORKBENCH (FULL SCREEN LAYOUT)             */}
       {/* ============================================================ */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '380px 1fr' }, gap: 2.5, flex: 1, minHeight: 'calc(100vh - 310px)' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '320px 1fr', xl: '380px 1fr' }, gap: { xs: 1.5, md: 2.5 }, flex: 1, minHeight: 0 }}>
         
         {/* LEFT PANE: Human Analyst Decision Playbook */}
         <Stack spacing={2} sx={{ display: 'flex', flexDirection: 'column' }}>

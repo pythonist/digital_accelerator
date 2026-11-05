@@ -93,25 +93,41 @@ const TABS = [
   { key: 'documents', label: 'Documents', icon: DescriptionIcon },
 ];
 
+const STAGES = [
+  { id: 0, title: 'Stage 1: Evidence & Identity', desc: 'Case lineage, KYC & customer profile', color: '#2563eb' },
+  { id: 1, title: 'Stage 2: Forensic Signals', desc: 'Ledger, entity network & rule triggers', color: '#e8590c' },
+  { id: 2, title: 'Stage 3: Typologies & Validation', desc: 'Pattern detection & chronological timeline', color: '#7c3aed' },
+  { id: 3, title: 'Stage 4: Autonomous Filings', desc: 'Risk synthesis, QA & SAR generation', color: '#16a34a' },
+];
+
 const DEFAULT_WORKFLOW = [
-  { node_id: 'case-retrieval-node', agent_id: 'case-retrieval', position: { x: 36, y: 65 }, enabled: true },
-  { node_id: 'customer-profile-node', agent_id: 'customer-profile', position: { x: 36, y: 195 }, enabled: true },
-  { node_id: 'transaction-history-node', agent_id: 'transaction-history', position: { x: 290, y: 65 }, enabled: true },
-  { node_id: 'network-intelligence-node', agent_id: 'network-intelligence', position: { x: 290, y: 195 }, enabled: true },
-  { node_id: 'typology-analysis-node', agent_id: 'typology-analysis', position: { x: 545, y: 130 }, enabled: true },
+  { node_id: 'case-retrieval-node', agent_id: 'case-retrieval', position: { x: 18, y: 70 }, enabled: true },
+  { node_id: 'customer-profile-node', agent_id: 'customer-profile', position: { x: 18, y: 195 }, enabled: true },
+  { node_id: 'transaction-history-node', agent_id: 'transaction-history', position: { x: 245, y: 70 }, enabled: true },
+  { node_id: 'network-intelligence-node', agent_id: 'network-intelligence', position: { x: 245, y: 195 }, enabled: true },
+  { node_id: 'typology-analysis-node', agent_id: 'typology-analysis', position: { x: 475, y: 130 }, enabled: true },
 ];
 
 const STAGE_MAP = {
   'case-retrieval': 0,
   'customer-profile': 0,
   'retrieval': 0,
+  'customer': 0,
   'data-sample': 0,
   'transaction-history': 1,
   'network-intelligence': 1,
+  'alert-review': 1,
+  'transaction': 1,
+  'network': 1,
+  'rules': 1,
   'lineage': 1,
   'graph': 1,
   'typology-analysis': 2,
-  'rules': 2,
+  'prior-case-review': 2,
+  'timeline-builder': 2,
+  'typology': 2,
+  'history': 2,
+  'timeline': 2,
   'baseline': 2,
   'audit': 2,
 };
@@ -131,16 +147,16 @@ const checkNodesOverlap = (nodes) => {
 };
 
 const tidyWorkflow = (nodes) => {
-  const colCounts = [0, 0, 0, 0];
+  const colCounts = [0, 0, 0];
   return (nodes || []).map((node) => {
-    const stage = STAGE_MAP[node.agent_id] ?? 1;
-    const col = Math.min(3, Math.max(0, stage));
+    const stage = STAGE_MAP[node.agent_id] ?? STAGE_MAP[node.agent_type] ?? 1;
+    const col = Math.min(2, Math.max(0, stage));
     const row = colCounts[col]++;
     return {
       ...node,
       position: {
-        x: 36 + col * 255,
-        y: 65 + row * 130,
+        x: 18 + col * 228,
+        y: 68 + row * 125,
       },
     };
   });
@@ -156,17 +172,13 @@ const resolveOverlaps = (nodes) => {
 
 const loadCanvas = () => {
   try {
-    const saved = JSON.parse(localStorage.getItem('fcip-agentic-workflow-v2'));
+    const saved = JSON.parse(localStorage.getItem('fcip-agentic-workflow-v3'));
     if (Array.isArray(saved) && saved.length) {
       return resolveOverlaps(saved);
     }
-    const legacy = JSON.parse(localStorage.getItem('fcip-agentic-workflow-v1'));
-    if (Array.isArray(legacy) && legacy.length) {
-      return tidyWorkflow(legacy);
-    }
-    return DEFAULT_WORKFLOW;
+    return tidyWorkflow(DEFAULT_WORKFLOW);
   } catch (_) {
-    return DEFAULT_WORKFLOW;
+    return tidyWorkflow(DEFAULT_WORKFLOW);
   }
 };
 
@@ -215,47 +227,15 @@ const AgentCanvas = ({
   const selectedNode = workflowNodes.find((node) => node.node_id === selectedNodeId);
   const selectedAgent = selectedNode ? { ...nodeMap[selectedNode.agent_id], ...selectedNode } : null;
 
-  const positionFromEvent = (event) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return {
-      x: Math.max(12, Math.min(Math.max(12, rect.width - 210), event.clientX - rect.left - 100)),
-      y: Math.max(50, Math.min(Math.max(50, rect.height - 110), event.clientY - rect.top - 48)),
-    };
-  };
-
-  const findNextPosition = (allNodes) => {
-    const colCounts = [0, 0, 0];
-    allNodes.forEach((node) => {
-      const col = Math.min(2, Math.max(0, Math.floor(((node.position?.x || 36) - 10) / 255)));
-      colCounts[col]++;
-    });
-    let bestCol = 0;
-    for (let c = 1; c < colCounts.length; c++) {
-      if (colCounts[c] < colCounts[bestCol]) bestCol = c;
-    }
-    return {
-      x: 36 + bestCol * 255,
-      y: 65 + colCounts[bestCol] * 130,
-    };
-  };
-
-  const snapAndAvoidCollision = (movingNodeId, rawPos, allNodes) => {
-    let x = Math.max(12, rawPos.x);
-    let y = Math.max(50, rawPos.y);
-    const otherNodes = allNodes.filter((n) => n.node_id !== movingNodeId);
-    const collides = (cx, cy) => otherNodes.some((n) => Math.abs((n.position?.x || 0) - cx) < 210 && Math.abs((n.position?.y || 0) - cy) < 110);
-    
-    let attempts = 0;
-    while (collides(x, y) && attempts < 10) {
-      y += 130;
-      attempts++;
-    }
-    return { x, y };
-  };
-
   const addAgent = (agent, position = null) => {
     const count = workflowNodes.filter((node) => node.agent_id === agent.id).length;
-    const nextPos = position ? snapAndAvoidCollision(null, position, workflowNodes) : findNextPosition(workflowNodes);
+    const stage = STAGE_MAP[agent.id] ?? STAGE_MAP[agent.agent_type] ?? 1;
+    const col = Math.min(2, Math.max(0, stage));
+    const sameColCount = workflowNodes.filter((n) => (STAGE_MAP[n.agent_id] ?? 1) === col).length;
+    const defaultPos = position || {
+      x: 18 + col * 228,
+      y: 68 + sameColCount * 125,
+    };
     const node = {
       node_id: `${agent.id}-${Date.now()}`,
       agent_id: agent.id,
@@ -263,11 +243,11 @@ const AgentCanvas = ({
       tool_name: agent.tool_name,
       instructions: agent.instructions || '',
       config: agent.config || { model: 'inherit', evidence_depth: 'standard', max_evidence: 8 },
-      position: nextPos,
+      position: defaultPos,
       enabled: true,
       instance_name: count ? `${agent.name} ${count + 1}` : agent.name,
     };
-    setWorkflowNodes((nodes) => resolveOverlaps([...nodes, node]));
+    setWorkflowNodes((nodes) => [...nodes, node]);
     setSelectedNodeId(node.node_id);
   };
 
@@ -281,76 +261,111 @@ const AgentCanvas = ({
     setWorkflowNodes((nodes) => tidyWorkflow(nodes));
   };
 
+  const handleDragStart = (event, node) => {
+    event.dataTransfer.setData('application/fcip-node', node.node_id);
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.dataTransfer.setData('application/fcip-offset-x', String(event.clientX - rect.left));
+    event.dataTransfer.setData('application/fcip-offset-y', String(event.clientY - rect.top));
+  };
+
   const handleDrop = (event) => {
     event.preventDefault();
+    const board = event.currentTarget.getBoundingClientRect();
     const agentId = event.dataTransfer.getData('application/fcip-agent');
     const movingNode = event.dataTransfer.getData('application/fcip-node');
-    const rawPos = positionFromEvent(event);
-    if (agentId && nodeMap[agentId]) addAgent(nodeMap[agentId], rawPos);
+    const offsetX = Number(event.dataTransfer.getData('application/fcip-offset-x')) || 90;
+    const offsetY = Number(event.dataTransfer.getData('application/fcip-offset-y')) || 40;
+
+    const targetX = Math.max(16, Math.min(board.width - 220, event.clientX - board.left - offsetX));
+    const targetY = Math.max(50, Math.min(board.height - 110, event.clientY - board.top - offsetY));
+
+    if (agentId && nodeMap[agentId]) {
+      addAgent(nodeMap[agentId], { x: targetX, y: targetY });
+    }
     if (movingNode) {
-      setWorkflowNodes((nodes) => {
-        const finalPos = snapAndAvoidCollision(movingNode, rawPos, nodes);
-        return nodes.map((node) => (
-          node.node_id === movingNode ? { ...node, position: finalPos } : node
-        ));
-      });
+      setWorkflowNodes((nodes) => nodes.map((n) => (
+        n.node_id === movingNode ? { ...n, position: { x: targetX, y: targetY } } : n
+      )));
     }
   };
 
-  const edges = workflowNodes.slice(0, -1).map((node, index) => ({
-    from: node,
-    to: workflowNodes[index + 1],
-  }));
+  // Structured multi-stage edges (flows cleanly from stage to stage)
+  const activeNodes = workflowNodes.filter(n => n.enabled !== false);
+  const stage0 = activeNodes.filter(n => (STAGE_MAP[n.agent_id] ?? 0) === 0);
+  const stage1 = activeNodes.filter(n => (STAGE_MAP[n.agent_id] ?? 1) === 1);
+  const stage2 = activeNodes.filter(n => (STAGE_MAP[n.agent_id] ?? 2) === 2);
+
+  const edges = [];
+  stage0.forEach(s0 => {
+    stage1.forEach(s1 => {
+      edges.push({ from: s0, to: s1 });
+    });
+  });
+  stage1.forEach(s1 => {
+    stage2.forEach(s2 => {
+      edges.push({ from: s1, to: s2 });
+    });
+  });
 
   return (
     <Stack spacing={2} sx={{ flex: 1, minHeight: 'calc(100vh - 310px)', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
-        <Box>
-          <Typography variant="h6" sx={{ fontWeight: 700, color: TEXT_PRIMARY }}>Multi-agent investigation canvas</Typography>
-          <Typography variant="body2" sx={{ color: TEXT_SECONDARY, mt: 0.4 }}>
-            Drag specialised agents onto the workspace, configure their roles, then run the selected team in parallel.
-          </Typography>
+      {/* Workflow Explanation Banner */}
+      <Box sx={{ p: 1.5, bgcolor: '#f8fafc', border: `1px solid ${BORDER}`, borderRadius: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <AccountTree sx={{ color: ACCENT, fontSize: 24 }} />
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: TEXT_PRIMARY, lineHeight: 1.25 }}>
+              Autonomous Multi-Agent Investigation Pipeline
+            </Typography>
+            <Typography variant="caption" sx={{ color: TEXT_SECONDARY }}>
+              Evidence flows across stages: <strong>Stage 1 (Identity & Data)</strong> &rarr; <strong>Stage 2 (Forensics & Network)</strong> &rarr; <strong>Stage 3 (Typologies & Validation)</strong> &rarr; <strong>Stage 4 (SAR Narrative & Reports)</strong>.
+            </Typography>
+          </Box>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <select
             value={investigationType}
             onChange={(event) => setInvestigationType(event.target.value)}
             disabled={workflowStatus === 'running'}
-            style={{ padding: '8px 28px 8px 10px', border: `1px solid ${BORDER}`, borderRadius: 4, color: TEXT_PRIMARY, background: SURFACE }}
+            style={{ padding: '6px 24px 6px 10px', border: `1px solid ${BORDER}`, borderRadius: 4, color: TEXT_PRIMARY, background: SURFACE, fontSize: '0.8rem', fontWeight: 600 }}
           >
             {INVESTIGATION_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <Button startIcon={<Add />} onClick={onCreateAgent} sx={{ color: ACCENT, textTransform: 'none', fontWeight: 700 }}>
+          <Button startIcon={<Add />} onClick={onCreateAgent} sx={{ color: ACCENT, textTransform: 'none', fontWeight: 700, fontSize: '0.8rem' }}>
             Create agent
           </Button>
           <Button
             variant="outlined"
+            size="small"
             onClick={handleTidy}
             disabled={workflowStatus === 'running'}
-            sx={{ color: ACCENT, borderColor: '#fed7aa', bgcolor: '#fff7ed', textTransform: 'none', fontWeight: 600, '&:hover': { bgcolor: '#ffedd5', borderColor: ACCENT } }}
+            sx={{ color: ACCENT, borderColor: '#fed7aa', bgcolor: '#fff7ed', textTransform: 'none', fontWeight: 700, fontSize: '0.8rem', '&:hover': { bgcolor: '#ffedd5', borderColor: ACCENT } }}
           >
-            Auto layout
+            Organize by Stage
           </Button>
           <Button
             variant="outlined"
+            size="small"
             onClick={() => setWorkflowNodes(tidyWorkflow(DEFAULT_WORKFLOW))}
             disabled={workflowStatus === 'running'}
-            sx={{ color: TEXT_SECONDARY, borderColor: BORDER, textTransform: 'none' }}
+            sx={{ color: TEXT_SECONDARY, borderColor: BORDER, textTransform: 'none', fontSize: '0.8rem' }}
           >
-            Reset canvas
+            Reset 5 Core Agents
           </Button>
         </Stack>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '250px 1fr 270px' }, gap: 1.5, flex: 1, minHeight: 'calc(100vh - 380px)', alignItems: 'stretch' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '240px 1fr 265px' }, gap: 1.5, flex: 1, minHeight: 'calc(100vh - 380px)', alignItems: 'stretch' }}>
+        {/* Agent Library */}
         <Paper sx={{ ...cardSx, p: 1.25, height: '100%', minHeight: 'calc(100vh - 380px)', overflowY: 'auto' }}>
-          <Typography sx={sectionLabelSx}>Agent library</Typography>
+          <Typography sx={sectionLabelSx}>Agent Library</Typography>
           <Typography variant="caption" sx={{ color: TEXT_SECONDARY, display: 'block', mt: 0.5, mb: 1.25 }}>
-            Drag or add evidence agents.
+            Click or drag to add specialized agents.
           </Typography>
           <Stack spacing={1}>
             {agentCatalog.map((agent) => {
               const Icon = iconForAgent(agent.agent_type);
+              const stageId = STAGE_MAP[agent.id] ?? STAGE_MAP[agent.agent_type] ?? 1;
               return (
                 <Paper
                   key={agent.id}
@@ -362,8 +377,11 @@ const AgentCanvas = ({
                   <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'flex-start' }}>
                     <Icon sx={{ fontSize: 18, color: agent.color || ACCENT, mt: 0.1 }} />
                     <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, color: TEXT_PRIMARY }}>{agent.name}</Typography>
-                      <Typography variant="caption" sx={{ display: 'block', color: TEXT_SECONDARY, lineHeight: 1.35 }}>{agent.description}</Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, color: TEXT_PRIMARY }}>{agent.name}</Typography>
+                        <Chip label={`Stage ${stageId + 1}`} size="small" sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700, bgcolor: '#f1f5f9', color: TEXT_SECONDARY }} />
+                      </Box>
+                      <Typography variant="caption" sx={{ display: 'block', color: TEXT_SECONDARY, lineHeight: 1.35, mt: 0.2 }}>{agent.description}</Typography>
                     </Box>
                     <Add sx={{ color: ACCENT, fontSize: 17 }} />
                   </Box>
@@ -373,49 +391,117 @@ const AgentCanvas = ({
           </Stack>
         </Paper>
 
+        {/* Workflow Design Board */}
         <Paper
           onDragOver={(event) => event.preventDefault()}
           onDrop={handleDrop}
           sx={{ ...cardSx, height: '100%', minHeight: 'calc(100vh - 380px)', position: 'relative', overflow: 'hidden', bgcolor: '#fbfcfe', backgroundImage: 'radial-gradient(#d8dee9 1px, transparent 1px)', backgroundSize: '18px 18px' }}
         >
-          <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, px: 1.5, py: 1, display: 'flex', justifyContent: 'space-between', bgcolor: 'rgba(255,255,255,0.92)', borderBottom: `1px solid ${BORDER}` }}>
-            <Typography sx={{ ...sectionLabelSx, color: ACCENT }}>Workflow design board</Typography>
-            <Typography variant="caption" sx={{ color: TEXT_SECONDARY }}>{workflowNodes.length} agents · parallel evidence collection</Typography>
+          {/* Top Board Bar */}
+          <Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 3, px: 1.5, py: 1, display: 'flex', justifyContent: 'space-between', bgcolor: 'rgba(255,255,255,0.92)', borderBottom: `1px solid ${BORDER}` }}>
+            <Typography sx={{ ...sectionLabelSx, color: ACCENT }}>Workflow Design Board</Typography>
+            <Typography variant="caption" sx={{ color: TEXT_SECONDARY }}>{workflowNodes.length} active agents · parallel multi-stage execution</Typography>
           </Box>
-          <svg aria-hidden="true" width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-            <defs><marker id="agent-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" /></marker></defs>
-            {edges.map(({ from, to }) => {
+
+          {/* Stage Guide Background Columns */}
+          <Box sx={{ position: 'absolute', inset: 0, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', pointerEvents: 'none', borderRight: `1px dashed ${BORDER}`, zIndex: 0 }}>
+            {STAGES.map((s, idx) => (
+              <Box key={s.id} sx={{ borderRight: idx < 3 ? `1px dashed ${BORDER}` : 'none', p: 1.25, pt: 5, bgcolor: idx % 2 === 0 ? 'transparent' : 'rgba(248, 250, 252, 0.45)' }}>
+                <Typography sx={{ fontSize: '0.68rem', fontWeight: 800, color: s.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {s.title}
+                </Typography>
+                <Typography sx={{ fontSize: '0.62rem', color: TEXT_SECONDARY, display: 'block', mt: 0.25 }}>
+                  {s.desc}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+
+          {/* Flow Lines SVG */}
+          <svg aria-hidden="true" width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1 }}>
+            <defs>
+              <marker id="agent-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 z" fill="#94a3b8" />
+              </marker>
+            </defs>
+            {edges.map(({ from, to }, idx) => {
               const x1 = (from.position?.x || 0) + 195;
               const y1 = (from.position?.y || 0) + 48;
               const x2 = to.position?.x || 0;
               const y2 = (to.position?.y || 0) + 48;
-              const dx = Math.max(30, Math.abs(x2 - x1) / 2);
+              const dx = Math.max(24, Math.abs(x2 - x1) / 2);
               const path = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
               return (
-                <path key={`${from.node_id}-${to.node_id}`} d={path} fill="none" stroke="#cbd5e1" strokeWidth="2" strokeDasharray={from.enabled && to.enabled ? 'none' : '4 4'} markerEnd="url(#agent-arrow)" />
+                <path
+                  key={`edge-${from.node_id}-${to.node_id}-${idx}`}
+                  d={path}
+                  fill="none"
+                  stroke="#cbd5e1"
+                  strokeWidth="1.8"
+                  strokeDasharray={from.enabled && to.enabled ? 'none' : '4 4'}
+                  markerEnd="url(#agent-arrow)"
+                />
               );
             })}
           </svg>
+
           {workflowNodes.length === 0 && (
-            <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', p: 4 }}>
+            <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', p: 4, zIndex: 2 }}>
               <Box><AccountTree sx={{ color: '#cbd5e1', fontSize: 42 }} /><Typography sx={{ color: TEXT_SECONDARY }}>Drag an agent here to start designing this investigation.</Typography></Box>
             </Box>
           )}
+
+          {/* Stage 4 Final Target Node */}
+          <Paper
+            sx={{
+              position: 'absolute',
+              right: 18,
+              top: 75,
+              width: 195,
+              minHeight: 110,
+              p: 1.25,
+              zIndex: 2,
+              border: '1.5px solid #fed7aa',
+              borderLeft: `4px solid ${ACCENT}`,
+              bgcolor: '#fff7ed',
+              borderRadius: 1.5,
+              boxShadow: '0 2px 8px rgba(232,89,12,0.08)',
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <DescriptionIcon sx={{ color: ACCENT, fontSize: 18 }} />
+              <Typography variant="caption" sx={{ fontWeight: 800, color: TEXT_PRIMARY, lineHeight: 1.2 }}>
+                Regulatory SAR & Synthesis
+              </Typography>
+            </Box>
+            <Typography variant="caption" sx={{ color: TEXT_SECONDARY, display: 'block', mt: 0.6, fontSize: '0.67rem', lineHeight: 1.35 }}>
+              Autonomously synthesizes findings, runs QA review, and drafts FinCEN SAR filing & reports.
+            </Typography>
+            <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <FiberManualRecord sx={{ color: workflowStatus === 'completed' ? '#16a34a' : workflowStatus === 'running' ? '#2563eb' : TEXT_SECONDARY, fontSize: 9 }} />
+              <Typography variant="caption" sx={{ fontWeight: 700, fontSize: '0.67rem', color: workflowStatus === 'completed' ? '#16a34a' : workflowStatus === 'running' ? '#2563eb' : TEXT_SECONDARY }}>
+                {workflowStatus === 'completed' ? 'Delivered' : workflowStatus === 'running' ? 'Active Target' : 'Autonomous Target'}
+              </Typography>
+            </Box>
+          </Paper>
+
+          {/* Draggable Agent Cards */}
           {workflowNodes.map((node) => {
             const agent = { ...nodeMap[node.agent_id], ...node };
             const Icon = iconForAgent(agent.agent_type);
             const state = statusStyle(nodeStatus(node, plan, workflowStatus));
             const selected = selectedNodeId === node.node_id;
+            const stageNum = (STAGE_MAP[node.agent_id] ?? STAGE_MAP[node.agent_type] ?? 0) + 1;
             return (
               <Paper
                 key={node.node_id}
                 draggable
-                onDragStart={(event) => event.dataTransfer.setData('application/fcip-node', node.node_id)}
+                onDragStart={(event) => handleDragStart(event, node)}
                 onClick={() => setSelectedNodeId(node.node_id)}
                 sx={{
-                  position: 'absolute', left: node.position?.x || 0, top: node.position?.y || 0, width: 195, minHeight: 96, p: 1.1, zIndex: 1,
+                  position: 'absolute', left: node.position?.x || 0, top: node.position?.y || 0, width: 195, minHeight: 96, p: 1.1, zIndex: 2,
                   border: `1px solid ${selected ? (agent.color || ACCENT) : BORDER}`, borderLeft: `4px solid ${agent.color || ACCENT}`,
-                  boxShadow: selected ? '0 0 0 2px rgba(232,89,12,0.18)' : '0 1px 3px rgba(15,23,42,0.08)', cursor: 'grab', userSelect: 'none',
+                  boxShadow: selected ? '0 0 0 2px rgba(232,89,12,0.25)' : '0 1px 3px rgba(15,23,42,0.08)', cursor: 'grab', userSelect: 'none',
                   bgcolor: '#ffffff',
                   borderRadius: 1.5,
                   transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
@@ -454,11 +540,14 @@ const AgentCanvas = ({
                     ✕
                   </Box>
                 </Box>
-                <Typography variant="caption" sx={{ color: TEXT_SECONDARY, display: 'block', mt: 0.5, pl: 3.4, lineHeight: 1.3, fontSize: '0.7rem' }}>
-                  {agent.tool_name?.replace(/_/g, ' ')}
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.2, pl: 3.4, lineHeight: 1.3, fontSize: '0.68rem' }}>
-                  {agent.config?.evidence_depth || 'standard'} depth · {agent.config?.model === 'inherit' || !agent.config?.model ? 'global model' : agent.config.model}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5, pl: 3.4 }}>
+                  <Typography variant="caption" sx={{ color: TEXT_SECONDARY, lineHeight: 1.3, fontSize: '0.7rem' }}>
+                    {agent.tool_name?.replace(/_/g, ' ')}
+                  </Typography>
+                  <Chip label={`Stage ${stageNum}`} size="small" sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700, bgcolor: '#f8fafc', color: TEXT_SECONDARY }} />
+                </Box>
+                <Typography variant="caption" sx={{ color: '#64748b', display: 'block', mt: 0.2, pl: 3.4, lineHeight: 1.3, fontSize: '0.67rem' }}>
+                  {agent.config?.evidence_depth || 'standard'} depth · {agent.config?.model === 'inherit' || !agent.config?.model ? 'global OpenAI' : 'OpenAI'}
                 </Typography>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.6, pl: 3.4 }}>
                   {state.label === 'Working' ? <CircularProgress size={9} sx={{ color: state.color }} /> : <FiberManualRecord sx={{ color: state.color, fontSize: 9 }} />}
@@ -469,13 +558,17 @@ const AgentCanvas = ({
           })}
         </Paper>
 
+        {/* Agent Configuration */}
         <Paper sx={{ ...cardSx, p: 1.5, height: '100%', minHeight: 'calc(100vh - 380px)', overflowY: 'auto' }}>
-          <Typography sx={sectionLabelSx}>Agent configuration</Typography>
+          <Typography sx={sectionLabelSx}>Agent Configuration</Typography>
           {!selectedAgent ? (
-            <Typography variant="body2" sx={{ color: TEXT_SECONDARY, mt: 1.5 }}>Select an agent node to view or update its instructions.</Typography>
+            <Typography variant="body2" sx={{ color: TEXT_SECONDARY, mt: 1.5 }}>Select an agent node to configure its parameters and instructions.</Typography>
           ) : (
             <Stack spacing={1.25} sx={{ mt: 1.25 }}>
-              <Box><Typography variant="body2" sx={{ fontWeight: 700, color: TEXT_PRIMARY }}>{selectedAgent.instance_name || selectedAgent.name}</Typography><Typography variant="caption" sx={{ color: TEXT_SECONDARY }}>{selectedAgent.agent_type || 'custom'} agent · {selectedAgent.tool_name?.replace(/_/g, ' ')}</Typography></Box>
+              <Box>
+                <Typography variant="body2" sx={{ fontWeight: 700, color: TEXT_PRIMARY }}>{selectedAgent.instance_name || selectedAgent.name}</Typography>
+                <Typography variant="caption" sx={{ color: TEXT_SECONDARY }}>{selectedAgent.agent_type || 'custom'} agent · {selectedAgent.tool_name?.replace(/_/g, ' ')}</Typography>
+              </Box>
               <TextField
                 label="Workflow agent name" size="small" fullWidth
                 value={selectedAgent.instance_name || selectedAgent.name || ''}
@@ -491,10 +584,11 @@ const AgentCanvas = ({
                 value={selectedAgent.config?.model || 'inherit'}
                 disabled={workflowStatus === 'running'}
                 onChange={(event) => setWorkflowNodes((nodes) => nodes.map((node) => node.node_id === selectedAgent.node_id ? { ...node, config: { ...(node.config || {}), model: event.target.value } } : node))}
-                helperText={`Inherit uses the global model (${globalModel || 'default'}).`}
+                helperText="Uses configured OpenAI model (openai.gpt-5.6-luna)."
               >
                 <MenuItem value="inherit">Inherit global model</MenuItem>
-                {availableModels.map((model) => <MenuItem key={model.id} value={model.id}>{model.label}</MenuItem>)}
+                <MenuItem value="chatgpt">OpenAI (Default Configured)</MenuItem>
+                <MenuItem value="openai">OpenAI Gateway</MenuItem>
               </TextField>
               <TextField
                 label="Evidence depth" select size="small" fullWidth
@@ -502,7 +596,7 @@ const AgentCanvas = ({
                 disabled={workflowStatus === 'running'}
                 onChange={(event) => setWorkflowNodes((nodes) => nodes.map((node) => node.node_id === selectedAgent.node_id ? { ...node, config: { ...(node.config || {}), evidence_depth: event.target.value } } : node))}
               >
-                <MenuItem value="fast">Fast · concise signal scan</MenuItem>
+                <MenuItem value="fast">Fast · concise signal scan (Credit saver)</MenuItem>
                 <MenuItem value="standard">Standard · balanced evidence review</MenuItem>
                 <MenuItem value="deep">Deep · detailed investigative review</MenuItem>
               </TextField>
@@ -515,7 +609,7 @@ const AgentCanvas = ({
               />
               <TextField
                 label="Focused investigation instructions"
-                multiline minRows={4} size="small" fullWidth
+                multiline minRows={3} size="small" fullWidth
                 value={selectedAgent.instructions || ''}
                 disabled={workflowStatus === 'running'}
                 onChange={(event) => setWorkflowNodes((nodes) => nodes.map((node) => node.node_id === selectedAgent.node_id ? { ...node, instructions: event.target.value } : node))}
@@ -604,6 +698,9 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
         setToolLogs(res.tool_logs || []);
         setLlmLogs(res.llm_logs || []);
         setTrace(res.trace || null);
+        if (Array.isArray(res.activities)) {
+          setActivities(res.activities);
+        }
       }
     } catch (e) {
       console.error('Failed to fetch agentic status', e);
@@ -615,6 +712,15 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
       fetchStatus();
     }
   }, [selectedCaseId]);
+
+  // Background polling while investigation is running ensures tabs keep updating
+  useEffect(() => {
+    if (status !== 'running' || !selectedCaseId) return;
+    const interval = setInterval(() => {
+      fetchStatus();
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [status, selectedCaseId]);
 
   useEffect(() => {
     const fetchSessions = () => {
@@ -632,19 +738,26 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
       const evtSource = new EventSource(`/api/v2/agentic/stream/${selectedCaseId}`);
 
       evtSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.status === 'completed' || data.status === 'failed') {
-          setStatus(data.status);
-          evtSource.close();
-          fetchStatus();
-        } else {
-          setActivities(prev => [...prev, data]);
-          fetchStatus();
+        try {
+          const data = JSON.parse(event.data);
+          if (data.status === 'completed' || data.status === 'failed') {
+            setStatus(data.status);
+            evtSource.close();
+            fetchStatus();
+          } else if (data.message) {
+            setActivities(prev => {
+              const existingIds = new Set(prev.map(a => a.id).filter(Boolean));
+              if (data.id && existingIds.has(data.id)) return prev;
+              return [...prev, data];
+            });
+          }
+        } catch (err) {
+          console.error('Error parsing SSE event', err);
         }
       };
 
       evtSource.onerror = (err) => {
-        console.error('EventSource failed:', err);
+        console.warn('EventSource warning:', err);
         evtSource.close();
       };
 
@@ -704,20 +817,10 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
   const totalSteps = plan.length || 1;
   const needsRealRun = Boolean(trace?.legacy_or_incomplete);
   const evidenceCount = needsRealRun ? 0 : (findings?.evidence_items?.length || toolLogs.filter(row => row.status === 'success').length || 0);
-  const modelOptions = Array.from(new Map([
-    ...(ollamaModels || []).map((item) => {
-      const id = typeof item === 'string' ? item : item?.id || item?.name;
-      const label = typeof item === 'string' ? item : item?.label || item?.name;
-      return [id, { id, label }];
-    }).filter(([id]) => id),
-    ['chatgpt', { id: 'chatgpt', label: 'OpenAI · GPT-4o mini' }],
-    ['gpt-4o', { id: 'openai:gpt-4o', label: 'OpenAI · GPT-4o' }],
-    ['gpt-3.5-turbo', { id: 'openai:gpt-3.5-turbo', label: 'OpenAI · GPT-3.5 Turbo' }],
-    ['gemini-flash', { id: 'openrouter:google/gemini-2.0-flash-exp:free', label: 'OpenRouter · Gemini 2.0 Flash' }],
-    ['llama3.3', { id: 'openrouter:meta-llama/llama-3.3-70b-instruct', label: 'OpenRouter · Llama 3.3 70B' }],
-    ['nemotron', { id: 'nemotron', label: 'GPT 5.5 Pro' }],
-    ['mistral', { id: 'openrouter:mistralai/mistral-7b-instruct:free', label: 'OpenRouter · Mistral 7B' }],
-  ]).values());
+  const modelOptions = [
+    { id: 'chatgpt', label: 'OpenAI · openai.gpt-5.6-luna (Configured)' },
+    { id: 'openai', label: 'OpenAI Gateway (Default)' },
+  ];
 
   const handleDownloadDocument = async (doc) => {
     try {
@@ -801,17 +904,8 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                   cursor: status === 'running' ? 'default' : 'pointer',
                 }}
               >
-                {(ollamaModels || []).map((item) => {
-                  const id = typeof item === 'string' ? item : item?.id || item?.name;
-                  const label = typeof item === 'string' ? item : item?.label || item?.name;
-                  return id ? <option key={id} value={id}>{label}</option> : null;
-                })}
-                {!ollamaModels?.length ? (
-                  <>
-                    <option value="chatgpt">OpenAI · gpt-4o-mini</option>
-                    <option value="nemotron">GPT 5.5 Pro</option>
-                  </>
-                ) : null}
+                <option value="chatgpt">OpenAI · openai.gpt-5.6-luna (Configured)</option>
+                <option value="openai">OpenAI Gateway (Default)</option>
               </select>
 
               <Box>
@@ -959,6 +1053,30 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
               </Box>
             )}
 
+            {status === 'failed' && (
+              <Alert
+                severity="error"
+                sx={{ mb: 2, borderRadius: 1 }}
+                action={
+                  <Button color="inherit" size="small" onClick={handleStart} startIcon={<PlayArrow />}>
+                    Retry Run
+                  </Button>
+                }
+              >
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  Agentic Investigation Halted
+                </Typography>
+                <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                  {currentStepLabel.replace(/^Failed:\s*/, '')}
+                </Typography>
+                {(currentStepLabel.toLowerCase().includes('quota') || currentStepLabel.toLowerCase().includes('credit') || currentStepLabel.toLowerCase().includes('429')) && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontWeight: 700, color: '#991b1b' }}>
+                    OpenAI API Credit Notice: The run stopped because your account credit quota is exhausted or rate limited ($2 budget limit). Please check your OpenAI API balance.
+                  </Typography>
+                )}
+              </Alert>
+            )}
+
             {needsRealRun && activeTab !== 'analysis' && activeTab !== 'canvas' && (
               <Alert
                 severity="warning"
@@ -971,7 +1089,7 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
               >
                 This completed session is a legacy or incomplete run. It has {trace?.llm_call_count || 0} recorded LLM calls,
                 {` ${trace?.findings_count || 0}`} structured findings, and {trace?.document_count || 0} old documents.
-                Run a real AI investigation to generate ChatGPT/Nemotron traces, evidence-backed findings, and full reports.
+                Run a live AI investigation to generate OpenAI audit traces, evidence-backed findings, and full reports.
               </Alert>
             )}
 

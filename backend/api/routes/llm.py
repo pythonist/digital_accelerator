@@ -28,7 +28,7 @@ def _get_llm_service():
 
 
 def _default_llm_model(llm_service=None):
-    return os.getenv("OPENAI_MODEL") or "gpt-4o-mini"
+    return os.getenv("OPENAI_MODEL") or "openai.gpt-5.6-luna"
 
 
 def _resolve_request_model(payload=None, llm_service=None):
@@ -425,10 +425,9 @@ def chat():
         
         print("[LLM] Generating SQL Plan...")
         sql_response = llm_service.generate(
-            prompt=msg, 
-            model=model, 
+            prompt=msg,
+            model=model,
             system_prompt=sql_system_prompt,
-            temperature=0.1
         )
         
         sql_text = (sql_response.get('response') or '') if isinstance(sql_response, dict) else ''
@@ -484,15 +483,21 @@ def chat():
     
     # Append the internal reasoning for the user to see (Transparency)
     if isinstance(final_response, dict):
+        if not final_response.get("success"):
+            return jsonify({
+                "success": False,
+                "error": final_response.get("error") or "LLM generation failed",
+                "response": "",
+            }), 502
         if query_executed and final_response.get('response'):
             final_response['response'] += f"\n\n*(Analysis based on query: `{generated_sql}`)*"
-        return jsonify(final_response)
+        return jsonify(final_response), 200
     
     return jsonify({
         'success': False,
         'error': 'Invalid response received from LLM service',
         'response': str(final_response)
-    })
+    }), 502
 
 
 # ============================================================================
@@ -1027,14 +1032,27 @@ def explain_case_endpoint():
         
         explainer = CaseExplainer(llm_service) if llm_service else None
         if not explainer:
-            return jsonify({'error': 'AI provider unavailable'}), 503
+            return jsonify({'success': False, 'error': 'AI provider unavailable'}), 503
 
         explanation = explainer.explain_case(summary, model=model)
+        if (
+            not explanation
+            or explanation.startswith("Failed to generate explanation")
+            or explanation.startswith("AI service unavailable")
+            or explanation.startswith("Cannot explain case")
+            or explanation.startswith("Error generating explanation")
+        ):
+            return jsonify({
+                'success': False,
+                'case_id': case_id,
+                'error': explanation or 'Failed to generate explanation',
+            }), 502
+
         return jsonify({
             'success': True,
             'case_id': case_id,
             'explanation': explanation
-        })
+        }), 200
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1068,14 +1086,29 @@ def review_questions_endpoint():
         
         gen = ReviewQuestionsGenerator(llm_service) if llm_service else None
         if not gen:
-            return jsonify({'error': 'AI provider unavailable'}), 503
+            return jsonify({'success': False, 'error': 'AI provider unavailable'}), 503
 
         questions = gen.generate_review_questions(summary, model=model)
+        if (
+            not questions
+            or (isinstance(questions, list) and len(questions) > 0 and (
+                questions[0].startswith("Error:")
+                or questions[0].startswith("AI service unavailable")
+                or questions[0].startswith("Cannot generate")
+            ))
+        ):
+            err_msg = questions[0] if questions else "Failed to generate review questions"
+            return jsonify({
+                'success': False,
+                'case_id': case_id,
+                'error': err_msg,
+            }), 502
+
         return jsonify({
             'success': True,
             'case_id': case_id,
             'questions': questions
-        })
+        }), 200
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1126,13 +1159,11 @@ CONVERSATION GUIDELINES:
 """
 
         if not llm_service or not llm_service.check_connection():
-            resp_text = f"**[Offline Analysis for {case_id}]**\n\nBased on available case data:\n- Total Volume: {summary.get('key_metrics', {}).get('total_volume', 'N/A')}\n- Triggered Alerts: {summary.get('key_metrics', {}).get('alert_count', 0)}\n- Counterparties: {len(summary.get('top_counterparties', []))}\n\n*Please ensure your LLM provider is active for real-time natural language copilot responses.*"
             return jsonify({
-                'success': True,
-                'response': resp_text,
+                'success': False,
+                'error': 'OpenAI provider unavailable. Check OPENAI_API_KEY and OPENAI_BASE_URL in .env.',
                 'case_id': case_id,
-                'model': 'deterministic-fallback'
-            })
+            }), 503
 
         response_payload = llm_service.chat(
             message,
@@ -1140,13 +1171,29 @@ CONVERSATION GUIDELINES:
             system_prompt=system_prompt
         )
 
+        if not isinstance(response_payload, dict) or not response_payload.get('success'):
+            err = (response_payload or {}).get('error') if isinstance(response_payload, dict) else 'Chat generation failed'
+            return jsonify({
+                'success': False,
+                'error': err or 'Failed to generate copilot response',
+                'case_id': case_id,
+            }), 502
+
+        resp_text = str(response_payload.get('response') or response_payload.get('text') or '').strip()
+        if not resp_text:
+            return jsonify({
+                'success': False,
+                'error': 'OpenAI returned an empty response',
+                'case_id': case_id,
+            }), 502
+
         return jsonify({
             'success': True,
             'case_id': case_id,
-            'response': response_payload.get('response', ''),
+            'response': resp_text,
             'model': response_payload.get('model', model),
             'execution_time': response_payload.get('execution_time', 0)
-        })
+        }), 200
 
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -14,22 +14,22 @@ def _get_configured_chat_model() -> str:
     raw = (
         os.getenv("OPENAI_MODEL")
         or os.getenv("LLM_DEFAULT_MODEL")
-        or "gpt-4o-mini"
+        or "openai.gpt-5.6-luna"
     ).strip().strip('"').strip("'")
     if raw.startswith("openai:"):
         raw = raw[7:].strip()
-    return raw or "gpt-4o-mini"
+    return raw or "openai.gpt-5.6-luna"
 
 
 def _get_configured_embed_model() -> str:
     raw = (
         os.getenv("OPENAI_EMBED_MODEL")
         or os.getenv("LLM_EMBED_MODEL")
-        or "text-embedding-3-small"
+        or "vertex_ai.gemini-embedding-2"
     ).strip().strip('"').strip("'")
     if raw.startswith("openai:"):
         raw = raw[7:].strip()
-    return raw or "text-embedding-3-small"
+    return raw or "vertex_ai.gemini-embedding-2"
 
 
 def _format_model_label(model_id: str) -> str:

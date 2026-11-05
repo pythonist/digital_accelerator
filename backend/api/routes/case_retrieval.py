@@ -35,12 +35,42 @@ def case_retrieval_index_status():
     return jsonify({"success": True, **service.index_status()})
 
 
+@case_retrieval_bp.route("/case-retrieval/rebuild-progress", methods=["GET"])
+@handle_errors
+def case_retrieval_rebuild_progress():
+    service = CaseVectorIndexService(_get_db_manager())
+    progress = service.get_progress()
+    status = service.index_status(build_if_missing=False)
+    return jsonify({
+        "success": True,
+        **progress,
+        "existing_case_count": status.get("case_count", 0),
+        "existing_last_rebuilt_at": status.get("last_rebuilt_at"),
+        "index_ready": status.get("index_ready", False),
+    })
+
+
 @case_retrieval_bp.route("/case-retrieval/rebuild-index", methods=["POST"])
 @handle_errors
 def case_retrieval_rebuild_index():
     payload = request.get_json(silent=True) or {}
     service = CaseVectorIndexService(_get_db_manager())
-    metadata = service.build_index(force_rebuild=bool(payload.get("force_rebuild", True)))
+    is_async = payload.get("async", True)
+    force = bool(payload.get("force_rebuild", True))
+
+    if is_async:
+        total = service.count_cases_to_index()
+        service.start_async_build(force_rebuild=force)
+        return jsonify({
+            "success": True,
+            "status": "building",
+            "total": total,
+            "current": 0,
+            "percentage": 0,
+            "message": f"Starting index rebuild for {total} cases...",
+        })
+
+    metadata = service.build_index(force_rebuild=force)
     status = service.index_status()
     return jsonify({
         "success": True,

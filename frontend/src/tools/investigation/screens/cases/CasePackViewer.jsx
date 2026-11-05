@@ -469,161 +469,170 @@ const CasePackViewer = () => {
     const riskBg = riskScore > 75 ? '#fef2f2' : riskScore > 40 ? '#fff7ed' : '#f0fdf4';
 
     return (
-      <Box sx={{ p: 3, pb: 10 }}>
-        <Stack spacing={2.5}>
+      <Box sx={{ p: { xs: 1.5, sm: 2, md: 2.5 }, pb: 6 }}>
+        <Stack spacing={2}>
           {/* ============================================================ */}
           {/* 1. UNIFIED EXECUTIVE INTELLIGENCE & FINANCIAL DOSSIER RIBBON */}
           {/* ============================================================ */}
           <Paper
             variant="outlined"
             sx={{
-              p: 2.25,
+              p: { xs: 1.5, sm: 2 },
               borderRadius: 2,
               bgcolor: '#ffffff',
               borderColor: '#e2e8f0',
-              display: 'flex',
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                md: 'minmax(240px, 1.2fr) minmax(360px, 2fr) auto',
+                xl: 'minmax(260px, 1fr) minmax(480px, 2fr) auto',
+              },
+              gap: { xs: 1.5, md: 2 },
               alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 2.5,
               boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
             }}
           >
             {/* Left: Focal Subject Identity & KYC */}
-            <Stack direction="row" spacing={2} alignItems="center">
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
               <Box
                 sx={{
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   bgcolor: '#f1f5f9',
                   borderRadius: 1.5,
                   display: 'grid',
                   placeItems: 'center',
                   border: '1px solid #e2e8f0',
+                  flexShrink: 0,
                 }}
               >
-                <UserIcon sx={{ fontSize: 22, color: '#334155' }} />
+                <UserIcon sx={{ fontSize: 20, color: '#334155' }} />
               </Box>
-              <Box>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography sx={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap">
+                  <Typography sx={{ fontSize: '0.88rem', fontWeight: 800, color: '#0f172a', whiteSpace: 'nowrap' }}>
                     {kyc.name || selectedCase}
                   </Typography>
                   <Chip
                     label={kyc.customer_id || 'CUST-000449'}
                     size="small"
-                    sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569' }}
+                    sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#f8fafc', border: '1px solid #e2e8f0', color: '#475569' }}
                   />
                   <Chip
                     label="KYC Verified"
                     size="small"
-                    sx={{ height: 20, fontSize: 10.5, fontWeight: 700, bgcolor: '#eff6ff', color: '#1d4ed8' }}
+                    sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, bgcolor: '#eff6ff', color: '#1d4ed8' }}
                   />
                 </Stack>
-                <Typography sx={{ fontSize: 12, color: '#64748b', mt: 0.25 }}>
+                <Typography sx={{ fontSize: '0.72rem', color: '#64748b', mt: 0.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Account: <Box component="span" sx={{ fontWeight: 700, color: '#1e293b' }}>{kyc.account_id || `ACCT-${selectedCase}`}</Box> • High Velocity Profile
                 </Typography>
               </Box>
             </Stack>
 
-            {/* Center: Integrated High-Density Financial Metrics (Zero Boxiness) */}
-            <Stack
-              direction="row"
-              spacing={3}
-              alignItems="center"
-              divider={<Divider orientation="vertical" flexItem sx={{ height: 30, my: 'auto', borderColor: '#e2e8f0' }} />}
-              sx={{ flexWrap: 'wrap' }}
+            {/* Center: Integrated High-Density Financial Metrics */}
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(4, 1fr)' },
+                gap: { xs: 1.25, sm: 1.5 },
+                py: { xs: 1, md: 0 },
+                px: { xs: 0, md: 2 },
+                borderLeft: { xs: 'none', md: '1px solid #f1f5f9' },
+                borderRight: { xs: 'none', md: '1px solid #f1f5f9' },
+              }}
             >
               {/* Total Volume */}
-              <Box>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7, color: '#64748b' }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#64748b' }}>
                   Total Volume
                 </Typography>
-                <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                <Typography sx={{ fontSize: { xs: '0.95rem', sm: '1.05rem' }, fontWeight: 800, color: '#0f172a', lineHeight: 1.2, mt: 0.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {fmtNum(totalVol, 2)}
                 </Typography>
-                <Typography sx={{ fontSize: 10.5, color: '#94a3b8' }}>
+                <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8', mt: 0.25, whiteSpace: 'nowrap' }}>
                   {ledger.length} total txns
                 </Typography>
               </Box>
 
               {/* Inflow vs Outflow Net */}
-              <Box>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7, color: '#64748b' }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#64748b' }}>
                   Net Cash Flow
                 </Typography>
-                <Typography sx={{ fontSize: 17, fontWeight: 800, color: netBalance >= 0 ? '#16a34a' : '#dc2626', lineHeight: 1.2 }}>
+                <Typography sx={{ fontSize: { xs: '0.95rem', sm: '1.05rem' }, fontWeight: 800, color: netBalance >= 0 ? '#16a34a' : '#dc2626', lineHeight: 1.2, mt: 0.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {fmtNum(netBalance, 2)}
                 </Typography>
-                <Typography sx={{ fontSize: 10.5, color: '#64748b' }}>
+                <Typography sx={{ fontSize: '0.65rem', color: '#64748b', mt: 0.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Cr: {fmtNum(creditVol)} | Dr: {fmtNum(debitVol)}
                 </Typography>
               </Box>
 
               {/* Max Transaction */}
-              <Box>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7, color: '#64748b' }}>
-                  Max Transaction
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#64748b' }}>
+                  Max Txn
                 </Typography>
-                <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                <Typography sx={{ fontSize: { xs: '0.95rem', sm: '1.05rem' }, fontWeight: 800, color: '#0f172a', lineHeight: 1.2, mt: 0.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {fmtNum(fps.max_transaction || 0, 2)}
                 </Typography>
-                <Typography sx={{ fontSize: 10.5, color: '#94a3b8' }}>
-                  Peak single exposure
+                <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8', mt: 0.25, whiteSpace: 'nowrap' }}>
+                  Peak exposure
                 </Typography>
               </Box>
 
               {/* Alerts */}
-              <Box>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.7, color: '#64748b' }}>
-                  Alert Status
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#64748b' }}>
+                  Alerts
                 </Typography>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography sx={{ fontSize: 17, fontWeight: 800, color: '#dc2626', lineHeight: 1.2 }}>
+                <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.25 }}>
+                  <Typography sx={{ fontSize: { xs: '0.95rem', sm: '1.05rem' }, fontWeight: 800, color: '#dc2626', lineHeight: 1.2 }}>
                     {alerts.length || 1}
                   </Typography>
                   <Chip
                     size="small"
-                    label={typologies.length > 0 ? `${typologies.length} Typologies` : 'Active Triage'}
-                    sx={{ height: 18, fontSize: 10, bgcolor: '#fef2f2', color: '#dc2626', fontWeight: 700 }}
+                    label={typologies.length > 0 ? `${typologies.length} Typologies` : 'Active'}
+                    sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#fef2f2', color: '#dc2626', fontWeight: 700 }}
                   />
                 </Stack>
-                <Typography sx={{ fontSize: 10.5, color: '#94a3b8' }}>
-                  Open for resolution
+                <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8', mt: 0.25, whiteSpace: 'nowrap' }}>
+                  Open triage
                 </Typography>
               </Box>
-            </Stack>
+            </Box>
 
             {/* Right: Risk Gauge */}
             <Box
               sx={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 1.5,
-                pl: 2,
-                borderLeft: { xs: 'none', md: '1px solid #e2e8f0' },
+                gap: 1.25,
+                justifyContent: { xs: 'flex-start', md: 'flex-end' },
+                flexShrink: 0,
               }}
             >
-              <Box sx={{ textAlign: 'right' }}>
-                <Typography sx={{ fontSize: 10.5, fontWeight: 800, color: riskColor, letterSpacing: 0.6 }}>
+              <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: riskColor, letterSpacing: 0.5 }}>
                   {riskLabel}
                 </Typography>
-                <Typography sx={{ fontSize: 10, color: '#94a3b8' }}>
+                <Typography sx={{ fontSize: '0.6rem', color: '#94a3b8' }}>
                   RISK GAUGE
                 </Typography>
               </Box>
               <Box
                 sx={{
-                  width: 42,
-                  height: 42,
+                  width: 38,
+                  height: 38,
                   borderRadius: '50%',
                   bgcolor: riskBg,
                   border: `2px solid ${riskColor}`,
                   display: 'grid',
                   placeItems: 'center',
                   fontWeight: 900,
-                  fontSize: 16,
+                  fontSize: 15,
                   color: riskColor,
+                  flexShrink: 0,
                 }}
               >
                 {riskScore}
@@ -864,56 +873,146 @@ const CasePackViewer = () => {
       {/* Drawer */}
       {renderCaseDrawer()}
 
-      {/* Main Content Area - Full Height Expansion */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 'calc(100vh - 180px)', overflow: 'hidden', bgcolor: '#fafafa', borderRadius: 2, border: '1px solid #e0e0e0' }}>
-        
+      {/* Main Content Area - Responsive Flex Layout */}
+      <Paper
+        variant="outlined"
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+          bgcolor: '#ffffff',
+          borderRadius: 2,
+          borderColor: '#e2e8f0',
+          overflow: 'hidden',
+          boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)',
+        }}
+      >
         {/* Case Header Bar */}
-        <Paper elevation={0} sx={{ px: 3, py: 2, borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 1 }}>
-            <Stack direction="row" spacing={2} alignItems="center">
-                <Button 
-                    variant="contained" 
-                    startIcon={<MenuIcon />} 
-                    onClick={() => setDrawerOpen(true)}
-                    sx={{ bgcolor: '#263238', '&:hover': { bgcolor: '#37474f' } }}
-                >
-                    Case Menu ({cases.length})
-                </Button>
-                
-                {selectedCase && (
-                    <Box>
-                        <Typography variant="subtitle1" fontWeight="bold">Case {selectedCase}</Typography>
-                        <Chip label="Active" size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: '0.65rem' }} />
-                    </Box>
-                )}
-            </Stack>
-            
+        <Box
+          sx={{
+            px: { xs: 1.5, sm: 2, md: 2.5 },
+            py: 1.25,
+            borderBottom: '1px solid #e2e8f0',
+            bgcolor: '#ffffff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 1.5,
+            zIndex: 1,
+          }}
+        >
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flexWrap: 'wrap', gap: 1 }}>
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<MenuIcon sx={{ fontSize: 16 }} />}
+              onClick={() => setDrawerOpen(true)}
+              sx={{
+                bgcolor: '#0f172a',
+                color: '#ffffff',
+                fontWeight: 600,
+                fontSize: '0.78rem',
+                textTransform: 'none',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+                px: 1.5,
+                py: 0.5,
+                '&:hover': { bgcolor: '#1e293b' },
+              }}
+            >
+              Case Menu ({cases.length})
+            </Button>
+
             {selectedCase && (
-                <Button variant="outlined" color="error" size="small" onClick={() => handleStatusChange('Closed')}>Close Case</Button>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+                <Typography sx={{ fontSize: '0.9rem', fontWeight: 800, color: '#0f172a', fontFamily: 'monospace' }}>
+                  Case {selectedCase}
+                </Typography>
+                <Chip
+                  label="Active"
+                  size="small"
+                  sx={{
+                    height: 20,
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    bgcolor: '#ecfdf5',
+                    color: '#059669',
+                    border: '1px solid #a7f3d0',
+                  }}
+                />
+              </Stack>
             )}
-        </Paper>
+          </Stack>
+
+          {selectedCase && (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                onClick={() => handleStatusChange('Closed')}
+                sx={{
+                  fontWeight: 600,
+                  fontSize: '0.78rem',
+                  textTransform: 'none',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  minWidth: 'auto',
+                  px: 1.5,
+                  py: 0.5,
+                  borderColor: '#fca5a5',
+                  color: '#dc2626',
+                  '&:hover': { bgcolor: '#fef2f2', borderColor: '#ef4444' },
+                }}
+              >
+                Close Case
+              </Button>
+            </Stack>
+          )}
+        </Box>
 
         {/* Tabs Bar */}
         {selectedCase && (
-            <Box sx={{ px: 3, borderBottom: '1px solid #e0e0e0', bgcolor: 'white' }}>
-            <Tabs 
-                value={activeTab} 
-                onChange={(e, v) => setActiveTab(v)}
-                variant="scrollable"
-                scrollButtons="auto"
+          <Box sx={{ px: { xs: 1, sm: 2 }, borderBottom: '1px solid #e2e8f0', bgcolor: '#ffffff' }}>
+            <Tabs
+              value={activeTab}
+              onChange={(e, v) => setActiveTab(v)}
+              variant="scrollable"
+              scrollButtons="auto"
+              allowScrollButtonsMobile
+              sx={{
+                minHeight: 40,
+                '& .MuiTabs-scrollButtons': {
+                  color: '#475569',
+                  width: 28,
+                  '&.Mui-disabled': { opacity: 0.3 },
+                },
+                '& .MuiTab-root': {
+                  minHeight: 40,
+                  py: 0.5,
+                  px: { xs: 1.25, sm: 1.75, md: 2 },
+                  fontSize: { xs: '0.75rem', sm: '0.8rem' },
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  minWidth: 'auto',
+                },
+              }}
             >
-                <Tab icon={<ActivityIcon fontSize="small" />} iconPosition="start" label="Overview" />
-                <Tab icon={<NetworkIcon fontSize="small" />} iconPosition="start" label="Evidence" />
-                <Tab icon={<DollarSignIcon fontSize="small" />} iconPosition="start" label="Ledger" />
-                <Tab icon={<SparklesIcon fontSize="small" />} iconPosition="start" label="AI Explain" />
-                <Tab icon={<QuestionIcon fontSize="small" />} iconPosition="start" label="AI Review" />
-                <Tab icon={<NotesIcon fontSize="small" />} iconPosition="start" label="Notes" />
-                <Tab icon={<CodeIcon fontSize="small" />} iconPosition="start" label="JSON Source" />
+              <Tab icon={<ActivityIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="Overview" />
+              <Tab icon={<NetworkIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="Evidence" />
+              <Tab icon={<DollarSignIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="Ledger" />
+              <Tab icon={<SparklesIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="AI Explain" />
+              <Tab icon={<QuestionIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="AI Review" />
+              <Tab icon={<NotesIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="Notes" />
+              <Tab icon={<CodeIcon sx={{ fontSize: 16 }} />} iconPosition="start" label="JSON Source" />
             </Tabs>
-            </Box>
+          </Box>
         )}
 
         {/* Scrollable Content Area */}
-        <Box sx={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+        <Box sx={{ flex: 1, overflowY: 'auto', position: 'relative', minHeight: 0 }}>
           {!selectedCase ? (
              <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'text.secondary' }}>
                 <SearchIcon sx={{ fontSize: 64, opacity: 0.2, mb: 2 }} />
@@ -1030,7 +1129,7 @@ const CasePackViewer = () => {
              </Box>
           )}
         </Box>
-      </Box>
+      </Paper>
     </PageContainer>
   );
 };

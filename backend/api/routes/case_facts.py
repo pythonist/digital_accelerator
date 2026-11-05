@@ -319,8 +319,6 @@ Provide a clear, professional response based ONLY on these facts. Be concise and
         result = llm_service.generate(
             prompt=facts_summary,
             system_prompt="You are an AML investigation assistant. Provide clear, professional responses based ONLY on the provided case facts. Be concise and focus on actionable insights.",
-            temperature=0.7,
-            max_tokens=500
         )
         
         if not result.get('success'):
@@ -415,8 +413,6 @@ Provide a clear, professional response based ONLY on these facts. Be concise and
             for chunk in llm_service.stream_generate(
                 prompt=facts_summary,
                 system_prompt="You are an AML investigation assistant. Provide clear, professional responses based ONLY on the provided case facts. Be concise and focus on actionable insights.",
-                temperature=0.7,
-                max_tokens=500,
             ):
                 yield emit("token", {"token": chunk})
             yield emit("done", {"case_id": case_id, "env_id": env_id})

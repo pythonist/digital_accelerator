@@ -181,7 +181,7 @@ const AiReviewPanel = ({ caseId }) => {
       </Paper>
 
       {/* Main Dual-Pane Studio */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '420px 1fr' }, gap: 2.5, flex: 1, minHeight: 'calc(100vh - 310px)' }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: '340px 1fr', xl: '420px 1fr' }, gap: { xs: 1.5, md: 2.5 }, flex: 1, minHeight: 0 }}>
         
         {/* ============================================================ */}
         {/* LEFT PANE: Regulatory Challenge & Analytical Scorecard */}

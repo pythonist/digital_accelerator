@@ -489,6 +489,10 @@ class APIClient {
     return this.get('/api/v2/case-retrieval/index-status');
   }
 
+  async getCaseRetrievalRebuildProgress() {
+    return this.get('/api/v2/case-retrieval/rebuild-progress');
+  }
+
   async rebuildCaseRetrievalIndex(payload = {}) {
     return this.post('/api/v2/case-retrieval/rebuild-index', payload);
   }

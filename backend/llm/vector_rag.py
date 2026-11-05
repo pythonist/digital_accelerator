@@ -91,61 +91,7 @@ class VectorRAGSystem:
                     print(f"    Warning: local embedding failed for item {idx}: {exc}")
             return all_embeddings if all_embeddings else None
 
-        if not _ollama_http_enabled():
-            return None
-        
-        all_embeddings = []
-        total_batches = (len(texts) + batch_size - 1) // batch_size
-        
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            batch_num = (i // batch_size) + 1
-            
-            try:
-                print(f"  → Processing batch {batch_num}/{total_batches} ({len(batch)} texts)...")
-                response = requests.post(
-                    f"{self.ollama_base_url}/api/embed",
-                    json={'model': self.embedding_model, 'input': batch},
-                    timeout=300
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'embeddings' in data:
-                        batch_embeddings = [np.array(e, dtype=np.float32) for e in data['embeddings']]
-                        all_embeddings.extend(batch_embeddings)
-                    else:
-                        print(f"    ⚠️ No embeddings in response for batch {batch_num}")
-                else:
-                    print(f"    ❌ Batch {batch_num} failed: HTTP {response.status_code}")
-                    
-            except requests.Timeout:
-                print(f"    ⏱️ Batch {batch_num} timed out, retrying with smaller chunks...")
-                # Retry with smaller batch
-                if len(batch) > 1:
-                    mid = len(batch) // 2
-                    sub_batch_1 = batch[:mid]
-                    sub_batch_2 = batch[mid:]
-                    for sub_batch in [sub_batch_1, sub_batch_2]:
-                        try:
-                            response = requests.post(
-                                f"{self.ollama_base_url}/api/embed",
-                                json={'model': self.embedding_model, 'input': sub_batch},
-                                timeout=180
-                            )
-                            if response.status_code == 200:
-                                data = response.json()
-                                if 'embeddings' in data:
-                                    sub_embeddings = [np.array(e, dtype=np.float32) for e in data['embeddings']]
-                                    all_embeddings.extend(sub_embeddings)
-                        except Exception as sub_e:
-                            print(f"      ❌ Sub-batch failed: {sub_e}")
-                            
-            except Exception as e:
-                print(f"    ⚠️ Batch {batch_num} error: {e}")
-        
-        return all_embeddings if all_embeddings else None
-
+        return None
     def generate_embedding(self, text: str) -> Optional[np.ndarray]:
         """Single string embedding with retry logic"""
         if not _NUMPY_OK:
@@ -157,28 +103,7 @@ class VectorRAGSystem:
                     return np.array(emb, dtype=np.float32)
             except Exception as exc:
                 print(f"  Warning: local embedding failed: {exc}")
-        if not _ollama_http_enabled():
-            return None
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = requests.post(
-                    f"{self.ollama_base_url}/api/embeddings",
-                    json={'model': self.embedding_model, 'prompt': text},
-                    timeout=30
-                )
-                if response.status_code == 200:
-                    embedding = response.json().get('embedding', [])
-                    if embedding:
-                        return np.array(embedding, dtype=np.float32)
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"  ⚠️ Embedding attempt {attempt + 1} failed, retrying...")
-                    time.sleep(1)
-                else:
-                    print(f"  ❌ Error generating embedding after {max_retries} attempts: {e}")
         return None
-
     def build_case_embeddings(self, force_rebuild=False):
         """Builds normalized FAISS index for Cosine Similarity with enhanced metrics."""
         if not _NUMPY_OK:
@@ -489,42 +414,13 @@ Provide a concise explanation (2-3 sentences) highlighting the key patterns, ris
                 result = self.llm_provider.generate(
                     prompt=prompt,
                     model=model,
-                    temperature=0.7,
-                    max_tokens=150,
                 )
                 if result.get('success'):
                     explanation = str(result.get('response') or '').strip()
                     return explanation if explanation else "Unable to generate explanation."
                 return f"LLM Error: {result.get('error', 'Unknown error')}"
 
-            if not _ollama_http_enabled():
-                return "AI explanation is unavailable because no configured provider is ready."
-
-            response = requests.post(
-                f"{self.ollama_base_url}/api/generate",
-                json={
-                    'model': model,
-                    'prompt': prompt,
-                    'stream': False,
-                    'options': {
-                        'temperature': 0.7,
-                        'num_predict': 150
-                    }
-                },
-                timeout=30
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                explanation = data.get('response', '').strip()
-                return explanation if explanation else "Unable to generate explanation."
-            try:
-                err_json = response.json()
-                err_msg = err_json.get('error', 'Unknown error')
-                return f"LLM Error: {err_msg} (HTTP {response.status_code})"
-            except Exception:
-                return f"LLM service unavailable (HTTP {response.status_code})"
-                
+            return 'AI explanation is unavailable because no configured provider is ready.'
         except requests.Timeout:
             return "Explanation generation timed out. The LLM service may be busy."
         except Exception as e:

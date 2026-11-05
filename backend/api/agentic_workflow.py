@@ -115,9 +115,9 @@ def _parse_llm_json(raw) -> dict:
     return value
 
 
-def _chat_json(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.1, max_tokens: int = 1800) -> dict:
+def _chat_json(session_id: str, provider: str, stage: str, system: str, user: str, **kwargs) -> dict:
     prompt = f"SYSTEM:\n{system}\n\nUSER:\n{user}"
-    raw = run_llm_json(provider, system, user, temperature=temperature, max_tokens=max_tokens)
+    raw = run_llm_json(provider, system, user)
     _save_last_llm(session_id, stage, prompt, raw)
     try:
         return _parse_llm_json(raw)
@@ -127,7 +127,7 @@ def _chat_json(session_id: str, provider: str, stage: str, system: str, user: st
             f"{system}\n\nYour previous response was incomplete or invalid. Return one COMPLETE, "
             "compact JSON object only. Do not use markdown fences. Keep arrays concise."
         )
-        retry_raw = run_llm_json(provider, retry_system, user, temperature=temperature, max_tokens=max_tokens)
+        retry_raw = run_llm_json(provider, retry_system, user)
         _save_last_llm(session_id, f"{stage}:retry", f"SYSTEM:\n{retry_system}\n\nUSER:\n{user}", retry_raw)
         try:
             return _parse_llm_json(retry_raw)
@@ -135,8 +135,8 @@ def _chat_json(session_id: str, provider: str, stage: str, system: str, user: st
             raise LLMError(f"{provider} returned incomplete JSON for {stage}; findings/documents were not fabricated.") from exc
 
 
-def _chat_text(session_id: str, provider: str, stage: str, system: str, user: str, temperature: float = 0.2, max_tokens: int = 1800) -> str:
-    response = run_llm_text(provider, system, user, temperature=temperature, max_tokens=max_tokens)
+def _chat_text(session_id: str, provider: str, stage: str, system: str, user: str, **kwargs) -> str:
+    response = run_llm_text(provider, system, user)
     _save_last_llm(session_id, stage, f"SYSTEM:\n{system}\n\nUSER:\n{user}", response)
     return response
 
@@ -154,22 +154,18 @@ def _summarize_tool(
     evidence_depth = agent_config.get("evidence_depth", "standard")
     max_evidence = agent_config.get("max_evidence", 6)
     system = (
-        f"You are {provider} acting as the memory and compression agent for a "
-        "financial crime investigation. Summarize only the supplied tool output. "
-        "Do not invent facts. Return concise bullet-point markdown covering: "
-        "Key Facts, Specific Metrics/Entities, Triggered Flags, and Provisional Risk. "
-        "Keep the summary under 180 words. Do not repeat facts from prior tools."
+        "You are an expert AML investigator summarizing forensic tool findings. "
+        "Summarize the evidence in 2-4 bullet points under 90 words: "
+        "Key Facts, Metrics/Entities, Flags, and Risk. Do not hallucinate."
     )
     user = (
         f"Tool: {tool_name}\n\n"
-        f"Existing investigation context:\n{current_memory[-1500:] or 'None yet.'}\n\n"
-        f"Raw tool output:\n{raw_output[:5000]}\n\n"
-        f"Agent-specific instructions:\n{agent_instructions or 'Use the standard investigation scope.'}\n\n"
-        f"Evidence depth: {evidence_depth}. Include no more than {max_evidence} key evidence items.\n\n"
-        "Update the investigation memory from this tool output."
+        f"Raw tool output:\n{raw_output[:1800]}\n\n"
+        f"Focus: {agent_instructions or 'Standard AML scope'}\n\n"
+        f"Depth: {evidence_depth}. Maximum {max_evidence} points.\n\n"
+        "Provide a concise summary."
     )
-    depth_tokens = {"fast": 350, "standard": 450, "deep": 650}.get(str(evidence_depth), 450)
-    return _chat_text(session_id, provider, f"summarize:{tool_name}", system, user, temperature=0.1, max_tokens=depth_tokens)
+    return _chat_text(session_id, provider, f"summarize:{tool_name}", system, user)
 
 
 def _current_memory(session_id: str) -> str:
@@ -243,7 +239,7 @@ def plan_investigation(session_id: str, case_id: str, context: dict, prior_memor
         f"Prior memory if this is a follow-up loop:\n{prior_memory[-3000:] or 'None'}\n\n"
         "Create the investigation plan."
     )
-    result = _chat_json(session_id, provider, "planner", system, user, max_tokens=1000)
+    result = _chat_json(session_id, provider, "planner", system, user)
     steps = result.get("steps") or []
     valid = [step for step in steps if step.get("tool") in TOOL_REGISTRY]
     if not valid:
@@ -304,25 +300,31 @@ def execute_step(session_id: str, case_id: str, tool_name: str, step_db_id: str,
         selected_model = context.get("selected_model", "chatgpt")
         tool_provider = configured_model if configured_model != "inherit" else selected_model
         
-        # For worker tool summaries, use gpt-4o-mini when OpenAI is selected to reserve TPM quota for lead synthesis
-        worker_provider = tool_provider
-        if str(tool_provider).startswith("openai:") and tool_provider != "openai:gpt-4o-mini":
-            worker_provider = "openai:gpt-4o-mini"
+        # Route strictly to configured OpenAI provider
+        worker_provider = tool_provider if tool_provider in ("chatgpt", "openai") else "chatgpt"
 
         log_activity(
             session_id,
-            f"{agent_name} summarizing with {tool_provider} ({agent_config.get('evidence_depth', 'standard')} evidence depth).",
+            f"{agent_name} analyzing evidence ({agent_config.get('evidence_depth', 'standard')} depth).",
             "info",
         )
-        summary = _summarize_tool(
-            session_id,
-            worker_provider,
-            tool_name,
-            raw_output,
-            current_memory=memory_text,
-            agent_instructions=str(agent.get("instructions") or ""),
-            agent_config=agent_config,
-        )
+        try:
+            summary = _summarize_tool(
+                session_id,
+                worker_provider,
+                tool_name,
+                raw_output,
+                current_memory=memory_text,
+                agent_instructions=str(agent.get("instructions") or ""),
+                agent_config=agent_config,
+            )
+        except Exception as exc:
+            exc_str = str(exc)
+            if any(k in exc_str.lower() for k in ["quota", "credit", "429", "insufficient_quota"]):
+                log_activity(session_id, f"OpenAI Rate/Credit notice on {agent_name}: evidence recorded.", "warning")
+            else:
+                log_activity(session_id, f"{agent_name}: summary notice ({exc}) - evidence recorded.", "info")
+            summary = f"Evidence captured ({len(raw_output)} bytes). Note: automated LLM summary fallback applied."
 
         c.execute(
             """
@@ -362,7 +364,7 @@ def synthesize_risk(session_id: str, case_id: str, memory_text: str, provider: s
         '"risk_evolution":[{"stage":"...","score":0,"reason":"..."}]}.'
     )
     user = f"Case ID: {case_id}\n\nAccumulated memory:\n{memory_text[-6000:]}"
-    return _chat_json(session_id, provider, "risk_agent", system, user, temperature=0.1, max_tokens=800)
+    return _chat_json(session_id, provider, "risk_agent", system, user)
 
 
 def qa_review(session_id: str, case_id: str, memory_text: str, risk_result: dict, provider: str) -> dict:
@@ -376,7 +378,7 @@ def qa_review(session_id: str, case_id: str, memory_text: str, risk_result: dict
         f"Case ID: {case_id}\n\nMemory:\n{memory_text[-5000:]}\n\n"
         f"Risk assessment:\n{json.dumps(risk_result, indent=2, default=str)}"
     )
-    return _chat_json(session_id, provider, "qa_reflection", system, user, temperature=0.1, max_tokens=600)
+    return _chat_json(session_id, provider, "qa_reflection", system, user)
 
 
 def extract_findings(session_id: str, case_id: str, tool_log: list[dict], risk_result: dict, provider: str) -> dict:
@@ -404,9 +406,9 @@ def extract_findings(session_id: str, case_id: str, tool_log: list[dict], risk_r
     user = (
         f"Case ID: {case_id}\n"
         f"Risk result:\n{json.dumps(risk_result, indent=2, default=str)}\n\n"
-        f"Full tool evidence summaries:\n{evidence_blocks[:7000]}"
+        f"Full tool evidence summaries:\n{evidence_blocks[:4500]}"
     )
-    data = _chat_json(session_id, provider, "findings_agent", system, user, temperature=0.12, max_tokens=1500)
+    data = _chat_json(session_id, provider, "findings_agent", system, user)
     for key in ("findings", "evidence_items", "risk_drivers", "recommendations", "timeline", "open_questions"):
         if not isinstance(data.get(key), list):
             data[key] = []
@@ -419,15 +421,16 @@ def generate_document(session_id: str, case_id: str, doc_type: str, findings_dat
         "Write detailed, compliance-appropriate markdown using only the supplied "
         "structured findings, risk result, and tool summaries. Do not invent facts."
     )
+    compact_tools = [{k: row.get(k) for k in ('tool_name', 'summary', 'status')} for row in tool_log]
     user = (
         f"Document type: {doc_type}\nCase ID: {case_id}\n\n"
         f"Risk result:\n{json.dumps(risk_result, indent=2, default=str)}\n\n"
-        f"Structured findings:\n{json.dumps(findings_data, indent=2, default=str)[:8000]}\n\n"
-        f"Tool summaries:\n{json.dumps([{k: row.get(k) for k in ('tool_name', 'summary', 'status')} for row in tool_log], indent=2, default=str)[:6000]}\n\n"
+        f"Structured findings:\n{json.dumps(findings_data, indent=2, default=str)[:4000]}\n\n"
+        f"Tool summaries:\n{json.dumps(compact_tools, indent=2, default=str)[:3500]}\n\n"
         "Write the document with clear section headings, evidence references, "
         "recommendations where relevant, and enough detail for senior analyst review."
     )
-    return _chat_text(session_id, provider, f"document:{doc_type}", system, user, temperature=0.18, max_tokens=1500)
+    return _chat_text(session_id, provider, f"document:{doc_type}", system, user)
 
 
 def generate_reports(session_id: str, case_id: str, risk_result: dict, provider: str) -> dict:
@@ -463,13 +466,19 @@ def _finalize_risk(session_id: str, risk_result: dict) -> None:
 def run_agentic_investigation(case_id: str, session_id: str, context: dict | None = None) -> None:
     context = context or {}
     try:
-        provider = context.get("selected_model", "chatgpt")
+        raw_provider = context.get("selected_model", "chatgpt")
+        provider = raw_provider if raw_provider in ("chatgpt", "openai") else "chatgpt"
         providers = provider_status()
         log_activity(session_id, f"Started agentic investigation for Case {case_id}", "info")
         log_activity(session_id, f"Loaded workflow {WORKFLOW_VERSION} from {WORKFLOW_FILE}", "info")
+        openai_model = (
+            providers.get("openai", {}).get("model")
+            or providers.get("chatgpt", {}).get("model")
+            or "openai.gpt-5.6-luna"
+        )
         log_activity(
             session_id,
-            f"Using model {provider} (LLM providers: ChatGPT={providers['chatgpt']['model']} Nemotron={providers['nemotron']['model']})",
+            f"Using model {provider} (Configured OpenAI model: {openai_model})",
             "info",
         )
         update_memory(session_id, f"Case ID: {case_id}\nInvestigation initialized at {datetime.utcnow().isoformat()}Z.")
@@ -556,7 +565,14 @@ def run_agentic_investigation(case_id: str, session_id: str, context: dict | Non
         _finalize_risk(session_id, risk_result)
         log_activity(session_id, "Agentic investigation complete.", "success")
     except Exception as exc:
-        update_session_status(session_id, "failed", current_step=f"Failed: {exc}")
+        exc_str = str(exc)
+        if any(term in exc_str.lower() for term in ["quota", "credit", "429", "insufficient_quota"]):
+            user_msg = "OpenAI API credit limit reached or rate limit exceeded ($2 credit limit). Please check your OpenAI account balance."
+            update_session_status(session_id, "failed", current_step=f"Failed: {user_msg}")
+            log_activity(session_id, f"Investigation halted: {user_msg}", "error")
+        else:
+            update_session_status(session_id, "failed", current_step=f"Failed: {exc}")
+            log_activity(session_id, f"Agentic investigation failed: {exc}", "error")
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("UPDATE investigation_session SET end_time = ? WHERE id = ?", (datetime.now().isoformat(), session_id))

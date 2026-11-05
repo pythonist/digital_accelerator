@@ -24,9 +24,7 @@ class AIExplanationService:
                 full_prompt = f"{prompt}\n\nCONTEXT DATA:\n{json.dumps(context_data, indent=2, default=str)}"
 
             result = self.llm.generate(
-                prompt=full_prompt,
-                temperature=0.3,
-                max_tokens=250
+                prompt=full_prompt
             )
             
             return result.get('response', '') if result.get('success') else None
@@ -48,9 +46,7 @@ Focus on: data quality implications and why join rates matter for calibration ac
 Keep it professional and concise."""
 
         result = self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=200
+            prompt=prompt
         )
         
         return result.get('response', '') if result.get('success') else None
@@ -73,9 +69,7 @@ Focus on: why filtering is necessary for effective calibration and risk focus.
 Keep it professional and regulatory-focused."""
 
         result = self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=200
+            prompt=prompt
         )
         
         return result.get('response', '') if result.get('success') else None
@@ -100,9 +94,7 @@ Focus on: why aggregation is critical for detecting behavioral patterns vs indiv
 Keep it professional and explain the risk detection value."""
 
         result = self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=200
+            prompt=prompt
         )
         
         return result.get('response', '') if result.get('success') else None
@@ -127,9 +119,7 @@ Explain what percentile-based calibration means for regulators.
 Keep it professional and audit-focused."""
 
         result = self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=250
+            prompt=prompt
         )
         
         return result.get('response', '') if result.get('success') else None
@@ -198,9 +188,7 @@ Focus on: what approval means for deployment and regulatory compliance.
 Keep it brief and professional."""
 
         result = self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=150
+            prompt=prompt
         )
         
         return result.get('response', '') if result.get('success') else None
@@ -229,9 +217,7 @@ The summary should:
 Keep it executive-level, professional, and confidence-inspiring."""
 
         result = self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=300
+            prompt=prompt
         )
         
         return result.get('response', '') if result.get('success') else None

@@ -294,28 +294,7 @@ class FCCWorkbenchNarrativeService:
     def _resolve_model(self, ollama: Any) -> Optional[str]:
         if not ollama:
             return None
-        try:
-            available = [str(model or "").strip() for model in ollama.list_models()]
-        except Exception:
-            available = []
-
-        preferred = [
-            "gpt-4o-mini",
-            "qwen2.5:1.5b",
-            "qwen2.5:0.5b",
-            "phi3:mini",
-            "gemma2:2b",
-            "tinyllama",
-        ]
-        lowered = {name.lower(): name for name in available if name}
-        for wanted in preferred:
-            exact = lowered.get(wanted.lower())
-            if exact:
-                return exact
-            for name in available:
-                if str(name).lower().startswith(wanted.lower()):
-                    return name
-        return getattr(ollama, "default_model", None)
+        return getattr(ollama, 'default_model', None) or os.getenv('OPENAI_MODEL')
 
     def build(
         self,
@@ -325,7 +304,7 @@ class FCCWorkbenchNarrativeService:
         context: Dict[str, Any],
         fallback: str,
         audience: str = "business",
-        max_tokens: int = 260,
+        **kwargs: Any,
     ) -> str:
         cache_key = f"{audience}:{section_key}"
         if cache_key in self._cache:
@@ -349,8 +328,6 @@ class FCCWorkbenchNarrativeService:
                 result = self.ollama.generate(
                     prompt=prompt,
                     model=self.model,
-                    temperature=0.2,
-                    max_tokens=max_tokens,
                 )
                 candidate = _safe_text((result or {}).get("response"), "").replace("*", "")
                 if candidate:
@@ -499,7 +476,6 @@ class FCCWorkbenchReportPDFGenerator:
                 f"{_to_int(bi.get('sars_missed'), 0):,} remain the miss-risk to govern."
             ),
             audience=audience,
-            max_tokens=300,
         )
         workbench_story = self.narratives.build(
             "workbench_overview",

@@ -197,7 +197,7 @@ def get_all_latest_sessions():
     conn.close()
     return [dict(r) for r in rows]
 
-def get_activities(session_id: str, limit: int = 100):
+def get_activities(session_id: str, limit: int = 500):
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT * FROM activity_log WHERE session_id = ? ORDER BY timestamp ASC LIMIT ?", (session_id, limit))

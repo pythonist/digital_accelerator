@@ -11,7 +11,7 @@ import ast
 class SmartMergeService:
     def __init__(self, db_manager, ollama_wrapper=None):
         self.db_manager = db_manager
-        self.ollama = ollama_wrapper
+        self.llm = ollama_wrapper; self.ollama = ollama_wrapper
         self._init_registry()
 
     def _init_registry(self):
@@ -178,7 +178,7 @@ class SmartMergeService:
         """
         
         try:
-            result = self.ollama.generate(prompt, model='tinyllama', temperature=0.1)
+            result = self.ollama.generate(prompt, model=None)
             if not result['success']: return []
 
             # Robust JSON Parsing

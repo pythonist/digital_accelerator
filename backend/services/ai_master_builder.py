@@ -67,8 +67,6 @@ class AIMasterBuilder:
             response = self._llm_provider.generate(
                 prompt=prompt,
                 model=model or getattr(self._llm_provider, "default_model", None),
-                temperature=0.1,
-                max_tokens=700,
             )
             if not response.get("success"):
                 raise RuntimeError(response.get("error") or "AI provider returned no response")

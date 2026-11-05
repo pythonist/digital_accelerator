@@ -28,9 +28,9 @@ class UnifiedLLMProvider:
         except ImportError:
             pass
 
-        selected = selected or os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "gpt-4o-mini"
+        selected = selected or os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "openai.gpt-5.6-luna"
         _, model = split_model_id(selected)
-        return "openai", model or "gpt-4o-mini"
+        return "openai", model or "openai.gpt-5.6-luna"
 
     def _provider(self, model: str) -> OpenAIWrapper:
         key = f"openai:{model}"
@@ -49,7 +49,7 @@ class UnifiedLLMProvider:
 
     @property
     def embedding_model(self) -> str:
-        return getattr(self._active(), "embedding_model", os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small"))
+        return getattr(self._active(), "embedding_model", os.getenv("OPENAI_EMBED_MODEL", "vertex_ai.gemini-embedding-2"))
 
     def check_connection(self) -> bool:
         try:
