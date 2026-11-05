@@ -1,114 +1,110 @@
 // src/tools/investigation/screens/case/CaseInvestigationScreen.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { useAppContext } from "@context/AppContext";
-import apiClient from "@services/api";
+import { useAppContext } from '@context/AppContext';
+import apiClient from '@services/api';
 import { mergeFccSentinelHandoff, readFccSentinelHandoff } from '../../../../utils/fccSentinelHandoff';
 
-// ✅ Import Layout Components
-// import PageContainer from "@investigation/components/PageContainer"; 
-// import PageContainer from "@investigation/components/PageContainer";
-import PageContainer from "@investigation-layout/PageContainer";
-// ✅ Import Manual Component
-import CopilotManual from "@investigation/components/guide/CopilotManual";
+import PageContainer from '@investigation-layout/PageContainer';
+import CopilotManual from '@investigation/components/guide/CopilotManual';
+import { FormattedMarkdown } from '@investigation/components/FormattedMarkdown';
 
 import {
-  Box, Paper, Typography, Button, Select, MenuItem, FormControl, CircularProgress, 
-  Card, CardContent, Grid, Chip, TextField, InputAdornment, Stack, IconButton, 
-  LinearProgress, Divider, Tooltip
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Divider,
+  FormControl,
+  Grid,
+  IconButton,
+  InputAdornment,
+  LinearProgress,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
 } from '@mui/material';
 
 import {
-  Security as ShieldIcon, TrendingUp as TrendingUpIcon, Send as SendIcon, 
-  Refresh as RefreshIcon, Info as InfoIcon, Warning as WarningIcon, 
-  SmartToy as SmartToyIcon, Person as PersonIcon, AttachMoney as MoneyIcon, 
-  Timeline as TimelineIcon, Notifications as NotificationsIcon, 
-  Description as FileTextIcon, CheckCircle as CheckCircleIcon, 
-  Error as ErrorIcon, ExpandMore as ExpandMoreIcon, ExpandLess as ExpandLessIcon, 
-  Bolt as BoltIcon, TableChart as TableChartIcon,
-  HelpOutline // ✅ Icon for Guide
+  AutoAwesome as AutoAwesomeIcon,
+  Bolt as BoltIcon,
+  Check as CheckIcon,
+  CheckCircle as CheckCircleIcon,
+  ContentCopy as ContentCopyIcon,
+  DeleteOutline as DeleteOutlineIcon,
+  Description as FileTextIcon,
+  ErrorOutline as ErrorIcon,
+  ExpandLess as ExpandLessIcon,
+  ExpandMore as ExpandMoreIcon,
+  FilterList as FilterListIcon,
+  HelpOutline,
+  Notifications as NotificationsIcon,
+  Person as PersonIcon,
+  Refresh as RefreshIcon,
+  Security as ShieldIcon,
+  Send as SendIcon,
+  Timeline as TimelineIcon,
+  TrendingUp as TrendingUpIcon,
+  VerifiedUser as VerifiedIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 
-// --- Markdown Component to fix raw text ---
-const MarkdownResponse = ({ content }) => {
-  if (!content) return null;
-
-  // 1. Split by newlines to handle paragraphs/lists
-  const lines = content.split('\n');
-  
-  return (
-    <Box sx={{ fontSize: '0.875rem', lineHeight: 1.6, color: 'text.primary' }}>
-      {lines.map((line, i) => {
-        // Handle Bullet Points
-        if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
-          const text = line.replace(/^[\*\-]\s+/, '');
-          return (
-            <Box key={i} sx={{ display: 'flex', gap: 1, ml: 1, mb: 0.5 }}>
-              <Typography component="span" sx={{ color: 'text.secondary' }}>•</Typography>
-              <Typography component="span" sx={{ fontWeight: text.includes('**') ? 600 : 400 }}>
-                {parseBold(text)}
-              </Typography>
-            </Box>
-          );
-        }
-        
-        // Handle Headers
-        if (line.trim().startsWith('**') && line.trim().endsWith('**') && line.length < 50) {
-           return <Typography key={i} variant="subtitle2" sx={{ mt: 2, mb: 1, color: 'primary.dark', fontWeight: 'bold' }}>{line.replace(/\*\*/g, '')}</Typography>;
-        }
-
-        // Handle Empty Lines
-        if (!line.trim()) return <Box key={i} sx={{ height: 8 }} />;
-
-        // Standard Text with Bold parsing
-        return (
-          <Typography key={i} component="p" sx={{ mb: 0.5 }}>
-            {parseBold(line)}
-          </Typography>
-        );
-      })}
-    </Box>
-  );
+const RISK_TIER_CONFIG = (score) => {
+  if (score >= 80) {
+    return {
+      label: 'HIGH RISK',
+      color: '#dc2626',
+      bg: '#fef2f2',
+      border: '#fecaca',
+    };
+  }
+  if (score >= 40) {
+    return {
+      label: 'MEDIUM RISK',
+      color: '#d97706',
+      bg: '#fffbeb',
+      border: '#fde68a',
+    };
+  }
+  return {
+    label: 'LOW RISK',
+    color: '#059669',
+    bg: '#ecfdf5',
+    border: '#a7f3d0',
+  };
 };
 
-// Helper to parse **bold** text inside a line
-const parseBold = (text) => {
-  const parts = text.split(/(\*\*.*?\*\*)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
-};
-
-
-// --- MAIN SCREEN ---
 const CaseInvestigationScreen = () => {
-  const { 
-    caseList, 
-    loadCaseList, 
+  const {
+    caseList,
+    loadCaseList,
     caseScope,
-    getFilteredCaseList 
+    getFilteredCaseList,
   } = useAppContext();
-  
+
   const [selectedCaseId, setSelectedCaseId] = useState('');
   const [facts, setFacts] = useState(null);
   const [loading, setLoading] = useState(false);
-  
+
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [generating, setGenerating] = useState(false);
   const [streamStarted, setStreamStarted] = useState(false);
   const [exportingReport, setExportingReport] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState(null);
   const [expandedSections, setExpandedSections] = useState({
     risk: true,
     alerts: true,
-    transactions: true
+    transactions: true,
   });
-  
-  // ✅ State for Manual visibility
+
   const [showManual, setShowManual] = useState(false);
-  
+
   const chatEndRef = useRef(null);
   const workflowSessionRef = useRef(null);
   const displayCases = getFilteredCaseList();
@@ -180,24 +176,29 @@ const CaseInvestigationScreen = () => {
         });
       }
     }).catch(() => {});
-    
+
     try {
       const res = await apiClient.get(`/api/v2/case/${id}/facts`);
       if (res.success && res.facts) {
         setFacts(res.facts);
-        setMessages([{
-          role: 'system',
-          content: `Case ${id} loaded. Risk Score: ${res.facts.risk.risk_score}/100. Ready to assist.`,
-          timestamp: new Date()
-        }]);
+        setMessages([
+          {
+            role: 'system',
+            caseId: id,
+            facts: res.facts,
+            timestamp: new Date(),
+          },
+        ]);
       }
     } catch (err) {
       console.error(err);
-      setMessages([{
-        role: 'error',
-        content: `Failed to load case: ${err.message}`,
-        timestamp: new Date()
-      }]);
+      setMessages([
+        {
+          role: 'error',
+          content: `Failed to load case facts: ${err.message}`,
+          timestamp: new Date(),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -205,9 +206,9 @@ const CaseInvestigationScreen = () => {
 
   const sendMessage = async (text) => {
     if (!text.trim() || generating) return;
-    
+
     const userMsg = { role: 'user', content: text, timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg, { role: 'assistant', content: '', streaming: true, timestamp: new Date() }]);
+    setMessages((prev) => [...prev, userMsg, { role: 'assistant', content: '', streaming: true, timestamp: new Date() }]);
     setInput('');
     setGenerating(true);
     setStreamStarted(false);
@@ -246,7 +247,7 @@ const CaseInvestigationScreen = () => {
           const payload = JSON.parse(dataLine.slice(5).trim());
           if (rawEvent.includes('event: token')) {
             setStreamStarted(true);
-            setMessages(prev => {
+            setMessages((prev) => {
               const next = [...prev];
               const index = next.length - 1;
               if (next[index]?.role === 'assistant') {
@@ -262,14 +263,14 @@ const CaseInvestigationScreen = () => {
         }
         if (done) finished = true;
       }
-      setMessages(prev => {
+      setMessages((prev) => {
         const next = [...prev];
         const index = next.length - 1;
         if (next[index]?.role === 'assistant') next[index] = { ...next[index], streaming: false };
         return next;
       });
     } catch (err) {
-      setMessages(prev => {
+      setMessages((prev) => {
         const next = [...prev];
         const index = next.length - 1;
         if (next[index]?.role === 'assistant' && !next[index].content) {
@@ -284,7 +285,29 @@ const CaseInvestigationScreen = () => {
   };
 
   const toggleSection = (section) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+    setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const handleCopy = (text, idx) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(idx);
+    setTimeout(() => setCopiedIndex(null), 2000);
+  };
+
+  const handleClearChat = () => {
+    if (!facts) {
+      setMessages([]);
+      return;
+    }
+    setMessages([
+      {
+        role: 'system',
+        caseId: selectedCaseId,
+        facts,
+        timestamp: new Date(),
+      },
+    ]);
   };
 
   const handleExportReport = async () => {
@@ -307,11 +330,14 @@ const CaseInvestigationScreen = () => {
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setMessages(prev => [...prev, {
-        role: 'error',
-        content: `Report export failed: ${err.message}`,
-        timestamp: new Date()
-      }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'error',
+          content: `Report export failed: ${err.message}`,
+          timestamp: new Date(),
+        },
+      ]);
     } finally {
       setExportingReport(false);
     }
@@ -335,309 +361,572 @@ const CaseInvestigationScreen = () => {
   }, [displayCases, selectedCaseId]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const riskScore = Number(facts?.risk?.risk_score || 0);
+  const tier = RISK_TIER_CONFIG(riskScore);
 
   return (
     <>
-      {/* ✅ FIXED: Manual component placed outside PageContainer for guaranteed visibility */}
       <CopilotManual open={showManual} onClose={() => setShowManual(false)} />
 
       <PageContainer
-          header={
-              <PageContainer 
-                  title="Investigation Copilot" 
-                  subtitle="Deterministic Analysis + AI Assistant"
-                  actions={
-                  <Stack direction="row" spacing={1.5} alignItems="center">
-                      
-                      {/* ✅ Copilot Guide Button */}
-                      <Button 
-                        variant="text" 
-                        startIcon={<HelpOutline />} 
-                        onClick={() => setShowManual(true)}
-                        size="small"
-                        sx={{ color: 'text.secondary', fontWeight: 600 }}
-                      >
-                        Guide
-                      </Button>
-                      
-                      <Divider orientation="vertical" flexItem variant="middle" />
+        title="AI Copilot Investigation"
+        subtitle="Evidence-grounded conversational intelligence & forensic case narrative copilot"
+        breadcrumbs={['Investigation', 'AI Copilot']}
+        actions={(
+          <Stack direction="row" spacing={1.25} alignItems="center">
+            <Button
+              variant="text"
+              startIcon={<HelpOutline />}
+              onClick={() => setShowManual(true)}
+              size="small"
+              sx={{ color: '#475569', fontWeight: 600, textTransform: 'none' }}
+            >
+              Guide
+            </Button>
 
-                      {selectedCaseId && (
-                      <Chip 
-                          label={`Case: ${selectedCaseId}`}
-                          size="small"
-                          sx={{ fontWeight: 'bold', fontFamily: 'monospace', bgcolor: '#f5f5f5', height: 28 }}
-                      />
-                      )}
-                      <Button 
-                      variant="outlined" 
-                      size="small" 
-                      startIcon={<RefreshIcon />}
-                      onClick={() => selectedCaseId && handleCaseSelect(selectedCaseId)}
-                      disabled={!selectedCaseId || loading}
-                      sx={{ fontWeight: 600 }}
-                      >
-                      Reload
-                      </Button>
-                      <Button 
-                      variant="contained" 
-                      size="small" 
-                      disableElevation 
-                      color="primary" 
-                      startIcon={<FileTextIcon />}
-                      disabled={exportingReport || !facts}
-                      onClick={handleExportReport}
-                      sx={{ fontWeight: '600' }}
-                      >
-                      {exportingReport ? 'Preparing Report...' : 'Export Report'}
-                      </Button>
-                  </Stack>
-                  }
+            <Divider orientation="vertical" flexItem sx={{ my: 0.5 }} />
+
+            {selectedCaseId && (
+              <Chip
+                label={`Case: ${selectedCaseId}`}
+                size="small"
+                sx={{
+                  fontWeight: 700,
+                  fontFamily: 'monospace',
+                  bgcolor: '#f1f5f9',
+                  color: '#0f172a',
+                  border: '1px solid #cbd5e1',
+                  height: 28,
+                  fontSize: '0.75rem',
+                }}
               />
-          }
+            )}
+
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<RefreshIcon />}
+              onClick={() => selectedCaseId && handleCaseSelect(selectedCaseId)}
+              disabled={!selectedCaseId || loading}
+              sx={{
+                fontWeight: 600,
+                textTransform: 'none',
+                borderColor: '#cbd5e1',
+                color: '#334155',
+                '&:hover': { borderColor: '#94a3b8', bgcolor: '#f8fafc' },
+              }}
+            >
+              Reload
+            </Button>
+
+            <Button
+              variant="contained"
+              size="small"
+              disableElevation
+              startIcon={<FileTextIcon />}
+              disabled={exportingReport || !facts}
+              onClick={handleExportReport}
+              sx={{
+                bgcolor: '#ea580c',
+                color: '#ffffff',
+                fontWeight: 600,
+                textTransform: 'none',
+                '&:hover': { bgcolor: '#c2410c' },
+              }}
+            >
+              {exportingReport ? 'Preparing Report...' : 'Export Report'}
+            </Button>
+          </Stack>
+        )}
       >
-        {/* ✅ Main Content Area */}
-        <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden' }}>
-          
-          {/* LEFT SIDEBAR: Case Selector & Facts */}
-          <Paper 
-            elevation={0} 
-            sx={{ 
-              width: 340, 
-              flexShrink: 0, 
-              borderRight: '1px solid #e0e0e0',
+        <Box sx={{ display: 'flex', height: 'calc(100vh - 125px)', overflow: 'hidden' }}>
+          {/* ======================================================== */}
+          {/* LEFT SIDEBAR: Case Dossier & Empirical Signals */}
+          {/* ======================================================== */}
+          <Paper
+            elevation={0}
+            sx={{
+              width: 350,
+              flexShrink: 0,
+              borderRight: '1px solid #e2e8f0',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              bgcolor: '#fff'
+              bgcolor: '#ffffff',
             }}
           >
-            <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0', bgcolor: '#fafafa' }}>
-              <Typography variant="subtitle2" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <ShieldIcon sx={{ fontSize: 14 }} />
-                Active Case
+            {/* Active Case Selector */}
+            <Box sx={{ p: 2, borderBottom: '1px solid #e2e8f0', bgcolor: '#f8fafc' }}>
+              <Typography
+                sx={{
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.06em',
+                  color: '#475569',
+                  textTransform: 'uppercase',
+                  mb: 1.25,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 0.75,
+                }}
+              >
+                <ShieldIcon sx={{ fontSize: 13, color: '#ea580c' }} />
+                Active Investigation Dossier
               </Typography>
-              
+
               <FormControl fullWidth size="small">
-                <Select 
-                  value={selectedCaseId} 
+                <Select
+                  value={selectedCaseId}
                   onChange={(e) => handleCaseSelect(e.target.value)}
                   displayEmpty
-                  sx={{ bgcolor: 'white' }}
+                  sx={{
+                    bgcolor: '#ffffff',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    fontFamily: 'monospace',
+                    borderRadius: 1.5,
+                    '& .MuiOutlinedInput-notchedOutline': { borderColor: '#cbd5e1' },
+                    '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: '#94a3b8' },
+                  }}
                 >
                   <MenuItem value="">
-                    <em>Select case...</em>
+                    <em>Select active case...</em>
                   </MenuItem>
                   {displayCases.map((c, i) => (
-                    <MenuItem key={i} value={getCaseId(c)}>
+                    <MenuItem key={i} value={getCaseId(c)} sx={{ fontSize: '0.82rem', fontFamily: 'monospace' }}>
                       {getCaseId(c)}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
 
+              {/* Scoped queue subtle metadata badge */}
               {caseScope.type !== 'GLOBAL' && (
-                <Paper 
-                  variant="outlined" 
-                  sx={{ 
-                    mt: 2, 
-                    p: 1.5, 
-                    bgcolor: '#e3f2fd', 
-                    borderColor: '#90caf9',
-                    border: '2px solid'
+                <Box
+                  sx={{
+                    mt: 1.5,
+                    p: 1.25,
+                    bgcolor: '#ffffff',
+                    borderRadius: 1.5,
+                    border: '1px solid #e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
                   }}
                 >
-                  <Typography variant="caption" fontWeight="bold" color="primary.main" display="block">
-                    {activeHandoff?.pipeline_name
-                      ? `FCC retained queue from ${activeHandoff.pipeline_name}`
-                      : 'Scoped FCC/Sentinel case queue'}
-                  </Typography>
-                  <Typography variant="caption" color="primary.dark">
-                    {caseScope.caseCount} cases in scope
-                  </Typography>
-                </Paper>
+                  <FilterListIcon sx={{ fontSize: 16, color: '#ea580c' }} />
+                  <Box>
+                    <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, color: '#0f172a', lineHeight: 1.2 }}>
+                      {activeHandoff?.pipeline_name
+                        ? `Retained: ${activeHandoff.pipeline_name}`
+                        : 'Scoped FCC Investigation Queue'}
+                    </Typography>
+                    <Typography sx={{ fontSize: '0.68rem', color: '#64748b' }}>
+                      {caseScope.caseCount} cases in active queue
+                    </Typography>
+                  </Box>
+                </Box>
               )}
             </Box>
 
             {/* Case Facts Summary (Scrollable) */}
             <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
               {!selectedCaseId ? (
-                  <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>
-                      <Typography variant="body2">Select a case to view facts.</Typography>
-                  </Box>
+                <Box sx={{ py: 6, textAlign: 'center', color: '#64748b' }}>
+                  <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                    Select an active case from the dropdown above to inspect empirical signals.
+                  </Typography>
+                </Box>
               ) : !facts && !loading ? (
-                  <Box sx={{ py: 4, textAlign: 'center', color: 'text.secondary' }}>
-                      <Typography variant="body2">No facts loaded.</Typography>
-                  </Box>
+                <Box sx={{ py: 6, textAlign: 'center', color: '#64748b' }}>
+                  <Typography variant="body2" sx={{ fontSize: '0.82rem' }}>
+                    No telemetry facts loaded.
+                  </Typography>
+                </Box>
               ) : loading ? (
-                  <Box sx={{ py: 4, textAlign: 'center' }}><CircularProgress size={24} /></Box>
+                <Box sx={{ py: 6, textAlign: 'center' }}>
+                  <CircularProgress size={24} sx={{ color: '#ea580c' }} />
+                </Box>
               ) : (
-                  <Stack spacing={2}>
-                      {/* Risk Summary */}
-                      <Card variant="outlined" sx={{ border: '2px solid #e0e0e0' }}>
-                          <Box 
-                          onClick={() => toggleSection('risk')}
-                          sx={{ 
-                              p: 1.5, bgcolor: '#fafafa', cursor: 'pointer',
-                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                              '&:hover': { bgcolor: '#f5f5f5' }
-                          }}
-                          >
-                          <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <TimelineIcon sx={{ fontSize: 14 }} /> Risk Profile
-                          </Typography>
-                          <IconButton size="small">{expandedSections.risk ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}</IconButton>
-                          </Box>
-                          {expandedSections.risk && (
-                          <CardContent sx={{ p: 2, pt: 1 }}>
-                              <Grid container spacing={1.5}>
-                              <Grid item xs={12}>
-                                  <Paper elevation={0} sx={{ p: 2, textAlign: 'center', border: '2px solid', borderColor: facts.risk.risk_score > 80 ? 'error.main' : facts.risk.risk_score > 50 ? 'warning.main' : 'success.main', bgcolor: facts.risk.risk_score > 80 ? '#ffebee' : facts.risk.risk_score > 50 ? '#fff3e0' : '#e8f5e9' }}>
-                                  <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.65rem' }}>Risk Score</Typography>
-                                  <Typography variant="h3" fontWeight="bold" color={facts.risk.risk_score > 80 ? 'error.main' : facts.risk.risk_score > 50 ? 'warning.main' : 'success.main'} sx={{ lineHeight: 1.2 }}>{facts.risk.risk_score}</Typography>
-                                  <LinearProgress variant="determinate" value={facts.risk.risk_score} sx={{ mt: 1, height: 6, borderRadius: 1, bgcolor: '#e0e0e0', '& .MuiLinearProgress-bar': { bgcolor: facts.risk.risk_score > 80 ? 'error.main' : facts.risk.risk_score > 50 ? 'warning.main' : 'success.main' } }} />
-                                  </Paper>
-                              </Grid>
-                              <Grid item xs={6}>
-                                  <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: '#fafafa' }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', textTransform: 'uppercase', fontWeight: 'bold' }}>Level</Typography>
-                                  <Typography variant="body2" fontWeight="bold">{facts.risk.risk_level}</Typography>
-                                  </Paper>
-                              </Grid>
-                              <Grid item xs={6}>
-                                  <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', bgcolor: '#fafafa' }}>
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem', textTransform: 'uppercase', fontWeight: 'bold' }}>KYC</Typography>
-                                  <Typography variant="body2" fontWeight="bold">{facts.risk.kyc_status}</Typography>
-                                  </Paper>
-                              </Grid>
-                              </Grid>
-                              {facts.risk.flagged_behaviors?.length > 0 && (
-                              <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                  {facts.risk.flagged_behaviors.map((b, i) => (
-                                  <Chip key={i} label={b} size="small" color="error" icon={<WarningIcon />} sx={{ justifyContent: 'flex-start', fontSize: '0.7rem', height: 24 }} />
-                                  ))}
-                              </Box>
-                              )}
-                          </CardContent>
-                          )}
-                      </Card>
+                <Stack spacing={2}>
+                  {/* Executive Risk Index Card */}
+                  <Card variant="outlined" sx={{ borderRadius: 2, borderColor: '#e2e8f0', boxShadow: 'none' }}>
+                    <Box
+                      onClick={() => toggleSection('risk')}
+                      sx={{
+                        p: 1.5,
+                        bgcolor: '#f8fafc',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        borderBottom: expandedSections.risk ? '1px solid #e2e8f0' : 'none',
+                        '&:hover': { bgcolor: '#f1f5f9' },
+                      }}
+                    >
+                      <Typography
+                        sx={{
+                          fontSize: '0.7rem',
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.75,
+                        }}
+                      >
+                        <TimelineIcon sx={{ fontSize: 14, color: tier.color }} />
+                        Composite Risk Index
+                      </Typography>
+                      <IconButton size="small" sx={{ p: 0.25 }}>
+                        {expandedSections.risk ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                      </IconButton>
+                    </Box>
 
-                      {/* Alerts */}
-                      <Card variant="outlined" sx={{ border: '2px solid #e0e0e0' }}>
-                          <Box 
-                          onClick={() => toggleSection('alerts')}
-                          sx={{ 
-                              p: 1.5, bgcolor: '#fafafa', cursor: 'pointer',
-                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                              '&:hover': { bgcolor: '#f5f5f5' }
-                          }}
-                          >
-                          <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <NotificationsIcon sx={{ fontSize: 14 }} /> Alert History
-                          </Typography>
-                          <IconButton size="small">{expandedSections.alerts ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}</IconButton>
+                    {expandedSections.risk && (
+                      <CardContent sx={{ p: 2 }}>
+                        {/* Score row */}
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+                          <Box>
+                            <Typography sx={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>
+                              Risk Score
+                            </Typography>
+                            <Stack direction="row" alignItems="baseline" spacing={0.5}>
+                              <Typography sx={{ fontSize: '1.75rem', fontWeight: 800, color: tier.color, lineHeight: 1 }}>
+                                {riskScore}
+                              </Typography>
+                              <Typography sx={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 600 }}>
+                                / 100
+                              </Typography>
+                            </Stack>
                           </Box>
-                          {expandedSections.alerts && (
-                          <CardContent sx={{ p: 2, pt: 1 }}>
-                              <Stack spacing={1.5}>
-                              <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #e0e0e0' }}>
-                                  <Typography variant="caption" color="text.secondary">Total Alerts</Typography>
-                                  <Typography variant="body2" fontWeight="bold">{facts.alerts.total_alerts}</Typography>
-                              </Stack>
-                              <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #e0e0e0' }}>
-                                  <Typography variant="caption" color="text.secondary">Critical</Typography>
-                                  <Typography variant="body2" fontWeight="bold" color="error.main">{facts.alerts.critical_alerts}</Typography>
-                              </Stack>
-                              <Stack direction="row" justifyContent="space-between">
-                                  <Typography variant="caption" color="text.secondary">Latest Alert</Typography>
-                                  <Typography variant="caption" fontFamily="monospace" fontWeight="600">{new Date(facts.alerts.latest_alert).toLocaleDateString()}</Typography>
-                              </Stack>
-                              </Stack>
-                          </CardContent>
-                          )}
-                      </Card>
 
-                      {/* Transactions */}
-                      <Card variant="outlined" sx={{ border: '2px solid #e0e0e0' }}>
-                          <Box 
-                          onClick={() => toggleSection('transactions')}
-                          sx={{ 
-                              p: 1.5, bgcolor: '#fafafa', cursor: 'pointer',
-                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                              '&:hover': { bgcolor: '#f5f5f5' }
-                          }}
-                          >
-                          <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ textTransform: 'uppercase', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <TrendingUpIcon sx={{ fontSize: 14 }} /> 30-Day Activity
-                          </Typography>
-                          <IconButton size="small">{expandedSections.transactions ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}</IconButton>
+                          <Box sx={{ textAlign: 'right' }}>
+                            <Box
+                              sx={{
+                                px: 1.25,
+                                py: 0.5,
+                                bgcolor: tier.bg,
+                                border: '1px solid',
+                                borderColor: tier.border,
+                                borderRadius: 1.5,
+                                display: 'inline-block',
+                              }}
+                            >
+                              <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: tier.color }}>
+                                {tier.label}
+                              </Typography>
+                            </Box>
                           </Box>
-                          {expandedSections.transactions && (
-                          <CardContent sx={{ p: 2, pt: 1 }}>
-                              <Stack spacing={1.5}>
-                              <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #e0e0e0' }}>
-                                  <Typography variant="caption" color="text.secondary">Total Volume</Typography>
-                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace">{Number(facts.transactions.total_volume || 0).toLocaleString()}</Typography>
+                        </Stack>
+
+                        <LinearProgress
+                          variant="determinate"
+                          value={Math.min(100, Math.max(0, riskScore))}
+                          sx={{
+                            height: 6,
+                            borderRadius: 1,
+                            bgcolor: '#e2e8f0',
+                            '& .MuiLinearProgress-bar': {
+                              bgcolor: tier.color,
+                              borderRadius: 1,
+                            },
+                          }}
+                        />
+
+                        {/* KYC & Segment Grid */}
+                        <Grid container spacing={1} sx={{ mt: 1.5 }}>
+                          <Grid item xs={6}>
+                            <Paper
+                              variant="outlined"
+                              sx={{
+                                p: 1,
+                                textAlign: 'center',
+                                bgcolor: '#f8fafc',
+                                borderColor: '#e2e8f0',
+                                borderRadius: 1.5,
+                              }}
+                            >
+                              <Typography sx={{ fontSize: '0.62rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                KYC Status
+                              </Typography>
+                              <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="center" sx={{ mt: 0.25 }}>
+                                <VerifiedIcon sx={{ fontSize: 12, color: '#059669' }} />
+                                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a' }}>
+                                  {facts.risk.kyc_status || 'Verified'}
+                                </Typography>
                               </Stack>
-                              <Stack direction="row" justifyContent="space-between" sx={{ pb: 1, borderBottom: '1px solid #e0e0e0' }}>
-                                  <Typography variant="caption" color="text.secondary">Avg Transaction</Typography>
-                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace">{Number(facts.transactions.avg_amount || 0).toFixed(2)}</Typography>
-                              </Stack>
-                              <Stack direction="row" justifyContent="space-between">
-                                  <Typography variant="caption" color="text.secondary">Cash Ratio</Typography>
-                                  <Typography variant="body2" fontWeight="bold" fontFamily="monospace" color={facts.transactions.cash_ratio > 0.3 ? 'error.main' : 'success.main'}>{(facts.transactions.cash_ratio * 100).toFixed(1)}%</Typography>
-                              </Stack>
-                              </Stack>
-                          </CardContent>
-                          )}
-                      </Card>
-                  </Stack>
+                            </Paper>
+                          </Grid>
+                          <Grid item xs={6}>
+                            <Paper
+                              variant="outlined"
+                              sx={{
+                                p: 1,
+                                textAlign: 'center',
+                                bgcolor: '#f8fafc',
+                                borderColor: '#e2e8f0',
+                                borderRadius: 1.5,
+                              }}
+                            >
+                              <Typography sx={{ fontSize: '0.62rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                                Level
+                              </Typography>
+                              <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#0f172a', mt: 0.25, textTransform: 'capitalize' }}>
+                                {facts.risk.risk_level || 'Low'}
+                              </Typography>
+                            </Paper>
+                          </Grid>
+                        </Grid>
+
+                        {facts.risk.flagged_behaviors?.length > 0 && (
+                          <Box sx={{ mt: 1.5, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                            {facts.risk.flagged_behaviors.map((b, i) => (
+                              <Chip
+                                key={i}
+                                label={b}
+                                size="small"
+                                icon={<WarningIcon sx={{ fontSize: 13, color: '#dc2626' }} />}
+                                sx={{
+                                  justifyContent: 'flex-start',
+                                  fontSize: '0.68rem',
+                                  height: 22,
+                                  bgcolor: '#fef2f2',
+                                  color: '#991b1b',
+                                  border: '1px solid #fecaca',
+                                }}
+                              />
+                            ))}
+                          </Box>
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+
+                  {/* Alert Telemetry Card */}
+                  <Card variant="outlined" sx={{ borderRadius: 2, borderColor: '#e2e8f0', boxShadow: 'none' }}>
+                    <Box
+                      onClick={() => toggleSection('alerts')}
+                      sx={{
+                        p: 1.5,
+                        bgcolor: '#f8fafc',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        borderBottom: expandedSections.alerts ? '1px solid #e2e8f0' : 'none',
+                        '&:hover': { bgcolor: '#f1f5f9' },
+                      }}
+                    >
+                      <Typography
+                        sx={{
+                          fontSize: '0.7rem',
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.75,
+                        }}
+                      >
+                        <NotificationsIcon sx={{ fontSize: 14, color: '#64748b' }} />
+                        Alert Telemetry
+                      </Typography>
+                      <IconButton size="small" sx={{ p: 0.25 }}>
+                        {expandedSections.alerts ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                      </IconButton>
+                    </Box>
+
+                    {expandedSections.alerts && (
+                      <CardContent sx={{ p: 2 }}>
+                        <Stack spacing={1.25}>
+                          <Stack direction="row" justifyContent="space-between" sx={{ pb: 0.75, borderBottom: '1px solid #f1f5f9' }}>
+                            <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Total Alerts</Typography>
+                            <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: 'monospace' }}>
+                              {facts.alerts.total_alerts || 0}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" justifyContent="space-between" sx={{ pb: 0.75, borderBottom: '1px solid #f1f5f9' }}>
+                            <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Critical Severity</Typography>
+                            <Typography
+                              sx={{
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                fontFamily: 'monospace',
+                                color: (facts.alerts.critical_alerts || 0) > 0 ? '#dc2626' : '#059669',
+                              }}
+                            >
+                              {facts.alerts.critical_alerts || 0}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" justifyContent="space-between">
+                            <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Latest Trigger</Typography>
+                            <Typography sx={{ fontSize: '0.72rem', fontFamily: 'monospace', color: '#334155' }}>
+                              {facts.alerts.latest_alert ? new Date(facts.alerts.latest_alert).toLocaleDateString() : 'None'}
+                            </Typography>
+                          </Stack>
+                        </Stack>
+                      </CardContent>
+                    )}
+                  </Card>
+
+                  {/* 30-Day Activity Card */}
+                  <Card variant="outlined" sx={{ borderRadius: 2, borderColor: '#e2e8f0', boxShadow: 'none' }}>
+                    <Box
+                      onClick={() => toggleSection('transactions')}
+                      sx={{
+                        p: 1.5,
+                        bgcolor: '#f8fafc',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        borderBottom: expandedSections.transactions ? '1px solid #e2e8f0' : 'none',
+                        '&:hover': { bgcolor: '#f1f5f9' },
+                      }}
+                    >
+                      <Typography
+                        sx={{
+                          fontSize: '0.7rem',
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 0.75,
+                        }}
+                      >
+                        <TrendingUpIcon sx={{ fontSize: 14, color: '#64748b' }} />
+                        30-Day Activity Matrix
+                      </Typography>
+                      <IconButton size="small" sx={{ p: 0.25 }}>
+                        {expandedSections.transactions ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                      </IconButton>
+                    </Box>
+
+                    {expandedSections.transactions && (
+                      <CardContent sx={{ p: 2 }}>
+                        <Stack spacing={1.25}>
+                          <Stack direction="row" justifyContent="space-between" sx={{ pb: 0.75, borderBottom: '1px solid #f1f5f9' }}>
+                            <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Total Volume</Typography>
+                            <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: 'monospace', color: '#0f172a' }}>
+                              ${Number(facts.transactions.total_volume || 0).toLocaleString()}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" justifyContent="space-between" sx={{ pb: 0.75, borderBottom: '1px solid #f1f5f9' }}>
+                            <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Avg Transaction</Typography>
+                            <Typography sx={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: 'monospace', color: '#0f172a' }}>
+                              ${Number(facts.transactions.avg_amount || 0).toFixed(2)}
+                            </Typography>
+                          </Stack>
+                          <Stack direction="row" justifyContent="space-between">
+                            <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>Cash Ratio</Typography>
+                            <Typography
+                              sx={{
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                fontFamily: 'monospace',
+                                color: (facts.transactions.cash_ratio || 0) > 0.3 ? '#dc2626' : '#059669',
+                              }}
+                            >
+                              {((facts.transactions.cash_ratio || 0) * 100).toFixed(1)}%
+                            </Typography>
+                          </Stack>
+                        </Stack>
+                      </CardContent>
+                    )}
+                  </Card>
+                </Stack>
               )}
             </Box>
           </Paper>
 
-          {/* CENTER/RIGHT: Copilot Interface */}
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: '#f5f7fa' }}>
-            
+          {/* ======================================================== */}
+          {/* CENTER / RIGHT: Enterprise AML Copilot Workspace */}
+          {/* ======================================================== */}
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', bgcolor: '#f8fafc' }}>
             {loading && (
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
                 <Stack spacing={2} alignItems="center">
-                  <CircularProgress size={48} />
-                  <Typography variant="body2" color="text.secondary">Loading case data...</Typography>
+                  <CircularProgress size={42} sx={{ color: '#ea580c' }} />
+                  <Typography variant="body2" sx={{ color: '#64748b', fontSize: '0.85rem' }}>
+                    Ingesting case telemetry and empirical signals...
+                  </Typography>
                 </Stack>
               </Box>
             )}
 
             {!loading && !selectedCaseId && (
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, p: 6 }}>
-                <Box sx={{ width: 80, height: 80, bgcolor: '#f5f5f5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e0e0e0', mb: 3 }}>
-                  <ShieldIcon sx={{ fontSize: 40, color: '#bdbdbd' }} />
+                <Box
+                  sx={{
+                    width: 72,
+                    height: 72,
+                    bgcolor: '#ffffff',
+                    borderRadius: 3,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.05)',
+                    mb: 2.5,
+                  }}
+                >
+                  <ShieldIcon sx={{ fontSize: 36, color: '#ea580c' }} />
                 </Box>
-                <Typography variant="h6" fontWeight="600" color="text.primary" gutterBottom>Select a Case to Begin</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420, textAlign: 'center', lineHeight: 1.6 }}>Copilot will analyze deterministic facts and provide AI-assisted investigation support.</Typography>
-                <Button onClick={() => setShowManual(true)} startIcon={<HelpOutline />} sx={{ mt: 3 }} variant="outlined">Read User Guide</Button>
+                <Typography sx={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', mb: 0.5 }}>
+                  Select an Investigation Case
+                </Typography>
+                <Typography sx={{ maxWidth: 460, textAlign: 'center', color: '#64748b', fontSize: '0.85rem', lineHeight: 1.6 }}>
+                  Choose a case from the active queue to activate evidence-grounded AI copilot reasoning, automated SAR drafting, and cross-case pattern analysis.
+                </Typography>
+                <Button
+                  onClick={() => setShowManual(true)}
+                  startIcon={<HelpOutline />}
+                  variant="outlined"
+                  size="small"
+                  sx={{ mt: 3, color: '#334155', borderColor: '#cbd5e1', textTransform: 'none', fontWeight: 600 }}
+                >
+                  Read Copilot User Guide
+                </Button>
               </Box>
             )}
 
             {!loading && selectedCaseId && !facts && (
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, p: 6 }}>
-                <Box sx={{ width: 80, height: 80, bgcolor: '#fff3e0', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #ffe0b2', mb: 3 }}>
-                  <WarningIcon sx={{ fontSize: 40, color: '#f57c00' }} />
+                <Box
+                  sx={{
+                    width: 72,
+                    height: 72,
+                    bgcolor: '#fff7ed',
+                    borderRadius: 3,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #fed7aa',
+                    mb: 2.5,
+                  }}
+                >
+                  <WarningIcon sx={{ fontSize: 36, color: '#ea580c' }} />
                 </Box>
-                <Typography variant="h6" fontWeight="600" color="text.primary" gutterBottom>Failed to Load Case Facts</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420, textAlign: 'center', lineHeight: 1.6, mb: 1 }}>
-                  We couldn't retrieve facts for case <strong>{selectedCaseId}</strong>.
+                <Typography sx={{ fontSize: '1.1rem', fontWeight: 800, color: '#0f172a', mb: 0.5 }}>
+                  Case Telemetry Unavailable
                 </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 400, textAlign: 'center', mb: 3 }}>
-                  Ensure master data generation has run and the case data exists in the database.
+                <Typography sx={{ maxWidth: 440, textAlign: 'center', color: '#64748b', fontSize: '0.85rem', mb: 3 }}>
+                  Unable to load facts for case <strong>{selectedCaseId}</strong>. Verify database connectivity and ensure master case records exist.
                 </Typography>
-                <Button 
-                  onClick={() => handleCaseSelect(selectedCaseId)} 
-                  startIcon={<RefreshIcon />} 
+                <Button
+                  onClick={() => handleCaseSelect(selectedCaseId)}
+                  startIcon={<RefreshIcon />}
                   variant="contained"
                   disableElevation
+                  sx={{ bgcolor: '#ea580c', '&:hover': { bgcolor: '#c2410c' }, textTransform: 'none', fontWeight: 600 }}
                 >
                   Retry Loading Case
                 </Button>
@@ -646,98 +935,513 @@ const CaseInvestigationScreen = () => {
 
             {!loading && selectedCaseId && facts && (
               <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-                
-                {/* Chat Header */}
-                <Box sx={{ p: 2, background: 'linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%)', color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e40af', flexShrink: 0 }}>
+                {/* Modern Copilot Header Bar */}
+                <Box
+                  sx={{
+                    px: 3,
+                    py: 1.5,
+                    bgcolor: '#0f172a',
+                    color: '#ffffff',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderBottom: '1px solid #1e293b',
+                    flexShrink: 0,
+                  }}
+                >
                   <Stack direction="row" spacing={1.5} alignItems="center">
-                    <Box sx={{ width: 36, height: 36, bgcolor: 'rgba(255,255,255,0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><SmartToyIcon /></Box>
+                    <Box
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        bgcolor: 'rgba(234, 88, 12, 0.2)',
+                        border: '1px solid rgba(234, 88, 12, 0.4)',
+                        borderRadius: 1.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#ea580c',
+                      }}
+                    >
+                      <AutoAwesomeIcon sx={{ fontSize: 18 }} />
+                    </Box>
                     <Box>
-                      <Typography variant="subtitle2" fontWeight="bold">AI Copilot</Typography>
-                      <Typography variant="caption" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>Evidence-grounded model assistance</Typography>
+                      <Typography sx={{ fontSize: '0.85rem', fontWeight: 800, color: '#f8fafc', lineHeight: 1.2 }}>
+                        FCIP Copilot Intelligence
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                        Evidence-grounded model • Grounded strictly in empirical case telemetry
+                      </Typography>
                     </Box>
                   </Stack>
-                  <Chip label={`${messages.length} messages`} size="small" sx={{ bgcolor: 'rgba(255,255,255,0.15)', color: 'white', height: 24, fontSize: '0.7rem', fontWeight: 'bold' }} />
+
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    {/* Live model status pill */}
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.75,
+                        px: 1.25,
+                        py: 0.35,
+                        bgcolor: 'rgba(255, 255, 255, 0.08)',
+                        borderRadius: 1.5,
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                      }}
+                    >
+                      <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
+                      <Typography sx={{ fontSize: '0.68rem', fontWeight: 600, color: '#e2e8f0', fontFamily: 'monospace' }}>
+                        Active: openai.gpt-5.6-luna
+                      </Typography>
+                    </Box>
+
+                    <Chip
+                      label={`${messages.length} ${messages.length === 1 ? 'interaction' : 'interactions'}`}
+                      size="small"
+                      sx={{
+                        bgcolor: 'rgba(255, 255, 255, 0.08)',
+                        color: '#cbd5e1',
+                        height: 24,
+                        fontSize: '0.68rem',
+                        fontWeight: 600,
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                      }}
+                    />
+
+                    <Tooltip title="Reset conversation session" arrow>
+                      <IconButton size="small" onClick={handleClearChat} sx={{ color: '#94a3b8', '&:hover': { color: '#ffffff' } }}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
                 </Box>
 
                 {/* Messages Area - SCROLLABLE */}
-                <Box sx={{ flex: 1, overflowY: 'auto', p: 3, bgcolor: '#fafafa' }}>
-                  <Stack spacing={2}>
-                    {messages.map((msg, idx) => (
-                      <Stack key={idx} direction={msg.role === 'user' ? 'row-reverse' : 'row'} spacing={1.5} alignItems="flex-start">
-                        <Box sx={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, bgcolor: msg.role === 'user' ? '#1976d2' : msg.role === 'system' ? '#388e3c' : msg.role === 'error' ? '#d32f2f' : '#424242', color: 'white', border: '2px solid', borderColor: msg.role === 'user' ? '#1565c0' : msg.role === 'system' ? '#2e7d32' : msg.role === 'error' ? '#c62828' : '#212121' }}>
-                          {msg.role === 'user' ? <PersonIcon fontSize="small" /> : msg.role === 'error' ? <ErrorIcon fontSize="small" /> : msg.role === 'system' ? <CheckCircleIcon fontSize="small" /> : <SmartToyIcon fontSize="small" />}
-                        </Box>
-                        <Box sx={{ maxWidth: '75%', minWidth: 200 }}>
-                          <Paper elevation={msg.role === 'user' ? 2 : 0} variant={msg.role === 'user' ? 'elevation' : 'outlined'} sx={{ p: 2, bgcolor: msg.role === 'user' ? '#1976d2' : msg.role === 'system' ? '#e8f5e9' : msg.role === 'error' ? '#ffebee' : 'white', color: msg.role === 'user' ? 'white' : 'text.primary', borderWidth: 2, borderColor: msg.role === 'system' ? '#81c784' : msg.role === 'error' ? '#e57373' : '#e0e0e0' }}>
-                            
-                            {/* Use Markdown Component here */}
-                            {msg.role === 'user' ? (
-                              <Typography variant="body2" sx={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.content}</Typography>
-                            ) : (
-                              <>
-                                {msg.streaming && !msg.content ? (
-                                  <Typography variant="body2" color="text.secondary">Analyzing case evidence…</Typography>
-                                ) : (
-                                  <MarkdownResponse content={msg.content} />
-                                )}
-                                {msg.streaming && msg.content && generating && (
-                                  <Typography component="span" sx={{ color: 'primary.main', animation: 'blink 1s step-end infinite' }}>▋</Typography>
-                                )}
-                              </>
-                            )}
-                            
-                            <Typography variant="caption" sx={{ mt: 1, display: 'block', opacity: 0.7, fontSize: '0.65rem', color: msg.role === 'user' ? 'rgba(255,255,255,0.9)' : 'text.secondary' }}>{msg.timestamp?.toLocaleTimeString()}</Typography>
+                <Box sx={{ flex: 1, overflowY: 'auto', p: 3, bgcolor: '#f8fafc' }}>
+                  <Stack spacing={2.5}>
+                    {messages.map((msg, idx) => {
+                      // 1. Initial Intake Dossier Message
+                      if (msg.role === 'system') {
+                        return (
+                          <Paper
+                            key={idx}
+                            variant="outlined"
+                            sx={{
+                              p: 2.5,
+                              borderRadius: 2,
+                              bgcolor: '#ffffff',
+                              border: '1px solid #e2e8f0',
+                              borderLeft: '4px solid #ea580c',
+                              boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)',
+                            }}
+                          >
+                            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <Box
+                                  sx={{
+                                    width: 26,
+                                    height: 26,
+                                    borderRadius: 1,
+                                    bgcolor: '#ecfdf5',
+                                    border: '1px solid #a7f3d0',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: '#059669',
+                                  }}
+                                >
+                                  <CheckIcon sx={{ fontSize: 15 }} />
+                                </Box>
+                                <Typography sx={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a' }}>
+                                  Case Dossier Ingested: <span style={{ fontFamily: 'monospace' }}>{msg.caseId}</span>
+                                </Typography>
+                              </Stack>
+                              <Typography sx={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                                {msg.timestamp?.toLocaleTimeString()}
+                              </Typography>
+                            </Stack>
+
+                            {/* Summary strip */}
+                            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1.5 }}>
+                              <Chip
+                                label={`Risk Score: ${msg.facts?.risk?.risk_score ?? 0}/100`}
+                                size="small"
+                                sx={{
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  bgcolor: tier.bg,
+                                  color: tier.color,
+                                  border: '1px solid',
+                                  borderColor: tier.border,
+                                  height: 24,
+                                }}
+                              />
+                              <Chip
+                                label={`Level: ${msg.facts?.risk?.risk_level || 'Low'}`}
+                                size="small"
+                                sx={{
+                                  fontSize: '0.7rem',
+                                  fontWeight: 600,
+                                  bgcolor: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  height: 24,
+                                }}
+                              />
+                              <Chip
+                                label={`KYC: ${msg.facts?.risk?.kyc_status || 'Verified'}`}
+                                size="small"
+                                sx={{
+                                  fontSize: '0.7rem',
+                                  fontWeight: 600,
+                                  bgcolor: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  height: 24,
+                                }}
+                              />
+                              <Chip
+                                label={`Alerts: ${msg.facts?.alerts?.total_alerts || 0}`}
+                                size="small"
+                                sx={{
+                                  fontSize: '0.7rem',
+                                  fontWeight: 600,
+                                  bgcolor: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  height: 24,
+                                }}
+                              />
+                            </Stack>
+
+                            <Typography sx={{ fontSize: '0.82rem', color: '#475569', lineHeight: 1.6 }}>
+                              The Copilot has ingested all telemetry, alerts, and transaction records for this case. Ask any forensic question or select a quick action below to begin your analysis.
+                            </Typography>
                           </Paper>
-                        </Box>
-                      </Stack>
-                    ))}
-                    
+                        );
+                      }
+
+                      // 2. User Message
+                      if (msg.role === 'user') {
+                        return (
+                          <Stack key={idx} direction="row" justifyContent="flex-end" spacing={1.5} alignItems="flex-start">
+                            <Box sx={{ maxWidth: '78%' }}>
+                              <Paper
+                                elevation={0}
+                                sx={{
+                                  p: 2,
+                                  bgcolor: '#1e293b',
+                                  color: '#ffffff',
+                                  borderRadius: '16px 16px 4px 16px',
+                                  boxShadow: '0 2px 6px rgba(15, 23, 42, 0.08)',
+                                }}
+                              >
+                                <Typography sx={{ fontSize: '0.85rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                                  {msg.content}
+                                </Typography>
+                                <Typography
+                                  sx={{
+                                    mt: 0.75,
+                                    fontSize: '0.65rem',
+                                    color: 'rgba(255,255,255,0.6)',
+                                    textAlign: 'right',
+                                  }}
+                                >
+                                  {msg.timestamp?.toLocaleTimeString()}
+                                </Typography>
+                              </Paper>
+                            </Box>
+                            <Box
+                              sx={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: '50%',
+                                bgcolor: '#334155',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#ffffff',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <PersonIcon sx={{ fontSize: 18 }} />
+                            </Box>
+                          </Stack>
+                        );
+                      }
+
+                      // 3. Error Message
+                      if (msg.role === 'error') {
+                        return (
+                          <Stack key={idx} direction="row" spacing={1.5} alignItems="flex-start">
+                            <Box
+                              sx={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 1.5,
+                                bgcolor: '#fef2f2',
+                                border: '1px solid #fecaca',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#dc2626',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <ErrorIcon fontSize="small" />
+                            </Box>
+                            <Paper
+                              variant="outlined"
+                              sx={{
+                                p: 2,
+                                bgcolor: '#fef2f2',
+                                borderColor: '#fecaca',
+                                borderRadius: 2,
+                                maxWidth: '78%',
+                              }}
+                            >
+                              <Typography sx={{ fontSize: '0.82rem', color: '#991b1b', lineHeight: 1.5 }}>
+                                {msg.content}
+                              </Typography>
+                              <Typography sx={{ mt: 0.5, fontSize: '0.65rem', color: '#b91c1c' }}>
+                                {msg.timestamp?.toLocaleTimeString()}
+                              </Typography>
+                            </Paper>
+                          </Stack>
+                        );
+                      }
+
+                      // 4. Assistant Copilot Message
+                      return (
+                        <Stack key={idx} direction="row" spacing={1.5} alignItems="flex-start">
+                          <Box
+                            sx={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 1.5,
+                              bgcolor: '#0f172a',
+                              border: '1px solid #1e293b',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#ea580c',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <AutoAwesomeIcon sx={{ fontSize: 18 }} />
+                          </Box>
+
+                          <Box sx={{ maxWidth: '82%', minWidth: 260 }}>
+                            <Paper
+                              variant="outlined"
+                              sx={{
+                                p: 2.5,
+                                bgcolor: '#ffffff',
+                                borderColor: '#e2e8f0',
+                                borderRadius: '16px 16px 16px 4px',
+                                boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)',
+                              }}
+                            >
+                              {msg.streaming && !msg.content ? (
+                                <Stack direction="row" spacing={1.5} alignItems="center">
+                                  <CircularProgress size={14} sx={{ color: '#ea580c' }} />
+                                  <Typography sx={{ fontSize: '0.82rem', color: '#64748b', fontStyle: 'italic' }}>
+                                    Analyzing case telemetry & synthesizing findings...
+                                  </Typography>
+                                </Stack>
+                              ) : (
+                                <FormattedMarkdown content={msg.content} />
+                              )}
+
+                              {msg.streaming && msg.content && (
+                                <Typography
+                                  component="span"
+                                  sx={{
+                                    display: 'inline-block',
+                                    width: 6,
+                                    height: 14,
+                                    bgcolor: '#ea580c',
+                                    ml: 0.5,
+                                    animation: 'pulse 1s infinite',
+                                    verticalAlign: 'middle',
+                                  }}
+                                />
+                              )}
+
+                              {/* Footer controls */}
+                              <Stack
+                                direction="row"
+                                justifyContent="space-between"
+                                alignItems="center"
+                                sx={{ mt: 1.5, pt: 1, borderTop: '1px solid #f1f5f9' }}
+                              >
+                                <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8' }}>
+                                  {msg.timestamp?.toLocaleTimeString()} • openai.gpt-5.6-luna
+                                </Typography>
+
+                                {msg.content && !msg.streaming && (
+                                  <Tooltip title={copiedIndex === idx ? 'Copied to clipboard' : 'Copy message text'} arrow>
+                                    <IconButton
+                                      size="small"
+                                      onClick={() => handleCopy(msg.content, idx)}
+                                      sx={{ color: '#94a3b8', '&:hover': { color: '#0f172a' }, p: 0.5 }}
+                                    >
+                                      {copiedIndex === idx ? (
+                                        <CheckIcon sx={{ fontSize: 14, color: '#059669' }} />
+                                      ) : (
+                                        <ContentCopyIcon sx={{ fontSize: 14 }} />
+                                      )}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Stack>
+                            </Paper>
+                          </Box>
+                        </Stack>
+                      );
+                    })}
+
                     {generating && !streamStarted && (
                       <Stack direction="row" spacing={1.5} alignItems="center">
-                        <Box sx={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#424242', color: 'white', border: '2px solid #212121' }}><SmartToyIcon fontSize="small" /></Box>
-                        <Paper variant="outlined" sx={{ p: 2, borderWidth: 2, borderColor: '#e0e0e0' }}>
-                          <Typography variant="body2" color="text.secondary">Preparing evidence…</Typography>
-                          <LinearProgress sx={{ mt: 1, width: 180 }} />
+                        <Box
+                          sx={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 1.5,
+                            bgcolor: '#0f172a',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#ea580c',
+                          }}
+                        >
+                          <AutoAwesomeIcon sx={{ fontSize: 18 }} />
+                        </Box>
+                        <Paper variant="outlined" sx={{ p: 1.5, px: 2, borderRadius: 2, bgcolor: '#ffffff', borderColor: '#e2e8f0' }}>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <CircularProgress size={14} sx={{ color: '#ea580c' }} />
+                            <Typography sx={{ fontSize: '0.8rem', color: '#64748b' }}>
+                              Grounding query in database facts...
+                            </Typography>
+                          </Stack>
                         </Paper>
                       </Stack>
                     )}
-                    <div ref={chatEndRef}/>
+                    <div ref={chatEndRef} />
                   </Stack>
                 </Box>
 
                 {/* Quick Actions & Input - FIXED AT BOTTOM */}
-                <Box sx={{ borderTop: '1px solid #e0e0e0', bgcolor: 'white', flexShrink: 0 }}>
-                  <Box sx={{ p: 1.5, bgcolor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
-                      <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'block', textTransform: 'uppercase', fontSize: '0.65rem', px: 0.5 }}>Quick Actions</Typography>
-                      <Stack direction="row" spacing={1} overflow="auto" pb={0.5} px={0.5}>
-                          {[{ label: 'Draft SAR Narrative', icon: FileTextIcon }, { label: 'Explain Risk Drivers', icon: TimelineIcon }, { label: 'Suggest Next Steps', icon: BoltIcon }, { label: 'Compare to Baseline', icon: TrendingUpIcon }].map(action => (
-                              <Button key={action.label} onClick={() => sendMessage(action.label)} disabled={generating} size="small" variant="outlined" startIcon={<action.icon fontSize="small" />} sx={{ textTransform: 'none', fontSize: '0.7rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{action.label}</Button>
-                          ))}
-                      </Stack>
-                  </Box>
-                  <Box sx={{ p: 2 }}>
-                      <TextField
-                          fullWidth multiline maxRows={3} placeholder="Ask about this case..." value={input} onChange={(e) => setInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
-                          disabled={generating} variant="outlined"
-                          sx={{ '& .MuiOutlinedInput-root': { bgcolor: '#fafafa', '& fieldset': { borderWidth: 1 } } }}
-                          InputProps={{
-                              endAdornment: (
-                                  <InputAdornment position="end">
-                                      <Button onClick={() => sendMessage(input)} disabled={!input.trim() || generating} variant="contained" size="medium" sx={{ minWidth: 80, fontWeight: 'bold', boxShadow: 1 }} endIcon={<SendIcon />}>Send</Button>
-                                  </InputAdornment>
-                              )
+                <Box sx={{ borderTop: '1px solid #e2e8f0', bgcolor: '#ffffff', flexShrink: 0 }}>
+                  <Box sx={{ px: 2.5, py: 1.25, bgcolor: '#f8fafc', borderBottom: '1px solid #f1f5f9' }}>
+                    <Typography
+                      sx={{
+                        fontSize: '0.65rem',
+                        fontWeight: 800,
+                        letterSpacing: '0.06em',
+                        color: '#64748b',
+                        textTransform: 'uppercase',
+                        mb: 0.75,
+                      }}
+                    >
+                      Investigative Prompt Shortcuts
+                    </Typography>
+                    <Stack direction="row" spacing={1} overflow="auto" pb={0.5}>
+                      {[
+                        { label: 'Draft SAR Narrative', icon: FileTextIcon },
+                        { label: 'Explain Risk Drivers', icon: TimelineIcon },
+                        { label: 'Suggest Next Steps', icon: BoltIcon },
+                        { label: 'Compare to Baseline', icon: TrendingUpIcon },
+                      ].map((action) => (
+                        <Button
+                          key={action.label}
+                          onClick={() => sendMessage(action.label)}
+                          disabled={generating}
+                          size="small"
+                          variant="outlined"
+                          startIcon={<action.icon sx={{ fontSize: 14 }} />}
+                          sx={{
+                            textTransform: 'none',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            color: '#334155',
+                            borderColor: '#cbd5e1',
+                            bgcolor: '#ffffff',
+                            borderRadius: 1.5,
+                            py: 0.4,
+                            px: 1.25,
+                            '&:hover': {
+                              bgcolor: '#f1f5f9',
+                              borderColor: '#94a3b8',
+                            },
                           }}
-                      />
-                      <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: 'block', fontSize: '0.7rem', textAlign: 'center' }}>Press Enter to send, Shift+Enter for new line</Typography>
+                        >
+                          {action.label}
+                        </Button>
+                      ))}
+                    </Stack>
+                  </Box>
+
+                  <Box sx={{ p: 2, px: 2.5 }}>
+                    <TextField
+                      fullWidth
+                      multiline
+                      maxRows={4}
+                      placeholder="Ask about transaction patterns, alert triggers, typologies, counterparties..."
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage(input);
+                        }
+                      }}
+                      disabled={generating}
+                      variant="outlined"
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          bgcolor: '#f8fafc',
+                          borderRadius: 2,
+                          fontSize: '0.85rem',
+                          '& fieldset': { borderColor: '#cbd5e1' },
+                          '&:hover fieldset': { borderColor: '#94a3b8' },
+                          '&.Mui-focused fieldset': { borderColor: '#ea580c' },
+                        },
+                      }}
+                      InputProps={{
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <Button
+                              onClick={() => sendMessage(input)}
+                              disabled={!input.trim() || generating}
+                              variant="contained"
+                              size="medium"
+                              disableElevation
+                              sx={{
+                                minWidth: 76,
+                                fontWeight: 700,
+                                textTransform: 'none',
+                                bgcolor: '#ea580c',
+                                borderRadius: 1.5,
+                                '&:hover': { bgcolor: '#c2410c' },
+                              }}
+                              endIcon={<SendIcon sx={{ fontSize: 16 }} />}
+                            >
+                              Send
+                            </Button>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                    <Typography
+                      variant="caption"
+                      sx={{ mt: 0.75, display: 'block', fontSize: '0.68rem', color: '#94a3b8', textAlign: 'center' }}
+                    >
+                      Press Enter ↵ to send • Shift+Enter for new line • Grounded in empirical case facts
+                    </Typography>
                   </Box>
                 </Box>
-
               </Box>
             )}
-
           </Box>
-
         </Box>
       </PageContainer>
     </>
