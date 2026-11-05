@@ -442,14 +442,14 @@ const CaseInvestigationScreen = () => {
           </Stack>
         )}
       >
-        <Box sx={{ display: 'flex', height: 'calc(100vh - 125px)', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', flex: 1, minHeight: 0, height: '100%', overflow: 'hidden', borderRadius: 2, border: '1px solid #e2e8f0', bgcolor: '#ffffff' }}>
           {/* ======================================================== */}
           {/* LEFT SIDEBAR: Case Dossier & Empirical Signals */}
           {/* ======================================================== */}
           <Paper
             elevation={0}
             sx={{
-              width: 350,
+              width: { xs: '100%', md: 290, lg: 320, xl: 350 },
               flexShrink: 0,
               borderRight: '1px solid #e2e8f0',
               display: 'flex',

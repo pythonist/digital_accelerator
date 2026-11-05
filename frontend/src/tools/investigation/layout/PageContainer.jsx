@@ -38,33 +38,30 @@ const PageContainer = ({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       
-      {/* ✅ CONTENT TITLE BAR 
-        - Reduced vertical padding (py: 1.5) to fix "gap"
-        - Reduced horizontal padding (px: 3)
-        - Matches Calibration's compact style
-      */}
+      {/* CONTENT TITLE BAR */}
       <Box 
         sx={{ 
-          px: 3, 
-          py: 1.5, 
+          px: { xs: 1.5, sm: 2, md: 3 }, 
+          py: { xs: 1, sm: 1.25, md: 1.5 }, 
           bgcolor: 'background.paper', 
           borderBottom: '1px solid', 
-          borderColor: 'divider' 
+          borderColor: 'divider',
+          flexShrink: 0,
         }}
       >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+          <Box sx={{ minWidth: 0 }}>
             {/* Breadcrumbs: Compact and faded */}
             {breadcrumbs.length > 0 && (
               <Breadcrumbs 
-                separator={<ChevronRight sx={{ fontSize: 14, color: 'text.disabled' }} />} 
-                sx={{ mb: 0.5, '& .MuiBreadcrumbs-ol': { alignItems: 'center' } }}
+                separator={<ChevronRight sx={{ fontSize: 13, color: 'text.disabled' }} />} 
+                sx={{ mb: 0.25, '& .MuiBreadcrumbs-ol': { alignItems: 'center' } }}
               >
                 {breadcrumbs.map((crumb, idx) => (
                   <Typography 
                     key={idx} 
                     variant="caption" 
-                    sx={{ color: 'text.secondary', fontSize: '0.65rem', fontWeight: 500 }}
+                    sx={{ color: 'text.secondary', fontSize: '0.62rem', fontWeight: 600, letterSpacing: '0.04em' }}
                   >
                     {crumb.toUpperCase()}
                   </Typography>
@@ -72,13 +69,12 @@ const PageContainer = ({
               </Breadcrumbs>
             )}
             
-            {/* Title: H6 is smaller than H5, reducing visual weight */}
-            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', lineHeight: 1.2, fontSize: '1.1rem' }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', lineHeight: 1.2, fontSize: { xs: '0.95rem', sm: '1.05rem', md: '1.15rem' } }}>
               {title}
             </Typography>
             
             {subtitle && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, fontSize: '0.8rem' }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, fontSize: { xs: '0.72rem', sm: '0.78rem' }, lineHeight: 1.3 }}>
                 {subtitle}
               </Typography>
             )}
@@ -86,18 +82,15 @@ const PageContainer = ({
 
           {/* Actions Area */}
           {actions && (
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
               {actions}
             </Box>
           )}
         </Box>
       </Box>
 
-      {/* ✅ CONTENT BODY 
-        - Standard padding (p: 3)
-        - No extra margins here
-      */}
-      <Box sx={{ p: 3, flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* CONTENT BODY */}
+      <Box sx={{ p: { xs: 1.5, sm: 2, md: 2.5 }, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {children}
       </Box>
     </Box>

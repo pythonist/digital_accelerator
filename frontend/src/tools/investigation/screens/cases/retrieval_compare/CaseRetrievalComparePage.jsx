@@ -236,11 +236,11 @@ const CaseRetrievalComparePage = () => {
       subtitle="Find behaviorally similar cases using structured risk, transaction, alert, network, and typology signals, then compare them in a single workflow."
       breadcrumbs={['Investigation', 'Case Retrieval and Compare']}
       actions={(
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <Button size="small" variant="text" startIcon={<HelpIcon />} onClick={() => setGuideOpen(true)}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap', gap: 1 }}>
+          <Button size="small" variant="text" startIcon={<HelpIcon />} onClick={() => setGuideOpen(true)} sx={{ flexShrink: 0, textTransform: 'none', fontWeight: 600 }}>
             Guide
           </Button>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport} disabled={activeTab === 'similar' ? !similarResults.length : !comparisonData}>
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport} disabled={activeTab === 'similar' ? !similarResults.length : !comparisonData} sx={{ flexShrink: 0, textTransform: 'none', fontWeight: 600 }}>
             Export
           </Button>
 
@@ -258,13 +258,14 @@ const CaseRetrievalComparePage = () => {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 1,
-                px: 1.5,
+                px: 1.25,
                 py: 0.5,
                 bgcolor: indexStatus?.case_count ? '#f8fafc' : '#fffbeb',
                 border: '1px solid',
                 borderColor: indexStatus?.case_count ? '#cbd5e1' : '#fde68a',
                 borderRadius: 1.5,
                 height: 32,
+                flexShrink: 0,
               }}
             >
               <Box
@@ -274,6 +275,7 @@ const CaseRetrievalComparePage = () => {
                   borderRadius: '50%',
                   bgcolor: indexStatus?.case_count ? '#16a34a' : '#d97706',
                   boxShadow: indexStatus?.case_count ? '0 0 0 2px rgba(22, 163, 74, 0.2)' : 'none',
+                  flexShrink: 0,
                 }}
               />
               <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: '#334155', whiteSpace: 'nowrap' }}>
@@ -295,6 +297,8 @@ const CaseRetrievalComparePage = () => {
               color: '#ffffff',
               fontWeight: 600,
               textTransform: 'none',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               '&:hover': { bgcolor: '#c2410c' },
             }}
           >

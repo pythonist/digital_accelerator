@@ -46,8 +46,8 @@ import {
 import SentinelLogo from '@assets/PwC_2025_logo.svg';
 
 const HEADER_HEIGHT = 36;
-const DRAWER_WIDTH = 280;
-const DRAWER_COLLAPSED_WIDTH = 72;
+const DRAWER_WIDTH = 240;
+const DRAWER_COLLAPSED_WIDTH = 64;
 
 const StyledDrawer = styled(Drawer, {
   shouldForwardProp: (prop) => prop !== 'open',
@@ -150,10 +150,12 @@ const SharedWorkbenchLayout = ({
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isCompact = useMediaQuery(theme.breakpoints.down('lg'));
+  const isCompact = useMediaQuery('(max-width: 1440px)');
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
-      return localStorage.getItem('sharedWorkbench.isCollapsed') === 'true';
+      const saved = localStorage.getItem('sharedWorkbench.isCollapsed');
+      if (saved !== null) return saved === 'true';
+      return typeof window !== 'undefined' && window.innerWidth <= 1440;
     } catch {
       return false;
     }
