@@ -92,8 +92,7 @@ class ControlledInferenceService:
         if _DIGIT_RE.search(txt):
             res2 = self._provider.generate(
                 prompt=self._prompt(step_id=step_id, inference_type=inference_type, evidence=evidence),
-                system_prompt=self._system_prompt() + "
-Output must contain no digits.",
+                system_prompt=f"{self._system_prompt()}\nOutput must contain no digits.",
             )
             if res2.get("success"):
                 txt2 = (res2.get("response") or "").strip()
