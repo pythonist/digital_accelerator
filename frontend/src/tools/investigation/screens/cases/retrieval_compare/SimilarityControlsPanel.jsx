@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { ExpandMore } from '@mui/icons-material';
 
-import { modeOptions } from './retrievalCompareUtils';
+import { modeOptions, normalizeModeDisplay } from './retrievalCompareUtils';
 
 const modeDescriptions = {
   'Behavioral Similarity': 'Best when you want to match transaction rhythm, amount behavior, concentration, flow pattern, and time-based activity.',
@@ -37,12 +37,12 @@ const SimilarityControlsPanel = ({ controls, onChange, onSearch, searching, case
         {caseOptions.map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}
       </TextField>
 
-      <TextField select size="small" label="Similarity Mode" value={controls.mode} onChange={(event) => onChange('mode', event.target.value)}>
+      <TextField select size="small" label="Similarity Mode" value={normalizeModeDisplay(controls.mode)} onChange={(event) => onChange('mode', event.target.value)}>
         {modeOptions.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
       </TextField>
 
       <Alert severity="info" sx={{ py: 0.5 }}>
-        {modeDescriptions[controls.mode] || modeDescriptions['Hybrid Similarity']}
+        {modeDescriptions[normalizeModeDisplay(controls.mode)] || modeDescriptions['Hybrid Similarity']}
       </Alert>
 
       <Stack spacing={1}>

@@ -481,11 +481,11 @@ export const useAppContext = () => useContext(AppContext);
 export const usePersistentState = (key, initialValue) => {
   const { globalStore, setGlobalStore } = useAppContext();
   const stateValue = globalStore[key] !== undefined ? globalStore[key] : initialValue;
-  const setStateValue = (newValue) => {
+  const setStateValue = useCallback((newValue) => {
     setGlobalStore(prevStore => {
       const resolvedValue = newValue instanceof Function ? newValue(prevStore[key] !== undefined ? prevStore[key] : initialValue) : newValue;
       return { ...prevStore, [key]: resolvedValue };
     });
-  };
+  }, [key, setGlobalStore, initialValue]);
   return [stateValue, setStateValue];
 };

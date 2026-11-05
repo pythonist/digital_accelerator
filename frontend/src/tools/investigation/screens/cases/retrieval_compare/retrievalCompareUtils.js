@@ -25,6 +25,14 @@ export const modeOptions = [
   'Hybrid Similarity',
 ];
 
+export const normalizeModeDisplay = (mode) => {
+  const text = String(mode || '').toLowerCase();
+  if (text.includes('behavioral')) return 'Behavioral Similarity';
+  if (text.includes('typology')) return 'Typology Similarity';
+  if (text.includes('network')) return 'Network Similarity';
+  return 'Hybrid Similarity';
+};
+
 export const sortSimilarResults = (rows, sortBy) => {
   const items = [...(rows || [])];
   if (sortBy === 'recency') {

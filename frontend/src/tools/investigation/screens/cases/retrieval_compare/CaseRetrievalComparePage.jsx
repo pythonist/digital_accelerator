@@ -113,24 +113,22 @@ const CaseRetrievalComparePage = () => {
       const nextDefaults = buildDefaultControls(latestSettings);
       setControls((previous) => ({
         ...previous,
-        mode: nextDefaults.mode,
-        topK: nextDefaults.topK,
-        threshold: nextDefaults.threshold,
+        mode: previous?.mode || nextDefaults.mode,
+        topK: previous?.topK || nextDefaults.topK,
+        threshold: previous?.threshold !== undefined ? previous.threshold : nextDefaults.threshold,
         weights: {
-          ...previous.weights,
           ...nextDefaults.weights,
+          ...(previous?.weights || {}),
         },
         filters: {
-          ...previous.filters,
-          outcome_filter: nextDefaults.filters.outcome_filter,
-          include_resolved: nextDefaults.filters.include_resolved,
+          ...nextDefaults.filters,
+          ...(previous?.filters || {}),
         },
       }));
     };
 
-    applySettings(readInvestigationSettings());
     return subscribeInvestigationSettings(applySettings);
-  }, [setControls]);
+  }, []);
 
   const caseOptions = useMemo(
     () => (caseList || []).map((item) => {
