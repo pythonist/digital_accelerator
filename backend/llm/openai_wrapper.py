@@ -29,11 +29,9 @@ _raw_base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").strip(
 if _raw_base.endswith("/chat/completions"):
     _raw_base = _raw_base[:-len("/chat/completions")].rstrip("/")
 DEFAULT_BASE_URL = _raw_base
-_raw_default_model = os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "gpt-5.6-luna"
+_raw_default_model = os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "openai.gpt-5.6-luna"
 if _raw_default_model.startswith("openai:"):
-    _raw_default_model = _raw_default_model[7:]
-elif _raw_default_model.startswith("openai."):
-    _raw_default_model = _raw_default_model[7:]
+    _raw_default_model = _raw_default_model[7:].strip()
 DEFAULT_MODEL = _raw_default_model
 DEFAULT_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL") or os.getenv("LLM_EMBED_MODEL") or "vertex_ai.gemini-embedding-2"
 REQUEST_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT") or os.getenv("LLM_TIMEOUT") or "180")
@@ -156,11 +154,8 @@ class OpenAIWrapper:
 
         dyn_model, _, _ = self._get_context_overrides()
         chosen_model = model or dyn_model or self.default_model or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
-        while chosen_model.startswith("openai:") or chosen_model.startswith("openai."):
-            if chosen_model.startswith("openai:"):
-                chosen_model = chosen_model[7:].strip()
-            elif chosen_model.startswith("openai."):
-                chosen_model = chosen_model[7:].strip()
+        if chosen_model.startswith("openai:"):
+            chosen_model = chosen_model[7:].strip()
 
         body: Dict[str, Any] = {
             "model": chosen_model,
@@ -320,11 +315,8 @@ class OpenAIWrapper:
 
         dyn_model, _, _ = self._get_context_overrides()
         chosen_model = model or dyn_model or self.default_model or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
-        while chosen_model.startswith("openai:") or chosen_model.startswith("openai."):
-            if chosen_model.startswith("openai:"):
-                chosen_model = chosen_model[7:].strip()
-            elif chosen_model.startswith("openai."):
-                chosen_model = chosen_model[7:].strip()
+        if chosen_model.startswith("openai:"):
+            chosen_model = chosen_model[7:].strip()
 
         start = time.time()
         _, _, api_key = self._get_context_overrides()

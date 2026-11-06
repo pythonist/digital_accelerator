@@ -159,12 +159,12 @@ const SharedWorkbenchLayout = ({
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isCompact = useMediaQuery('(max-width: 1440px)');
+  const isCompact = useMediaQuery('(max-width: 1280px)');
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       const saved = localStorage.getItem('sharedWorkbench.isCollapsed');
       if (saved !== null) return saved === 'true';
-      return typeof window !== 'undefined' && window.innerWidth <= 1440;
+      return typeof window !== 'undefined' && window.innerWidth <= 1280;
     } catch {
       return false;
     }
@@ -313,7 +313,7 @@ const SharedWorkbenchLayout = ({
     return '';
   }, [activeScreen, sections]);
 
-  const effectiveCollapsed = !isMobile && (isCollapsed || isCompact);
+  const effectiveCollapsed = !isMobile && isCollapsed;
 
   const renderDrawerContent = () => (
     <Box
@@ -547,25 +547,27 @@ const SharedWorkbenchLayout = ({
               zIndex: 1300,
             }}
           >
-            <IconButton
-              size="small"
-              onClick={() => setIsCollapsed((prev) => !prev)}
-              sx={{
-                bgcolor: '#182234',
-                color: '#e5e7eb',
-                border: '1px solid #334155',
-                width: 24,
-                height: 24,
-                borderRadius: 0,
-                boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-                '&:hover': {
-                  bgcolor: '#22324a',
-                  color: '#ffffff',
-                },
-              }}
-            >
-              {effectiveCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
-            </IconButton>
+            <Tooltip title={effectiveCollapsed ? "Expand sidebar" : "Collapse sidebar"} placement="right">
+              <IconButton
+                size="small"
+                onClick={() => setIsCollapsed((prev) => !prev)}
+                sx={{
+                  bgcolor: '#182234',
+                  color: '#e5e7eb',
+                  border: '1px solid #334155',
+                  width: 24,
+                  height: 24,
+                  borderRadius: 0,
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                  '&:hover': {
+                    bgcolor: '#22324a',
+                    color: '#ffffff',
+                  },
+                }}
+              >
+                {effectiveCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
+              </IconButton>
+            </Tooltip>
           </Box>
           {renderDrawerContent()}
         </StyledDrawer>
@@ -611,10 +613,20 @@ const SharedWorkbenchLayout = ({
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-              {isMobile && (
+              {isMobile ? (
                 <Tooltip title="Open navigation">
                   <IconButton size="small" onClick={() => setMobileOpen(true)} sx={{ color: 'white', p: 0.5 }}>
                     <MenuOpen sx={{ fontSize: 18, transform: 'rotate(180deg)' }} />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Tooltip title={effectiveCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+                  <IconButton
+                    size="small"
+                    onClick={() => setIsCollapsed((prev) => !prev)}
+                    sx={{ color: 'white', p: 0.5 }}
+                  >
+                    <MenuOpen sx={{ fontSize: 18, transform: effectiveCollapsed ? 'rotate(180deg)' : 'none' }} />
                   </IconButton>
                 </Tooltip>
               )}

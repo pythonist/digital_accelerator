@@ -25,11 +25,9 @@ except Exception:
 
 logger = logging.getLogger("aml.llm.clients")
 
-raw_model = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip().strip('"').strip("'")
+raw_model = os.environ.get("OPENAI_MODEL", "openai.gpt-5.6-luna").strip().strip('"').strip("'")
 if raw_model.startswith("openai:"):
-    raw_model = raw_model[7:]
-elif raw_model.startswith("openai."):
-    raw_model = raw_model[7:]
+    raw_model = raw_model[7:].strip()
 OPENAI_MODEL = raw_model
 _raw_openai_base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 if _raw_openai_base.endswith("/chat/completions"):

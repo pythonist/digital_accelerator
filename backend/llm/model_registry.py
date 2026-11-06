@@ -14,14 +14,11 @@ def _get_configured_chat_model() -> str:
     raw = (
         os.getenv("OPENAI_MODEL")
         or os.getenv("LLM_DEFAULT_MODEL")
-        or "gpt-5.6-luna"
+        or "openai.gpt-5.6-luna"
     ).strip().strip('"').strip("'")
-    while raw.startswith("openai:") or raw.startswith("openai."):
-        if raw.startswith("openai:"):
-            raw = raw[7:].strip()
-        elif raw.startswith("openai."):
-            raw = raw[7:].strip()
-    return raw or "gpt-5.6-luna"
+    if raw.startswith("openai:"):
+        raw = raw[7:].strip()
+    return raw or "openai.gpt-5.6-luna"
 
 
 def _get_configured_embed_model() -> str:
@@ -78,11 +75,9 @@ def split_model_id(model_id: str | None) -> tuple[str | None, str | None]:
     raw = str(model_id or "").strip()
     if not raw:
         return None, None
-    while ":" in raw:
+    if ":" in raw:
         _, raw = raw.split(":", 1)
         raw = raw.strip()
-    while raw.startswith("openai."):
-        raw = raw[7:].strip()
     return "openai", raw
 
 
