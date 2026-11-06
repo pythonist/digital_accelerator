@@ -45,6 +45,7 @@ import {
   HelpOutline,
   Notifications as NotificationsIcon,
   Person as PersonIcon,
+  PlayArrow as PlayArrowIcon,
   Refresh as RefreshIcon,
   Security as ShieldIcon,
   Send as SendIcon,
@@ -104,6 +105,8 @@ const CaseInvestigationScreen = () => {
   });
 
   const [showManual, setShowManual] = useState(false);
+  const [agenticSession, setAgenticSession] = useState(null);
+  const [launchingAgentic, setLaunchingAgentic] = useState(false);
 
   const chatEndRef = useRef(null);
   const workflowSessionRef = useRef(null);
@@ -136,6 +139,50 @@ const CaseInvestigationScreen = () => {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedCaseId) {
+      setAgenticSession(null);
+      return;
+    }
+    let isMounted = true;
+    const fetchStatus = () => {
+      apiClient.get(`/api/v2/agentic/status/${encodeURIComponent(selectedCaseId)}`)
+        .then((res) => {
+          if (isMounted) {
+            setAgenticSession(res?.session || (res?.status === 'not_started' ? null : { status: res?.status }));
+          }
+        })
+        .catch(() => {});
+    };
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [selectedCaseId]);
+
+  const handleLaunchAgentic = async () => {
+    if (!selectedCaseId || launchingAgentic) return;
+    try {
+      setLaunchingAgentic(true);
+      const res = await apiClient.post('/api/v2/agentic/start', {
+        case_id: selectedCaseId,
+        selected_model: 'chatgpt',
+      });
+      if (res?.session_id) {
+        setAgenticSession({ id: res.session_id, status: 'running', case_id: selectedCaseId });
+        window.dispatchEvent(new CustomEvent('agentic_investigation_started', {
+          detail: { caseId: selectedCaseId, sessionId: res.session_id }
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to launch agentic investigation:', err);
+    } finally {
+      setLaunchingAgentic(false);
+    }
+  };
 
   const getCaseId = (c) => c.case_id || c.caseid || c.Case_ID || c.id;
 
@@ -991,7 +1038,7 @@ const CaseInvestigationScreen = () => {
                     >
                       <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
                       <Typography sx={{ fontSize: '0.68rem', fontWeight: 600, color: '#e2e8f0', fontFamily: 'monospace' }}>
-                        Active: openai.gpt-5.6-luna
+                        Active: gpt-5.6-luna
                       </Typography>
                     </Box>
 
@@ -1015,6 +1062,73 @@ const CaseInvestigationScreen = () => {
                     </Tooltip>
                   </Stack>
                 </Box>
+
+                {/* Background Agentic Investigation Suggestion Banner */}
+                {selectedCaseId && (!agenticSession || agenticSession.status === 'not_started') && (
+                  <Box sx={{ px: 3, pt: 2, pb: 0, bgcolor: '#f8fafc' }}>
+                    <Paper
+                      elevation={0}
+                      sx={{
+                        p: 1.75,
+                        bgcolor: '#fff7ed',
+                        border: '1px solid #fed7aa',
+                        borderRadius: 2,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 2,
+                      }}
+                    >
+                      <Stack direction="row" spacing={1.5} alignItems="center">
+                        <Box
+                          sx={{
+                            width: 36,
+                            height: 36,
+                            bgcolor: 'rgba(234, 88, 12, 0.15)',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#ea580c',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <AutoAwesomeIcon sx={{ fontSize: 20 }} />
+                        </Box>
+                        <Box>
+                          <Typography sx={{ fontSize: '0.82rem', fontWeight: 700, color: '#9a3412', lineHeight: 1.3 }}>
+                            Sentinel Suggestion: Launch Multi-Agent Investigation
+                          </Typography>
+                          <Typography sx={{ fontSize: '0.72rem', color: '#7c2d12', mt: 0.25 }}>
+                            Run parallel evidence collection, typology pattern matching, and dossier synthesis in the background while you review.
+                          </Typography>
+                        </Box>
+                      </Stack>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        disabled={launchingAgentic}
+                        startIcon={launchingAgentic ? <CircularProgress size={14} color="inherit" /> : <PlayArrowIcon />}
+                        onClick={handleLaunchAgentic}
+                        sx={{
+                          bgcolor: '#ea580c',
+                          '&:hover': { bgcolor: '#c2410c' },
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          fontSize: '0.75rem',
+                          px: 2,
+                          py: 0.65,
+                          borderRadius: 1.5,
+                          boxShadow: 'none',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {launchingAgentic ? 'Launching...' : 'Run in Background'}
+                      </Button>
+                    </Paper>
+                  </Box>
+                )}
 
                 {/* Messages Area - SCROLLABLE */}
                 <Box sx={{ flex: 1, overflowY: 'auto', p: 3, bgcolor: '#f8fafc' }}>
@@ -1273,7 +1387,7 @@ const CaseInvestigationScreen = () => {
                                 sx={{ mt: 1.5, pt: 1, borderTop: '1px solid #f1f5f9' }}
                               >
                                 <Typography sx={{ fontSize: '0.65rem', color: '#94a3b8' }}>
-                                  {msg.timestamp?.toLocaleTimeString()} • openai.gpt-5.6-luna
+                                  {msg.timestamp?.toLocaleTimeString()} • gpt-5.6-luna
                                 </Typography>
 
                                 {msg.content && !msg.streaming && (

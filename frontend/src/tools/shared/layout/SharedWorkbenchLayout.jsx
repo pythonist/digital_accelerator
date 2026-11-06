@@ -4,10 +4,14 @@ import {
   AppBar,
   Avatar,
   Box,
+  Button,
+  Chip,
+  CircularProgress,
   CssBaseline,
   Divider,
   Drawer,
   IconButton,
+  LinearProgress,
   List,
   ListItem,
   ListItemButton,
@@ -22,7 +26,9 @@ import {
   Collapse,
   alpha,
   Select,
+  Stack,
 } from '@mui/material';
+import apiClient from '@services/api';
 import {
   readInvestigationSettings,
   saveInvestigationSettings,
@@ -32,8 +38,11 @@ import { useAppContext } from '@context/AppContext';
 import { styled, useTheme } from '@mui/material/styles';
 import {
   ArrowBack,
+  AutoAwesome,
+  CheckCircle,
   ChevronLeft,
   ChevronRight,
+  Close,
   Dns,
   ExpandLess,
   ExpandMore,
@@ -150,12 +159,12 @@ const SharedWorkbenchLayout = ({
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const isCompact = useMediaQuery('(max-width: 1440px)');
+  const isCompact = useMediaQuery('(max-width: 1280px)');
   const [isCollapsed, setIsCollapsed] = useState(() => {
     try {
       const saved = localStorage.getItem('sharedWorkbench.isCollapsed');
       if (saved !== null) return saved === 'true';
-      return typeof window !== 'undefined' && window.innerWidth <= 1440;
+      return typeof window !== 'undefined' && window.innerWidth <= 1280;
     } catch {
       return false;
     }
@@ -169,6 +178,113 @@ const SharedWorkbenchLayout = ({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorElUser, setAnchorElUser] = useState(null);
   const isSharp = navShape === 'sharp';
+
+  // Global Agentic Background Task Monitor
+  const [activeInvestigation, setActiveInvestigation] = useState(null);
+  const [dismissedNoticeId, setDismissedNoticeId] = useState(null);
+
+  useEffect(() => {
+    let isSubscribed = true;
+
+    const pollSessions = async () => {
+      try {
+        const sessions = await apiClient.get('/api/v2/agentic/sessions');
+        if (!isSubscribed || !Array.isArray(sessions)) return;
+
+        // 1. Check for actively running agentic session
+        const running = sessions.find((s) => s.status === 'running');
+        if (running) {
+          const completed = running.completed_steps || 0;
+          const total = running.total_steps || 6;
+          const percent = Math.min(95, Math.max(5, Math.round((completed / (total || 1)) * 100)));
+
+          let estSec = 25;
+          if (running.start_time) {
+            const elapsed = Math.max(1, (Date.now() - new Date(running.start_time).getTime()) / 1000);
+            if (completed > 0) {
+              const secPerStep = elapsed / completed;
+              estSec = Math.max(5, Math.round(secPerStep * Math.max(1, total - completed)));
+            } else {
+              estSec = Math.max(15, Math.max(5, 45 - Math.round(elapsed)));
+            }
+          }
+
+          setActiveInvestigation({
+            id: running.id,
+            caseId: running.case_id,
+            status: 'running',
+            completedSteps: completed,
+            totalSteps: total,
+            percent,
+            estSec,
+            currentStep: running.current_step || 'Evidence collection in progress...',
+          });
+          return;
+        }
+
+        // 2. Check for recent completed session (within 2 minutes)
+        const latest = sessions[0];
+        if (latest && latest.status === 'completed' && latest.id !== dismissedNoticeId) {
+          const completedTime = latest.end_time || latest.start_time;
+          const isRecent = completedTime ? (Date.now() - new Date(completedTime).getTime()) < 120000 : false;
+          if (isRecent) {
+            setActiveInvestigation({
+              id: latest.id,
+              caseId: latest.case_id,
+              status: 'completed',
+              completedSteps: latest.total_steps || 6,
+              totalSteps: latest.total_steps || 6,
+              percent: 100,
+              estSec: 0,
+              currentStep: 'Agentic investigation completed. Findings and SAR dossier ready.',
+            });
+            return;
+          }
+        }
+
+        setActiveInvestigation((prev) => (prev?.status === 'running' ? null : prev));
+      } catch (err) {
+        // Non-blocking
+      }
+    };
+
+    pollSessions();
+    const interval = setInterval(pollSessions, 3500);
+
+    const handleInvestigationStarted = (e) => {
+      const caseId = e.detail?.caseId;
+      const sessionId = e.detail?.sessionId;
+      setActiveInvestigation({
+        id: sessionId || 'new',
+        caseId: caseId || 'active',
+        status: 'running',
+        completedSteps: 0,
+        totalSteps: 6,
+        percent: 5,
+        estSec: 35,
+        currentStep: 'Initializing background multi-agent investigation...',
+      });
+      pollSessions();
+    };
+
+    window.addEventListener('agentic_investigation_started', handleInvestigationStarted);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+      window.removeEventListener('agentic_investigation_started', handleInvestigationStarted);
+    };
+  }, [dismissedNoticeId]);
+
+  const handleOpenAgenticCanvas = (caseId) => {
+    if (caseId) {
+      localStorage.setItem('agentic_target_case', caseId);
+      window.dispatchEvent(new CustomEvent('open_agentic_case', { detail: { caseId } }));
+    }
+    if (setActiveScreen) {
+      setActiveScreen('agentic');
+    }
+  };
 
   const initialGroups = useMemo(() => {
     const seed = {};
@@ -197,7 +313,7 @@ const SharedWorkbenchLayout = ({
     return '';
   }, [activeScreen, sections]);
 
-  const effectiveCollapsed = !isMobile && (isCollapsed || isCompact);
+  const effectiveCollapsed = !isMobile && isCollapsed;
 
   const renderDrawerContent = () => (
     <Box
@@ -431,25 +547,27 @@ const SharedWorkbenchLayout = ({
               zIndex: 1300,
             }}
           >
-            <IconButton
-              size="small"
-              onClick={() => setIsCollapsed((prev) => !prev)}
-              sx={{
-                bgcolor: '#182234',
-                color: '#e5e7eb',
-                border: '1px solid #334155',
-                width: 24,
-                height: 24,
-                borderRadius: 0,
-                boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-                '&:hover': {
-                  bgcolor: '#22324a',
-                  color: '#ffffff',
-                },
-              }}
-            >
-              {effectiveCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
-            </IconButton>
+            <Tooltip title={effectiveCollapsed ? "Expand sidebar" : "Collapse sidebar"} placement="right">
+              <IconButton
+                size="small"
+                onClick={() => setIsCollapsed((prev) => !prev)}
+                sx={{
+                  bgcolor: '#182234',
+                  color: '#e5e7eb',
+                  border: '1px solid #334155',
+                  width: 24,
+                  height: 24,
+                  borderRadius: 0,
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
+                  '&:hover': {
+                    bgcolor: '#22324a',
+                    color: '#ffffff',
+                  },
+                }}
+              >
+                {effectiveCollapsed ? <ChevronRight sx={{ fontSize: 14 }} /> : <ChevronLeft sx={{ fontSize: 14 }} />}
+              </IconButton>
+            </Tooltip>
           </Box>
           {renderDrawerContent()}
         </StyledDrawer>
@@ -495,10 +613,20 @@ const SharedWorkbenchLayout = ({
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-              {isMobile && (
+              {isMobile ? (
                 <Tooltip title="Open navigation">
                   <IconButton size="small" onClick={() => setMobileOpen(true)} sx={{ color: 'white', p: 0.5 }}>
                     <MenuOpen sx={{ fontSize: 18, transform: 'rotate(180deg)' }} />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Tooltip title={effectiveCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+                  <IconButton
+                    size="small"
+                    onClick={() => setIsCollapsed((prev) => !prev)}
+                    sx={{ color: 'white', p: 0.5 }}
+                  >
+                    <MenuOpen sx={{ fontSize: 18, transform: effectiveCollapsed ? 'rotate(180deg)' : 'none' }} />
                   </IconButton>
                 </Tooltip>
               )}
@@ -663,6 +791,127 @@ const SharedWorkbenchLayout = ({
             </Box>
           </Toolbar>
         </AppBar>
+
+        {/* Persistent Global Agentic Investigation Notification & Progress Bar */}
+        {activeInvestigation && (
+          <Box
+            sx={{
+              position: 'relative',
+              width: '100%',
+              bgcolor: activeInvestigation.status === 'running' ? '#0f172a' : '#064e3b',
+              color: '#ffffff',
+              borderBottom: activeInvestigation.status === 'running' ? '1px solid #1e293b' : '1px solid #047857',
+              px: { xs: 1.5, sm: 2.5 },
+              py: 0.85,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 2,
+              zIndex: 1100,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+              transition: 'all 0.25s ease',
+            }}
+          >
+            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+              {activeInvestigation.status === 'running' ? (
+                <CircularProgress size={16} sx={{ color: '#ea580c', flexShrink: 0 }} />
+              ) : (
+                <CheckCircle sx={{ fontSize: 18, color: '#34d399', flexShrink: 0 }} />
+              )}
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexWrap: 'wrap' }}>
+                <Chip
+                  label={activeInvestigation.caseId}
+                  size="small"
+                  sx={{
+                    bgcolor: activeInvestigation.status === 'running' ? 'rgba(234, 88, 12, 0.2)' : 'rgba(52, 211, 153, 0.2)',
+                    color: activeInvestigation.status === 'running' ? '#fb923c' : '#a7f3d0',
+                    border: `1px solid ${activeInvestigation.status === 'running' ? 'rgba(234, 88, 12, 0.4)' : 'rgba(52, 211, 153, 0.4)'}`,
+                    fontWeight: 700,
+                    fontSize: '0.68rem',
+                    height: 20,
+                  }}
+                />
+
+                <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: '#f8fafc', whiteSpace: 'nowrap' }}>
+                  {activeInvestigation.status === 'running' ? 'Multi-Agent Investigation in Progress' : 'Multi-Agent Investigation Complete'}
+                </Typography>
+
+                <Typography sx={{ fontSize: '0.72rem', color: '#94a3b8', display: { xs: 'none', md: 'inline' }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  • {activeInvestigation.currentStep}
+                </Typography>
+
+                {activeInvestigation.status === 'running' && (
+                  <Chip
+                    label={`Agent Step ${activeInvestigation.completedSteps}/${activeInvestigation.totalSteps} (${activeInvestigation.percent}%) • ~${activeInvestigation.estSec}s remaining`}
+                    size="small"
+                    sx={{
+                      bgcolor: 'rgba(255, 255, 255, 0.08)',
+                      color: '#cbd5e1',
+                      fontSize: '0.68rem',
+                      height: 20,
+                    }}
+                  />
+                )}
+              </Box>
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={() => handleOpenAgenticCanvas(activeInvestigation.caseId)}
+                sx={{
+                  bgcolor: activeInvestigation.status === 'running' ? '#ea580c' : '#059669',
+                  '&:hover': { bgcolor: activeInvestigation.status === 'running' ? '#c2410c' : '#047857' },
+                  color: '#ffffff',
+                  fontSize: '0.7rem',
+                  fontWeight: 700,
+                  textTransform: 'none',
+                  py: 0.35,
+                  px: 1.5,
+                  minHeight: 24,
+                  borderRadius: 1,
+                  boxShadow: 'none',
+                }}
+              >
+                {activeInvestigation.status === 'running' ? 'Open Canvas' : 'View Findings'}
+              </Button>
+
+              {activeInvestigation.status === 'completed' && (
+                <IconButton
+                  size="small"
+                  onClick={() => {
+                    setDismissedNoticeId(activeInvestigation.id);
+                    setActiveInvestigation(null);
+                  }}
+                  sx={{ color: '#94a3b8', '&:hover': { color: '#ffffff' }, p: 0.25 }}
+                >
+                  <Close sx={{ fontSize: 16 }} />
+                </IconButton>
+              )}
+            </Stack>
+
+            {/* Bottom 2.5px Progress Bar */}
+            {activeInvestigation.status === 'running' && (
+              <LinearProgress
+                variant="determinate"
+                value={activeInvestigation.percent}
+                sx={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: 2.5,
+                  bgcolor: 'rgba(255, 255, 255, 0.1)',
+                  '& .MuiLinearProgress-bar': {
+                    bgcolor: '#ea580c',
+                  },
+                }}
+              />
+            )}
+          </Box>
+        )}
 
         <Box
           component="main"

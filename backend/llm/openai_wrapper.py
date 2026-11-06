@@ -29,7 +29,10 @@ _raw_base = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").strip(
 if _raw_base.endswith("/chat/completions"):
     _raw_base = _raw_base[:-len("/chat/completions")].rstrip("/")
 DEFAULT_BASE_URL = _raw_base
-DEFAULT_MODEL = os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "openai.gpt-5.6-luna"
+_raw_default_model = os.getenv("OPENAI_MODEL") or os.getenv("LLM_DEFAULT_MODEL") or "openai.gpt-5.6-luna"
+if _raw_default_model.startswith("openai:"):
+    _raw_default_model = _raw_default_model[7:].strip()
+DEFAULT_MODEL = _raw_default_model
 DEFAULT_EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL") or os.getenv("LLM_EMBED_MODEL") or "vertex_ai.gemini-embedding-2"
 REQUEST_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT") or os.getenv("LLM_TIMEOUT") or "180")
 
@@ -152,7 +155,7 @@ class OpenAIWrapper:
         dyn_model, _, _ = self._get_context_overrides()
         chosen_model = model or dyn_model or self.default_model or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
         if chosen_model.startswith("openai:"):
-            chosen_model = chosen_model[7:]
+            chosen_model = chosen_model[7:].strip()
 
         body: Dict[str, Any] = {
             "model": chosen_model,
@@ -221,6 +224,26 @@ class OpenAIWrapper:
             message = choice.get("message") or {}
             content = (message.get("content") or "").strip()
 
+            usage = data.get("usage") or {}
+            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or 0)
+            total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+
+            # Record token usage persistently for the session and settings dashboard
+            try:
+                from api.agent_db import record_token_usage
+                record_token_usage(
+                    session_id=str(kwargs.get("session_id") or ""),
+                    model=str(model_sent or self.default_model),
+                    provider=self.provider_name,
+                    stage=str(kwargs.get("stage") or "general"),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
+            except Exception as db_exc:
+                logger.debug("Failed to record token usage: %s", db_exc)
+
             if not content:
                 finish_reason = choice.get("finish_reason") or "empty_content"
                 logger.warning("LLM returned blank content (model=%s, finish_reason=%s)", model_sent, finish_reason)
@@ -233,6 +256,10 @@ class OpenAIWrapper:
                     "provider": self.provider_name,
                     "finish_reason": finish_reason,
                     "latency_sec": latency,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "usage": usage,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
@@ -244,6 +271,10 @@ class OpenAIWrapper:
                 "provider": self.provider_name,
                 "finish_reason": choice.get("finish_reason"),
                 "latency_sec": latency,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "usage": usage,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -285,7 +316,7 @@ class OpenAIWrapper:
         dyn_model, _, _ = self._get_context_overrides()
         chosen_model = model or dyn_model or self.default_model or os.getenv("OPENAI_MODEL") or DEFAULT_MODEL
         if chosen_model.startswith("openai:"):
-            chosen_model = chosen_model[7:]
+            chosen_model = chosen_model[7:].strip()
 
         start = time.time()
         _, _, api_key = self._get_context_overrides()

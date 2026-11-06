@@ -75,10 +75,10 @@ def split_model_id(model_id: str | None) -> tuple[str | None, str | None]:
     raw = str(model_id or "").strip()
     if not raw:
         return None, None
-    if ":" not in raw:
-        return "openai", raw
-    provider, model = raw.split(":", 1)
-    return "openai", model.strip()
+    if ":" in raw:
+        _, raw = raw.split(":", 1)
+        raw = raw.strip()
+    return "openai", raw
 
 
 def find_local_model(model_name: str | None) -> tuple[str, Any] | None:

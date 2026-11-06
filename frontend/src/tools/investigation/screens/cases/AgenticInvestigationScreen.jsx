@@ -584,7 +584,7 @@ const AgentCanvas = ({
                 value={selectedAgent.config?.model || 'inherit'}
                 disabled={workflowStatus === 'running'}
                 onChange={(event) => setWorkflowNodes((nodes) => nodes.map((node) => node.node_id === selectedAgent.node_id ? { ...node, config: { ...(node.config || {}), model: event.target.value } } : node))}
-                helperText="Uses configured OpenAI model (openai.gpt-5.6-luna)."
+                helperText="Uses configured OpenAI model (gpt-5.6-luna)."
               >
                 <MenuItem value="inherit">Inherit global model</MenuItem>
                 <MenuItem value="chatgpt">OpenAI (Default Configured)</MenuItem>
@@ -673,6 +673,24 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
     const preferred = next?.assistant?.preferred_model || next?.global?.default_model;
     if (preferred && status !== 'running') setSelectedModel(preferred);
   }), [status]);
+
+  useEffect(() => {
+    const checkTargetCase = () => {
+      const target = localStorage.getItem('agentic_target_case');
+      if (target && target !== selectedCaseId && status !== 'running') {
+        setSelectedCaseId(target);
+        localStorage.removeItem('agentic_target_case');
+      }
+    };
+    checkTargetCase();
+    const handleCustomOpen = (e) => {
+      if (e.detail?.caseId && status !== 'running') {
+        setSelectedCaseId(e.detail.caseId);
+      }
+    };
+    window.addEventListener('open_agentic_case', handleCustomOpen);
+    return () => window.removeEventListener('open_agentic_case', handleCustomOpen);
+  }, [selectedCaseId, status]);
 
   useEffect(() => {
     apiClient.get('/api/v2/agentic/agents')
@@ -818,7 +836,7 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
   const needsRealRun = Boolean(trace?.legacy_or_incomplete);
   const evidenceCount = needsRealRun ? 0 : (findings?.evidence_items?.length || toolLogs.filter(row => row.status === 'success').length || 0);
   const modelOptions = [
-    { id: 'chatgpt', label: 'OpenAI · openai.gpt-5.6-luna (Configured)' },
+    { id: 'chatgpt', label: 'OpenAI · gpt-5.6-luna (Configured)' },
     { id: 'openai', label: 'OpenAI Gateway (Default)' },
   ];
 
@@ -904,7 +922,7 @@ const AgenticInvestigationScreen = ({ caseId: initialCaseId }) => {
                   cursor: status === 'running' ? 'default' : 'pointer',
                 }}
               >
-                <option value="chatgpt">OpenAI · openai.gpt-5.6-luna (Configured)</option>
+                <option value="chatgpt">OpenAI · gpt-5.6-luna (Configured)</option>
                 <option value="openai">OpenAI Gateway (Default)</option>
               </select>
 

@@ -133,6 +133,21 @@ def init_db():
         )
     ''')
 
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS llm_token_usage (
+            id TEXT PRIMARY KEY,
+            session_id TEXT,
+            model TEXT,
+            provider TEXT,
+            stage TEXT,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            total_tokens INTEGER,
+            cost_usd REAL,
+            timestamp DATETIME
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -184,7 +199,9 @@ def get_all_latest_sessions():
     c = conn.cursor()
     c.execute('''
         SELECT s.*, 
-               (SELECT model FROM llm_interaction_log l WHERE l.session_id = s.id LIMIT 1) as model
+               (SELECT model FROM llm_interaction_log l WHERE l.session_id = s.id LIMIT 1) as model,
+               (SELECT COUNT(*) FROM investigation_plan p WHERE p.session_id = s.id AND p.status = 'completed') as completed_steps,
+               (SELECT COUNT(*) FROM investigation_plan p WHERE p.session_id = s.id) as total_steps
         FROM investigation_session s
         WHERE id IN (
             SELECT id FROM investigation_session 
@@ -381,3 +398,133 @@ def get_findings(session_id: str):
     if row and row['findings_json']:
         return json.loads(row['findings_json'])
     return None
+
+
+def record_token_usage(
+    session_id: str | None,
+    model: str,
+    provider: str = "openai",
+    stage: str = "general",
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    cost_usd: float | None = None,
+) -> None:
+    if total_tokens <= 0:
+        total_tokens = prompt_tokens + completion_tokens
+    if cost_usd is None:
+        cost_usd = round((prompt_tokens * 0.0000025) + (completion_tokens * 0.0000100), 6)
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO llm_token_usage
+            (id, session_id, model, provider, stage, prompt_tokens, completion_tokens, total_tokens, cost_usd, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(uuid.uuid4()),
+            session_id or "",
+            model or "unknown",
+            provider or "openai",
+            stage or "general",
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cost_usd,
+            datetime.now().isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_token_usage_stats() -> dict:
+    conn = get_db_connection()
+    c = conn.cursor()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # Today stats
+    c.execute(
+        """
+        SELECT 
+            COALESCE(SUM(total_tokens), 0) as tokens_today,
+            COALESCE(SUM(prompt_tokens), 0) as prompt_tokens_today,
+            COALESCE(SUM(completion_tokens), 0) as completion_tokens_today,
+            COALESCE(SUM(cost_usd), 0.0) as cost_today,
+            COUNT(*) as calls_today
+        FROM llm_token_usage
+        WHERE timestamp LIKE ?
+        """,
+        (f"{today_str}%",),
+    )
+    today_row = dict(c.fetchone() or {})
+
+    # Lifetime stats
+    c.execute(
+        """
+        SELECT 
+            COALESCE(SUM(total_tokens), 0) as tokens_lifetime,
+            COALESCE(SUM(prompt_tokens), 0) as prompt_tokens_lifetime,
+            COALESCE(SUM(completion_tokens), 0) as completion_tokens_lifetime,
+            COALESCE(SUM(cost_usd), 0.0) as cost_lifetime,
+            COUNT(*) as calls_lifetime
+        FROM llm_token_usage
+        """
+    )
+    lifetime_row = dict(c.fetchone() or {})
+
+    # Daily breakdown (past 14 days)
+    c.execute(
+        """
+        SELECT 
+            SUBSTR(timestamp, 1, 10) as day,
+            SUM(total_tokens) as total_tokens,
+            SUM(prompt_tokens) as prompt_tokens,
+            SUM(completion_tokens) as completion_tokens,
+            ROUND(SUM(cost_usd), 4) as cost_usd,
+            COUNT(*) as call_count
+        FROM llm_token_usage
+        GROUP BY SUBSTR(timestamp, 1, 10)
+        ORDER BY day DESC
+        LIMIT 14
+        """
+    )
+    daily_rows = [dict(r) for r in c.fetchall()]
+
+    # Recent session calls (latest 30)
+    c.execute(
+        """
+        SELECT 
+            id, session_id, model, provider, stage,
+            prompt_tokens, completion_tokens, total_tokens, cost_usd, timestamp
+        FROM llm_token_usage
+        ORDER BY timestamp DESC
+        LIMIT 30
+        """
+    )
+    recent_calls = [dict(r) for r in c.fetchall()]
+    conn.close()
+
+    budget_limit = 2.00
+    cost_lifetime = float(lifetime_row.get("cost_lifetime") or 0.0)
+    remaining_budget = max(0.0, round(budget_limit - cost_lifetime, 4))
+    budget_used_percent = min(100.0, round((cost_lifetime / budget_limit) * 100, 1))
+
+    return {
+        "tokens_today": int(today_row.get("tokens_today") or 0),
+        "prompt_tokens_today": int(today_row.get("prompt_tokens_today") or 0),
+        "completion_tokens_today": int(today_row.get("completion_tokens_today") or 0),
+        "cost_today": round(float(today_row.get("cost_today") or 0.0), 4),
+        "calls_today": int(today_row.get("calls_today") or 0),
+        "tokens_lifetime": int(lifetime_row.get("tokens_lifetime") or 0),
+        "prompt_tokens_lifetime": int(lifetime_row.get("prompt_tokens_lifetime") or 0),
+        "completion_tokens_lifetime": int(lifetime_row.get("completion_tokens_lifetime") or 0),
+        "cost_lifetime": round(cost_lifetime, 4),
+        "calls_lifetime": int(lifetime_row.get("calls_lifetime") or 0),
+        "budget_limit": budget_limit,
+        "remaining_budget": remaining_budget,
+        "budget_used_percent": budget_used_percent,
+        "daily_history": daily_rows[::-1],
+        "recent_calls": recent_calls,
+    }

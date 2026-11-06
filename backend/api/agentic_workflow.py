@@ -474,6 +474,7 @@ def run_agentic_investigation(case_id: str, session_id: str, context: dict | Non
         openai_model = (
             providers.get("openai", {}).get("model")
             or providers.get("chatgpt", {}).get("model")
+            or os.environ.get("OPENAI_MODEL")
             or "openai.gpt-5.6-luna"
         )
         log_activity(
